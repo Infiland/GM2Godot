@@ -3,22 +3,33 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field
-from typing import Callable, Iterable, Mapping, cast
+from typing import Callable, Iterable, Mapping
 
 # D01 compatibility export for deferred resource consumers; retired by R26.
 from src.conversion.diagnostic_models import (
     ProjectManifestDiagnostic as ProjectManifestDiagnostic,
     ProjectSourceLocation,
 )
-from src.conversion.gamemaker_json import read_gamemaker_json
+from src.conversion.gamemaker_json import GameMakerJsonDocument, read_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.project_model import (
+    GameMakerProjectManifest as GameMakerProjectManifest,
+    ProjectAudioGroup as ProjectAudioGroup,
+    ProjectConfigOverride as ProjectConfigOverride,
+    ProjectConfiguration as ProjectConfiguration,
+    ProjectIncludedFile as ProjectIncludedFile,
+    ProjectOption as ProjectOption,
+    ProjectOptionsMetadata,
+    ProjectResourceReference as ProjectResourceReference,
+    ProjectTextureGroup as ProjectTextureGroup,
+    normalize_project_manifest_path,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import JsonDict, JsonList
 
 _RESOURCE_TYPE_KIND = {
     "GMAnimationCurve": "animcurves",
@@ -72,137 +83,6 @@ _KNOWN_PROJECT_FIELDS = frozenset({
 _MISSING_RESOURCE_PATH = object()
 
 
-def _empty_json_dict() -> JsonDict:
-    return cast(JsonDict, {})
-
-
-@dataclass(frozen=True)
-class ProjectResourceReference:
-    uuid: str
-    name: str
-    path: str
-    kind: str
-    resource_type: str
-    order: int
-    tags: tuple[str, ...] = ()
-    source: ProjectSourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ProjectConfigOverride:
-    configuration: str
-    field_path: str
-    value: object
-    source: ProjectSourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ProjectConfiguration:
-    name: str
-    parent: str = ""
-    overrides: tuple[ProjectConfigOverride, ...] = ()
-    source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
-
-
-@dataclass(frozen=True)
-class ProjectOption:
-    platform: str
-    key: str
-    value: object
-    source: ProjectSourceLocation | None = None
-
-
-@dataclass(frozen=True)
-class ProjectTextureGroup:
-    name: str
-    parent: str = ""
-    is_dynamic: bool = False
-    dynamic_path: str = ""
-    targets: tuple[str, ...] = ()
-    source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
-
-
-@dataclass(frozen=True)
-class ProjectAudioGroup:
-    name: str
-    targets: tuple[str, ...] = ()
-    source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
-
-
-@dataclass(frozen=True)
-class ProjectIncludedFile:
-    name: str
-    path: str
-    targets: tuple[str, ...] = ()
-    source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
-
-
-@dataclass(frozen=True)
-class GameMakerProjectManifest:
-    project_name: str
-    yyp_path: str | None
-    resource_type: str = ""
-    resource_version: str = ""
-    resources: tuple[ProjectResourceReference, ...] = ()
-    configurations: tuple[ProjectConfiguration, ...] = ()
-    options: tuple[ProjectOption, ...] = ()
-    texture_groups: tuple[ProjectTextureGroup, ...] = ()
-    audio_groups: tuple[ProjectAudioGroup, ...] = ()
-    included_files: tuple[ProjectIncludedFile, ...] = ()
-    diagnostics: tuple[ProjectManifestDiagnostic, ...] = ()
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
-    ide_version: str = ""
-
-    def get_option(self, key: str, platform: str | None = None) -> ProjectOption | None:
-        folded_key = key.casefold()
-        folded_platform = platform.casefold() if platform is not None else None
-        for option in reversed(self.options):
-            if option.key.casefold() != folded_key:
-                continue
-            if folded_platform is None or option.platform.casefold() == folded_platform:
-                return option
-        return None
-
-    def options_for_platform(self, platform: str) -> dict[str, ProjectOption]:
-        selected: dict[str, ProjectOption] = {}
-        for option in self.options:
-            if option.platform.casefold() in ("main", platform.casefold()):
-                selected[option.key] = option
-        return selected
-
-    def audio_group_names(self) -> list[str]:
-        return [group.name for group in self.audio_groups if group.name]
-
-    def find_resources(
-        self,
-        *,
-        uuid: str | None = None,
-        name: str | None = None,
-        path: str | None = None,
-        kind: str | None = None,
-        resource_type: str | None = None,
-    ) -> tuple[ProjectResourceReference, ...]:
-        normalized_path = _normalize_project_path(path) if path else None
-        matches: list[ProjectResourceReference] = []
-        for resource in self.resources:
-            if uuid is not None and resource.uuid != uuid:
-                continue
-            if name is not None and resource.name.casefold() != name.casefold():
-                continue
-            if normalized_path is not None and _normalize_project_path(resource.path) != normalized_path:
-                continue
-            if kind is not None and resource.kind.casefold() != kind.casefold():
-                continue
-            if resource_type is not None and resource.resource_type.casefold() != resource_type.casefold():
-                continue
-            matches.append(resource)
-        return tuple(matches)
-
-
 def load_gamemaker_project_manifest(
     gm_project_path: str,
     *,
@@ -220,8 +100,8 @@ def load_gamemaker_project_manifest(
         )
         return GameMakerProjectManifest(project_name="", yyp_path=None, diagnostics=tuple(diagnostics))
 
-    raw_data, raw_source = _read_lenient_json_file(yyp_path)
-    if raw_data is None:
+    document = _read_project_document(yyp_path)
+    if document is None or not isinstance(document.value, dict):
         diagnostics.append(
             ProjectManifestDiagnostic(
                 severity="warning",
@@ -232,6 +112,8 @@ def load_gamemaker_project_manifest(
         )
         return GameMakerProjectManifest(project_name="", yyp_path=yyp_path, diagnostics=tuple(diagnostics))
 
+    raw_data = document.value
+    raw_source = document.source
     resources = _parse_resources(
         raw_data,
         yyp_path,
@@ -239,7 +121,8 @@ def load_gamemaker_project_manifest(
         diagnostics,
     )
     configurations = _parse_configurations(raw_data, yyp_path, raw_source)
-    options = _parse_project_options(gm_project_path, diagnostics)
+    option_files = _parse_project_options(gm_project_path, diagnostics)
+    options = tuple(option for metadata in option_files for option in metadata.options)
     texture_groups = _parse_texture_groups(raw_data, yyp_path, raw_source)
     audio_groups = _parse_audio_groups(raw_data, yyp_path, raw_source)
     included_files = _parse_included_files(raw_data, yyp_path, raw_source)
@@ -257,6 +140,7 @@ def load_gamemaker_project_manifest(
         resources=resources,
         configurations=configurations,
         options=options,
+        option_files=option_files,
         texture_groups=texture_groups,
         audio_groups=audio_groups,
         included_files=included_files,
@@ -326,17 +210,15 @@ def _find_yyp_path(
     return None
 
 
-def _read_lenient_json_file(path: str) -> tuple[JsonDict | None, str]:
+def _read_project_document(path: str) -> GameMakerJsonDocument | None:
     try:
-        document = read_gamemaker_json(path)
-        data = document.value
-        return (data, document.source) if isinstance(data, dict) else (None, document.source)
+        return read_gamemaker_json(path)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        return None, ""
+        return None
 
 
 def _parse_resources(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
     diagnostics: list[ProjectManifestDiagnostic],
@@ -346,10 +228,10 @@ def _parse_resources(
     raw_resources = yyp_data.get("resources")
     if not isinstance(raw_resources, list):
         return ()
-    for order, raw_entry in enumerate(cast(JsonList, raw_resources)):
+    for order, raw_entry in enumerate(raw_resources):
         if not isinstance(raw_entry, dict):
             continue
-        entry = cast(JsonDict, raw_entry)
+        entry = raw_entry
         raw_path, path_field = _resource_path_value(entry)
         field_path = f"resources[{order}].{path_field}"
         (
@@ -459,17 +341,17 @@ def _resource_field_line(
     return source.count("\n", 0, match.start()) + 1, match.end()
 
 
-def _resource_path_value(entry: JsonDict) -> tuple[object, str]:
+def _resource_path_value(entry: JsonObject) -> tuple[object, str]:
     """Return a raw YYP resource path and its field without coercion."""
     data = entry
     field_prefix = ""
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
         field_prefix = "Value."
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         return (
             nested.get("path", _MISSING_RESOURCE_PATH),
             f"{field_prefix}id.path",
@@ -482,16 +364,16 @@ def _resource_path_value(entry: JsonDict) -> tuple[object, str]:
 
 
 def _resource_diagnostic_identity(
-    entry: JsonDict,
+    entry: JsonObject,
     raw_path: object,
 ) -> tuple[str, str, str]:
     data = entry
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         name = _string_value(nested.get("name"))
         nested_resource_type = _string_value(nested.get("resourceType"))
     else:
@@ -520,7 +402,7 @@ def _resource_diagnostic_identity(
 
 
 def _resource_reference_from_entry(
-    entry: JsonDict,
+    entry: JsonObject,
     order: int,
     yyp_path: str,
     raw_source: str,
@@ -529,11 +411,11 @@ def _resource_reference_from_entry(
     uuid = _string_value(entry.get("id")) or _string_value(entry.get("Key"))
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
         uuid = uuid or _string_value(data.get("id"))
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         uuid = (
             _string_value(nested.get("id"))
             or _string_value(nested.get("uuid"))
@@ -561,7 +443,7 @@ def _resource_reference_from_entry(
     return ProjectResourceReference(
         uuid=uuid,
         name=name,
-        path=_normalize_project_path(path),
+        path=normalize_project_manifest_path(path),
         kind=kind,
         resource_type=resource_type,
         order=order_value,
@@ -571,7 +453,7 @@ def _resource_reference_from_entry(
 
 
 def _parse_configurations(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectConfiguration, ...]:
@@ -595,7 +477,7 @@ def _parse_configurations(
 
     config_values = yyp_data.get("ConfigValues")
     if isinstance(config_values, dict):
-        for name, raw_overrides in cast(JsonDict, config_values).items():
+        for name, raw_overrides in config_values.items():
             config_name = str(name)
             overrides = _config_overrides_from_value(
                 config_name,
@@ -622,33 +504,33 @@ def _parse_configurations(
     return tuple(configs[name] for name in sorted(configs))
 
 
-def _iter_config_nodes(raw_configs: object) -> Iterable[JsonDict]:
+def _iter_config_nodes(raw_configs: JsonValue) -> Iterable[JsonObject]:
     if isinstance(raw_configs, dict):
-        config = cast(JsonDict, raw_configs)
+        config = raw_configs
         if _string_value(config.get("name")) or _string_value(config.get("%Name")):
             yield config
         for key in ("children", "configs", "Configs"):
             for child in _iter_config_nodes(config.get(key)):
                 yield child
     elif isinstance(raw_configs, list):
-        for item in cast(JsonList, raw_configs):
+        for item in raw_configs:
             if isinstance(item, dict):
-                yield from _iter_config_nodes(cast(JsonDict, item))
+                yield from _iter_config_nodes(item)
 
 
-def _config_parent_name(node: JsonDict) -> str:
+def _config_parent_name(node: JsonObject) -> str:
     raw_parent = node.get("parent") or node.get("parentConfig")
     if isinstance(raw_parent, str):
         return raw_parent
     if isinstance(raw_parent, dict):
-        parent = cast(JsonDict, raw_parent)
+        parent = raw_parent
         return _string_value(parent.get("name")) or _string_value(parent.get("%Name"))
     return ""
 
 
 def _config_overrides_from_node(
     configuration: str,
-    node: JsonDict,
+    node: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectConfigOverride, ...]:
@@ -669,14 +551,14 @@ def _config_overrides_from_node(
 
 def _config_overrides_from_value(
     configuration: str,
-    value: object,
+    value: JsonValue,
     yyp_path: str,
     raw_source: str,
     field_path: str,
 ) -> tuple[ProjectConfigOverride, ...]:
     if isinstance(value, dict):
         overrides: list[ProjectConfigOverride] = []
-        for key, nested_value in cast(JsonDict, value).items():
+        for key, nested_value in value.items():
             overrides.extend(
                 _config_overrides_from_value(
                     configuration,
@@ -697,10 +579,31 @@ def _config_overrides_from_value(
     )
 
 
+def parse_project_options_document(
+    document: GameMakerJsonDocument,
+    *,
+    platform: str,
+) -> ProjectOptionsMetadata | None:
+    data = document.value
+    if not isinstance(data, dict):
+        return None
+    options = tuple(
+        ProjectOption(
+            platform=platform,
+            key=key,
+            value=value,
+            source=ProjectSourceLocation(document.source_path, _line_for(document.source, key), key),
+        )
+        for key, value in data.items()
+        if key.startswith("option_")
+    )
+    return ProjectOptionsMetadata(platform, document.source_path, document.source, data, options)
+
+
 def _parse_project_options(
     gm_project_path: str,
     diagnostics: list[ProjectManifestDiagnostic],
-) -> tuple[ProjectOption, ...]:
+) -> tuple[ProjectOptionsMetadata, ...]:
     lexical_options_root = os.path.join(gm_project_path, "options")
     try:
         resolved_options_root = resolve_project_filesystem_source_path(
@@ -719,7 +622,7 @@ def _parse_project_options(
     options_root = resolved_options_root.filesystem_path
     if not os.path.isdir(options_root):
         return ()
-    options: list[ProjectOption] = []
+    options: list[ProjectOptionsMetadata] = []
     for root, dirs, files in os.walk(options_root):
         contained_dirs: list[str] = []
         for directory in sorted(dirs):
@@ -776,20 +679,13 @@ def _parse_project_options(
             path = resolved_path.filesystem_path
             if not os.path.isfile(path):
                 continue
-            data, source = _read_lenient_json_file(path)
-            if data is None:
+            document = _read_project_document(path)
+            if document is None:
                 continue
             platform = _option_platform_from_path(options_root, path)
-            for key, value in data.items():
-                if key.startswith("option_"):
-                    options.append(
-                        ProjectOption(
-                            platform=platform,
-                            key=key,
-                            value=value,
-                            source=ProjectSourceLocation(path, _line_for(source, key), key),
-                        )
-                    )
+            metadata = parse_project_options_document(document, platform=platform)
+            if metadata is not None:
+                options.append(metadata)
     return tuple(options)
 
 
@@ -831,7 +727,7 @@ def _option_platform_from_path(options_root: str, path: str) -> str:
 
 
 def _parse_texture_groups(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectTextureGroup, ...]:
@@ -856,7 +752,7 @@ def _parse_texture_groups(
 
 
 def _parse_audio_groups(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectAudioGroup, ...]:
@@ -877,7 +773,7 @@ def _parse_audio_groups(
 
 
 def _parse_included_files(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectIncludedFile, ...]:
@@ -891,7 +787,7 @@ def _parse_included_files(
         files.append(
             ProjectIncludedFile(
                 name=name,
-                path=_normalize_project_path(path),
+                path=normalize_project_manifest_path(path),
                 targets=_targets_from_mapping(item),
                 source=ProjectSourceLocation(yyp_path, _line_for(raw_source, name or path), f"IncludedFiles[{index}]"),
                 raw_data=item,
@@ -901,7 +797,7 @@ def _parse_included_files(
 
 
 def _unknown_project_field_diagnostics(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectManifestDiagnostic, ...]:
@@ -936,7 +832,7 @@ def _resource_conflict_diagnostics(
         _duplicate_resource_diagnostics(
             resources,
             "path",
-            lambda resource: _normalize_project_path(resource.path).casefold(),
+            lambda resource: normalize_project_manifest_path(resource.path).casefold(),
         )
     )
     return tuple(diagnostics)
@@ -986,41 +882,41 @@ def _missing_target_option_diagnostics(
     )
 
 
-def _iter_dict_items(value: object) -> Iterable[JsonDict]:
+def _iter_dict_items(value: JsonValue) -> Iterable[JsonObject]:
     if isinstance(value, list):
-        for item in cast(JsonList, value):
+        for item in value:
             if isinstance(item, dict):
-                yield cast(JsonDict, item)
+                yield item
     elif isinstance(value, dict):
-        for item in cast(JsonDict, value).values():
+        for item in value.values():
             if isinstance(item, dict):
-                yield cast(JsonDict, item)
+                yield item
 
 
-def _entry_name(data: JsonDict) -> str:
+def _entry_name(data: JsonObject) -> str:
     return _string_value(data.get("%Name")) or _string_value(data.get("name"))
 
 
-def _entry_reference_name(value: object) -> str:
+def _entry_reference_name(value: JsonValue) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        return _entry_name(cast(JsonDict, value))
+        return _entry_name(value)
     return ""
 
 
-def _targets_from_mapping(data: Mapping[str, object]) -> tuple[str, ...]:
+def _targets_from_mapping(data: Mapping[str, JsonValue]) -> tuple[str, ...]:
     raw_targets = data.get("targets") or data.get("copyToTargets") or data.get("platforms")
     if isinstance(raw_targets, list):
         targets: list[str] = []
-        for target in cast(JsonList, raw_targets):
+        for target in raw_targets:
             target_text = str(target)
             if target_text:
                 targets.append(target_text)
         return tuple(targets)
     if isinstance(raw_targets, dict):
         targets: list[str] = []
-        for key, value in cast(Mapping[str, object], raw_targets).items():
+        for key, value in raw_targets.items():
             if bool(value):
                 targets.append(str(key))
         return tuple(sorted(targets))
@@ -1040,29 +936,29 @@ def _resource_type_from_path(path: str) -> str:
 
 
 def _kind_from_path(path: str) -> str:
-    normalized = _normalize_project_path(path)
+    normalized = normalize_project_manifest_path(path)
     if "/" not in normalized:
         return ""
     return normalized.split("/", 1)[0]
 
 
 def _name_from_path(path: str) -> str:
-    filename = os.path.basename(_normalize_project_path(path))
+    filename = os.path.basename(normalize_project_manifest_path(path))
     return os.path.splitext(filename)[0]
 
 
-def _string_value(value: object) -> str:
+def _string_value(value: JsonValue) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _project_ide_version(yyp_data: JsonDict) -> str:
+def _project_ide_version(yyp_data: JsonObject) -> str:
     metadata = yyp_data.get("MetaData")
     if not isinstance(metadata, dict):
         return ""
-    return _string_value(cast(JsonDict, metadata).get("IDEVersion"))
+    return _string_value(metadata.get("IDEVersion"))
 
 
-def _int_value(value: object, default: int) -> int:
+def _int_value(value: JsonValue, default: int) -> int:
     if isinstance(value, bool):
         return default
     if not isinstance(value, (int, float, str)):
@@ -1073,14 +969,10 @@ def _int_value(value: object, default: int) -> int:
         return default
 
 
-def _string_tuple(value: object) -> tuple[str, ...]:
+def _string_tuple(value: JsonValue) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(str(item) for item in cast(JsonList, value) if str(item))
-
-
-def _normalize_project_path(path: str | None) -> str:
-    return (path or "").replace("\\", "/").strip()
+    return tuple(str(item) for item in value if str(item))
 
 
 def _line_for(source: str, needle: str) -> int:

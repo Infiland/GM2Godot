@@ -235,7 +235,9 @@ class TestLegacyGameMakerDecoding(unittest.TestCase):
             path = Path(directory) / "project.yyp"
             path.write_text('{"n":NaN,"p":Infinity,"m":-Infinity}', encoding="utf-8")
             manifest = load_gamemaker_project_manifest(directory)
-            self.assertTrue(math.isnan(manifest.raw_data["n"]))
+            value = manifest.raw_data["n"]
+            assert isinstance(value, float)
+            self.assertTrue(math.isnan(value))
             self.assertEqual(manifest.raw_data["p"], math.inf)
             self.assertEqual(manifest.raw_data["m"], -math.inf)
 

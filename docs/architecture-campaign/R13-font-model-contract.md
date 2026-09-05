@@ -9,7 +9,8 @@ work; root will reconcile their actual integration state before its PR.
 Implementation owner: `audit_gml_resources`, in `dev/080-font-model` at
 `GM2Godot-080-font-model`. A separate agent reviews the actual source read-only;
 root then reads the actual changes and owns integration. No source change is
-authorized outside the twelve paths below. Version and release work remains
+authorized outside the thirteen scoped paths below, including the retained
+snapshot amendment. Version and release work remains
 reserved for the single final v0.8.0 release.
 
 ## Problem and benefit
@@ -186,15 +187,15 @@ locks and full fourteen-field parity contract; all prior gate objects are exact.
 Its five parity inputs are two repository fixtures and three external projects;
 the separately required full suite runs all five pinned external projects.
 
-Full, controls, font matrix, parity/same-ref, performance, current-parent
-integration and final PR/merge native proof remain outstanding. This source
-snapshot is based on b9; root will preserve the later verified I02/L02 campaign
-state during integration. Original proof will retain its actual source identity.
+At that initial source snapshot, full, controls, font matrix, parity/same-ref,
+performance and integration proof were still outstanding. The accepted results
+below retain their actual source identities. The later combined source preserves
+verified I02/L02 work; final PR/merge native proof remains outstanding.
 
 ## Retained whole-aggregate snapshot amendment
 
 The immutable `465b562380313fad75245b2f97c5ecdd4824228c` full run executed
-3161 tests: 3104 successes, one stale snapshot failure and56 exact prior host
+3161 tests: 3104 successes, one stale snapshot failure and 56 exact prior host
 skips. All five pinned external fixture tests passed; all595 tracked files and
 fixture bindings stayed unchanged. Preserve that failed result and its package.
 
@@ -217,3 +218,60 @@ suite with all five external fixtures. Rebind unexecuted parity, matrix, control
 and timing packages in fresh locations; preserve all original evidence and every
 accepted payload, assertion, native gate, coverage floor and benchmark workload.
 The failed full result does not establish proof for the corrected tree.
+
+## Accepted local and combined results
+
+Independent and root reviews approve immutable corrected source
+`321a629abb5090fc3409a75d2b0dd83e06299505`. The 66 focused tests passed with zero
+skips after Pyright and Ruff fixes. The accepted full retry ran 3161 tests with
+3105 successes and 56 exact existing host skips; all five pinned external project
+tests passed. Both earlier failed full runs remain preserved: the stale aggregate
+snapshot and an unchanged reader-deadline test. Isolated diagnostics do not
+establish the cause of the latter failure.
+
+The five-fixture fourteen-field base/candidate and same-ref comparisons are
+equal under the existing normalization. Raw transaction identities remain in
+the evidence. Both resource-matrix runtime markers report the same two
+compatibility warnings; parity does not claim warning-free runtime validation.
+The 366-case matrix produces 776 observations per run: 585 unchanged and 191
+explicitly accepted aggregate retirements. Nineteen intact controls pass; nineteen
+fresh one-ID mutants trigger 37 intended callbacks, with every source restoration
+verified. A failed root read-only raw-identity assertion and its continuation
+sequencing deviation remain documented; no comparator policy was weakened.
+
+The timing comparison uses two excluded warmups and five alternating fresh
+process pairs with identical inputs. Three passes over 64 glyph-rich documents
+retain 192 models and 393,216 glyph dictionaries. Decode/normalize median rises
+from 0.264205708s to 0.653276s: 147.26%, or about 2.026ms per retained parse. Whole
+benchmark-process median peak RSS rises from 50,085,888 to 190,054,400 bytes
+(about 133.48MiB additional). These material costs are accepted because the
+contract requires complete recursive JSON validation and raw dictionary identity.
+The new model retains the validated dictionary without copying or caching it.
+Successful production workers return a name rather than collecting models;
+exception tracebacks can retain locals until future settlement. This source
+explanation is not a quantitative allocation profile or production peak estimate.
+
+The separate 90-font planning/conversion workload preserves every output and
+log. Its median changes from 0.172695791s to 0.167902s, with overlapping sample
+ranges, so no speedup is claimed. Timing acceptance is recorded in
+`R13/timing-result-review/performance-verdict.json`; complete root local approval
+is `R13/R13-root-final-local-proof-review.json` under the external evidence root.
+
+Prepared merge `1a8bd8200d6fdb72a4b1a3d1908239aeddc93049` combines that source
+with verified campaign parent `5faa683a07a913c96d5283d06b8e2cb1b44e5b30`. All 13
+R13 owners and 13 incoming Python paths preserve their reviewed bytes; there
+are no overlapping Python edits. The 605-file/405-Python source passed Pyright
+with zero errors/warnings, both Ruff checks, actionlint and the strict unchanged
+maintainability policy. Its actual-parent allowance falls 1044 to 1041, with three
+entries removed, seven reduced and no additions or growth. All prior gates,
+coverage floors, I02 native commands and L02 CLI modules remain preserved.
+
+The combined focused runs contain 242 tests: 65 R13 successes, one retained
+snapshot success, 83 CI successes and 93 CLI tests with 92 successes plus the exact
+existing Windows-only directory-relocation skip. All 605 source hashes remain
+unchanged through those checks. Independent combined review is
+`R13/current-parent-5faa/independent-combined-source-review/review.json`.
+Final status documentation is a separate narrow delta; original full, parity,
+matrix, controls and timing results remain bound to 321. R13 is locally approved
+and becomes verified only after exact final-source PR and campaign-merge native
+CI evidence is accepted. Campaign progress remains 16 of 54 tasks (29.6%).

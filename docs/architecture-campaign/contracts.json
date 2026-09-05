@@ -995,7 +995,7 @@
       "task_id": "R13",
       "issue": 797,
       "title": "Authoritative fonts resource model",
-      "state": "reviewing",
+      "state": "approved",
       "problem_and_evidence": "The worker, registry and unused descriptive font aggregate interpret overlapping raw fields differently; fonts -> output paths -> registry -> fonts forms a lazy cycle. Actual b9 95 historical plus366 expanded cases/776 public observations are characterized and reviewed.",
       "expected_benefit": "One normalized frozen FontModel, two concrete planning selectors and one source-lookup leaf; delete duplicated dictionary/descriptive parsing and the lookup cycle.",
       "current_owner": "fonts.py, asset_registry.py, asset_output_paths.py",
@@ -1043,7 +1043,7 @@
         "successes": 65,
         "skips": 0,
         "result_sha256": "7a39101807e01056782d43d6477e6ab4e72ab1e770252b210a0e6ac3a0e2ec55",
-        "checks": "Pyright0errors0warnings,bothRuff,diff; full and native proof remain pending"
+        "checks": "Initial source proof: Pyright zero errors/warnings, both Ruff and diff passed. Subsequent corrected, full and combined results are recorded below; exact native PR/merge proof remains pending."
       },
       "root_baseline": {
         "parent": "b9c05cd326cbcb8531ca93c24709bcf14cb81748",
@@ -1055,7 +1055,7 @@
         "grown": 0,
         "receipt_sha256": "9375ad152bc115907250dd2fd3a5e6229c4946c45c0ea3d74aa2ef2c20872a93"
       },
-      "remaining_verification": "Final independent performance acceptance, actual5faa combined source/static/focused checks, and exact native PR/merge CI. All immutable321 local executions are complete; no task completion credit yet.",
+      "remaining_verification": "Final source and metadata freeze, reviewed native-CI verification package, and exact PR/merge CI on the campaign branch. Independent and root local performance and combined source/static/focused reviews are approved. R13 receives no verified-task credit until integration proof completes.",
       "cross_family_snapshot_amendment": {
         "scope": "Only the expected 64-character digest in TestPathModelConsumers.test_resource_matrix_and_empty_project_preserve_other_families; retain all seven assertions, all record families, fixture data and path normalization. The original twelve owner files remain unchanged.",
         "proposal_index_sha256": "fe3798891d6950e74c8a5e09dc9e5a5adf106df71dcbc24a92b26b950cf1bee3",
@@ -1065,7 +1065,7 @@
         "failed_source": "465b562380313fad75245b2f97c5ecdd4824228c",
         "failed_full_result_sha256": "e6d12849bd5e617499275531ce7e6dc73e803307985fb7a2538794c7e0ec865e",
         "failed_full_outcome": "3161 tests: 3104 successes, one stale snapshot failure, 56 exact prior host skips; all five pinned external fixture tests passed, all595 source and fixture bindings unchanged.",
-        "next_validation": "After source correction: Pyright0/0, both Ruff and explicitly recorded66 selected tests (existing65 plus corrected retained method), then new immutable source and separately reviewed full-v2 with the same suite/five fixtures/skip policy. Rebind unexecuted packages to the corrected source in fresh locations; preserve all original and failed evidence."
+        "next_validation": "Completed at corrected immutable321: Pyright zero errors/warnings, both Ruff and66 selected successes, then the accepted full retry and fresh parity/matrix/control/timing results below. Both failed full runs and original packages remain preserved."
       },
       "immutable_local_results": {
         "source_commit": "321a629abb5090fc3409a75d2b0dd83e06299505",
@@ -1075,7 +1075,35 @@
         "matrix": "Two fresh366case/776observation runs;585oldobservations unchanged,191explicitaccepted aggregate retirements.",
         "controls": "19intact tests,zero skips;19freshone-IDmutants caused37intended callbacks,allsource restorations verified.",
         "performance": "Five fresh alternating pairs plus2excludedwarmups.192retained-font decode median0.264205708to0.653276s(+147.26%);90fontplanning/conversion median0.172695791to0.167902s with overlapping ranges.Wholeprocess median peak50,085,888to190,054,400bytes. No speedup/perworker-memory claim.",
-        "evidence_root": "/Users/infi/Documents/Github/.gm2godot-v080-evidence/R13"
+        "evidence_root": "/Users/infi/Documents/Github/.gm2godot-v080-evidence/R13",
+        "acceptance": "Independent and root APPROVE, including the explicit material decode/raw-retention performance tradeoff; original source identity retained.",
+        "root_review_sha256": "e43bca1b2620306a4708ca510a637a3e7167af7614c0266619e66aea3717f7bc",
+        "performance_verdict_sha256": "a2bcc566a360e375fd9bc66ca4bce1e5e1bfe4c6af4657739b634a88b2e1d663"
+      },
+      "combined_proof": {
+        "prepared_merge": "1a8bd8200d6fdb72a4b1a3d1908239aeddc93049",
+        "actual_parent": "5faa683a07a913c96d5283d06b8e2cb1b44e5b30",
+        "source_files": 605,
+        "python_files": 405,
+        "source_index_sha256": "5b9b1ae218edd1a6e4ea068e1e2f1005fd5c266ba265b879add701f275b31ce0",
+        "independent_review_sha256": "beddce8d91bc8af9566393e620fec77a0de5421cbb75b3d6cd2dfe03f4e782a1",
+        "static_result_sha256": "8e54b46913d108daa6d2aa2a9b8e87a4fa8dc415123a2099562b5e9f14117785",
+        "test_result_sha256": "3c848b5badac2c48cb0d66daba1a0d3a79e6cd63eeff0e3969461848a0ec86c7",
+        "root_test_review_sha256": "c8cadc4d48c9c352e78fb0edcbf3580dfb99052820ba36ab0801e21c3afab601",
+        "root_test_description_clarification_sha256": "fe8f8c2f31ef7eaacff5327cb614540bacd54e657bf103887d196e744d8ced65",
+        "checks": "Pyright zero errors/warnings, both Ruff checks, actionlint and strict actual-parent baseline passed. All13 R13 owners preserve321; all13 incoming Python paths preserve5faa; no overlapping Python edits.",
+        "tests": "242 total:65 R13 successes,1 retained snapshot success,83 CI successes,93 CLI tests with92 successes and the one unchanged native-Windows-only directory-relocation skip. All605 source hashes unchanged.",
+        "baseline": {
+          "entries_before": 1044,
+          "entries_after": 1041,
+          "removed": 3,
+          "lowered": 7,
+          "added": 0,
+          "grown": 0,
+          "policy_unchanged": true,
+          "comparison_sha256": "1334d12795794edbd82886fff2bb877ff217ef50ebb4f05a2ce479ca60d4c1b8"
+        },
+        "limits": "Original full/parity/matrix/control/timing proof remains bound to321. Final metadata is a separate documentation-only delta. Native PR and merge proof is pending."
       }
     },
     {

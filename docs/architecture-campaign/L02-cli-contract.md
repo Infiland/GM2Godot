@@ -231,3 +231,23 @@ Final local approval: `L02/L02-root-final-local-proof-review.json`, SHA
 `fdd769a156e41c5e20580915a0c7998dfe49e8ce419c8c70766e7736adfa6e7d`.
 The combined proposal is `L02/current-parent-4787f4b/review-files.json`, SHA
 `1d1f902101afcad8b161d2d0b115aa875149eec420c156a8e96cbf672829542e`.
+
+## Completed combined local proof
+
+Prepared merge `2a69dc0219d99c359cd746f7df90eb00b36be942` has parents d3 and478
+and exactly the reviewed598-file/399-Python composition. The sole merge conflict
+was the ledger, resolved to the independently reviewed root metadata. The strict
+unchanged generator/checker against actual478 passed1044 and matched the forecast
+byte-for-byte. Pyright0/0, both Ruff paths and actionlint passed. All83 CI methods
+passed;93 CLI methods produced92 successes and the same historical Windows-binding
+directory-relocation skip (`native Windows handles required`). All15 new methods
+passed. Every source hash stayed unchanged. Both unittest commands ran once and
+exited0; a root post-run audit's mistaken expected skip name was corrected by
+comparing the preserved old78 log and receipt, without rerunning either command.
+
+Independent combined review is
+`L02/current-parent-4787f4b/combined-checks/L02-independent-combined-result-review.json`,
+SHA `575389016ee3fea74d258feb7a7cd4ea6cc1edf99f5f2ddda8328eabcc94a78b`.
+Final PR/merge native selection and all inherited exact-source CI proof remain
+required. This annotation changes documentation only and retains the actual2a69
+attribution of combined checks and d3/e142 attribution of original local proof.

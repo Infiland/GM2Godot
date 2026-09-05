@@ -2473,7 +2473,16 @@
         "timing": "12 fresh workers,8 cases times200 calls; median-sum overhead53.50855 microseconds/+1.3483%,largest per-call25.970 microseconds; root accepts bounded orchestration cost, no real conversion speed claim"
       },
       "integration_proposal_sha256": "1d1f902101afcad8b161d2d0b115aa875149eec420c156a8e96cbf672829542e",
-      "remaining_verification": "Combined Pyright/Ruff/actionlint,83CI and93CLI cohort,strict1044 actual478; final immutable PR and merge15new native successes per host and all retained gates. Original full/parity/timing remain attributed to d3/e142."
+      "remaining_verification": "Final immutable PR and merge15new native successes per host,allretainedI02/I01/R12/T01/CLI/native artifacts/modes/coverage,strict1044actual478. Original full/parity/timing remain attributed to d3/e142; combined local proof at2a69.",
+      "combined_local_proof": {
+        "source_head": "2a69dc0219d99c359cd746f7df90eb00b36be942",
+        "actual_parent": "4787f4bd3a86f1ba881337fb10562ca0644d92ea",
+        "static_result_sha256": "832382bcb22aef26bf4d4bd705f8deb23fe531272f6235ea4014652ff42fcda4",
+        "test_result_review_sha256": "0d3d7a994a2c643f732565cb879fc32fc77a34df84350cab7dfe8f69f9b945f1",
+        "independent_review_sha256": "575389016ee3fea74d258feb7a7cd4ea6cc1edf99f5f2ddda8328eabcc94a78b",
+        "checks": "598files/399Python exact;Pyright0errors0warnings,bothRuff,actionlint,strict1044actual478;83CI/0skip,93CLI/92success/1exactoldWindowsbindingrelocation skip;all15new actualsuccess",
+        "source_inventory_sha256": "6d1e3e2c679654aab8992919595ef468311ef899ec8de0792ad964328d5965e7"
+      }
     },
     {
       "task_id": "L03",

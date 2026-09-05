@@ -18,8 +18,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. Python 3.14 is not proof.
 - The single final v0.8.0 release follows full campaign verification and merge
   of `dev/080-architecture-campaign` into `main`, as confirmed by the user.
-- L02 source and complete local proof are approved; root combines with verified
-  I02 for bounded combined checks and final native PR/merge proof. R13 source
+- L02 source and complete local proof are approved; the reviewed combination with verified
+  I02 has passed bounded checks; final native PR/merge proof is next. R13 source
   has passed65 focused tests and is under independent/root review. I03 remains
   a prospective contract with typing and characterization prerequisites.
 
@@ -43,7 +43,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
 | I02 Included Files POSIX operations | verified | audit_transactions_cli; PR #890 merged4787f4b | Independent/root source, local, combined and exact CI APPROVE | PR33968388651/merge33971661125;50new+31retained native/runtime, R12/T01/CLI/artifacts/modes/coverage,strict1045actualb9; I02/final-verification.json |
-| L02 CLI request and session ownership | approved | audit_policy_tests_docs; sourced3a05b2, root combination with4787f4b | Independent/root actual source and final local proof APPROVE; combined review pending |3139full/56known skips,all5fixtures,6entry commands,nine-case parity/same-ref,12controls,12timing workers; L02/L02-root-final-local-proof-review.json |
+| L02 CLI request and session ownership | approved | audit_policy_tests_docs; sourced3a05b2, root combination with4787f4b | Independent/root source, final local and actual combined proof APPROVE |3139full/56known skips,all5fixtures,6entry commands,nine-case parity/same-ref,12controls,12timing workers; L02/L02-root-final-local-proof-review.json |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -212,3 +212,11 @@ Windows and Linux claims require their actual native CI receipts.
   correction passed. Twelve timing workers showed up to25.97 microseconds of
   added per-call orchestration cost, accepted by root without a conversion
   speed claim. Current-parent checks and exact PR/merge proof remain pending.
+
+- L02 prepared merge2a69dc0 has exactly the reviewed d3/478 source composition:
+  598 files,399 Python files, all unchanged through its checks. Pyright0/0,
+  both Ruff paths, actionlint and strict1044 against actual478 passed. The83 CI
+  methods all passed;93 CLI methods produced92 successes and the exact existing
+  Windows-binding directory-relocation skip. All15 new methods passed. The saved
+  combined results and independent review are approved; final PR/merge native
+  proof remains pending. No original full/parity/timing run was repeated.

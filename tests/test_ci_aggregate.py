@@ -118,6 +118,18 @@ class CIAggregateTests(unittest.TestCase):
     def test_exact_same_commit_calls_and_terminal_dependencies(self) -> None:
         self._assert_graph(self.workflows)
 
+    def test_full_suite_installs_and_verifies_pinned_policy_tool(self) -> None:
+        job = _job_blocks(self.workflows["tests.yml"])["test"]
+        setup = job.split("      - name: Run unit tests\n", 1)[0]
+        requirements = (WORKFLOW_DIR.parents[1] / "requirements-tooling.txt").read_text(
+            encoding="utf-8",
+        )
+        ruff_pin = next(line for line in requirements.splitlines() if line.startswith("ruff=="))
+        install = setup.split("python scripts/verify_dependency_environment.py", 1)[0]
+        self.assertIn(ruff_pin, install)
+        verification = setup.split("python scripts/verify_dependency_environment.py", 1)[1]
+        self.assertIn("--require ruff \\\n", verification)
+
     def test_triggers_cover_main_and_campaign_without_duplicate_children(self) -> None:
         caller = self.workflows["ci.yml"].split("\npermissions:", 1)[0]
         self.assertEqual(caller, (

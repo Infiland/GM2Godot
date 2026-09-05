@@ -140,7 +140,7 @@ jobs:
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
             xargs -0 -- python -m ruff check --isolated --target-version py312 \
-              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+              --select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
 
   workflow-success:
     name: workflow-success

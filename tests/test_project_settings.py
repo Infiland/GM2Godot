@@ -9,9 +9,6 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.conversion_outcome import ConversionCounts
@@ -20,6 +17,8 @@ from src.conversion.project_settings import (
     ProjectOperationResult,
     ProjectSettingsConverter,
 )
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SAMPLE_YYP = """\
 {
@@ -838,7 +837,7 @@ class TestConvertIconFallback(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertTrue(os.path.exists(os.path.join(self.godot_dir, 'icon.png')))
-        fallback_logs = [l for l in self.logs if 'windows' in l]
+        fallback_logs = [log for log in self.logs if 'windows' in log]
         self.assertTrue(len(fallback_logs) > 0, "Should log which platform was used as fallback")
 
     def test_uses_selected_platform_when_available(self) -> None:
@@ -848,7 +847,7 @@ class TestConvertIconFallback(unittest.TestCase):
         result = converter.convert_icon()
 
         self.assertTrue(result)
-        fallback_logs = [l for l in self.logs if 'Fallback' in l or 'instead' in l]
+        fallback_logs = [log for log in self.logs if 'Fallback' in log or 'instead' in log]
         self.assertEqual(len(fallback_logs), 0, "Should not fall back when selected platform has icons")
 
     def test_returns_false_when_no_platform_has_icons(self) -> None:

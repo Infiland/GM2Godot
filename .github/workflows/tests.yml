@@ -91,6 +91,16 @@ jobs:
           retention-days: 30
           archive: true
 
+      - name: Run native linux artifact mode characterization
+        run: >-
+          python -m unittest -v
+          tests.test_conversion_manifest.TestConversionManifest.test_existing_and_new_artifact_modes_remain_exact
+          tests.test_diagnostics.TestDiagnosticCollector.test_new_private_modes_and_existing_exact_modes_are_preserved
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_callbacks_return_final_mode
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_fd_chmod_rebinding_keeps_selected_rollback_callable
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
+
       - name: Run unit tests
         run: |
           python -m coverage erase
@@ -199,6 +209,16 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           archive: true
+
+      - name: Run native macos artifact mode characterization
+        run: >-
+          python -m unittest -v
+          tests.test_conversion_manifest.TestConversionManifest.test_existing_and_new_artifact_modes_remain_exact
+          tests.test_diagnostics.TestDiagnosticCollector.test_new_private_modes_and_existing_exact_modes_are_preserved
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_callbacks_return_final_mode
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_fd_chmod_rebinding_keeps_selected_rollback_callable
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
+          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
 
       - name: Run native macOS managed-output transaction tests
         run: >-
@@ -310,6 +330,12 @@ jobs:
           tests.test_managed_output_publisher
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
+
+      - name: Run native windows artifact mode characterization
+        run: >-
+          python -m unittest -v
+          tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_readonly_hardlink_is_rejected_without_alias_mutation
+          tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_single_link_readonly_publish_and_restore
 
       - name: Run native Windows Godot output-reader scheduling tests
         run: >-

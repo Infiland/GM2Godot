@@ -1,12 +1,8 @@
 import os
-import sys
 import tempfile
 import unittest
 from dataclasses import dataclass
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.gml_runtime import GML_RUNTIME_RELATIVE_PATH, GML_RUNTIME_SCRIPT, write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_expression

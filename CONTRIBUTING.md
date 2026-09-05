@@ -82,7 +82,7 @@ Compatibility work continues to target GameMaker LTS 2026 source projects and ex
 - Keep functions focused and concise
 - Use type hints where appropriate
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
-- Run `ruff check .` before submitting Python code. CI enforces Ruff's `E9` fatal-error checks and the complete Pyflakes (`F`) rule family. Do not disable `F` or individual `F`-numbered rules globally or per file. Broader style rules should be introduced separately from feature work.
+- Run `ruff check .` before submitting Python code. CI enforces Ruff's complete `E4`, `E7`, `E9` and Pyflakes (`F`) rule families. Do not disable these families or individual rules globally or per file. Broader style rules should be introduced separately from feature work.
 
 ### Shrinking maintainability debt (R02 / #795)
 
@@ -107,10 +107,10 @@ symbol, separating application, tooling, and tests. `scripts/maintainability_met
 owns measurement thresholds, module classifications, and lint rules; the JSON
 records that policy to reject accidental changes. Every tracked Python input
 (including tracked ignored files) and nonignored untracked Python input is
-measured. Unknown classifications fail. Existing E9/F checks remain mandatory;
+measured. Unknown classifications fail. The complete E4/E7/E9/F families remain mandatory;
 normal Ruff also enforces the campaign's coarse C90 ceiling of 122. The ratchet
 independently measures C901 above 15, function/module length, nesting,
-parameters, duplicate symbols, pending I001/B/E4/E7/E9 findings, exact suppression
+parameters, duplicate symbols, I001/B and enforced E4/E7/E9 findings, exact suppression
 comments (including directives after explanatory comment prefixes), and static/eager import cycles. Declarative/mixed modules are labeled,
 not exempted. Ruff runs at the requirements pin with isolated configuration and
 ignores neither files nor `noqa` findings. Source traversal and JSON are sorted;

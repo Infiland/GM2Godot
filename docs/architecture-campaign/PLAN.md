@@ -153,6 +153,15 @@ a separate issue, except a demonstrated prerequisite blocking a listed guarantee
 | V01 | Integrated parity, runtime, native CI and independent campaign review | all architecture/docs tasks |
 | V02 | Version, changelog, artifacts, approved main merge and v0.8.0 verification | V01 |
 
+R03 begins from the approved combined R10/N01 source under its accepted exact
+contract; integration waits for verified dependencies. R04 remains a separate
+import-only pass after R03. R05 follows R04 and R26 so typed resource, native,
+event and CLI owners are stable before their remaining Bugbear findings are
+fixed. The existing immutable-parent debt gate continues to measure I001 and B
+throughout; this schedule permits no new debt, suppression or exclusion. W02
+waits for R05 so contributor commands describe final lint enforcement. All 54
+tasks remain required by V01/V02.
+
 ## Measurable acceptance targets
 
 - Zero governed private GML imports and suppressions; the 44-export contract stays

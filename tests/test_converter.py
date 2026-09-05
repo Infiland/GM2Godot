@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import threading
 import tempfile
 import shutil
@@ -12,9 +11,6 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_context import ConversionContext, enabled_converter_keys
@@ -405,7 +401,8 @@ class TestConverterOutcomes(unittest.TestCase):
                 raise error
 
         failing = FailingConverter("/gm", "/godot")
-        runner = lambda: self.converter._run_base_converter(failing)
+        def runner() -> ConversionStepResult:
+            return self.converter._run_base_converter(failing)
         with self._environment({"scripts": runner}) as calls:
             with self.assertRaises(RuntimeError) as raised:
                 self.converter.convert(

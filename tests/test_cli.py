@@ -20,9 +20,6 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src import cli
 from src.conversion.converter import Converter
@@ -43,6 +40,8 @@ from src.conversion.diagnostics import (
 from src.conversion.godot_validation import GodotValidationReport
 from src.conversion.project_godot import ConversionPreflightError
 from src.version import get_version
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ast
 import io
+import re
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -93,11 +95,12 @@ class TestMaintainabilityMeasurements(unittest.TestCase):
                 "import sys\nimport os\n\n\ndef process(value: int) -> int:\n"
                 + "".join(f"    if value == {value}:\n        return {value}\n" for value in range(15))
                 + "    return value  # noqa\n\n\ndef defaults(values=[]):\n    return values\n\n\nimport math  # noqa\n"
+                + "handler = lambda: 1\nfor l in ():\n    pass\n"
             )
             (root / "src" / "example.py").write_text(source, encoding="utf-8")
             paths = ["src/example.py"]
             debt = metrics.measure(root, paths)
-            for metric in ("complexity", "lint.I001", "lint.B006", "lint.E402"):
+            for metric in ("complexity", "lint.I001", "lint.B006", "lint.E402", "lint.E731", "lint.E741"):
                 with self.subTest(metric=metric):
                     self.assertTrue(any(f"|{metric}|" in key for key in debt), debt)
             (root / "src" / "empty.py").write_text("", encoding="utf-8")
@@ -107,6 +110,20 @@ class TestMaintainabilityMeasurements(unittest.TestCase):
             (root / "requirements-tooling.txt").write_text("ruff==0.0.0\n", encoding="utf-8")
             with self.assertRaisesRegex(metrics.MaintainabilityError, "Ruff version: expected ruff 0.0.0"):
                 metrics.measure(root, paths)
+
+    def test_project_config_enforces_complete_e4_e7_families(self) -> None:
+        source = (
+            "import sys, os\nprint(sys.version, os.name)\nimport math\n"
+            "handler = lambda: math.pi\nif handler(): result = 1\nfor l in (): print(l)\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-m", "ruff", "check", "--config", str(checker.PROJECT_ROOT / "pyproject.toml"),
+                 "--output-format", "concise", "--stdin-filename", "contract_input.py", "-"],
+                input=source, text=True, capture_output=True, cwd=directory,
+            )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(set(re.findall(r": (E\d{3}) ", result.stdout)), {"E401", "E402", "E701", "E731", "E741"})
 
     def test_embedded_suppressions_are_tracked_without_matching_strings(self) -> None:
         for directive in ("noqa: F401", "ruff: noqa: F401", "pyright: ignore[reportUnusedImport]", "type: ignore"):
@@ -359,7 +376,7 @@ class TestMaintainabilityWorkflow(unittest.TestCase):
             '--baseline maintainability-baseline.json --base-ref "$base_ref"',
             "python -m unittest tests.test_maintainability_policy",
             "python -m ruff check .",
-            "--select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude",
+            "--select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, workflow)

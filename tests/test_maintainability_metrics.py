@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import hashlib
 import io
 import json
 import re
@@ -319,33 +318,19 @@ class TestMaintainabilityParent(unittest.TestCase):
             self.assertEqual(checker.parent_debt(root, "parent").debt, debt)
         self.assertEqual(git_call.call_args_list[-1].args, (root, "show", f"{revision}:{checker.BASELINE_PATH}"))
 
-    def test_import_layout_bridge_requires_exact_git_parent_and_raw_bytes(self) -> None:
+    def test_legacy_import_layout_candidates_and_git_parents_are_rejected(self) -> None:
         root = checker.PROJECT_ROOT
         revision = "a" * 40
-        debt = {"application|complexity|src/example.py::process": 19}
         legacy_policy = checker.policy(root)
         legacy_policy.pop("import_layout")
-        raw = json.dumps({"schema_version": 2, "policy": legacy_policy, "debt": debt, "size_evidence": {}}).encode()
-        current = checker.serialize(root, debt).encode()
-        for selected, payload, allowed in (
-            (revision, raw, True),
-            ("b" * 40, raw, False),
-            (revision, raw + b"\n", False),
-            ("b" * 40, current, True),
-        ):
-            with (
-                self.subTest(selected=selected, payload=payload),
-                patch.object(checker, "LEGACY_IMPORT_LAYOUT_PARENT", revision),
-                patch.object(checker, "LEGACY_IMPORT_LAYOUT_BASELINE_SHA256", hashlib.sha256(raw).hexdigest()),
-                patch.object(checker, "git", side_effect=[selected.encode(), b"", checker.BASELINE_PATH.encode(), payload]),
-            ):
-                if allowed:
-                    self.assertEqual(checker.parent_debt(root, "parent").debt, debt)
-                else:
-                    with self.assertRaisesRegex(metrics.MaintainabilityError, "policy/version mismatch"):
-                        checker.parent_debt(root, "parent")
+        raw = json.dumps({"schema_version": 2, "policy": legacy_policy, "debt": {}, "size_evidence": {}}).encode()
         with self.assertRaisesRegex(metrics.MaintainabilityError, "policy/version mismatch"):
             checker.load_baseline(raw.decode(), checker.policy(root))
+        with (
+            patch.object(checker, "git", side_effect=[revision.encode(), b"", checker.BASELINE_PATH.encode(), raw]),
+            self.assertRaisesRegex(metrics.MaintainabilityError, "policy/version mismatch"),
+        ):
+            checker.parent_debt(root, "parent")
 
     def test_missing_parent_baseline_only_bootstraps_one_fixed_commit(self) -> None:
         for revision in (checker.BOOTSTRAP_REF, "a" * 40):

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import cast
 
 from src.conversion.diagnostic_models import ResourceModelDiagnostic
+from src.conversion.font_model import FontModel, parse_font_model
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject
@@ -51,12 +52,6 @@ class SpriteModel(ResourceModel):
 class SoundModel(ResourceModel):
     sound_file: str = ""
     audio_group: str = ""
-
-
-@dataclass(frozen=True)
-class FontModel(ResourceModel):
-    font_name: str = ""
-    size: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -239,7 +234,7 @@ class _ParsedResourceModelBuckets:
     timelines: list[TimelineModel] = field(default_factory=_empty_timeline_models)
     other_resources: list[ResourceModel] = field(default_factory=_empty_resource_models)
 
-    def add(self, model: ResourceModel | PathModel) -> None:
+    def add(self, model: ResourceModel | PathModel | FontModel) -> None:
         if isinstance(model, SpriteModel):
             self.sprites.append(model)
         elif isinstance(model, SoundModel):
@@ -269,7 +264,7 @@ class _ParsedResourceModelBuckets:
 def _parse_resource_model(
     gm_project_path: str,
     reference: ProjectResourceReference,
-) -> tuple[ResourceModel | PathModel | None, tuple[ResourceModelDiagnostic, ...]]:
+) -> tuple[ResourceModel | PathModel | FontModel | None, tuple[ResourceModelDiagnostic, ...]]:
     try:
         resolved_yy = resolve_project_source_path(
             gm_project_path,
@@ -328,11 +323,7 @@ def _parse_resource_model(
             audio_group=_named_reference(raw_data.get("audioGroupId")) or "",
         ), ()
     if kind == "fonts":
-        return FontModel(
-            **base,
-            font_name=_string_value(raw_data.get("fontName")),
-            size=_float_value(raw_data.get("size")),
-        ), ()
+        return parse_font_model(raw_data, source_path=yy_path), ()
     if kind == "objects":
         return ObjectModel(
             **base,
@@ -570,9 +561,3 @@ def _int_value(value: object) -> int:
 
 def _optional_int_value(value: object) -> int | None:
     return value if isinstance(value, int) else None
-
-
-def _float_value(value: object) -> float:
-    if isinstance(value, int | float):
-        return float(value)
-    return 0.0

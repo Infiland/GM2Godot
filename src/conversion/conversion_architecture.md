@@ -31,6 +31,31 @@ paths, sequences, timelines, generic remaining resources, and diagnostics.
 Converters can adopt these models incrementally as resource-specific renderers
 are separated from discovery and parsing.
 
+### Font model and source lookup
+
+`font_model.FontModel` is the canonical frozen font record used by the font
+worker and resource-model aggregate. `parse_font_model` normalizes required
+names, numeric fields and flags in worker order. Its fields are snapshots;
+`raw_data` retains the validated JSON dictionary and unknown values by identity.
+The aggregate's former descriptive FontModel constructor, ResourceModel
+inheritance, metadata and serialization shape are retired. There is no second
+font model or compatibility adapter.
+
+`FontConverter` owns reading and worker error handling. Registry planning uses
+the separate `bundled_font_reference` and `system_font_reference` raw-string
+selectors, so it does not evaluate worker numeric fields or required keys.
+The worker retains sibling settlement, source checks, immediate pre-copy
+revalidation, staging, metadata-copy policy, replacement and cleanup.
+
+`font_sources` owns bundled output filenames and system font discovery. It
+preserves directory and walk order, lowercase filename matching and first-match
+selection; the registry retains its existing per-conversion lookup cache.
+Both worker and registry import these helpers directly. The model depends only
+on JSON types and dataclasses; the source helper depends on generated-path
+helpers and the standard library. This removes the font converter's dependency
+cycle through output paths and the registry, allowing ordinary top-level output
+path imports. Neither leaf imports a converter or registry.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

@@ -27,7 +27,7 @@
         "src/*",
         "scripts/*"
       ],
-      "line": 84.00,
+      "line": 84.0,
       "branch": 73.93,
       "baseline": {
         "covered_lines": 29837,
@@ -72,6 +72,7 @@
       "name": "project-parsing",
       "include": [
         "src/conversion/diagnostic_models.py",
+        "src/conversion/font_model.py",
         "src/conversion/gamemaker_json.py",
         "src/conversion/json_values.py",
         "src/conversion/path_model.py",
@@ -82,7 +83,7 @@
         "src/conversion/resource_models.py"
       ],
       "line": 92.28,
-      "branch": 82.00,
+      "branch": 82.0,
       "baseline": {
         "covered_lines": 1052,
         "statements": 1140,

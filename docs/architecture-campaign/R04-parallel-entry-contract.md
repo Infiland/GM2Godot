@@ -1,0 +1,23 @@
+# R04 conditional parallel implementation entry
+
+Status: root-accepted scheduling refinement after independent review. This changes only the isolated implementation start for R11, I01 and G01 once every entry condition below is satisfied. It is not an implementation assignment. Root must still approve and freeze actual cleanup candidate C, refresh each child contract/input set at C and explicitly assign its sole owner/worktree.
+
+The original contracts put R11, I01 and G01 implementation after completed R04, including bridge cleanup. This document is the explicit bounded scheduling override; permanent dependencies and integration order remain unchanged. The initial R04 source has now merged at f40402cebc7f4820571f6f54febd78c7f9c17e6a; initial merge CI 33941403378 has passed all 24 required jobs and the sole permitted dependency-submission skip, with exact native and parent proof. Root has independently refreshed R11's12, I01's15 and G01's16 frozen inputs against that immutable source. All application/test definition bodies relevant to the three tasks are unchanged beyond approved imports. The accepted cleanup changes only the checker, one policy test and two docs, with no expected baseline/debt change.
+
+Accepted finite change: after initial R04 merge CI is fully successful, implement and review the four-file cleanup normally. Only once the exact cleanup implementation and root integration metadata are independently/root approved, required local checks pass, and its immutable candidate commit C exists may root assign R11, I01 and G01 to three separate worktrees based on C while cleanup PR/merge CI runs. All three complete accepted contracts and allowed source files remain binding; the only change is when isolated implementation may start. L01, T01 and later tasks are not covered by this exception.
+
+Entry requirements:
+
+- Initial R04 PR and merge CI/native/parent proof successful and tied to exact reviewed revisions.
+- Actual cleanup source diff equals its accepted small removal scope; no app, generated code, fixture, runtime, native, workflow, dependency or metric-policy change. The new permanent legacy-policy rejection test is reviewed.
+- Cleanup local Pyright0/0, both Ruff checks, policy/metrics/docs tests, strict new-policy parent gate, old-parent rejection and diff checks pass on frozen source.
+- Independently/root approve actual cleanup code and root-only metadata before freezing C. Baseline policy, debt and retained evidence remain the accepted new-policy values; any real baseline change requires a separately inspected source/input refresh before early entry.
+- Root verifies all three task input hashes at C, validates their final import/metric projections and publishes accepted per-task contracts. Separate sole implementers/worktrees, no shared source edits. Root serializes shared policy/coverage/verification/baseline integration. CPU-intensive proof windows are coordinated.
+
+Integration requirements are unchanged: no child PR or campaign integration until R04 cleanup's exact PR and merge CI/native/current-parent proof is successful. Root then confirms each child’s source against the actual integrated cleanup ref, reconciles ancestry and any shared metadata, and reruns relevant combined checks. Every child must still obtain independent/root actual-code review and its own exact PR/merge verification. R04 counts as verified only after its own cleanup merge proof; isolated child progress does not count toward the54-task percentage.
+
+If cleanup CI fails or its reviewed code changes, stop dependent proof/implementation that relies on the changed source, inspect the actual delta, and revalidate task inputs/contracts and local/combined checks before continuing. Do not preserve stale receipts as current proof, bypass CI or silently broaden a scope. A failure in unchanged native/full tests remains a real failure to resolve, not a reason to assume cleanup success.
+
+This parallels the already-reviewed R04 isolated start while R03 merge CI ran: immutable source and ownership are known, and dependency-ordered integration remains strict. It does not waive any verification or change the permanent architecture.
+
+Root read the independent scheduling review and the actual cleanup diff. The approved cleanup implementation is `bfe9b1fffd91d2142ab134acf00b588e034eeb26`; its 61 local tests, Pyright 0/0, both Ruff checks, strict 1,056-entry gate and actual parent controls pass. Final candidate C includes only separately reviewed root metadata beyond this implementation. No child assignment precedes the actual C hash/input confirmation.

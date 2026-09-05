@@ -278,7 +278,7 @@
       "task_id": "R04",
       "issue": 795,
       "title": "Complete I001 import sorting lint cohort",
-      "state": "implementing",
+      "state": "approved",
       "problem_and_evidence": "213 inherited I001 owner entries; fixed explicit layout detects 247 findings on the accepted R03 source. Project/isolated defaults previously disagreed; frozen source has 372 Python inputs and 41 Markdown inputs.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current I001 import sorting baseline entries",
@@ -554,10 +554,10 @@
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "R04 owns separate post-integration deletion of both legacy constants, exact guard, unused hashlib and temporary acceptance test; strict baseline-bearing parents restored, bootstrap 38b unchanged. R04 cannot be verified before cleanup CI and removed-P rejection pass.",
       "plan_verdict": "ACCEPTED by root after independent review; R04-import-contract.md is authoritative. Exact parent 1240a7b16d893bc06ba3d258683c731c60dbadca and raw baseline SHA cea9e1b5ec2a55a05c0f720ce43de7c4e11219e2108aabb9d47b888c38e85d7e. Isolated implementation while R03 merge CI runs is approved; PR/integration waits verified R03 and exact P event identities.",
-      "review_evidence": "Immutable ef758360d91e96f2df0a72fc17769e7e5ed77c09: independent and root actual-code APPROVE; 252 allowed paths and 372 source hashes verified; all 367 import-only ASTs and both dependency graphs preserved. Full suite: 3,064 tests with 56 classified native/filesystem skips, all five pinned projects and exact Godot. Pyright 0 errors/warnings; both Ruff paths and actionlint; 398 focused tests with one Windows-only skip; 80 independent tests and 13 native macOS tests with zero skips; strict gate 1,056 against exact 1240a7b. Initial PR #881 and merge f40402c passed exact CI 33939639226/33941403378, with 24 successful jobs and sole allowed skip. Six native receipts and Linux/macOS 6, Windows 2 artifact-mode proofs pass at both exact revisions. Separate bridge cleanup is implementing and still required before task verification.",
+      "review_evidence": "Immutable ef758360d91e96f2df0a72fc17769e7e5ed77c09: independent and root actual-code APPROVE; 252 allowed paths and 372 source hashes verified; all 367 import-only ASTs and both dependency graphs preserved. Full suite: 3,064 tests with 56 classified native/filesystem skips, all five pinned projects and exact Godot. Pyright 0 errors/warnings; both Ruff paths and actionlint; 398 focused tests with one Windows-only skip; 80 independent tests and 13 native macOS tests with zero skips; strict gate 1,056 against exact 1240a7b. Initial PR #881 and merge f40402c passed exact CI 33939639226/33941403378, with 24 successful jobs and sole allowed skip. Six native receipts and Linux/macOS 6, Windows 2 artifact-mode proofs pass at both exact revisions. Separate bridge cleanup is independently/root approved at bfe9b1f with local proof complete; exact cleanup PR/merge proof remains required before task verification.",
       "cleanup": {
         "contract": "R04-cleanup-contract.md",
-        "state": "implementing",
+        "state": "approved",
         "base_ref": "f40402cebc7f4820571f6f54febd78c7f9c17e6a",
         "allowed_files": [
           "scripts/check_maintainability.py",
@@ -575,7 +575,22 @@
         "baseline_sha256": "30ef0346df5cdc85c2a5c7ea66dc47907d8766ea91b7f012e3d747040d1e9e6d",
         "debt_entries": 1056,
         "root_contract_verdict": "ACCEPTED after independent/root contract review and exact initial merge proof",
-        "completion": "Approved actual small diff, required local checks, exact cleanup PR and merge CI, new-policy parent acceptance and old-policy parent rejection; no remaining bridge."
+        "completion": "Approved actual small diff, required local checks, exact cleanup PR and merge CI, new-policy parent acceptance and old-policy parent rejection; no remaining bridge.",
+        "owner_commit": "bfe9b1fffd91d2142ab134acf00b588e034eeb26",
+        "review_verdict": "Independent audit_transactions_cli and root actual-code APPROVE; four exact files, 372 source hashes and unchanged baseline verified",
+        "local_proof": "Pyright 0 errors/warnings; project/tracked Ruff; 61 policy/metrics/docs tests with zero skips; strict gate 1056 against f40402c; actual new-policy S accepts and old baseline-bearing P rejects; diff check passes",
+        "required_before_verification": "Exact cleanup PR and merge CI/native/current-parent proof remains mandatory"
+      },
+      "conditional_parallel_entry": {
+        "contract": "R04-parallel-entry-contract.md",
+        "scope": [
+          "R11",
+          "I01",
+          "G01"
+        ],
+        "status": "Root accepted after independent review; actual approved final cleanup candidate C and child-specific source/contract refresh remain required before assignment",
+        "integration_gate": "No child PR or campaign integration until exact cleanup merge proof succeeds",
+        "baseline_owner": "root serializes every child baseline generation and combined integration; no concurrent baseline writers"
       }
     },
     {
@@ -740,7 +755,9 @@
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation.",
+      "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
+      "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths."
     },
     {
       "task_id": "R12",
@@ -1326,7 +1343,9 @@
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation.",
+      "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
+      "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths."
     },
     {
       "task_id": "I02",
@@ -1693,7 +1712,9 @@
       "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation.",
+      "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
+      "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths."
     },
     {
       "task_id": "G02",

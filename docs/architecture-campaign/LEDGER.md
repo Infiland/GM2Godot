@@ -18,9 +18,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
 - No external blocker. Initial R04 is integrated and verified at `f40402c`.
-  Its separate four-file bridge retirement is implementing under the accepted
-  [cleanup contract](R04-cleanup-contract.md); cleanup review and PR/merge proof
-  remain required before the R04 task is verified.
+  Its separate four-file bridge retirement is approved at `bfe9b1f` under the
+  [cleanup contract](R04-cleanup-contract.md); exact cleanup PR/merge proof remains
+  required before the R04 task is verified.
   Other planned rows need bounded contract acceptance before implementation.
 
 ## Ownership and progress
@@ -35,7 +35,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | N01 native receipts | verified | audit_transactions_cli, `66bfcfe`; reviewed corrections through `b06c15b`; PR #879 merged `47642d8` | Independent and root code/integration reviews approved | `N01/pr-ci-final.json`, `N01/merge-push-run.json`; six zero-skip native artifacts at each exact revision |
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
-| R04 import layout | implementing | Initial `ef75836` merged by PR #881 at `f40402c`; audit_policy_tests_docs owns cleanup | Initial code and cleanup contract approved independently and by root | Initial PR/merge CI and exact native proof pass; separate four-file bridge retirement remains |
+| R04 import layout | approved | Initial PR #881 at `f40402c`; cleanup `bfe9b1f` by audit_policy_tests_docs | Initial and cleanup actual code approved independently and by root | Initial PR/merge proof and cleanup local checks pass; exact cleanup PR/merge proof remains |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -74,6 +74,11 @@ Raw evidence is retained outside the worktrees at
    separate import pass. R05 follows R04/R26 so remaining reflective test seams
    and exception ownership are stable; W02 waits for final R05 enforcement.
    Existing I001/B debt checks continue throughout. No task or limit is removed.
+
+9. After independent review, root accepts [conditional parallel implementation entry](R04-parallel-entry-contract.md)
+   for R11/I01/G01 from approved frozen cleanup candidate C. All entry checks and
+   explicit isolated assignments remain required. Child PRs/integration wait for
+   successful cleanup merge proof. Root serializes baseline and shared metadata.
 
 ## Validation checkpoint
 
@@ -171,6 +176,13 @@ Raw evidence is retained outside the worktrees at
   mode tests passed Linux/macOS 6 each and Windows 2, all without skips. Both actual
   parent comparisons resolved `1240a7b`; the merge tree matches the reviewed PR.
   Cleanup begins from the complete new-policy `f40402c` baseline with 1,056 entries.
+
+- R04 cleanup `bfe9b1f` matches the four-file reviewed projection. Independent and
+  root actual-code reviews approve; Pyright 0/0, both Ruff paths, 61 focused tests
+  with zero skips and the 1,056-entry strict gate pass. Actual S `f40402c` accepts;
+  baseline-bearing legacy P `1240a7b` rejects. Bootstrap, baseline/debt/evidence,
+  all five R03 test bodies and the other 370 source files remain unchanged.
+  Required cleanup PR and merge CI/native proof remain outstanding.
 
 Full-suite times from concurrent validation are not performance comparisons.
 Windows and Linux claims require their actual native CI receipts.

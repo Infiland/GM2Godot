@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import argparse
 import io
 import json
 import os
-import signal
 import sys
-import threading
 from contextlib import redirect_stdout
-from dataclasses import dataclass, replace
-from types import FrameType
-from typing import Sequence, TypedDict, cast
+from dataclasses import replace
+from typing import Sequence, cast
 
+from src.cli_configuration import (
+    ConvertRequest,
+    DiagnosticThresholds,
+    build_parser,
+    convert_request_from_args,
+    converter_inventory,
+    settings_for_selection,
+    thresholds_from_args,
+)
+from src.cli_session import ConversionSession
 from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
 from src.conversion.conversion_outcome import ConversionOutcome
-from src.conversion.converter import CONVERSION_CATEGORIES, Converter
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     ConversionDiagnosticReportPublicationReceipt,
@@ -30,8 +36,6 @@ from src.conversion.platform_capabilities import (
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES, ConversionPreflightError
 from src.version import get_version
 
-DEFAULT_CONVERSION_GROUPS = ("assets", "project", "wip")
-_NON_CONVERTER_SETTING_KEYS = frozenset({"sound_group_folders"})
 _STATIC_REPORT_DIRECTORY = "gm2godot"
 _STATIC_REPORT_DIRECTORY_DESCRIPTION = "CLI static report directory"
 _STATIC_REPORT_FILENAMES = (
@@ -42,22 +46,8 @@ _STATIC_REPORT_FILENAMES = (
 )
 
 
-class ConverterInventory(TypedDict):
-    default_groups: list[str]
-    groups: dict[str, list[str]]
-    converter_keys: list[str]
-
-
-@dataclass(frozen=True)
-class CLISetting:
-    value: bool
-
-    def get(self) -> bool:
-        return self.value
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
+    parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.version:
@@ -72,16 +62,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnostics = DiagnosticCollector()
         _write_static_reports(args.report_dir)
         diagnostics.write_reports(args.report_dir)
-        return _threshold_exit_code(diagnostics, args)
+        return _threshold_exit_code(diagnostics, thresholds_from_args(args))
 
     if args.command == "analyze":
         diagnostics = _analyze_project(args.gm_project, args.platform)
         _write_static_reports(args.report_dir, args.platform)
         diagnostics.write_reports(args.report_dir)
-        return _threshold_exit_code(diagnostics, args)
+        return _threshold_exit_code(diagnostics, thresholds_from_args(args))
 
     if args.command == "convert":
-        return _run_convert(args)
+        return _run_convert(convert_request_from_args(args))
 
     if args.command == "validate":
         diagnostics = _validate_project(
@@ -93,213 +83,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.report_dir:
             _write_static_reports(args.report_dir)
             diagnostics.write_reports(args.report_dir)
-        return _threshold_exit_code(diagnostics, args)
+        return _threshold_exit_code(diagnostics, thresholds_from_args(args))
 
     parser.print_help()
     return 2
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="GM2Godot",
-        description="Headless GM2Godot conversion, analysis, validation, and reporting.",
-    )
-    parser.add_argument(
-        "--version",
-        action="store_true",
-        help="Print the GM2Godot version and exit.",
-    )
-    subparsers = parser.add_subparsers(dest="command")
-
-    list_parser = subparsers.add_parser(
-        "list-converters",
-        help="List available conversion groups and converter keys.",
-    )
-    list_parser.add_argument(
-        "--format",
-        choices=("text", "json"),
-        default="text",
-        dest="output_format",
-        help="Output format for converter inventory.",
-    )
-
-    report_parser = subparsers.add_parser("report", help="Write static compatibility reports.")
-    _add_report_args(report_parser)
-    _add_threshold_args(report_parser)
-
-    analyze_parser = subparsers.add_parser(
-        "analyze", help="Analyze a GameMaker project without writing converted output."
-    )
-    analyze_parser.add_argument("--gm-project", required=True, help="GameMaker project directory.")
-    analyze_parser.add_argument(
-        "--platform",
-        "--target-platform",
-        dest="platform",
-        default=_default_platform(),
-        choices=("windows", "macos", "linux"),
-        help="Target GameMaker platform for option filtering.",
-    )
-    _add_report_args(analyze_parser)
-    _add_threshold_args(analyze_parser)
-
-    convert_parser = subparsers.add_parser("convert", help="Convert a GameMaker project.")
-    convert_parser.add_argument("--gm-project", required=True, help="GameMaker project directory.")
-    convert_parser.add_argument("--godot-project", required=True, help="Godot project directory.")
-    convert_parser.add_argument(
-        "--platform",
-        "--target-platform",
-        dest="platform",
-        default=_default_platform(),
-        choices=("windows", "macos", "linux"),
-        help="Target GameMaker platform for option filtering.",
-    )
-    convert_parser.add_argument(
-        "--groups",
-        default="assets,project,wip",
-        help="Comma-separated conversion groups from assets, project, wip.",
-    )
-    convert_parser.add_argument(
-        "--only",
-        default="",
-        help="Comma-separated individual converter keys to run instead of groups.",
-    )
-    convert_parser.add_argument(
-        "--sound-group-folders",
-        action="store_true",
-        help="Group converted sounds by GameMaker audio group folders.",
-    )
-    convert_parser.add_argument(
-        "--allow-partial",
-        action="store_true",
-        help=(
-            "Treat partial converted output as a successful exit when diagnostic "
-            "thresholds also pass."
-        ),
-    )
-    _add_report_args(convert_parser, required=False)
-    _add_threshold_args(convert_parser)
-
-    validate_parser = subparsers.add_parser(
-        "validate", help="Validate generated output reports and project presence."
-    )
-    validate_parser.add_argument("--godot-project", required=True, help="Godot project directory.")
-    validate_parser.add_argument(
-        "--godot-bin",
-        default=None,
-        help="Optional Godot executable for generated GDScript/scene/resource validation.",
-    )
-    validate_parser.add_argument(
-        "--skip-godot-validation",
-        action="store_true",
-        help="Skip headless Godot generated resource validation.",
-    )
-    validate_parser.add_argument(
-        "--godot-boot-frames",
-        type=_non_negative_int,
-        default=0,
-        help=(
-            "After generated resource validation passes, boot the Godot project's "
-            "configured main scene headlessly for this many frames and fail on "
-            "warning/error output. Default: 0 (disabled)."
-        ),
-    )
-    _add_report_args(validate_parser, required=False)
-    _add_threshold_args(validate_parser)
-
-    return parser
-
-
-def _add_report_args(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
-    parser.add_argument(
-        "--report-dir",
-        required=required,
-        default=None,
-        help="Directory where JSON and Markdown reports should be written.",
-    )
-
-
-def _add_threshold_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--fail-on-unsupported",
-        action="store_true",
-        help="Exit non-zero when any unsupported diagnostic is present.",
-    )
-    parser.add_argument(
-        "--max-warnings",
-        type=int,
-        default=None,
-        help="Exit non-zero when warning diagnostics exceed this count.",
-    )
-    parser.add_argument(
-        "--max-errors",
-        type=int,
-        default=0,
-        help="Exit non-zero when error diagnostics exceed this count.",
-    )
-    parser.add_argument(
-        "--max-unsupported",
-        type=int,
-        default=None,
-        help="Exit non-zero when unsupported diagnostics exceed this count.",
-    )
-
-
-def _run_convert(args: argparse.Namespace) -> int:
+def _run_convert(request: ConvertRequest) -> int:
     logs: list[str] = []
-    running = threading.Event()
-    running.set()
-    previous_sigint = signal.getsignal(signal.SIGINT)
-    handler_installed = threading.current_thread() is threading.main_thread()
-    sigint_handler_restored = False
-    sigint_received = False
-    managed_generation_decided = False
-    terminal_summary_phase = "idle"
-    external_report_dir: str | None = args.report_dir
+    session = ConversionSession()
+    external_report_dir: str | None = request.report_dir
     late_report_error: Exception | None = None
     attempt_publication_error: Exception | None = None
 
-    class _TerminalSummaryInterrupted(Exception):
-        pass
-
-    def request_cancellation(_signum: int, _frame: FrameType | None) -> None:
-        nonlocal sigint_received
-        if managed_generation_decided or terminal_summary_phase in {
-            "committing",
-            "committed",
-        }:
-            # Once the managed generation decision starts, cancellation cannot
-            # imply rollback. The buffered line also remains single-publication.
-            return
-        if sigint_received:
-            raise KeyboardInterrupt
-        sigint_received = True
-        running.clear()
-        if terminal_summary_phase == "preparing":
-            raise _TerminalSummaryInterrupted
-
-    def restore_sigint_handler() -> None:
-        nonlocal sigint_handler_restored
-        if not handler_installed or sigint_handler_restored:
-            return
-        try:
-            signal.signal(signal.SIGINT, previous_sigint)
-        except KeyboardInterrupt:
-            sigint_handler_restored = (
-                signal.getsignal(signal.SIGINT) == previous_sigint
-            )
-            if terminal_summary_phase != "committed":
-                raise
-        else:
-            sigint_handler_restored = True
-
     try:
-        if handler_installed:
-            signal.signal(signal.SIGINT, request_cancellation)
+        session.install_sigint_handler()
 
         try:
             managed_report_relative = _managed_report_relative_path(
-                args.report_dir,
-                args.godot_project,
+                request.report_dir,
+                request.godot_project,
             )
         except ValueError as error:
             print(
@@ -308,7 +111,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             )
             return 2
         conversion_diagnostics = DiagnosticCollector()
-        _add_platform_diagnostic(conversion_diagnostics, args.platform)
+        _add_platform_diagnostic(conversion_diagnostics, request.platform)
 
         def write_staged_cli_reports(staged_path: str) -> None:
             if managed_report_relative is None:
@@ -316,7 +119,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             staged_report_root = os.path.normpath(
                 os.path.join(staged_path, managed_report_relative)
             )
-            _write_static_reports(staged_report_root, args.platform)
+            _write_static_reports(staged_report_root, request.platform)
             if managed_report_relative not in {"", os.curdir}:
                 conversion_diagnostics.publish_reports(staged_report_root)
 
@@ -324,7 +127,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             log_callback=lambda message: logs.append(message),
             progress_callback=lambda _value: None,
             status_callback=lambda _message: None,
-            conversion_running=running,
+            conversion_running=session.running,
             staged_output_finalizer=(
                 write_staged_cli_reports
                 if managed_report_relative is not None
@@ -334,8 +137,8 @@ def _run_convert(args: argparse.Namespace) -> int:
 
         def observe_cancellation(current: ConversionOutcome) -> ConversionOutcome:
             if (
-                sigint_received
-                and not managed_generation_decided
+                session.sigint_received
+                and not session.managed_generation_decided
                 and current.state != "cancelled"
             ):
                 current = replace(current, state="cancelled")
@@ -379,10 +182,10 @@ def _run_convert(args: argparse.Namespace) -> int:
         primary_stderr: str | None = None
         try:
             outcome = converter.convert(
-                args.gm_project,
-                args.platform,
-                args.godot_project,
-                _settings_for_args(args),
+                request.gm_project,
+                request.platform,
+                request.godot_project,
+                settings_for_selection(request.selection),
                 diagnostics=conversion_diagnostics,
             )
         except ConversionPreflightError as error:
@@ -390,7 +193,7 @@ def _run_convert(args: argparse.Namespace) -> int:
         except Exception as error:
             runtime_error = error
         finally:
-            managed_generation_decided = True
+            session.managed_generation_decided = True
 
         if preflight_error is not None:
             diagnostic = converter.diagnostics.add(
@@ -421,11 +224,11 @@ def _run_convert(args: argparse.Namespace) -> int:
             )
 
         external_report_dir = _safe_conversion_report_destination(
-            args.report_dir,
+            request.report_dir,
             preflight_failed=outcome.failure_phase == "preflight",
             preflight_error=preflight_error,
-            gm_project_path=args.gm_project,
-            godot_project_path=args.godot_project,
+            gm_project_path=request.gm_project,
+            godot_project_path=request.godot_project,
         )
         if managed_report_relative is not None:
             external_report_dir = None
@@ -441,7 +244,7 @@ def _run_convert(args: argparse.Namespace) -> int:
         report_state = outcome.state
         report_error: Exception | None = None
         try:
-            _write_external_conversion_reports(external_report_dir, args.platform, converter.diagnostics)
+            _write_external_conversion_reports(external_report_dir, request.platform, converter.diagnostics)
         except Exception as error:
             report_error = error
 
@@ -491,7 +294,7 @@ def _run_convert(args: argparse.Namespace) -> int:
         summary_output = ""
         while True:
             try:
-                terminal_summary_phase = "preparing"
+                session.terminal_summary_phase = "preparing"
                 observed = observe_cancellation(outcome)
                 if observed.state != outcome.state:
                     outcome = repair_conversion_reports(observed)
@@ -509,11 +312,11 @@ def _run_convert(args: argparse.Namespace) -> int:
 
                 outcome = observed
                 summary_output = summary_buffer.getvalue()
-                terminal_summary_phase = "committing"
+                session.terminal_summary_phase = "committing"
                 sys.stdout.write(summary_output)
-                terminal_summary_phase = "committed"
-            except _TerminalSummaryInterrupted:
-                terminal_summary_phase = "idle"
+                session.terminal_summary_phase = "committed"
+            except session.terminal_summary_interrupted:
+                session.terminal_summary_phase = "idle"
                 outcome = repair_conversion_reports(
                     observe_cancellation(outcome)
                 )
@@ -553,7 +356,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             exit_code = _conversion_outcome_exit_code(
                 outcome,
                 converter.diagnostics,
-                args,
+                request,
             )
 
         if attempt_publication_error is not None:
@@ -567,19 +370,14 @@ def _run_convert(args: argparse.Namespace) -> int:
                 exit_code = 1
 
         try:
-            restore_sigint_handler()
+            session.restore_sigint_handler()
             return exit_code
         except KeyboardInterrupt:
-            if terminal_summary_phase == "committed":
+            if session.terminal_summary_phase == "committed":
                 return exit_code
             raise
     finally:
-        if handler_installed and not sigint_handler_restored:
-            try:
-                signal.signal(signal.SIGINT, previous_sigint)
-            except KeyboardInterrupt:
-                if terminal_summary_phase != "committed":
-                    raise
+        session.restore_sigint_handler_fallback()
 
 
 def _failed_conversion_outcome(
@@ -742,16 +540,16 @@ def _resolved_path_key(path: str) -> str:
 def _conversion_outcome_exit_code(
     outcome: ConversionOutcome,
     diagnostics: DiagnosticCollector,
-    args: argparse.Namespace,
+    request: ConvertRequest,
 ) -> int:
     if outcome.state == "cancelled":
         return 130
     if outcome.state == "failed":
         return 1
-    threshold_exit = _threshold_exit_code(diagnostics, args)
+    threshold_exit = _threshold_exit_code(diagnostics, request.thresholds)
     if threshold_exit != 0:
         return threshold_exit
-    if outcome.state == "partial" and not args.allow_partial:
+    if outcome.state == "partial" and not request.allow_partial:
         return 2
     return 0
 
@@ -896,16 +694,6 @@ def _add_godot_validation_diagnostic(
     )
 
 
-def _non_negative_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"Expected a non-negative integer: {value}") from exc
-    if parsed < 0:
-        raise argparse.ArgumentTypeError(f"Expected a non-negative integer: {value}")
-    return parsed
-
-
 def _import_diagnostics_report(
     diagnostics: DiagnosticCollector, report: object, report_path: str
 ) -> None:
@@ -957,48 +745,8 @@ def _import_diagnostics_report(
         )
 
 
-def _settings_for_args(args: argparse.Namespace) -> dict[str, CLISetting]:
-    all_keys = [
-        key
-        for keys in CONVERSION_CATEGORIES.values()
-        for key in keys
-        if key not in _NON_CONVERTER_SETTING_KEYS
-    ]
-    settings = {key: CLISetting(False) for key in all_keys}
-
-    only = _split_csv(args.only)
-    if only:
-        for key in only:
-            if key not in settings:
-                raise SystemExit(f"Unknown converter key for --only: {key}")
-            settings[key] = CLISetting(True)
-    else:
-        selected_groups = _split_csv(args.groups)
-        for group in selected_groups:
-            if group not in CONVERSION_CATEGORIES:
-                raise SystemExit(f"Unknown conversion group for --groups: {group}")
-            for key in CONVERSION_CATEGORIES[group]:
-                settings[key] = CLISetting(True)
-
-    settings["sound_group_folders"] = CLISetting(bool(args.sound_group_folders))
-    return settings
-
-
-def _converter_inventory() -> ConverterInventory:
-    groups = {
-        group: [key for key in keys if key not in _NON_CONVERTER_SETTING_KEYS]
-        for group, keys in CONVERSION_CATEGORIES.items()
-    }
-    converter_keys = sorted({key for keys in groups.values() for key in keys})
-    return {
-        "default_groups": list(DEFAULT_CONVERSION_GROUPS),
-        "groups": groups,
-        "converter_keys": converter_keys,
-    }
-
-
 def _print_converter_inventory(output_format: str) -> None:
-    inventory = _converter_inventory()
+    inventory = converter_inventory()
     if output_format == "json":
         print(json.dumps(inventory, indent=2, sort_keys=True))
         return
@@ -1071,7 +819,7 @@ def _render_api_compatibility_markdown() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _threshold_exit_code(diagnostics: DiagnosticCollector, args: argparse.Namespace) -> int:
+def _threshold_exit_code(diagnostics: DiagnosticCollector, thresholds: DiagnosticThresholds) -> int:
     summary = diagnostics.summary()
     unsupported_count = sum(
         1
@@ -1080,12 +828,12 @@ def _threshold_exit_code(diagnostics: DiagnosticCollector, args: argparse.Namesp
         or "unsupported" in diagnostic.message.lower()
     )
 
-    max_unsupported = 0 if args.fail_on_unsupported else args.max_unsupported
+    max_unsupported = 0 if thresholds.fail_on_unsupported else thresholds.max_unsupported
     if max_unsupported is not None and unsupported_count > max_unsupported:
         return 2
-    if args.max_errors is not None and summary["error"] > args.max_errors:
+    if thresholds.max_errors is not None and summary["error"] > thresholds.max_errors:
         return 2
-    if args.max_warnings is not None and summary["warning"] > args.max_warnings:
+    if thresholds.max_warnings is not None and summary["warning"] > thresholds.max_warnings:
         return 2
     return 0
 
@@ -1116,18 +864,6 @@ def _optional_int_field(value: object) -> int | None:
     if isinstance(value, int):
         return value
     return None
-
-
-def _split_csv(value: str) -> tuple[str, ...]:
-    return tuple(part.strip() for part in value.split(",") if part.strip())
-
-
-def _default_platform() -> str:
-    if sys.platform == "darwin":
-        return "macos"
-    if sys.platform.startswith("linux"):
-        return "linux"
-    return "windows"
 
 
 if __name__ == "__main__":

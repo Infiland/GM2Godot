@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib
-import inspect
 import io
 import json
 import os
@@ -2867,7 +2866,7 @@ class TestCLIReports(unittest.TestCase):
             with (
                 patch("src.cli.Converter", side_effect=converter.bind_factory),
                 patch(
-                    "src.cli.signal.signal",
+                    "src.cli_session.signal.signal",
                     side_effect=interrupt_after_handler_install,
                 ),
                 redirect_stdout(stdout),
@@ -3220,7 +3219,7 @@ class TestCLIReports(unittest.TestCase):
             return original_signal(signum, handler)
 
         with patch(
-            "src.cli.signal.signal",
+            "src.cli_session.signal.signal",
             side_effect=interrupt_before_handler_restore,
         ):
             exit_code, stdout, stderr = self._run_stubbed_convert(
@@ -3264,7 +3263,7 @@ class TestCLIReports(unittest.TestCase):
             return result
 
         with patch(
-            "src.cli.signal.signal",
+            "src.cli_session.signal.signal",
             side_effect=restore_then_interrupt,
         ):
             exit_code, stdout, stderr = self._run_stubbed_convert(
@@ -3332,47 +3331,13 @@ class TestCLIReports(unittest.TestCase):
         outcome = success_outcome()
         converter = OutcomeConverterStub(outcome)
         report_dir = os.path.join(self.temp_dir, "post-restore-return-interrupt")
-        run_convert = getattr(cli, "_run_convert")
-        source_lines, source_start = inspect.getsourcelines(run_convert)
-        restore_offset = next(
-            offset
-            for offset, source_line in enumerate(source_lines)
-            if source_line.strip() == "restore_sigint_handler()"
-        )
-        target_line = next(
-            source_start + offset
-            for offset in range(restore_offset + 1, len(source_lines))
-            if source_lines[offset].strip() == "return exit_code"
-        )
-        interrupted = False
-
-        def interrupt_before_committed_return(
-            frame: object,
-            event: str,
-            _arg: object,
-        ) -> object:
-            nonlocal interrupted
-            if (
-                not interrupted
-                and event == "line"
-                and getattr(frame, "f_code", None) is run_convert.__code__
-                and getattr(frame, "f_lineno", None) == target_line
-            ):
-                interrupted = True
-                sys.settrace(None)
-                signal.raise_signal(signal.SIGINT)
-            return interrupt_before_committed_return
-
-        previous_trace = sys.gettrace()
-        sys.settrace(cast(Any, interrupt_before_committed_return))
-        try:
+        with cli_sigint_at_boundary("post-restore-return") as reached:
             exit_code, stdout, stderr = self._run_stubbed_convert(
                 converter,
                 "--report-dir",
                 report_dir,
             )
-        finally:
-            sys.settrace(previous_trace)
+        interrupted = reached == ["post-restore-return"]
 
         self.assertTrue(interrupted)
         self.assertEqual(exit_code, 0)

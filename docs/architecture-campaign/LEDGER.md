@@ -7,22 +7,21 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Verified predecessor: R12 PR #889 at
-  `b9c05cd326cbcb8531ca93c24709bcf14cb81748`; this is the isolated R13 base.
-  I02 PR #890 is integrated at `4787f4b`, with exact merge CI still pending.
-- Progress counts fully verified roadmap tasks: 14 of 54 (25.9%). Source review,
-  integration and pending checks do not count as verification.
-- Main's 11 dirty policy files and all Git branches/commits remain preserved.
-  Root removed21 unused checkout folders at the user's request; only active
-  implementation checkouts are kept. Historical coverage evidence was archived.
-- Approved local environment: native CPython 3.12.10 arm64 and exact Godot
-  `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
-- Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
-  campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. R13's font contract, test bodies and before evidence
-  are accepted. Root controls its isolated implementation entry; L02 proof and
-  I02 merge verification proceed independently.
-
+- Integration branch: `dev/080-architecture-campaign`, through verified L02
+  PR #891 at `5faa683a07a913c96d5283d06b8e2cb1b44e5b30`.
+- Verified progress: 16 of 54 tasks (29.6%). Local approval and pending CI do
+  not count as completed tasks.
+- Main's 11 dirty policy files remain preserved. Twenty-three completed
+  worktrees were removed after retaining their branches and required evidence.
+  Main, the campaign, R13 and the I03 preflight are the active worktrees.
+- Approved environment: native CPython 3.12.10 arm64 and exact Godot
+  `4.7.2.stable.official.ed1daf0bf`. Python 3.14 is not proof.
+- Merge the fully verified campaign into `main`, then publish the single final
+  v0.8.0 release, as confirmed by the user.
+- R13's immutable local executions are complete. Performance acceptance and
+  the combined revision's native PR/merge verification remain separate gates.
+  I03 has accepted old characterization tests; its observer correction must
+  establish actual mock bindings before production extraction.
 
 ## Ownership and progress
 
@@ -42,8 +41,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
-| R12 authoritative path model | verified | audit_gml_resources; PR #889 merged `b9c05cd` | Independent/root source, local, combined and exact CI proof APPROVE | PR CI33964091840 and merge CI33965005168; required35/0, retained T01/CLI/native receipts and strict1045 actuale142 passed |
-| R13 authoritative font model | reviewing | audit_gml_resources; frozen465 plus narrow snapshot correction | Original12-owner source reviews retained; thirteenth-path amendment reviewed before use |65/0 original focused proof and strict1042; full465 has one stale aggregate snapshot failure among3161 tests; corrected66/full-v2 and other gates pending |
+| R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
+| I02 Included Files POSIX operations | verified | audit_transactions_cli; PR #890 merged4787f4b | Independent/root source, local, combined and exact CI APPROVE | PR33968388651/merge33971661125;50new+31retained native/runtime, R12/T01/CLI/artifacts/modes/coverage,strict1045actualb9; I02/final-verification.json |
+| L02 CLI request and session ownership | verified | PR #891 merged `5faa683` | Independent/root local, combined and exact CI APPROVE | PR33978428787/merge33980543144; all six native/CLI/runtime/artifact/coverage/strict-parent verifiers passed; L02/final-verification.json |
+| R13 authoritative font model | reviewing | Source `321a629`, isolated base `b9c05cd` | Source, correction, full, parity, matrix and control results reviewed; performance acceptance pending | 66 focused successes; full3161/56existing host skips; five-fixture parity;366case matrix;19controls; measured decode/raw-retention cost; combined/native proof next |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -200,21 +201,23 @@ Windows and Linux claims require their actual native CI receipts.
   native mode selections 6/6/2 with zero skips, and strict comparison against actual
   parent `f40402c`. The temporary legacy-policy exception is removed.
 
-- R13 source and focused proof are approved:65 tests/zero skips and both source
-  reviews. Exact strict actual-b9 debt is1042 with no new or increased entry.
-  Root adds the accepted four native modules, the canonical model's existing
-  project-parsing coverage membership and the exact65-ID R13 gate. Full,
-  controls, font matrix, fourteen-field parity, performance and final native
-  integration are pending. The earlier checkpoint above is this branch's b9
-  entry snapshot; current external campaign verification is I02 at4787f4b,
-  15of54 (27.8%), with22 unused worktrees removed. Final integration will preserve
-  the then-current campaign ledger and task rows.
+- I02 final PR #890 and merge4787f4b are verified. Both exact CI runs passed
+  the50 I02 and31 retained I01 native/runtime selections, all retained R12/T01,
+  CLI, artifacts, mode, coverage and strict1045 actual-b9 proof. No modeled or
+  skipped test was credited as native success. The approved PR and merge trees
+  match; immutable evidence is `I02/final-verification.json`.
+- L02 local proof is approved at d3 against e142:3139 tests with3083 successes
+  and56 exact prior host skips, all five fixtures, six actual entry commands,
+  nine CLI parity cases and same-ref, three78-ID replays and12 private controls.
+  The first parity ordering failure remains failed; its reviewed two-line
+  correction passed. Twelve timing workers showed up to25.97 microseconds of
+  added per-call orchestration cost, accepted by root without a conversion
+  speed claim. Current-parent checks and exact PR/merge proof remain pending.
 
-- R13 full465 exposed a retained R12 whole-aggregate snapshot that still includes
-  the retired font projection. Its3161 tests include one failure,56 prior host
-  skips and successful conversion of all five pinned external fixtures. The
-  narrow amendment updates one expected digest derived from retained before
-  records and the accepted canonical font shape; all twelve other record groups
-  and all seven assertions stay intact. Preserve the failed run, validate the
-  corrected66-ID selection, then freeze and verify a new full-v2 source. No R13
-  completion credit is added by the correction or the failed run.
+- L02 prepared merge2a69dc0 has exactly the reviewed d3/478 source composition:
+  598 files,399 Python files, all unchanged through its checks. Pyright0/0,
+  both Ruff paths, actionlint and strict1044 against actual478 passed. The83 CI
+  methods all passed;93 CLI methods produced92 successes and the exact existing
+  Windows-binding directory-relocation skip. All15 new methods passed. The saved
+  combined results and independent review are approved; final PR/merge native
+  proof remains pending. No original full/parity/timing run was repeated.

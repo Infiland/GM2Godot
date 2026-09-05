@@ -16,7 +16,9 @@ from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcom
 from src.conversion.diagnostics import DiagnosticCollector
 
 TraceCallback: TypeAlias = Callable[[FrameType, str, object], "TraceCallback | None"]
-CLISignalBoundary: TypeAlias = Literal["log-flush", "before-summary", "after-summary", "pre-summary-gap", "report-generation"]
+CLISignalBoundary: TypeAlias = Literal[
+    "log-flush", "before-summary", "after-summary", "pre-summary-gap", "report-generation", "post-restore-return",
+]
 
 
 class OutcomeConverterStub:
@@ -123,15 +125,26 @@ def cli_sigint_at_boundary(boundary: CLISignalBoundary) -> Generator[list[str], 
         "after-summary": ("_print_conversion_summary", "return"),
         "pre-summary-gap": ("_run_convert", "line"),
         "report-generation": ("_write_external_conversion_reports", "call"),
+        "post-restore-return": ("_run_convert", "line"),
     }
     owner_name, expected_event = boundaries[boundary]
     target_line: int | None = None
     if boundary == "pre-summary-gap":
         lines = Path(cli.__file__).read_text(encoding="utf-8").splitlines()
-        matches = [index + 2 for index, line in enumerate(lines) if line.strip() == 'terminal_summary_phase = "preparing"']
+        matches = [
+            index + 2
+            for index, line in enumerate(lines)
+            if line.strip() == 'session.terminal_summary_phase = "preparing"'
+        ]
         if len(matches) != 1:
             raise AssertionError("CLI must retain one terminal-summary preparing boundary")
         target_line = matches[0]
+    elif boundary == "post-restore-return":
+        lines = Path(cli.__file__).read_text(encoding="utf-8").splitlines()
+        matches = [index for index, line in enumerate(lines) if line.strip() == "session.restore_sigint_handler()"]
+        if len(matches) != 1 or lines[matches[0] + 1].strip() != "return exit_code":
+            raise AssertionError("CLI must retain one immediate post-restore committed return")
+        target_line = matches[0] + 2
     reached: list[str] = []
 
     def trace(frame: FrameType, event: str, _argument: object) -> TraceCallback | None:

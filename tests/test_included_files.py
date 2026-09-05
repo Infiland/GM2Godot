@@ -17,7 +17,7 @@ from contextlib import ExitStack
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import BinaryIO, Callable
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import MagicMock, patch
 
 from src.conversion import included_files as included_files_module
 from src.conversion.conversion_outcome import ConversionCounts
@@ -26,6 +26,11 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import IncludedFilePathAssignment, plan_included_file_paths
 from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
 from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts.filesystem_metadata import (
+    output_path_is_redirected,
+    path_fingerprint,
+    source_fingerprint,
+)
 from src.conversion.included_files_parts.models import (
     IncludedCopyReceipt,
     IncludedFileSource,
@@ -38,6 +43,14 @@ from src.conversion.included_files_parts.models import (
     PathIdentity,
 )
 from src.conversion.included_files_parts.path_validation import recovery_relative_path, recovery_tree_entry_path
+from src.conversion.included_files_parts.posix_operations import (
+    descriptor_paths_supported,
+    native_noreplace_available,
+    open_pinned_directory,
+    open_pinned_parent,
+    rename_transaction_entry_at,
+    sync_directory,
+)
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -134,7 +147,7 @@ class _ModeledWindowsCleanupParentBinding:
                 f"Included Files cleanup parent changed: {self.path}"
             ) from error
         if (
-            included_files_module._included_output_path_is_redirected(
+            output_path_is_redirected(
                 self.path,
                 path_stat,
             )
@@ -462,7 +475,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         cleanup_context.enter_context(
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             )
         )
@@ -554,10 +567,13 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             return chunk
 
         with (
-            patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+            patch(
+                "src.conversion.included_files.descriptor_paths_supported",
                 return_value=not force_fallback,
+            ) as descriptor_capability,
+            patch(
+                "src.conversion.included_files_parts.posix_operations.descriptor_paths_supported",
+                descriptor_capability,
             ),
             patch.object(
                 included_files_module,
@@ -578,7 +594,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             ),
             patch.object(
                 included_files_module,
-                "_sync_included_directory",
+                "sync_directory",
             ),
         ):
             warnings = included_files_module._cleanup_recorded_included_file(
@@ -590,7 +606,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 "streaming-cleanup",
                 "owned.bin",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(
+                    path_fingerprint(
                         owned_stat
                     )
                 ),
@@ -902,7 +918,7 @@ IncludedFilesConverter(
                 record_file.flush()
                 os.fsync(record_file.fileno())
             rewritten += 1
-        included_files_module._sync_included_directory(
+        sync_directory(
             project_path,
             project_identity,
         )
@@ -1029,54 +1045,15 @@ IncludedFilesConverter(
                 with self.assertRaisesRegex(OSError, error_pattern):
                     parse()
 
-    def test_linux_mount_id_parser_and_boundary_reject_different_mount(
-        self,
-    ) -> None:
-        with open(
-            os.path.join(self.datafiles_dir, "test-mount-id"),
-            "wb",
-        ) as test_file:
-            test_file.write(b"mount id model")
-        opened_stat = os.lstat(os.path.join(self.datafiles_dir, "test-mount-id"))
-
-        with (
-            patch.object(included_files_module.sys, "platform", "linux"),
-            patch(
-                "builtins.open",
-                mock_open(read_data="pos:\t0\nflags:\t0100000\nmnt_id:\t41\n"),
-            ),
-        ):
-            self.assertEqual(
-                included_files_module._included_linux_mount_id_from_fd(123),
-                41,
-            )
-
-        with (
-            patch.object(
-                included_files_module,
-                "_included_linux_mount_id_from_fd",
-                return_value=42,
-            ),
-            patch.object(included_files_module.os.path, "ismount", return_value=False),
-            self.assertRaisesRegex(OSError, "mount boundary"),
-        ):
-            included_files_module._verify_included_mount_boundary(
-                os.path.join(self.datafiles_dir, "test-mount-id"),
-                opened_stat,
-                opened_stat.st_dev,
-                41,
-                123,
-            )
-
     def test_descriptor_tree_capture_closes_parent_when_mount_check_fails(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned tree capture is unavailable")
         root_path = os.path.join(self.godot_dir, "fd-cleanup-root")
         os.mkdir(root_path)
         original_open_parent = (
-            included_files_module._open_pinned_included_parent
+            open_pinned_parent
         )
         opened_parent_fd = -1
 
@@ -1088,12 +1065,12 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_open_pinned_included_parent",
+                "open_pinned_parent",
                 side_effect=observe_parent_open,
             ),
             patch.object(
                 included_files_module,
-                "_included_linux_mount_id_from_fd",
+                "linux_mount_id_from_fd",
                 side_effect=OSError("injected mount inspection failure"),
             ),
             self.assertRaisesRegex(OSError, "mount inspection failure"),
@@ -1120,7 +1097,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(
@@ -1241,7 +1218,7 @@ IncludedFilesConverter(
                 with (
                     patch.object(
                         included_files_module,
-                        "_included_descriptor_paths_supported",
+                        "descriptor_paths_supported",
                         return_value=False,
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
@@ -1662,7 +1639,7 @@ IncludedFilesConverter(
                 project_identity = project_stat.st_dev, project_stat.st_ino
                 with patch.object(
                     included_files_module,
-                    "_included_descriptor_paths_supported",
+                    "descriptor_paths_supported",
                     return_value=False,
                 ):
                     snapshot = included_files_module._capture_included_tree(
@@ -1787,7 +1764,7 @@ IncludedFilesConverter(
         project_identity = project_stat.st_dev, project_stat.st_ino
         with patch.object(
             included_files_module,
-            "_included_descriptor_paths_supported",
+            "descriptor_paths_supported",
             return_value=False,
         ):
             snapshot = included_files_module._capture_included_tree(
@@ -2197,7 +2174,7 @@ IncludedFilesConverter(
                 with (
                     patch.object(
                         included_files_module,
-                        "_included_descriptor_paths_supported",
+                        "descriptor_paths_supported",
                         return_value=False,
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
@@ -2298,7 +2275,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -2419,7 +2396,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -2536,7 +2513,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -2574,12 +2551,12 @@ IncludedFilesConverter(
     def test_owned_tree_cleanup_preserves_modeled_nested_mount(self) -> None:
         variants = [("fallback", False)]
         if (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            descriptor_paths_supported()
+            and native_noreplace_available()
         ):
             variants.append(("descriptor", True))
 
-        for label, descriptor_paths_supported in variants:
+        for label, descriptor_supported in variants:
             with self.subTest(cleanup_path=label):
                 root_name = f"owned-cleanup-{label}"
                 root_path = os.path.join(self.godot_dir, root_name)
@@ -2596,15 +2573,18 @@ IncludedFilesConverter(
                     return os.path.basename(os.path.normpath(path)) == "mounted"
 
                 with (
-                    patch.object(
-                        included_files_module,
-                        "_included_descriptor_paths_supported",
-                        return_value=descriptor_paths_supported,
+                    patch(
+                        "src.conversion.included_files.descriptor_paths_supported",
+                        return_value=descriptor_supported,
+                    ) as descriptor_capability,
+                    patch(
+                        "src.conversion.included_files_parts.posix_operations.descriptor_paths_supported",
+                        descriptor_capability,
                     ),
                     patch.object(
                         included_files_module.os,
                         "name",
-                        os.name if descriptor_paths_supported else "nt",
+                        os.name if descriptor_supported else "nt",
                     ),
                     patch.object(
                         included_files_module.os.path,
@@ -2652,7 +2632,7 @@ IncludedFilesConverter(
     def test_native_linux_same_device_bind_mount_is_rejected(self) -> None:
         if not sys.platform.startswith("linux"):
             self.skipTest("Native Linux bind mounts are unavailable")
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned Included Files paths are unavailable")
         mount_tool = shutil.which("mount")
         umount_tool = shutil.which("umount")
@@ -3041,7 +3021,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -3087,7 +3067,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -3116,10 +3096,10 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
-            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(included_files_module, "sync_directory"),
         ):
             stage_path, _stage_identity = (
                 included_files_module._create_included_output_stage(
@@ -3161,10 +3141,10 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
-            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(included_files_module, "sync_directory"),
             patch.object(
                 included_files_module.secrets,
                 "token_hex",
@@ -3216,7 +3196,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(
@@ -4311,7 +4291,7 @@ included_files_module._acquire_included_project_lock(
             )
         )
         events: list[tuple[str, str]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = sync_directory
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
             events.append(("sync", path))
@@ -4323,7 +4303,7 @@ included_files_module._acquire_included_project_lock(
         with (
             patch.object(
                 included_files_module,
-                "_sync_included_directory",
+                "sync_directory",
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -4355,7 +4335,7 @@ included_files_module._acquire_included_project_lock(
     ) -> None:
         self._write("level-one/level-two/payload.txt", "payload")
         events: list[tuple[str, str]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = sync_directory
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
             events.append(("sync", os.path.abspath(path)))
@@ -4367,7 +4347,7 @@ included_files_module._acquire_included_project_lock(
         with (
             patch.object(
                 included_files_module,
-                "_sync_included_directory",
+                "sync_directory",
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -4990,7 +4970,7 @@ IncludedFilesConverter(
         )
 
         events: list[tuple[str, str, tuple[int, int] | None]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = sync_directory
         original_remove = included_files_module._remove_included_recovery_record
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
@@ -5023,7 +5003,7 @@ IncludedFilesConverter(
         with (
             patch.object(
                 included_files_module,
-                "_sync_included_directory",
+                "sync_directory",
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -5623,7 +5603,7 @@ IncludedFilesConverter(
         self.assertNotIn(b'"logical_path": "old.txt"', committed_pair[3])
 
         os.unlink(journal_path)
-        included_files_module._sync_included_directory(
+        sync_directory(
             self.godot_dir,
             project_identity,
         )
@@ -5698,7 +5678,7 @@ IncludedFilesConverter(
         self.assertEqual(committed_pair[1], {"new.txt": b"new generation"})
 
         os.unlink(journal_path)
-        included_files_module._sync_included_directory(
+        sync_directory(
             self.godot_dir,
             project_identity,
         )
@@ -6248,7 +6228,7 @@ os._exit(88)
                         temporary_file.write(content)
                         temporary_file.flush()
                         os.fsync(temporary_file.fileno())
-                    included_files_module._sync_included_directory(
+                    sync_directory(
                         self.godot_dir,
                         project_identity,
                     )
@@ -7224,7 +7204,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(
@@ -7863,7 +7843,7 @@ os._exit(88)
         self.assertEqual(blocked_paths, {source_path, output_path})
 
     def test_descriptor_digest_rechecks_the_open_handle(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned Included Files paths are unavailable")
         payload = b"descriptor staged payload"
         staged_path = os.path.join(self.godot_dir, "staged.bin")
@@ -7878,7 +7858,7 @@ os._exit(88)
             path_stat,
             ctime_offset=2,
         )
-        parent_fd = included_files_module._open_pinned_included_directory(
+        parent_fd = open_pinned_directory(
             self.godot_dir
         )
         try:
@@ -7997,7 +7977,7 @@ os._exit(88)
             source_file.write(pre_mutation_payload)
         original_stat = os.stat(source_path)
         original_read = included_files_module._read_included_payload_chunk
-        original_fingerprint = included_files_module._included_source_fingerprint
+        original_fingerprint = source_fingerprint
         mutated = False
         streamed_chunks: list[bytes] = []
 
@@ -8032,7 +8012,7 @@ os._exit(88)
             ),
             patch.object(
                 included_files_module,
-                "_included_source_fingerprint",
+                "source_fingerprint",
                 side_effect=windows_style_fingerprint,
             ),
             self.assertRaisesRegex(OSError, "output-set staging failed"),
@@ -8313,7 +8293,7 @@ os._exit(88)
         os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
         self._write("new.txt", "new")
         original_rename = (
-            included_files_module._rename_included_transaction_entry_at
+            rename_transaction_entry_at
         )
         sentinel_name: str | None = None
 
@@ -8372,10 +8352,10 @@ os._exit(88)
         rename_patcher = (
             patch.object(
                 included_files_module,
-                "_rename_included_transaction_entry_at",
+                "rename_transaction_entry_at",
                 side_effect=inject_unknown_destination,
             )
-            if included_files_module._included_descriptor_paths_supported()
+            if descriptor_paths_supported()
             else patch.object(
                 included_files_module,
                 "_before_included_transaction_rename_fallback",
@@ -8698,8 +8678,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            descriptor_paths_supported()
+            and native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         transaction_directory = os.path.join(self.godot_dir, "source-swap")
@@ -8764,8 +8744,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            descriptor_paths_supported()
+            and native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         cleanup_directory = os.path.join(self.godot_dir, "file-cleanup-swap")
@@ -8816,7 +8796,7 @@ os._exit(88)
                 "test-file-swap",
                 "owned.txt",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(owned_stat)
+                    path_fingerprint(owned_stat)
                 ),
                 expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
@@ -8828,7 +8808,7 @@ os._exit(88)
             self.assertEqual(parked_file.read(), "owned cleanup file")
 
     def test_descriptor_cleanup_streams_payload_receipts(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned cleanup is unavailable")
         self._assert_streaming_cleanup_path(force_fallback=False)
 
@@ -8892,7 +8872,7 @@ os._exit(88)
                         "large-streaming-cleanup",
                         "large.bin",
                         expected_fingerprint=(
-                            included_files_module._included_path_fingerprint(
+                            path_fingerprint(
                                 owned_stat
                             )
                         ),
@@ -8972,8 +8952,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            descriptor_paths_supported()
+            and native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         owned_path = os.path.join(self.godot_dir, "owned-empty-tree")
@@ -9037,7 +9017,7 @@ os._exit(88)
     def test_registry_capture_rejects_directory_swap_without_mixing_bytes(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry capture is unavailable")
         registry_directory = os.path.join(self.godot_dir, "gm2godot")
         replacement_directory = os.path.join(
@@ -9100,7 +9080,7 @@ os._exit(88)
     def test_registry_verifier_rejects_project_swap_before_reading_bytes(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry capture is unavailable")
         project_path = os.path.join(self.godot_dir, "project-root")
         parked_project = os.path.join(self.godot_dir, "parked-project-root")
@@ -9191,7 +9171,7 @@ os._exit(88)
         project_identity = (project_stat.st_dev, project_stat.st_ino)
         with patch.object(
             included_files_module,
-            "_included_descriptor_paths_supported",
+            "descriptor_paths_supported",
             return_value=False,
         ):
             expected_snapshot = included_files_module._capture_included_registry(
@@ -9220,7 +9200,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(
@@ -9258,7 +9238,7 @@ os._exit(88)
             self.assertEqual(parked_file.read(), b"old fallback registry bytes")
 
     def test_created_registry_directory_swap_is_not_adopted(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry creation is unavailable")
         registry_directory = os.path.join(self.godot_dir, "gm2godot")
         replacement_directory = os.path.join(
@@ -9353,7 +9333,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(
@@ -9418,7 +9398,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9461,7 +9441,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9511,7 +9491,7 @@ os._exit(88)
         parent_stat = os.lstat(cleanup_directory)
         expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
         expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-        expected_fingerprint = included_files_module._included_path_fingerprint(
+        expected_fingerprint = path_fingerprint(
             owned_stat
         )
         transaction_id = "a" * 32
@@ -9526,7 +9506,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9568,7 +9548,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9610,7 +9590,7 @@ os._exit(88)
         parent_stat = os.lstat(cleanup_directory)
         expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
         expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-        expected_fingerprint = included_files_module._included_path_fingerprint(
+        expected_fingerprint = path_fingerprint(
             owned_stat
         )
         transaction_id = "b" * 32
@@ -9632,7 +9612,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9667,7 +9647,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9715,7 +9695,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9741,7 +9721,7 @@ os._exit(88)
                 "test-hardlink",
                 "owned.txt",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(owned_stat)
+                    path_fingerprint(owned_stat)
                 ),
                 expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
@@ -9784,7 +9764,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9818,7 +9798,7 @@ os._exit(88)
         with (
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9910,7 +9890,7 @@ os._exit(88)
                 os.unlink(stage_link)
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_deep_directory_swap_is_not_followed_during_tree_capture(
@@ -9998,7 +9978,7 @@ os._exit(88)
             with (
                 patch.object(
                     included_files_module,
-                    "_included_descriptor_paths_supported",
+                    "descriptor_paths_supported",
                     return_value=False,
                 ),
                 patch.object(
@@ -10038,7 +10018,7 @@ os._exit(88)
                 "_verify_included_tree_path_binding",
             )
         ]
-        if included_files_module._included_descriptor_paths_supported():
+        if descriptor_paths_supported():
             variants.insert(
                 0,
                 (
@@ -10070,10 +10050,13 @@ os._exit(88)
                         return original_verifier(binding)
 
                     with (
-                        patch.object(
-                            included_files_module,
-                            "_included_descriptor_paths_supported",
+                        patch(
+                            "src.conversion.included_files.descriptor_paths_supported",
                             return_value=descriptor_supported,
+                        ) as descriptor_capability,
+                        patch(
+                            "src.conversion.included_files_parts.posix_operations.descriptor_paths_supported",
+                            descriptor_capability,
                         ),
                         patch.object(
                             included_files_module,
@@ -10108,7 +10091,7 @@ os._exit(88)
                     )
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent(
@@ -10131,7 +10114,7 @@ os._exit(88)
         )
         with patch.object(
             included_files_module,
-            "_included_descriptor_paths_supported",
+            "descriptor_paths_supported",
             return_value=False,
         ):
             fallback_snapshot = included_files_module._capture_included_tree(
@@ -10157,7 +10140,7 @@ os._exit(88)
         self.assertEqual(fallback_bytes, descriptor_bytes)
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_descriptor_tree_capture_rejects_deep_ancestor_swap(
@@ -10211,10 +10194,13 @@ os._exit(88)
 
         try:
             with (
-                patch.object(
-                    included_files_module,
-                    "_included_descriptor_paths_supported",
+                patch(
+                    "src.conversion.included_files.descriptor_paths_supported",
                     return_value=True,
+                ) as descriptor_capability,
+                patch(
+                    "src.conversion.included_files_parts.posix_operations.descriptor_paths_supported",
+                    descriptor_capability,
                 ),
                 patch.object(
                     included_files_module.os,
@@ -10239,106 +10225,6 @@ os._exit(88)
                 shutil.rmtree(ancestor_path)
             if os.path.isdir(parked_ancestor):
                 os.rename(parked_ancestor, ancestor_path)
-
-    def test_native_noreplace_preserves_file_and_directory_destinations(
-        self,
-    ) -> None:
-        if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
-        ):
-            self.skipTest("Native no-replace rename is unavailable")
-        transaction_directory = os.path.join(
-            self.godot_dir,
-            "native-noreplace",
-        )
-        os.mkdir(transaction_directory)
-        with open(
-            os.path.join(transaction_directory, "source.txt"),
-            "w",
-            encoding="utf-8",
-        ) as source_file:
-            source_file.write("source")
-        with open(
-            os.path.join(transaction_directory, "destination.txt"),
-            "w",
-            encoding="utf-8",
-        ) as destination_file:
-            destination_file.write("destination")
-        os.mkdir(os.path.join(transaction_directory, "source-dir"))
-        os.mkdir(os.path.join(transaction_directory, "destination-dir"))
-        directory_fd = included_files_module._open_pinned_included_directory(
-            transaction_directory
-        )
-        try:
-            for source_name, destination_name in (
-                ("source.txt", "destination.txt"),
-                ("source-dir", "destination-dir"),
-            ):
-                with self.subTest(source_name=source_name), self.assertRaises(
-                    OSError
-                ):
-                    included_files_module._rename_included_transaction_entry_at(
-                        directory_fd,
-                        source_name,
-                        directory_fd,
-                        destination_name,
-                    )
-        finally:
-            os.close(directory_fd)
-        with open(
-            os.path.join(transaction_directory, "source.txt"),
-            encoding="utf-8",
-        ) as source_file:
-            self.assertEqual(source_file.read(), "source")
-        with open(
-            os.path.join(transaction_directory, "destination.txt"),
-            encoding="utf-8",
-        ) as destination_file:
-            self.assertEqual(destination_file.read(), "destination")
-        self.assertTrue(
-            os.path.isdir(os.path.join(transaction_directory, "source-dir"))
-        )
-        self.assertTrue(
-            os.path.isdir(
-                os.path.join(transaction_directory, "destination-dir")
-            )
-        )
-
-    def test_native_noreplace_missing_capability_fails_closed(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
-            self.skipTest("Descriptor-pinned paths are unavailable")
-        transaction_directory = os.path.join(
-            self.godot_dir,
-            "native-unavailable",
-        )
-        os.mkdir(transaction_directory)
-        source_path = os.path.join(transaction_directory, "source.txt")
-        with open(source_path, "w", encoding="utf-8") as source_file:
-            source_file.write("source")
-        directory_fd = included_files_module._open_pinned_included_directory(
-            transaction_directory
-        )
-        try:
-            with patch.object(
-                included_files_module,
-                "_included_native_noreplace_available",
-                return_value=False,
-            ), self.assertRaisesRegex(OSError, "unavailable"):
-                included_files_module._rename_included_transaction_entry_at(
-                    directory_fd,
-                    "source.txt",
-                    directory_fd,
-                    "destination.txt",
-                )
-        finally:
-            os.close(directory_fd)
-        self.assertTrue(os.path.isfile(source_path))
-        self.assertFalse(
-            os.path.lexists(
-                os.path.join(transaction_directory, "destination.txt")
-            )
-        )
 
     def test_repeated_conversion_supports_file_directory_file_shapes(self) -> None:
         converter = self._converter()
@@ -12109,7 +11995,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
             ),
             patch.object(
                 included_files_module,
-                "_included_descriptor_paths_supported",
+                "descriptor_paths_supported",
                 return_value=False,
             ),
             patch.object(

@@ -264,3 +264,31 @@ Root final proof review SHA256:
 T01 is approved locally. Completion still requires actual-parent integration,
 combined checks and exact PR/merge CI, including twelve helper cases without
 skips on both native macOS and Windows. This approval is not campaign verification.
+
+
+## Prepared combined integration on reviewed L01 source
+
+Prepared merge `b0c47b0587df9183924765bf13f02a0d6e9768ae` combines the approved T01 source
+`4defcb3f5de3f6bea8bf130488dcc6fc55de4599` with L01 PR #887 head
+`16c438e06813b31b5bc0ac9028fcca4dd30c46e7`. L01 native CI is still pending. All 53 T01
+owner files match the approved source byte for byte; the other 336 Python files
+match the reviewed L01 parent. Existing verification gates, coverage policy and
+project settings remain exact parent bytes. The two workflow additions and
+CONTRIBUTING change remain the previously reviewed T01 source.
+
+Root seeded the exact L01 baseline and regenerated it from this combined source:
+1,047 entries become 1,045, with two removed keys, 17 lower allowances and no new
+or larger debt. No baseline union or policy change was used. Pyright reports zero
+errors and warnings; Ruff, actionlint and the strict reviewed-parent gate pass.
+The 78 required runtime/helper methods and all 49 G01 selected methods passed
+without skips. The 113 CLI, coverage-policy, documentation and architecture tests
+passed with one native-Windows-only skip. All 395 source/metadata hashes remained
+unchanged before and after those checks.
+
+The earlier 3,076-test full suite, source-bound 112-owner proof and negative
+controls remain evidence for immutable `d99d28a`; they were not rerun or relabeled
+as this combined source. Final campaign-parent ancestry and its strict gate,
+metadata review, and exact PR/merge native CI remain required.
+
+Combined input SHA256: `f204323a26fc1c389ee3e6a32c5ce875dcb78d49e57444c2ef9d08641491b599`.
+Combined result SHA256: `360df34ac8befbc7a8585c49a316acf5b33aea2743bbd36e80f5cb3a4b04cf7c`.

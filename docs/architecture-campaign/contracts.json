@@ -2374,7 +2374,24 @@
         "independent_receipt_sha256": "44c17c5d29ad6110b22ca70c2e3a85bb40d4f1912c3dca2f99dd7cbe4cb3fdb3",
         "root_review_sha256": "dd4e3efe01510bc29ef9b1f5350f0cb39fdbd4a9e638ba1d4d1fe191557c6dbd"
       },
-      "remaining_verification": "Actual-parent integration and combined checks; native12/0 on macOS/Windows and exact PR/merge CI; no task completion yet."
+      "remaining_verification": "Actual verified campaign-parent ancestry/gate refresh and final metadata review; exact native PR/merge CI including12 helper cases0skips on macOS/Windows.",
+      "combined_integration": {
+        "state": "Prepared and locally checked; reviewed L01 parent native CI pending",
+        "prepared_merge": "b0c47b0587df9183924765bf13f02a0d6e9768ae",
+        "reviewed_parent": "16c438e06813b31b5bc0ac9028fcca4dd30c46e7",
+        "source_commit": "4defcb3f5de3f6bea8bf130488dcc6fc55de4599",
+        "exact_owner_files": 53,
+        "other_python_exact_parent": 336,
+        "frozen_inputs": 395,
+        "baseline_before": 1047,
+        "baseline_after": 1045,
+        "baseline_removed": 2,
+        "baseline_lowered": 17,
+        "new_or_grown": 0,
+        "checks": "Pyright0/0; Ruff; actionlint; strict; required78/0; G01 required49/0;113 CLI/policy tests with one Windows-only skip",
+        "inputs_sha256": "f204323a26fc1c389ee3e6a32c5ce875dcb78d49e57444c2ef9d08641491b599",
+        "result_sha256": "360df34ac8befbc7a8585c49a316acf5b33aea2743bbd36e80f5cb3a4b04cf7c"
+      }
     },
     {
       "task_id": "T02",

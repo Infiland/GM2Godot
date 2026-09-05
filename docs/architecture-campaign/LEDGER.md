@@ -7,20 +7,21 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through T01 PR #888 at
-  `e142714a0f24a085d5717132f24f44f3c2d488f8`. Exact PR/merge CI, native helpers,
-  Godot runtime, artifact receipts and actual-parent proof are verified.
-- Progress counts fully verified roadmap tasks: 13 of 54 (24.1%). Source review,
+- Verified predecessor: R12 PR #889 at
+  `b9c05cd326cbcb8531ca93c24709bcf14cb81748`; this is the isolated R13 base.
+  I02 PR #890 is integrated at `4787f4b`, with exact merge CI still pending.
+- Progress counts fully verified roadmap tasks: 14 of 54 (25.9%). Source review,
   integration and pending checks do not count as verification.
-- Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
-  847/852/854/855 remain untouched.
+- Main's 11 dirty policy files and all Git branches/commits remain preserved.
+  Root removed21 unused checkout folders at the user's request; only active
+  implementation checkouts are kept. Historical coverage evidence was archived.
 - Approved local environment: native CPython 3.12.10 arm64 and exact Godot
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. T01 is verified. R12 includes its actual merge ancestry
-  and passes the strict parent gate; final metadata and native PR/merge CI are
-  next. I02 source review and the R13/L02 proposals proceed separately.
+- No external blocker. R13's font contract, test bodies and before evidence
+  are accepted. Root controls its isolated implementation entry; L02 proof and
+  I02 merge verification proceed independently.
 
 
 ## Ownership and progress
@@ -41,7 +42,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
-| R12 authoritative path model | approved | audit_gml_resources; source `9e01fd1`, actual T01 ancestry `c225210` | Independent/root source, local and guarded-parent proof APPROVE | Required35/0; guarded2/0+CLI78/1hostskip; strict1045 actuale142; original full3120/56, parity/control and benchmark preserved; final metadata/native PR/merge pending |
+| R12 authoritative path model | verified | audit_gml_resources; PR #889 merged `b9c05cd` | Independent/root source, local, combined and exact CI proof APPROVE | PR CI33964091840 and merge CI33965005168; required35/0, retained T01/CLI/native receipts and strict1045 actuale142 passed |
+| R13 authoritative font model | implementing | audit_gml_resources; `dev/080-font-model`, base `b9c05cd` | Design/test bodies and before results independently/root approved; source review remains required | [Contract](R13-font-model-contract.md); original95+366cases/776observations, composed12+1 before successes; root entry approval precedes source edits |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

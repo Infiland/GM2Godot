@@ -1438,6 +1438,216 @@
         "facade_module": "src.conversion.gml_transpiler"
       },
       "validation_kind": "conversion-parity"
+    },
+    "R12": {
+      "unittest_ids": [
+        "tests.test_asset_registry.TestAssetRegistryConverter.test_convert_all_writes_runtime_registry_script",
+        "tests.test_asset_registry.TestAssetRegistryConverter.test_empty_derived_registry_metadata_is_valid",
+        "tests.test_asset_registry.TestAssetRegistryConverter.test_malformed_derived_registry_metadata_is_skipped_not_completed",
+        "tests.test_asset_registry.TestAssetRegistryConverter.test_output_exception_fails_every_logical_registry_resource",
+        "tests.test_gml_runtime.TestGMLRuntimeParityFixtures.test_runtime_value_expression_fixtures",
+        "tests.test_gml_runtime.TestGMLRuntimeScript.test_runtime_defines_shared_value_helpers",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_path_and_mp_grid_helpers_lower_asset_arguments",
+        "tests.test_path_registry.TestPathRegistry.test_builds_path_registry_entries_from_gamemaker_paths",
+        "tests.test_path_registry.TestPathRegistry.test_renders_and_writes_path_registry_script",
+        "tests.test_path_registry.TestPathRegistry.test_skips_uncontained_path_metadata_sources",
+        "tests.test_paths_motion_godot.TestPathsMotionGodotSmoke.test_runtime_paths_and_mp_grid_smoke_scene",
+        "tests.test_resource_matrix_godot.ResourceMatrixEndToEndTests.test_cli_converts_full_fixture_and_exact_godot_loads_outputs",
+        "tests.test_conversion_architecture.TestResourceModels.test_missing_resource_is_structured_parse_diagnostic",
+        "tests.test_conversion_architecture.TestResourceModels.test_parse_resource_matrix_without_godot_output_path",
+        "tests.test_conversion_architecture.TestResourceModels.test_resource_model_rejects_manifest_path_outside_project",
+        "tests.test_conversion_architecture.TestResourceModels.test_resource_model_rejects_path_normalized_into_another_kind",
+        "tests.test_conversion_architecture.TestResourceModels.test_resource_model_rejects_script_sidecar_link_outside_project",
+        "tests.test_path_model.TestPathModel.test_canonical_dependency_and_import_ownership",
+        "tests.test_path_model.TestPathModel.test_canonical_shape_raw_identity_and_snapshot",
+        "tests.test_path_model.TestPathModel.test_geometry_errors_and_field_precedence",
+        "tests.test_path_model.TestPathModel.test_numeric_values_and_closed_rules",
+        "tests.test_path_model.TestPathModel.test_point_constructor_serialization_and_frozen_contract",
+        "tests.test_path_model.TestPathModel.test_point_filtering_defaults_and_order",
+        "tests.test_path_model.TestPathModel.test_unknown_fields_and_caller_names",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_aggregate_numeric_errors_precede_missing_resource_diagnostics",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_aggregate_uses_canonical_shape_and_live_raw_identity",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_reader_root_and_encoding_error_policies",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_registry_projects_canonical_points_without_reparsing",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_resource_matrix_and_empty_project_preserve_other_families",
+        "tests.test_path_model_consumers.TestPathModelConsumers.test_shared_json_quirks_unknown_values_and_source_containment",
+        "tests.test_path_registry.TestPathRegistry.test_build_failure_precedes_any_output",
+        "tests.test_path_registry.TestPathRegistry.test_consumes_one_shot_entries_in_order_with_duplicates",
+        "tests.test_path_registry.TestPathRegistry.test_native_bytes_and_non_resource_scene_suppression",
+        "tests.test_path_registry.TestPathRegistry.test_registry_failure_follows_completed_scene_writes",
+        "tests.test_path_registry.TestPathRegistry.test_scene_failure_preserves_exact_partial_write_order"
+      ],
+      "required_environment": {
+        "GODOT_BIN": "required-executable",
+        "SNAP_PROJECT_PATH": "required-git-checkout",
+        "ADDING_PROJECT_PATH": "required-git-checkout",
+        "SIMPLE_TOPDOWN_PROJECT_PATH": "required-git-checkout"
+      },
+      "required_paths": [
+        "src/conversion/gml_transpiler.py",
+        "tests/gml_transpiler_architecture_support.py",
+        "tests/test_gml_transpiler_architecture.py",
+        "tests/fixtures/golden/basic_scripts/BasicScripts.yyp",
+        "tests/fixtures/part2/projects/resource_matrix/ResourceMatrix.yyp",
+        "constraints/requirements-macos-py312.lock",
+        "src/conversion/json_values.py",
+        "src/conversion/gamemaker_json.py",
+        "src/conversion/project_source_discovery.py",
+        "tests/test_json_values.py",
+        "tests/test_gamemaker_json.py",
+        "src/conversion/project_model.py",
+        "tests/test_project_model.py",
+        "tests/test_project_model_consumers.py",
+        "src/conversion/path_model.py",
+        "src/conversion/path_registry.py",
+        "src/conversion/resource_models.py",
+        "tests/test_path_model.py",
+        "tests/test_path_model_consumers.py",
+        "tests/test_path_registry.py"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.10",
+        "platform": "darwin",
+        "machine": "arm64",
+        "godot_binary_environment": "GODOT_BIN",
+        "godot_version": "4.7.2.stable.official.ed1daf0bf"
+      },
+      "external_repositories": [
+        {
+          "name": "snap",
+          "environment": "SNAP_PROJECT_PATH",
+          "remote": "https://github.com/JujuAdams/SNAP.git",
+          "commit": "b4191e195c7c84359f995d568d8906c452b83e50",
+          "tree": "d933a9cd28ce965779e75f5d961b65a8203fb534"
+        },
+        {
+          "name": "adding",
+          "environment": "ADDING_PROJECT_PATH",
+          "remote": "https://github.com/WuffMakesGames/Adding.git",
+          "commit": "1bf032618be258242f78505de7cd151242452776",
+          "tree": "b5e9d66287101b90227460d54becd6dbd12c0578"
+        },
+        {
+          "name": "simple_topdown",
+          "environment": "SIMPLE_TOPDOWN_PROJECT_PATH",
+          "remote": "https://github.com/Infiland/GM2GodotGameTest_SimpleTopDown.git",
+          "commit": "2413d7714b0dbd5d548058ea4c74f591f0d4e1e3",
+          "tree": "26e60949d2ce9ab69ca6122255b5a16e641f72fa"
+        }
+      ],
+      "parity": {
+        "destination": {
+          "seed_project_godot": "[application]\nconfig/name=\"GM2Godot parity seed\"\n",
+          "same_absolute_path": true,
+          "reset_between_base_and_head": true,
+          "transaction_provenance": {
+            "root": ".gm2godot-managed-output",
+            "lock": ".gm2godot-managed-output.lock",
+            "volatile_fields": [
+              "transaction_id",
+              "destination_identity",
+              "parent_identity",
+              "managed_identities",
+              "evidence.attempt.identity",
+              "evidence.manifest.identity",
+              "generation_record.identity",
+              "generation_record.name",
+              "generation_record.sha256",
+              "journal_sha256"
+            ]
+          }
+        },
+        "dependency_locks": [
+          {
+            "path": "constraints/requirements-macos-py312.lock",
+            "sha256": "739ffd4c1281f1d6d279c0830b792fa71c7fb34e6849bccb4bd44207e0f9ad53"
+          },
+          {
+            "path": "requirements-bootstrap.txt",
+            "sha256": "90c82b6bda1db6d1665cdab218349663bd7903622fb010ddc01438141497a0d2"
+          },
+          {
+            "path": "requirements.txt",
+            "sha256": "6d55718ca1e4fc63ab64a2efa2dd6612a31b010d908b02662cebc2d2d56d0ad4"
+          },
+          {
+            "path": "requirements-tooling.txt",
+            "sha256": "ea632cc2f500df05d59e7b203772a334da64347ad8ec57f3f8927218931407ee"
+          }
+        ],
+        "fixtures": [
+          {
+            "id": "golden-basic-scripts",
+            "repository_path": "tests/fixtures/golden/basic_scripts",
+            "project_relative_path": "BasicScripts.yyp",
+            "sha256": "c9577649cac4c807d94ed0049e9175ffcb2448bb168939f5882debaef0562cef",
+            "only": [
+              "scripts"
+            ],
+            "expected_exit": 0,
+            "max_warnings": 0,
+            "max_errors": 0,
+            "max_unsupported": 0
+          },
+          {
+            "id": "part2-resource-matrix",
+            "repository_path": "tests/fixtures/part2/projects/resource_matrix",
+            "project_relative_path": "ResourceMatrix.yyp",
+            "sha256": "f3326f6db31a99ec36c53476b1ae405094b2e7efd925fcc534b582c996aea957",
+            "only": [],
+            "expected_exit": 0
+          },
+          {
+            "id": "snap-lts",
+            "environment": "SNAP_PROJECT_PATH",
+            "project_relative_path": "snap.yyp",
+            "sha256": "a837cc7aacb9b21898f0d117e88b365c47a19985d375675828377ea32cc9a6e8",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          },
+          {
+            "id": "adding-lts",
+            "environment": "ADDING_PROJECT_PATH",
+            "project_relative_path": "Adding.yyp",
+            "sha256": "ee4d6eeca8078b16621abe3f8796c68bd3a8177b9184007d69d399315c93bac0",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          },
+          {
+            "id": "simple-topdown",
+            "environment": "SIMPLE_TOPDOWN_PROJECT_PATH",
+            "project_relative_path": "GM2GodotGameTest_SimpleTopDown.yyp",
+            "sha256": "9ed406accd7a5697703fdd69055ce359ae211632ae23775f5f8f3d2d6b72ff6d",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          }
+        ],
+        "fields": [
+          "relative_paths",
+          "file_bytes",
+          "modes",
+          "generated_gdscript",
+          "source_maps",
+          "diagnostics",
+          "diagnostic_ids",
+          "parser_error",
+          "stdout",
+          "stderr",
+          "exit_status",
+          "terminal_output_state",
+          "transaction_provenance",
+          "runtime_markers"
+        ],
+        "facade_module": "src.conversion.gml_transpiler"
+      },
+      "validation_kind": "conversion-parity"
     }
   }
 }

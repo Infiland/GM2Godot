@@ -4,10 +4,10 @@ import hashlib
 import json
 import os
 import posixpath
+import shutil
 import stat
 import subprocess
 import sys
-import shutil
 import tempfile
 import threading
 import tracemalloc
@@ -20,20 +20,13 @@ from types import SimpleNamespace
 from typing import BinaryIO, Callable
 from unittest.mock import MagicMock, mock_open, patch
 
-
 from src.conversion import included_files as included_files_module
-from src.conversion.included_files import IncludedFilesConverter
-from src.conversion.included_file_registry import (
-    INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-    render_included_file_registry,
-)
-from src.conversion.included_file_paths import (
-    IncludedFilePathAssignment,
-    plan_included_file_paths,
-)
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
+from src.conversion.included_file_paths import IncludedFilePathAssignment, plan_included_file_paths
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
+from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

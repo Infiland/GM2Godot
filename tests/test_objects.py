@@ -1,6 +1,6 @@
-import os
 # pyright: reportPrivateUsage=false
 import json
+import os
 import shutil
 import tempfile
 import threading
@@ -8,14 +8,13 @@ import unittest
 from typing import cast
 from unittest.mock import DEFAULT, MagicMock, patch
 
-
-from src.conversion.objects import ObjectConverter, ObjectProcessResult
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.events.base import EventMapping
+from src.conversion.objects import ObjectConverter, ObjectProcessResult
 from src.conversion.type_defs import JsonDict
 
 

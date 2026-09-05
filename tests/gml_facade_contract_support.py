@@ -4,11 +4,7 @@ from __future__ import annotations
 
 import ast
 
-from tests.gml_transpiler_architecture_support import (
-    ImportEdge,
-    literal_string,
-    resolve_import_owner,
-)
+from tests.gml_transpiler_architecture_support import ImportEdge, literal_string, resolve_import_owner
 
 
 def literal_all_exports(source: str) -> tuple[str, ...]:

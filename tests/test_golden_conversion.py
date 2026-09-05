@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-
 from src import cli
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 

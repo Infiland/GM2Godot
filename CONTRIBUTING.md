@@ -82,7 +82,8 @@ Compatibility work continues to target GameMaker LTS 2026 source projects and ex
 - Keep functions focused and concise
 - Use type hints where appropriate
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
-- Run `ruff check .` before submitting Python code. CI enforces Ruff's complete `E4`, `E7`, `E9` and Pyflakes (`F`) rule families. Do not disable these families or individual rules globally or per file. Broader style rules should be introduced separately from feature work.
+- Run `ruff check .` before submitting Python code. CI enforces Ruff's complete `E4`, `E7`, `E9`, Pyflakes (`F`) and import sorting (`I`) rule families. Do not disable these families or individual rules globally or per file. Broader style rules should be introduced separately from feature work.
+- Import layout uses 120 columns, combined aliased imports and `split-on-trailing-comma=false`. Normal Ruff, tracked-input CI and the isolated maintainability measurement use these same explicit settings.
 
 ### Shrinking maintainability debt (R02 / #795)
 
@@ -107,7 +108,7 @@ symbol, separating application, tooling, and tests. `scripts/maintainability_met
 owns measurement thresholds, module classifications, and lint rules; the JSON
 records that policy to reject accidental changes. Every tracked Python input
 (including tracked ignored files) and nonignored untracked Python input is
-measured. Unknown classifications fail. The complete E4/E7/E9/F families remain mandatory;
+measured. Unknown classifications fail. The complete E4/E7/E9/F/I families remain mandatory;
 normal Ruff also enforces the campaign's coarse C90 ceiling of 122. The ratchet
 independently measures C901 above 15, function/module length, nesting,
 parameters, duplicate symbols, I001/B and enforced E4/E7/E9 findings, exact suppression
@@ -154,6 +155,13 @@ exact agreement, 1 identifies violated metric limits or stale entries, and 2
 means invalid configuration or unavailable measurement prerequisites. Review
 changes to the measurement policy separately; dependency upgrades must also
 review any change to the pinned Ruff measurement semantics.
+
+The baseline records the import layout alongside the other policy fields. R04's
+temporary transition accepts only its frozen Git parent and raw baseline hash;
+candidate baselines must contain the complete current policy. During that migration,
+use the explicit parent in the [R04 contract](docs/architecture-campaign/R04-import-contract.md),
+including for local checks. R04 removes this bridge in a separate verified change
+after integration; formatting-only reductions retain the existing size allowances.
 
 Import graphs are syntax-based and never import application code. They include
 relative/absolute imports, package initializers, re-exports, imports in functions

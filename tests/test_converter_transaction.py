@@ -13,24 +13,17 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
-from src.conversion import converter as converter_module
-from src.conversion import managed_output_publisher as publisher_module
-from src.conversion import scripts as scripts_module
-from src.conversion.architecture_policy import publish_architecture_policy_report
-from src.conversion.conversion_manifest import (
-    CONVERSION_ATTEMPT_RELATIVE_PATH,
-    CONVERSION_MANIFEST_RELATIVE_PATH,
+from src.conversion import (
+    converter as converter_module,
+    managed_output_publisher as publisher_module,
+    scripts as scripts_module,
 )
+from src.conversion.architecture_policy import publish_architecture_policy_report
+from src.conversion.conversion_manifest import CONVERSION_ATTEMPT_RELATIVE_PATH, CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import Converter
-from src.conversion.generation_inventory import (
-    GenerationInventory,
-    capture_generation_inventory,
-)
-from src.conversion.managed_output_publisher import (
-    MANAGED_OUTPUT_JOURNAL_NAME,
-    MANAGED_OUTPUT_RECOVERY_NAME,
-)
+from src.conversion.generation_inventory import GenerationInventory, capture_generation_inventory
+from src.conversion.managed_output_publisher import MANAGED_OUTPUT_JOURNAL_NAME, MANAGED_OUTPUT_RECOVERY_NAME
 from src.conversion.managed_output_workspace import WORKSPACE_PARENT_NAME
 
 

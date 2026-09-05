@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 import hashlib
 import os
-from pathlib import Path
 import plistlib
 import re
 import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
+import zipfile
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType
 from typing import cast
-import unicodedata
 from xml.parsers.expat import ExpatError
-import zipfile
-
 
 POLICY_COMPONENTS = ("packaging", "macos", "bundle_metadata.py")
 APP_PLIST_COMPONENTS = ("GM2Godot.app", "Contents", "Info.plist")

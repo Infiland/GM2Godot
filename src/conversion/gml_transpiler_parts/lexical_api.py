@@ -14,10 +14,7 @@ from .lexical import (
     read_ordinary_string,
     read_verbatim_string,
 )
-from .preprocessor import (
-    preprocess_gml_source,
-    preprocess_gml_source_preserving_layout,
-)
+from .preprocessor import preprocess_gml_source, preprocess_gml_source_preserving_layout
 from .tokens import (
     decode_gml_string_literal,
     read_template_string,
@@ -25,7 +22,6 @@ from .tokens import (
     tokenize_gml_expression,
     tokenize_gml_source,
 )
-
 
 __all__: Final[tuple[str, ...]] = (
     "decode_gml_string_literal",

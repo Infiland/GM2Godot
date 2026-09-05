@@ -13,7 +13,6 @@ from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.project_godot import GodotProjectFile
 from tests.conversion_outcome_helpers import completed_conversion_step_ledger
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

@@ -12,11 +12,7 @@ from .expression_api import (
     transpile_gml_condition,
     transpile_gml_expression,
 )
-from .lexical_api import (
-    reject_asset_identifier_name,
-    sanitize_gdscript_identifier,
-    validate_gml_identifier,
-)
+from .lexical_api import reject_asset_identifier_name, sanitize_gdscript_identifier, validate_gml_identifier
 from .shared_models import (
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
@@ -24,15 +20,8 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .statement_models import (
-    ControlFlowCapture,
-    GMLStatementRequest,
-    GMLStatementResult,
-)
-from .statements import (
-    control_flow_dispatch_lines,
-    transpile_statement,
-)
+from .statement_models import ControlFlowCapture, GMLStatementRequest, GMLStatementResult
+from .statements import control_flow_dispatch_lines, transpile_statement
 from .static_declarations import read_static_declaration_tokens
 from .utils import (
     indent_lines,
@@ -44,6 +33,7 @@ from .utils import (
     split_top_level_tokens,
     tokens_to_source,
 )
+
 
 class _StatementParser:
     def __init__(

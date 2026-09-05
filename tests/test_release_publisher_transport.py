@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
+from collections.abc import Callable, Mapping
+from pathlib import Path
 from unittest import mock
 
 from scripts import release_publisher as publisher_module
-
 
 REPOSITORY = "Infiland/GM2Godot"
 API_ORIGIN = "https://api.github.com"

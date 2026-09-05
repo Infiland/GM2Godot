@@ -3,7 +3,6 @@ from typing import Callable, TypeAlias
 
 from src.conversion.type_defs import JsonDict
 
-
 EventKey: TypeAlias = tuple[int, int]
 EventHandler: TypeAlias = Callable[[JsonDict, str], "EventMapping"]
 StaticMappings: TypeAlias = dict[EventKey, "EventMapping"]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import unittest
 
-
 from src.conversion.gml_runtime import (
     duplicate_runtime_symbols,
     runtime_api_index,
@@ -18,7 +17,6 @@ from src.conversion.gml_runtime_parts.manifest import (
     validate_runtime_segment_dependencies,
 )
 from src.conversion.gml_transpiler_parts.gml_api_manifest import iter_gml_api_entries
-
 
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"

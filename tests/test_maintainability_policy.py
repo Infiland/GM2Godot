@@ -9,8 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import check_maintainability as checker
-from scripts import maintainability_metrics as metrics
+from scripts import check_maintainability as checker, maintainability_metrics as metrics
 
 
 class TestMaintainabilityPolicy(unittest.TestCase):
@@ -171,6 +170,9 @@ class TestMaintainabilityPolicy(unittest.TestCase):
             {**valid, "debt": []},
         ]
         malformed.extend({**valid, "debt": {self.key: value}} for value in (0, -1, True, 1.5, "19"))
+        for name, value in (("line_length", 88), ("combine_as_imports", False), ("split_on_trailing_comma", True)):
+            changed = {**checker.policy(self.root), "import_layout": {**metrics.IMPORT_LAYOUT, name: value}}
+            malformed.append({**valid, "policy": changed})
         for payload in malformed:
             with self.subTest(payload=payload):
                 with self.assertRaises(metrics.MaintainabilityError):
@@ -185,10 +187,28 @@ class TestMaintainabilityPolicy(unittest.TestCase):
         policy = checker.policy(self.root)
         self.assertEqual(policy["lint_rules"], list(metrics.LINT_RULES))
         self.assertEqual(policy["thresholds"], metrics.THRESHOLDS)
+        self.assertEqual(
+            policy["import_layout"], {"line_length": 120, "combine_as_imports": True, "split_on_trailing_comma": False}
+        )
         with patch.object(checker, "LINT_RULES", ("C901",)):
             status, output = self.invoke(update=True)
         self.assertEqual(status, 2, output)
         self.assertIn("policy/version mismatch", output)
+
+    def test_real_ruff_import_layout_preserves_wide_and_combined_imports(self) -> None:
+        for source in (
+            "from package_name import first_export_with_a_lengthy_name, second_export_with_a_lengthy_name\n",
+            "from module import first as first, second as second\n",
+        ):
+            with self.subTest(source=source):
+                self.source.write_text(source, encoding="utf-8")
+                self.assertEqual(metrics.run_ruff(self.root, ["src/example.py"]), [])
+        self.source.write_text("from module import (\n    first,\n    second,\n)\n", encoding="utf-8")
+        findings = metrics.run_ruff(self.root, ["src/example.py"])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["code"], "I001")
+        self.source.write_text("from module import first, second\n", encoding="utf-8")
+        self.assertEqual(metrics.run_ruff(self.root, ["src/example.py"]), [])
 
     def size_parent(self, source: str) -> None:
         self.source.write_text(source, encoding="utf-8")

@@ -1,26 +1,14 @@
+import multiprocessing
 import os
 import platform
 import threading
 import time
 import webbrowser
-import multiprocessing
 
-from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QCloseEvent, QIcon
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
-from src.gui.icons import AppIcons
-from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker, ConversionWorkerResult
-from src.gui.panels.path_panel import PathPanel
-from src.gui.panels.action_panel import ActionPanel
-from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
-from src.gui.panels.progress_panel import ProgressPanel
-from src.gui.panels.info_bar import InfoBar
-from src.gui.dialogs.settings_dialog import SettingsDialog
-from src.gui.dialogs.about_dialog import AboutDialog
-from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
-from src.gui.dialogs.language_dialog import LanguageDialog
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.conversion.project_godot import (
@@ -29,11 +17,22 @@ from src.conversion.project_godot import (
     GodotProjectDestinationState,
     inspect_godot_project_destination,
 )
-from src.version import get_version
-from src.localization import get_localized, get_localized_list
-from src.update_checker import UpdateChecker
-from src.update_checker import UpdateInfo
+from src.gui.dialogs.about_dialog import AboutDialog
+from src.gui.dialogs.language_dialog import LanguageDialog
+from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
+from src.gui.dialogs.settings_dialog import SettingsDialog
 from src.gui.dialogs.update_dialog import UpdateDialog
+from src.gui.icons import AppIcons
+from src.gui.panels.action_panel import ActionPanel
+from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
+from src.gui.panels.info_bar import InfoBar
+from src.gui.panels.path_panel import PathPanel
+from src.gui.panels.progress_panel import ProgressPanel
+from src.gui.setting_value import SettingValue
+from src.gui.workers import ConversionWorker, ConversionWorkerResult
+from src.localization import get_localized, get_localized_list
+from src.update_checker import UpdateChecker, UpdateInfo
+from src.version import get_version
 
 
 class UpdateCheckWorker(QObject):

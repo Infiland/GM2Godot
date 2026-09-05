@@ -5,10 +5,11 @@ import platform
 import re
 import stat
 import tempfile
-import requests
-from dataclasses import dataclass
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, Optional, cast
+
+import requests
 
 from src.version import get_version
 

@@ -5,11 +5,8 @@ from typing import Iterable, Mapping, MutableMapping
 
 from .emitter import emit_gml_expression, emit_gml_truthy_expression
 from .enum_helpers import reject_enum_mutation_expression
-from .extension_functions import (
-    normalize_extension_function_mappings,
-    normalize_extension_functions,
-)
 from .expression_parser import parse_gml_expression
+from .extension_functions import normalize_extension_function_mappings, normalize_extension_functions
 from .shared_models import ScopeContext as _ScopeContext
 from .utils import normalize_local_names, normalize_scope_context, scope_context_with_global_names
 

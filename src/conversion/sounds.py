@@ -8,23 +8,21 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TypedDict, cast
 
-# Import localization manager
-from src.localization import get_localized
 from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
-from src.conversion.project_manifest import (
-    ProjectManifestDiagnostic,
-    load_gamemaker_project_manifest,
-)
 from src.conversion.project_godot import format_godot_string
+from src.conversion.project_manifest import ProjectManifestDiagnostic, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+
+# Import localization manager
+from src.localization import get_localized
 
 
 class SoundData(TypedDict):

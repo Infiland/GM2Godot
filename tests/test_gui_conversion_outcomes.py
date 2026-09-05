@@ -14,11 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepLedger,
-)
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome, ConversionStepLedger
 from src.gui.main_window import MainWindow
 from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
 from src.gui.panels.progress_panel import ProgressPanel

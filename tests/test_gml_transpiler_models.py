@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-import unittest
 
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
@@ -33,9 +33,13 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     Ternary,
     Unary,
 )
+from src.conversion.gml_transpiler_parts.extension_functions import (
+    GMLExtensionFunction as extension_gml_extension_function,
+    GMLExtensionFunctionMapping as extension_gml_extension_function_mapping,
+)
 from src.conversion.gml_transpiler_parts.result_models import (
-    GMLPreprocessResult,
     GMLPreprocessorDiagnostic,
+    GMLPreprocessResult,
     GMLSourceDiagnostic,
     GMLSourceMap,
     GMLSourceMapEntry,
@@ -43,9 +47,9 @@ from src.conversion.gml_transpiler_parts.result_models import (
     SourceDiagnosticSeverity,
 )
 from src.conversion.gml_transpiler_parts.shared_models import (
+    DEFAULT_SCOPE_CONTEXT,
     AssignmentOperator,
     BuiltinVariableMetadata,
-    DEFAULT_SCOPE_CONTEXT,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
@@ -55,26 +59,17 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     StaticDeclaration,
     Token,
 )
+from src.conversion.gml_transpiler_parts.source_map import (
+    GMLSourceDiagnostic as source_map_gml_source_diagnostic,
+    GMLSourceMap as source_map_gml_source_map,
+    GMLSourceMapEntry as source_map_gml_source_map_entry,
+)
 from src.conversion.gml_transpiler_parts.statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
     GMLStatementResult,
 )
-from src.conversion.gml_transpiler_parts.extension_functions import (
-    GMLExtensionFunction as extension_gml_extension_function,
-)
-from src.conversion.gml_transpiler_parts.extension_functions import (
-    GMLExtensionFunctionMapping as extension_gml_extension_function_mapping,
-)
-from src.conversion.gml_transpiler_parts.source_map import (
-    GMLSourceDiagnostic as source_map_gml_source_diagnostic,
-)
-from src.conversion.gml_transpiler_parts.source_map import GMLSourceMap as source_map_gml_source_map
-from src.conversion.gml_transpiler_parts.source_map import (
-    GMLSourceMapEntry as source_map_gml_source_map_entry,
-)
 from tests.gml_facade_contract_support import static_all_exports
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"

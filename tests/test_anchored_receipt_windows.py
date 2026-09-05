@@ -5,11 +5,10 @@ import ctypes
 import inspect
 import sys
 import unittest
-from unittest import mock
 from typing import Any, Callable, cast
+from unittest import mock
 
 from scripts import _anchored_receipt_windows as receipt
-
 
 PAYLOAD = b'{"ok":true}\n'
 

@@ -10,10 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts._anchored_output import (
-    AnchoredOutputError,
-    publish_identical_receipt_bytes,
-)
+from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
 from tests.windows_receipt_native_support import (
     WINDOWS_AMD64_ABI,
     BasicInformation,

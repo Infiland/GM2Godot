@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
 import re
 import tomllib
 import unittest
+from pathlib import Path
 from typing import cast
 
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
 from src.version import get_version
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WIKI_SOURCE_DIR = PROJECT_ROOT / "docs" / "wiki"
@@ -59,7 +58,11 @@ EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E4", "E7", "E9", "F", "C90"], "mccabe": {"max-complexity": 122}},
+    "lint": {
+        "select": ["E4", "E7", "E9", "F", "I", "C90"],
+        "isort": {"combine-as-imports": True, "split-on-trailing-comma": False},
+        "mccabe": {"max-complexity": 122},
+    },
 }
 EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff
@@ -68,8 +71,9 @@ EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff on every tracked lint input
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
-            xargs -0 -- python -m ruff check --isolated --target-version py312 \\
-              --select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+            xargs -0 -- python -m ruff check --isolated --target-version py312 --line-length 120 \\
+              --config lint.isort.combine-as-imports=true --config lint.isort.split-on-trailing-comma=false \\
+              --select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --
 """
 
 
@@ -291,7 +295,7 @@ class TestDocumentationHealth(unittest.TestCase):
 
     def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
         required_guidance = (
-            "CI enforces Ruff's complete `E4`, `E7`, `E9` and Pyflakes (`F`) "
+            "CI enforces Ruff's complete `E4`, `E7`, `E9`, Pyflakes (`F`) and import sorting (`I`) "
             "rule families. Do not disable these families or individual rules "
             "globally or per file."
         )

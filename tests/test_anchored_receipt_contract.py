@@ -4,17 +4,16 @@ from __future__ import annotations
 import inspect
 import ntpath
 import os
-from pathlib import Path, PureWindowsPath
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
-from typing import cast
 import unittest
+from collections.abc import Callable
+from pathlib import Path, PureWindowsPath
+from typing import cast
 from unittest import mock
 
 from scripts import _anchored_output as anchored
-
 
 PAYLOAD = b'{"status":"verified"}\n'
 

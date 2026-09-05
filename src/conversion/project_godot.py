@@ -10,7 +10,6 @@ from typing import Any, Callable, cast
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.type_defs import StrPath
 
-
 DEFAULT_GODOT_PROJECT_NAME = "GM2Godot Project"
 GODOT_PROJECT_FILENAME = "project.godot"
 MANAGED_OUTPUT_DIRECTORIES: tuple[str, ...] = (

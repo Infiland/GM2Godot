@@ -10,15 +10,9 @@ import unittest
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_outcome import ConversionCounts
-from src.conversion.diagnostic_models import (
-    ProjectManifestDiagnostic,
-    ProjectSourceLocation,
-)
+from src.conversion.diagnostic_models import ProjectManifestDiagnostic, ProjectSourceLocation
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.project_manifest import (
-    GameMakerProjectManifest,
-    load_gamemaker_project_manifest,
-)
+from src.conversion.project_manifest import GameMakerProjectManifest, load_gamemaker_project_manifest
 
 
 class TestBaseConverterAbstract(unittest.TestCase):

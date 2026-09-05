@@ -16,10 +16,7 @@ from unittest.mock import patch
 
 from src import cli
 from src.conversion import generation_inventory as inventory_module
-from src.conversion.conversion_manifest import (
-    CONVERSION_ATTEMPT_RELATIVE_PATH,
-    CONVERSION_MANIFEST_RELATIVE_PATH,
-)
+from src.conversion.conversion_manifest import CONVERSION_ATTEMPT_RELATIVE_PATH, CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.generation_inventory import (
     GenerationInventory,
     GenerationInventoryEntry,
@@ -32,12 +29,7 @@ from src.conversion.generation_inventory import (
     validate_generation_inventory,
     validate_staged_generation_inventory,
 )
-from src.conversion.managed_output_workspace import (
-    DESTINATION_LOCK_NAME,
-    WORKSPACE_PARENT_NAME,
-    ManagedOutputWorkspace,
-)
-
+from src.conversion.managed_output_workspace import DESTINATION_LOCK_NAME, WORKSPACE_PARENT_NAME, ManagedOutputWorkspace
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "golden" / "basic_scripts"

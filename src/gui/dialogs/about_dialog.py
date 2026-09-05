@@ -1,18 +1,16 @@
 import webbrowser
-from datetime import datetime
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, cast
 
 import requests
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QCursor
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QWidget, QFrame,
-)
+from PySide6.QtGui import QCursor, QPixmap
+from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from src.gui.theme import THEME
-from src.version import get_version
 from src.localization import get_localized
+from src.version import get_version
 
 
 class AboutDialog(QDialog):

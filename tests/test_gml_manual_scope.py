@@ -1,6 +1,5 @@
 import unittest
 
-
 from src.conversion.gml_transpiler import (
     category_issue_numbers,
     generate_gml_manual_scope_report,
@@ -9,7 +8,6 @@ from src.conversion.gml_transpiler import (
     render_gml_manual_scope_markdown,
     validate_gml_manual_scope_against_manifest,
 )
-
 
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"

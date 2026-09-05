@@ -2,15 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    preprocess_gml_source,
-    tokenize_gml_source,
-)
+from src.conversion.gml_transpiler_parts.lexical_api import preprocess_gml_source, tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
-from src.conversion.gml_transpiler_parts.utils import (
-    macro_configuration_matches,
-    tokens_to_source,
-)
+from src.conversion.gml_transpiler_parts.utils import macro_configuration_matches, tokens_to_source
 from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.type_defs import StrPath
 

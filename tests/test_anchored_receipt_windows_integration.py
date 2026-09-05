@@ -4,23 +4,20 @@ from __future__ import annotations
 import ctypes
 import gc
 import inspect
-from pathlib import Path
 import sys
+import unittest
+from pathlib import Path
 from types import FrameType
 from typing import Any, cast
-import unittest
 from unittest import mock
 
-from scripts import _anchored_output as anchored
-from scripts import _anchored_receipt_windows as receipt
-from scripts import verify_dependency_environment as verifier
-from tests.test_anchored_receipt_windows import FakeKernel32
-from tests.test_anchored_receipt_windows_relative import (
-    FakeKernelApi,
-    FakeNtApi,
-    _SequencedCloseKernelApi,
+from scripts import (
+    _anchored_output as anchored,
+    _anchored_receipt_windows as receipt,
+    verify_dependency_environment as verifier,
 )
-
+from tests.test_anchored_receipt_windows import FakeKernel32
+from tests.test_anchored_receipt_windows_relative import FakeKernelApi, FakeNtApi, _SequencedCloseKernelApi
 
 PAYLOAD = b'{"status":"verified"}\n'
 _API_NAMES = (

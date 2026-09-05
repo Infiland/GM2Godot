@@ -5,12 +5,9 @@ import os
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
-from src.conversion.atomic_generated_text import (
-    atomic_write_confined_generated_text,
-)
+from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
 from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.type_defs import JsonDict
-
 
 INCLUDED_FILE_REGISTRY_RELATIVE_PATH = os.path.join(
     "gm2godot",

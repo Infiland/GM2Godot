@@ -1,30 +1,19 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
 import threading
-from typing import cast
 import unittest
+from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import (
-    QEventLoop,
-    QObject,
-    QThread,
-    QTimer,
-    Signal,
-    Slot,
-)
+from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtWidgets import QApplication
 
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepLedger,
-)
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome, ConversionStepLedger
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
 from src.gui.setting_value import SettingValue
 from src.gui.workers import ConversionWorker, ConversionWorkerResult

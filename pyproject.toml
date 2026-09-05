@@ -14,8 +14,13 @@ select = [
   "E7",
   "E9",
   "F",
+  "I",
   "C90",
 ]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+split-on-trailing-comma = false
 
 [tool.ruff.lint.mccabe]
 max-complexity = 122

@@ -1,33 +1,27 @@
 from __future__ import annotations
 
-import os
-import re
 import json
-import shutil
+import os
 import posixpath
+import re
+import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict, cast
 
-from src.localization import get_localized
-from src.conversion.asset_output_paths import (
-    build_asset_output_paths,
-    resource_filesystem_path,
-    resource_sibling_path,
-)
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path, resource_sibling_path
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.generated_paths import (
-    generated_nested_resource_path,
-)
+from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
-    is_safe_project_source_component,
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
+    is_safe_project_source_component,
     validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.localization import get_localized
 
 
 class TilesetData(TypedDict):

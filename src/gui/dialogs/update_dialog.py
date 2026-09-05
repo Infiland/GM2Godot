@@ -2,18 +2,25 @@ import webbrowser
 from typing import cast
 
 import markdown2  # type: ignore[reportMissingTypeStubs]
-
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
-    QTextBrowser, QProgressBar, QFileDialog, QMessageBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.gui.theme import THEME
-from src.version import get_version
 from src.localization import get_localized
 from src.update_checker import UpdateChecker, UpdateInfo
+from src.version import get_version
 
 
 class DownloadWorker(QObject):

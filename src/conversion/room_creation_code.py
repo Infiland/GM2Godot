@@ -12,7 +12,6 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.type_defs import JsonDict, JsonList, LogCallback
 
-
 CreationCodeSourceResolver = Callable[[str, str], str | None]
 
 _INSTANCE_CREATION_CODE_PREFIX = "InstanceCreationCode_"

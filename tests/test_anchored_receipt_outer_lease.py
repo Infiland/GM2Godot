@@ -6,16 +6,15 @@ import errno
 import gc
 import inspect
 import os
-from pathlib import Path
 import sys
 import tempfile
+import unittest
+from pathlib import Path
 from types import FrameType, SimpleNamespace
 from typing import Any, Callable
-import unittest
 from unittest import mock
 
 from scripts import _anchored_output as anchored
-
 
 PAYLOAD = b'{"status":"verified"}\n'
 

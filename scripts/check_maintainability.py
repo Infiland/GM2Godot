@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import subprocess
@@ -17,6 +18,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.maintainability_metrics import (
+    IMPORT_LAYOUT,
     LINT_RULES,
     MODULE_KINDS,
     THRESHOLDS,
@@ -32,6 +34,9 @@ BASELINE_PATH = "maintainability-baseline.json"
 SCHEMA_VERSION = 2
 # The one pre-policy tree accepted at bootstrap. Later missing parents fail closed.
 BOOTSTRAP_REF = "38b364855f06e971d2676b921fd300e1f40f076a"
+# R04 removes these after integration; root freezes both identities at actual R03 entry.
+LEGACY_IMPORT_LAYOUT_PARENT = "1240a7b16d893bc06ba3d258683c731c60dbadca"
+LEGACY_IMPORT_LAYOUT_BASELINE_SHA256 = "cea9e1b5ec2a55a05c0f720ce43de7c4e11219e2108aabb9d47b888c38e85d7e"
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,7 @@ def working_paths(root: Path) -> list[str]:
 def policy(root: Path) -> dict[str, object]:
     return {
         "ruff": ruff_version(root),
+        "import_layout": IMPORT_LAYOUT,
         "thresholds": THRESHOLDS,
         "module_kinds": MODULE_KINDS,
         "lint_rules": list(LINT_RULES),
@@ -190,7 +196,14 @@ def parent_debt(root: Path, base_ref: str) -> Baseline:
     git(root, "merge-base", "--is-ancestor", revision, "HEAD")
     names = git(root, "ls-tree", "--name-only", revision, "--", BASELINE_PATH).decode().splitlines()
     if BASELINE_PATH in names:
-        return load_baseline(git(root, "show", f"{revision}:{BASELINE_PATH}").decode(), policy(root))
+        raw = git(root, "show", f"{revision}:{BASELINE_PATH}")
+        expected_policy = policy(root)
+        if (
+            revision == LEGACY_IMPORT_LAYOUT_PARENT
+            and hashlib.sha256(raw).hexdigest() == LEGACY_IMPORT_LAYOUT_BASELINE_SHA256
+        ):
+            expected_policy.pop("import_layout")
+        return load_baseline(raw.decode(), expected_policy)
     if revision != BOOTSTRAP_REF:
         raise MaintainabilityError(f"parent {revision} is missing {BASELINE_PATH}; only {BOOTSTRAP_REF} may bootstrap")
     return bootstrap_debt(root, revision)

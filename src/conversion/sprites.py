@@ -1,24 +1,24 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from PIL import Image
 from collections import defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TypedDict, cast
 
-from src.localization import get_localized
-from src.conversion.base_converter import BaseConverter
-from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
-from src.conversion.project_manifest import load_gamemaker_project_manifest
-from src.conversion.project_source_paths import (
+from PIL import Image
+
+from ..localization import get_localized
+from .base_converter import BaseConverter
+from .diagnostics import DiagnosticCollector
+from .generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
+from .project_manifest import load_gamemaker_project_manifest
+from .project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
-
+from .type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 _MAX_PRECISE_COLLISION_RECTANGLES = 16384
 

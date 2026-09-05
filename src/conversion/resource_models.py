@@ -8,7 +8,11 @@ from typing import cast
 from src.conversion.diagnostic_models import ResourceModelDiagnostic
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
-from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectResourceReference,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
@@ -16,7 +20,6 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.type_defs import JsonDict, JsonList
-
 
 
 def _empty_json_dict() -> JsonDict:

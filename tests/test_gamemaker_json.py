@@ -12,11 +12,7 @@ from itertools import product
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.maintainability_imports import (
-    build_graphs,
-    elementary_cycles,
-    module_edges,
-)
+from scripts.maintainability_imports import build_graphs, elementary_cycles, module_edges
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.gamemaker_json import parse_gamemaker_json, read_gamemaker_json

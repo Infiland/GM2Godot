@@ -9,17 +9,12 @@ import unittest
 from typing import NotRequired, TypeAlias, TypedDict, Unpack, cast
 from unittest.mock import patch
 
-
-from src.conversion.sounds import SoundConverter
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.asset_registry import AssetRegistryConverter
-from src.conversion.asset_output_paths import (
-    build_asset_output_paths,
-    resource_filesystem_path,
-)
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.sounds import SoundConverter
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
-
 
 SoundYY: TypeAlias = dict[str, object]
 

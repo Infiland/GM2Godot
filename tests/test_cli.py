@@ -6,8 +6,8 @@ import inspect
 import io
 import json
 import os
-import signal
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -20,18 +20,10 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
-
 from src import cli
+from src.conversion.conversion_manifest import CONVERSION_ATTEMPT_RELATIVE_PATH, CONVERSION_MANIFEST_RELATIVE_PATH
+from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome, ConversionStepLedger
 from src.conversion.converter import Converter
-from src.conversion.conversion_outcome import (
-    ConversionCounts,
-    ConversionOutcome,
-    ConversionStepLedger,
-)
-from src.conversion.conversion_manifest import (
-    CONVERSION_ATTEMPT_RELATIVE_PATH,
-    CONVERSION_MANIFEST_RELATIVE_PATH,
-)
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,

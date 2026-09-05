@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-from scripts import conversion_parity_contract as contract
-from scripts import conversion_parity_snapshot as snapshots
+from scripts import conversion_parity_contract as contract, conversion_parity_snapshot as snapshots
 
 
 class TestConversionParitySnapshot(unittest.TestCase):

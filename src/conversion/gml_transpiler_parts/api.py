@@ -5,23 +5,13 @@ import hashlib
 from typing import Iterable, Mapping, MutableSet
 
 from .constants import LEGACY_GLOBAL_BUILTINS
-from .extension_functions import (
-    normalize_extension_function_mappings,
-    normalize_extension_functions,
-)
 from .expression_api import emit_static_initialization_lines
+from .extension_functions import normalize_extension_function_mappings, normalize_extension_functions
 from .lexical_api import preprocess_gml_source, tokenize_gml_source
 from .result_models import GMLTranspileResult
 from .shared_models import ScopeContext as _ScopeContext
-from .source_map import (
-    build_gml_source_map,
-    render_gml_source_header,
-)
-from .statement_api import (
-    collect_static_declarations,
-    parse_gml_statements,
-    static_scope_id as build_static_scope_id,
-)
+from .source_map import build_gml_source_map, render_gml_source_header
+from .statement_api import collect_static_declarations, parse_gml_statements, static_scope_id as build_static_scope_id
 from .statement_models import GMLStatementRequest
 from .utils import prefix_multiline
 

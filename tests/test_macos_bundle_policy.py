@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import ast
-from importlib.util import module_from_spec, spec_from_file_location
-from pathlib import Path
 import re
 import runpy
 import shutil
 import sys
 import tempfile
-from typing import Protocol, cast
 import unittest
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+from typing import Protocol, cast
 from unittest import mock
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 POLICY_PATH = PROJECT_ROOT / "packaging" / "macos" / "bundle_metadata.py"

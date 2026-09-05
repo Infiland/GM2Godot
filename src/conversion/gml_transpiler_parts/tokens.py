@@ -6,13 +6,8 @@ from collections.abc import Sequence
 
 from .constants import BLOCK_DELIMITER_REPLACEMENTS, MULTI_CHAR_OPERATORS
 from .identifiers import validate_gml_identifier
-from .lexical import (
-    is_verbatim_string_start,
-    read_ordinary_string,
-    read_verbatim_string,
-)
+from .lexical import is_verbatim_string_start, read_ordinary_string, read_verbatim_string
 from .shared_models import GMLTranspileError, Token
-
 
 _GML_SIMPLE_ESCAPES = {
     '"': '"',

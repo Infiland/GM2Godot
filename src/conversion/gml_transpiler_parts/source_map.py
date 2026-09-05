@@ -14,11 +14,7 @@ from .lexical_api import (
     read_verbatim_string,
     sanitize_gdscript_identifier,
 )
-from .result_models import (
-    GMLSourceDiagnostic,
-    GMLSourceMap,
-    GMLSourceMapEntry,
-)
+from .result_models import GMLSourceDiagnostic, GMLSourceMap, GMLSourceMapEntry
 
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 _DECLARATION_RE = re.compile(r"\b(?:var|globalvar|static)\s+([^;\n]+)")

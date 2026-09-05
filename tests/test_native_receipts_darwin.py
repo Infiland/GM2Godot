@@ -7,10 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts._anchored_output import (
-    AnchoredOutputError,
-    publish_identical_receipt_bytes,
-)
+from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
 
 
 @unittest.skipUnless(sys.platform == "darwin", "requires native macOS root aliases")

@@ -23,7 +23,6 @@ from src.conversion.anchored_artifacts import (
     modes_match,
 )
 
-
 _GENERATION_FORMAT_VERSION = 1
 _GENERATION_LOCK_NAME = ".gm2godot-conversion.lock"
 _GENERATION_JOURNAL_NAME = ".gm2godot-conversion-transaction.json"

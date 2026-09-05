@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
 import runpy
 import sys
-from types import ModuleType
 import unittest
+from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 HOOK_PATH = (

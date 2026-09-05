@@ -2,11 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.conversion.shader_translation import (
-    ShaderStageSource,
-    translate_gamemaker_shader,
-)
-
+from src.conversion.shader_translation import ShaderStageSource, translate_gamemaker_shader
 
 VERTEX_PREAMBLE = """\
 attribute vec3 in_Position;

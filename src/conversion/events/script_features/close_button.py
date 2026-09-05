@@ -1,6 +1,5 @@
 from src.conversion.events.base import EventMapping
 
-
 _CLOSE_BUTTON_FUNC = "_notification"
 _READY_FUNC = "_ready"
 _DISABLE_AUTO_QUIT_BODY = "\tget_tree().auto_accept_quit = false"

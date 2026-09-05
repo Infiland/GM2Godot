@@ -7,7 +7,6 @@ from typing import cast
 
 from src.conversion.type_defs import JsonDict
 
-
 PARTICLE_DESCRIPTOR_FORMAT_VERSION = 1
 
 PARTICLE_SHAPES = (

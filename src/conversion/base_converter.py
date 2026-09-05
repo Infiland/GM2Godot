@@ -6,11 +6,7 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Any, Literal, cast
 
-from src.localization import get_localized
-from src.conversion.conversion_outcome import (
-    ConversionStepResult,
-    ResourceOutcomeTracker,
-)
+from src.conversion.conversion_outcome import ConversionStepResult, ResourceOutcomeTracker
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
@@ -23,6 +19,7 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.localization import get_localized
 
 
 class BaseConverter(ABC):

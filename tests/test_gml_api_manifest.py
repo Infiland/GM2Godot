@@ -1,6 +1,5 @@
 import unittest
 
-
 from src.conversion.gml_transpiler import (
     GMLTranspileError,
     category_issue_numbers,
@@ -15,10 +14,7 @@ from src.conversion.gml_transpiler import (
     transpile_gml_expression,
     validate_gml_function_arity,
 )
-from src.conversion.gml_transpiler_parts.gml_api_manifest import (
-    GAMEMAKER_LTS_MANUAL_ROOT,
-)
-
+from src.conversion.gml_transpiler_parts.gml_api_manifest import GAMEMAKER_LTS_MANUAL_ROOT
 
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"

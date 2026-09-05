@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from functools import lru_cache, partial
 from typing import Any, Callable, Literal, TypeAlias, cast
 
-
 FileFingerprint: TypeAlias = tuple[int, int, int, int, int]
 ReceiptFingerprint: TypeAlias = tuple[int, int, int, int]
 PathIdentity: TypeAlias = tuple[int, int]

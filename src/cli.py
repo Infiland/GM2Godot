@@ -14,36 +14,26 @@ from types import FrameType
 from typing import Sequence, TypedDict, cast
 
 from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
+from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.diagnostics import (
+    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     ConversionDiagnosticReportPublicationReceipt,
     ConversionDiagnosticReportSnapshot,
-    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-    DiagnosticSeverity,
     DiagnosticCollector,
+    DiagnosticSeverity,
     capture_conversion_diagnostic_reports,
     restore_conversion_diagnostic_reports,
 )
-from src.conversion.gml_transpiler import (
-    generate_gml_api_compatibility_report,
-    render_gml_manual_scope_markdown,
-)
-from src.conversion.godot_validation import (
-    validate_generated_godot_project,
-    write_godot_validation_report,
-)
+from src.conversion.gml_transpiler import generate_gml_api_compatibility_report, render_gml_manual_scope_markdown
+from src.conversion.godot_validation import validate_generated_godot_project, write_godot_validation_report
 from src.conversion.platform_capabilities import (
     generate_platform_capability_report,
     render_platform_capability_markdown,
 )
-from src.conversion.project_godot import (
-    MANAGED_OUTPUT_DIRECTORIES,
-    ConversionPreflightError,
-)
+from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES, ConversionPreflightError
 from src.version import get_version
-
 
 DEFAULT_CONVERSION_GROUPS = ("assets", "project", "wip")
 _NON_CONVERTER_SETTING_KEYS = frozenset({"sound_group_folders"})

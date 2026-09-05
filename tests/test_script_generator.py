@@ -1,6 +1,5 @@
 import unittest
 
-
 from src.conversion.script_generator import ObjectRuntimeConfig, SpriteRuntimeConfig, generate_script_content
 
 

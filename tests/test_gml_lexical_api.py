@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
 import inspect
+import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import Iterable, get_type_hints
-import unittest
-from src.conversion.gml_transpiler import (
-    preprocess_gml_source as facade_preprocess_gml_source,
-)
+
+from src.conversion.gml_transpiler import preprocess_gml_source as facade_preprocess_gml_source
 from src.conversion.gml_transpiler_parts.lexical_api import (
     decode_gml_string_literal,
     decode_gml_verbatim_string_literal,
@@ -27,14 +26,9 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     validate_gml_identifier,
 )
 from src.conversion.gml_transpiler_parts.result_models import GMLPreprocessResult
-from src.conversion.gml_transpiler_parts.shared_models import (
-    GMLTranspileError,
-    ScopeContext,
-    Token,
-)
+from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, ScopeContext, Token
 from src.conversion.gml_transpiler_parts.utils import split_assignment, split_top_level, strip_comments
 from tests.gml_facade_contract_support import static_all_exports
-
 
 PUBLIC_NAMES = (
     "decode_gml_string_literal",

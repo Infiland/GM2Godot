@@ -1,6 +1,5 @@
 from src.conversion.events.base import EventMapping, StaticMappings
 
-
 STATIC_MAPPINGS: StaticMappings = {
     (7, 66): EventMapping("_on_async_in_app_purchase", "", 14, "Other_66.gml"),
     (7, 67): EventMapping("_on_async_cloud_save", "", 14, "Other_67.gml"),

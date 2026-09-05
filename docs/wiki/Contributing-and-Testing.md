@@ -95,7 +95,7 @@ For Python or generated-code logic changes:
 ./venv/bin/python -m unittest
 ```
 
-CI enforces Ruff's complete `E4`, `E7`, `E9` and Pyflakes (`F`) rule families. Do not disable these families or individual rules globally or per file. Fix every Pyright error and warning in changed code. Run the relevant focused test while iterating; use the full suite for broad behavior changes. For Godot-dependent changes, run with the exact binary:
+CI enforces Ruff's complete `E4`, `E7`, `E9`, Pyflakes (`F`) and import sorting (`I`) rule families. Do not disable these families or individual rules globally or per file. Import layout uses 120 columns, combined aliased imports and `split-on-trailing-comma=false` in the project, tracked-input CI and isolated maintainability measurement. Fix every Pyright error and warning in changed code. Run the relevant focused test while iterating; use the full suite for broad behavior changes. For Godot-dependent changes, run with the exact binary:
 
 ```bash
 GODOT_BIN=/path/to/Godot-4.7.2 \

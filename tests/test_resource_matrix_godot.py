@@ -19,11 +19,7 @@ from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_plan import CONVERSION_STEPS
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.fonts import _find_system_font
-from src.conversion.godot_validation import (
-    generated_godot_importable_asset_paths,
-    validate_generated_godot_project,
-)
-
+from src.conversion.godot_validation import generated_godot_importable_asset_paths, validate_generated_godot_project
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_MATRIX_PATH = (

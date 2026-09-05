@@ -6,10 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Protocol, cast
 
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    resolve_project_source_path,
-)
+from src.conversion.project_source_paths import ProjectSourcePathError, resolve_project_source_path
 from src.conversion.type_defs import JsonDict
 
 ANIMATION_CURVE_REGISTRY_RELATIVE_PATH = os.path.join(

@@ -3,13 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from src.conversion.gml_transpiler_parts.expression_api import (
-    evaluate_enum_value_tokens,
-)
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    preprocess_gml_source,
-    tokenize_gml_source,
-)
+from src.conversion.gml_transpiler_parts.expression_api import evaluate_enum_value_tokens
+from src.conversion.gml_transpiler_parts.lexical_api import preprocess_gml_source, tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, Token
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_source_discovery import project_gml_source_paths

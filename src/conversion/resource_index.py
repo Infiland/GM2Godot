@@ -16,13 +16,7 @@ from src.conversion.project_source_paths import (
     resolve_project_sidecar_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import (
-    ConversionRunning,
-    JsonDict,
-    JsonList,
-    LogCallback,
-    ProgressCallback,
-)
+from src.conversion.type_defs import ConversionRunning, JsonDict, JsonList, LogCallback, ProgressCallback
 
 
 def _empty_json_dict() -> JsonDict:

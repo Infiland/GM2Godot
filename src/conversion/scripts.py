@@ -7,7 +7,6 @@ import tempfile
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from src.localization import get_localized
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
@@ -16,32 +15,14 @@ from src.conversion.gml_transpiler import (
     EXTENSION_FUNCTION_MAPPING_FILENAME,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
-    GMLTranspileError,
     GMLSourceMap,
+    GMLTranspileError,
     analyze_gml_source_identifiers,
+    load_gml_extension_function_mappings,
     merge_gml_source_maps,
     render_gml_source_header,
-    load_gml_extension_function_mappings,
     transpile_gml_code_with_source_map,
     write_gml_source_map,
-)
-from src.conversion.resource_index import GameMakerResourceIndex
-from src.conversion.project_manifest import (
-    ProjectManifestDiagnostic,
-    load_gamemaker_project_manifest,
-)
-from src.conversion.project_source_paths import (
-    ProjectSourcePathError,
-    ResolvedProjectSourcePath,
-    is_safe_project_source_component,
-    validate_project_resource_source_path,
-)
-from src.conversion.project_enums import collect_project_enum_values
-from src.conversion.project_macros import collect_project_macro_values
-from src.conversion.script_functions import (
-    ScriptFunctionDeclaration,
-    modern_script_structure,
-    render_script_top_level_source,
 )
 from src.conversion.gml_transpiler_parts.expression_api import (
     emit_constructor_inheritance_line,
@@ -50,8 +31,23 @@ from src.conversion.gml_transpiler_parts.expression_api import (
 )
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
+from src.conversion.project_manifest import ProjectManifestDiagnostic, load_gamemaker_project_manifest
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    is_safe_project_source_component,
+    validate_project_resource_source_path,
+)
+from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.script_functions import (
+    ScriptFunctionDeclaration,
+    modern_script_structure,
+    render_script_top_level_source,
+)
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
-
+from src.localization import get_localized
 
 SCRIPT_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_script_registry.gd")
 SCRIPT_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_script_registry.gd"

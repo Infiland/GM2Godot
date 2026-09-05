@@ -9,8 +9,6 @@ import unittest
 from typing import IO, Any, Callable, cast
 from unittest.mock import MagicMock, patch
 
-
-from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
@@ -29,6 +27,7 @@ from src.conversion.room_layers import (
     gamemaker_tile_transform_to_godot,
     is_empty_gamemaker_tile,
 )
+from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 
 
 def _write_file(path: str, content: str) -> None:

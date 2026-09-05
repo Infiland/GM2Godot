@@ -11,11 +11,7 @@ from typing import Any, Callable, cast
 from unittest.mock import patch
 
 from src.conversion import anchored_artifacts as anchored_artifacts_module
-from src.conversion.anchored_artifacts import (
-    ArtifactSpec,
-    ByteArtifactTransaction,
-    StagedArtifact,
-)
+from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction, StagedArtifact
 
 
 class TestAnchoredArtifacts(unittest.TestCase):

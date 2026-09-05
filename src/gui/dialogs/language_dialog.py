@@ -4,9 +4,7 @@ import os
 import sys
 from typing import Any, cast
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QWidget,
-)
+from PySide6.QtWidgets import QComboBox, QDialog, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from src.localization import get_localized
 

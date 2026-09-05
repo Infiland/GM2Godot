@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import FrozenInstanceError, fields, is_dataclass
 import inspect
+import unittest
+from dataclasses import FrozenInstanceError, fields, is_dataclass
 from pathlib import Path
 from typing import Iterable, get_args, get_type_hints
-import unittest
 
 from src.conversion.gml_transpiler import (
     transpile_gml_condition as facade_transpile_gml_condition,
-)
-from src.conversion.gml_transpiler import (
     transpile_gml_expression as facade_transpile_gml_expression,
 )
 from src.conversion.gml_transpiler_parts.expression_api import (
@@ -43,14 +41,8 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     NumberLiteral,
 )
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_expression
-from src.conversion.gml_transpiler_parts.shared_models import (
-    GMLTranspileError,
-    ScopeContext,
-    StaticDeclaration,
-    Token,
-)
+from src.conversion.gml_transpiler_parts.shared_models import GMLTranspileError, ScopeContext, StaticDeclaration, Token
 from tests.gml_facade_contract_support import static_all_exports
-
 
 PUBLIC_NAMES = (
     "emit_constructor_inheritance_line",

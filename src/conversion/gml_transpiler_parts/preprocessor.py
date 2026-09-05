@@ -6,11 +6,10 @@ from typing import Iterable, TypeAlias
 
 from .identifiers import validate_gml_identifier
 from .lexical import is_verbatim_string_start, read_verbatim_string
-from .result_models import GMLPreprocessResult, GMLPreprocessorDiagnostic
+from .result_models import GMLPreprocessorDiagnostic, GMLPreprocessResult
 from .shared_models import GMLTranspileError
 from .tokens import read_template_string
 from .utils import join_macro_continuation_lines, macro_configuration_matches, strip_comments
-
 
 _DIRECTIVE_RE = re.compile(r"^\s*#([A-Za-z_][A-Za-z0-9_]*)\b(.*)$")
 _DEFINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\s+(.*))?$")

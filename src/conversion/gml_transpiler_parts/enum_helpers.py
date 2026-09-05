@@ -4,7 +4,6 @@ from __future__ import annotations
 from typing import Iterable, Mapping
 
 from .constants import GML_BUILTIN_CONSTANT_IDENTIFIERS, READ_ONLY_BUILTIN_VARIABLES
-from .expression_parser import parse_gml_expression as _parse_gml_expression
 from .expression_models import (
     ArrayLiteral as _ArrayLiteral,
     Binary as _Binary,
@@ -25,17 +24,15 @@ from .expression_models import (
     Ternary as _Ternary,
     Unary as _Unary,
 )
+from .expression_parser import parse_gml_expression as _parse_gml_expression
 from .lexical_api import tokenize_gml_expression
-from .shared_models import (
-    GMLTranspileError,
-    Token,
-    Token as _Token,
-)
+from .shared_models import GMLTranspileError, Token, Token as _Token
 from .utils import (
     normalize_local_names as _normalize_local_names,
     tokens_to_source as _tokens_to_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
 )
+
 
 def _evaluate_enum_value_tokens(
     tokens: Iterable[_Token],

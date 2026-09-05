@@ -23,10 +23,7 @@ from .expression_service import (
     transpile_gml_condition as _transpile_gml_condition_impl,
     transpile_gml_expression as _transpile_gml_expression_impl,
 )
-from .function_helpers import (
-    emit_constructor_inheritance_line,
-    emit_static_initialization_lines,
-)
+from .function_helpers import emit_constructor_inheritance_line, emit_static_initialization_lines
 from .shared_models import ScopeContext
 
 

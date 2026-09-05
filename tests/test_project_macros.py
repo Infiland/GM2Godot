@@ -5,10 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.conversion.gml_transpiler import (
-    GMLTranspileError,
-    transpile_gml_expression,
-)
+from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_expression
 from src.conversion.project_macros import collect_project_macro_values
 
 

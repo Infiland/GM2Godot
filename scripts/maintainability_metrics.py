@@ -35,6 +35,7 @@ MODULE_KINDS = {
     "src/conversion/gml_transpiler_parts/constants.py": "mixed",
 }
 LINT_RULES = ("C901", "I001", "B", "E4", "E7", "E9")
+IMPORT_LAYOUT = {"line_length": 120, "combine_as_imports": True, "split_on_trailing_comma": False}
 
 
 class MaintainabilityError(ValueError):
@@ -189,8 +190,14 @@ def run_ruff(root: Path, paths: list[str]) -> list[dict[str, object]]:
                 "--no-cache",
                 "--target-version",
                 "py312",
+                "--line-length",
+                str(IMPORT_LAYOUT["line_length"]),
                 "--select",
                 ",".join(LINT_RULES),
+                "--config",
+                f"lint.isort.combine-as-imports={str(IMPORT_LAYOUT['combine_as_imports']).lower()}",
+                "--config",
+                f"lint.isort.split-on-trailing-comma={str(IMPORT_LAYOUT['split_on_trailing_comma']).lower()}",
                 "--config",
                 f"lint.mccabe.max-complexity={THRESHOLDS['complexity']}",
                 "--ignore-noqa",

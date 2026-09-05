@@ -15,16 +15,10 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from src.conversion import converter as converter_module
-from src.conversion import managed_output_publisher as publisher_module
-from src.conversion.conversion_manifest import (
-    CONVERSION_MANIFEST_RELATIVE_PATH,
-)
+from src.conversion import converter as converter_module, managed_output_publisher as publisher_module
+from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.converter import Converter
-from src.conversion.godot_validation import (
-    find_godot_binary,
-    validate_generated_godot_project,
-)
+from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.conversion.managed_resource_outputs import managed_resource_outputs
 
 

@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from dataclasses import dataclass
 
-
 from src.conversion.gml_runtime import GML_RUNTIME_RELATIVE_PATH, GML_RUNTIME_SCRIPT, write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_expression
 

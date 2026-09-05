@@ -5,11 +5,7 @@ import json
 from typing import Iterable, Mapping, MutableMapping
 
 from .emitter import emit_gml_expression
-from .expression_models import (
-    Call as _Call,
-    Expression as _Expression,
-    GMLExpression,
-)
+from .expression_models import Call as _Call, Expression as _Expression, GMLExpression
 from .expression_parser import parse_gml_expression
 from .shared_models import (
     ScopeContext,
@@ -17,6 +13,7 @@ from .shared_models import (
     StaticDeclaration,
     StaticDeclaration as _StaticDeclaration,
 )
+
 
 def _emit_static_initialization_lines(
     static_scope_name: str | None,

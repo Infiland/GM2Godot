@@ -1,12 +1,13 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import textwrap
-import shutil
 import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
+
 
 def _find_godot_binary() -> str | None:
     env_path = os.environ.get("GODOT_BIN")

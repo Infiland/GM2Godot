@@ -12,7 +12,6 @@ from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.scripts import SCRIPT_REGISTRY_RELATIVE_PATH, ScriptConverter
 
-
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "bound_method_context"
 
 

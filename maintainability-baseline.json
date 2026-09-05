@@ -305,112 +305,6 @@
     "application|lint.B904|src/conversion/included_files.py::_remove_included_output_stage_fallback|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
     "application|lint.B904|src/conversion/managed_output_publisher.py::_restore_previous_pointer|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
     "application|lint.B904|src/conversion/managed_output_publisher.py::_rollback_directories|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
-    "application|lint.I001|main.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/cli.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/anchored_artifacts.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/architecture_policy.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/asset_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/base_converter.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/conversion_artifact_generation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/conversion_context.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/conversion_manifest.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/conversion_outcome.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/conversion_plan.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/converter.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/event_mapping.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/__init__.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/base.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/core.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/input.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_animation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_audio.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_http.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_image_loaded.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_networking.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_platform.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_save_load.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_sound_loaded.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_steam.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_async_system.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_broadcast_message.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_close_button.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_legacy_health_lives.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_lifecycle.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_path_ended.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_room_boundary.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_user_events.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/mappings/other_wallpaper.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/script_features/close_button.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/events/script_features/resize.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/fonts.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/generated_paths.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/generation_inventory.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_runtime_parts/manifest.py::runtime_api_index|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/asset_lowering.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/constants.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/emitter.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/enum_helpers.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/expression_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/expression_parser.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/expression_parser.py::_ExpressionParser._parse_function_literal|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/expression_service.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/extension_functions.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/function_helpers.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/gml_function_dispatch.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/lexical_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/preprocessor.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/result_models.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/shared_models.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/statement_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/statement_parser.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/statements.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/static_declarations.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/tokens.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/gml_transpiler_parts/utils.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/godot_validation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/included_file_paths.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/included_file_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/included_files.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/managed_output_publisher.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/managed_output_workspace.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/managed_resource_outputs.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/notes.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/objects.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/particle_assets.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/project_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/project_manifest.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/project_settings.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/resource_models.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/room_creation_code.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/room_layers.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/rooms.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/script_generator.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/scripts.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/sequence_assets.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/shader_translation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/shaders.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/sounds.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/sprites.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/tilesets.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/conversion/type_defs.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/dialogs/about_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/dialogs/language_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/dialogs/release_notes_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/dialogs/settings_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/dialogs/update_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/main_window.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/panels/action_panel.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/panels/console_panel.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/panels/info_bar.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/panels/path_panel.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/panels/progress_panel.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/gui/theme.py::_checkmark_path|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/localization.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "application|lint.I001|src/update_checker.py::<module>|Import block is un-sorted or un-formatted": 1,
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8139,
     "application|module_lines.executable|src/cli.py::<module>": 1411,
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": 3485,
@@ -452,7 +346,7 @@
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
     "application|module_structure.executable|src/conversion/converter.py::<module>": 1772,
-    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 953,
+    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 952,
     "application|module_structure.executable|src/conversion/extension_registry.py::<module>": 2255,
     "application|module_structure.executable|src/conversion/fonts.py::<module>": 1361,
     "application|module_structure.executable|src/conversion/generation_inventory.py::<module>": 2404,
@@ -473,7 +367,7 @@
     "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1984,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1983,
     "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
     "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1035,
@@ -487,7 +381,7 @@
     "application|module_structure.executable|src/conversion/sounds.py::<module>": 1203,
     "application|module_structure.executable|src/conversion/sprites.py::<module>": 3056,
     "application|module_structure.executable|src/conversion/tilesets.py::<module>": 1822,
-    "application|module_structure.executable|src/gui/main_window.py::<module>": 1035,
+    "application|module_structure.executable|src/gui/main_window.py::<module>": 1034,
     "application|module_structure.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": 2598,
     "application|nesting|src/cli.py::_run_convert": 7,
     "application|nesting|src/cli.py::_run_convert.repair_conversion_reports": 6,
@@ -893,100 +787,6 @@
     "tests|lint.B905|tests/test_sprites.py::_make_yy_content_with_collision|`zip()` without an explicit `strict=` parameter": 1,
     "tests|lint.B905|tests/test_sprites.py::_make_yy_content_with_sequence|`zip()` without an explicit `strict=` parameter": 2,
     "tests|lint.B905|tests/test_sprites.py::_make_yy_content|`zip()` without an explicit `strict=` parameter": 1,
-    "tests|lint.I001|tests/conversion/events/test_async_platform_events.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/conversion/events/test_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/conversion/events/test_wallpaper_events.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_ancestor.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_contract.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_darwin.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_outer_lease.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_posix.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_posix_failclosed.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_posix_failures.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_windows.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_windows_integration.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_anchored_receipt_windows_relative.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_asset_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_atomic_generated_text.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_authored_particles_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_bound_method_context_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_ci_workflows.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_cli.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_collision_queries_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_conversion_architecture.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_converter.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_coverage_policy.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_dependency_lock_compile.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_dependency_policy.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_dependency_snapshot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_documentation_health.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_draw_basic_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_draw_sprite_text_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_ds_collections_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_event_mapping.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_extension_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_fonts.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_generation_inventory.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_api_manifest.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_documentation_links.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_expression_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_language_metadata.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_lexical_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_manual_scope.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_runtime.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_runtime_segments.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_statement_api.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_transpiler_architecture.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gml_transpiler_models.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_godot_validation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_golden_conversion.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gui_outcome_localization.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gui_startup_smoke.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_gui_worker_results.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_included_files.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_instance_registry_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_layers_runtime_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_linux_gui_artifact_verifier.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_linux_packaging_policy.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_lts_2026_conversion.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_macos_bundle_metadata.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_macos_bundle_policy.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_managed_output_crash_recovery.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_managed_output_workspace.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_monophobia_conversion.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_motion_helpers_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_notes.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_objects.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_part2_fixture_catalog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_part2_fixture_corpus.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_path_registry.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_paths_motion_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_precise_collision_masks_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_project_preflight.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_project_preflight_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_project_settings.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_release_notes_dialog.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_release_publisher.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_release_publisher_recovery.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_release_publisher_transport.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_resource_index.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_resource_matrix_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_rooms.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_script_generator.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_script_runtime_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_scripts.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_sequences_timelines_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_shader_translation.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_shaders.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_shaders_godot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_simple_topdown_conversion.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_sounds.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_sprites.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_tcc_conversion.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_tilesets.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_update_checker.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_version.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tests|lint.I001|tests/test_windows_included_files_scale_gate_runner.py::<module>|Import block is un-sorted or un-formatted": 1,
     "tests|module_lines.executable|tests/test_anchored_artifacts.py::<module>": 4534,
     "tests|module_lines.executable|tests/test_anchored_receipt_darwin.py::<module>": 2277,
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_integration.py::<module>": 1684,
@@ -995,7 +795,7 @@
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": 5544,
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6699,
     "tests|module_lines.executable|tests/test_cli.py::<module>": 3610,
-    "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2739,
+    "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2738,
     "tests|module_lines.executable|tests/test_converter.py::<module>": 1565,
     "tests|module_lines.executable|tests/test_dependency_policy.py::<module>": 2533,
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": 1905,
@@ -1012,13 +812,13 @@
     "tests|module_structure.executable|tests/test_anchored_receipt_darwin.py::<module>": 4534,
     "tests|module_structure.executable|tests/test_anchored_receipt_posix_failures.py::<module>": 2471,
     "tests|module_structure.executable|tests/test_anchored_receipt_windows.py::<module>": 2490,
-    "tests|module_structure.executable|tests/test_anchored_receipt_windows_integration.py::<module>": 3927,
+    "tests|module_structure.executable|tests/test_anchored_receipt_windows_integration.py::<module>": 3925,
     "tests|module_structure.executable|tests/test_anchored_receipt_windows_relative.py::<module>": 5376,
     "tests|module_structure.executable|tests/test_architecture_policy.py::<module>": 2893,
     "tests|module_structure.executable|tests/test_asset_registry.py::<module>": 9989,
     "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12303,
     "tests|module_structure.executable|tests/test_cli.py::<module>": 7094,
-    "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4414,
+    "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4412,
     "tests|module_structure.executable|tests/test_converter.py::<module>": 2978,
     "tests|module_structure.executable|tests/test_dependency_policy.py::<module>": 5674,
     "tests|module_structure.executable|tests/test_dependency_snapshot.py::<module>": 3794,
@@ -1032,8 +832,8 @@
     "tests|module_structure.executable|tests/test_godot_validation.py::<module>": 2227,
     "tests|module_structure.executable|tests/test_included_files.py::<module>": 22695,
     "tests|module_structure.executable|tests/test_linux_gui_artifact_verifier.py::<module>": 1502,
-    "tests|module_structure.executable|tests/test_managed_output_crash_recovery.py::<module>": 2547,
-    "tests|module_structure.executable|tests/test_managed_output_publisher.py::<module>": 1727,
+    "tests|module_structure.executable|tests/test_managed_output_crash_recovery.py::<module>": 2546,
+    "tests|module_structure.executable|tests/test_managed_output_publisher.py::<module>": 1726,
     "tests|module_structure.executable|tests/test_managed_output_workspace.py::<module>": 1583,
     "tests|module_structure.executable|tests/test_objects.py::<module>": 6677,
     "tests|module_structure.executable|tests/test_project_settings.py::<module>": 1995,
@@ -1218,19 +1018,6 @@
     "tooling|lint.B010|scripts/_anchored_receipt_windows.py::publish_windows_receipt|Do not call `setattr` with a constant attribute value. It is not any safer than normal property access.": 4,
     "tooling|lint.B904|scripts/_anchored_output.py::_checkout_output_parts|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
     "tooling|lint.B904|scripts/_anchored_output.py::_open_rooted_posix_parent|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
-    "tooling|lint.I001|packaging/linux/hooks/hook-PySide6.QtGui.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|packaging/macos/bundle_metadata.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/_anchored_output.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/_anchored_receipt_posix.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/_anchored_receipt_windows.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/build_dependency_snapshot.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/check_coverage.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/compile_dependency_lock.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/release_publisher.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/run_windows_included_files_scale_gate.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/verify_dependency_environment.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/verify_linux_gui_artifact.py::<module>|Import block is un-sorted or un-formatted": 1,
-    "tooling|lint.I001|scripts/verify_macos_bundle_metadata.py::<module>|Import block is un-sorted or un-formatted": 1,
     "tooling|module_lines.executable|scripts/_anchored_output.py::<module>": 2430,
     "tooling|module_lines.executable|scripts/_anchored_receipt_posix.py::<module>": 1347,
     "tooling|module_lines.executable|scripts/_anchored_receipt_windows.py::<module>": 1583,
@@ -1271,6 +1058,11 @@
     "tooling|suppression|scripts/verify_macos_bundle_metadata.py::_read_command_output|# type: ignore[attr-defined]": 2
   },
   "policy": {
+    "import_layout": {
+      "combine_as_imports": true,
+      "line_length": 120,
+      "split_on_trailing_comma": false
+    },
     "lint_rules": [
       "C901",
       "I001",
@@ -1573,18 +1365,18 @@
       "structure": 8335
     },
     "application|module_lines.executable|src/cli.py::<module>": {
-      "ast_sha256": "46c6d9e88d3a6c75071cdca92f2a07d0b99361136d7a713aff28fb4871825ccb",
-      "lines": 1411,
+      "ast_sha256": "99bdc584890fd0d1bdab2b5410ec86ba5275703751a4eb02738d4f7e4f2d9815",
+      "lines": 1401,
       "structure": 2036
     },
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": {
       "ast_sha256": "f5d31522c580647d2c743d5eb555b644026c0221cafa89cc705fde293db12704",
-      "lines": 3480,
+      "lines": 3479,
       "structure": 5906
     },
     "application|module_lines.executable|src/conversion/asset_registry.py::<module>": {
-      "ast_sha256": "cd69e83352332e74e3707350ed4122e2a55bad8e3fd15188af2c8fe9f4fd8e85",
-      "lines": 4138,
+      "ast_sha256": "f81d9904af94f49ec2460744e55ec7399a034394b2599d92140edfa033da7b75",
+      "lines": 4120,
       "structure": 6881
     },
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": {
@@ -1594,17 +1386,17 @@
     },
     "application|module_lines.executable|src/conversion/conversion_artifact_generation.py::<module>": {
       "ast_sha256": "3e2346fb60ccc630c00e52410d1aa8304166187ae78314f1f4cc9af3fb276a44",
-      "lines": 2006,
+      "lines": 2005,
       "structure": 3094
     },
     "application|module_lines.executable|src/conversion/conversion_manifest.py::<module>": {
-      "ast_sha256": "784281f7b1294763b4c2679bfa4b6f5095c73a1e4edb3d9c19a2e4bc8c765034",
-      "lines": 812,
+      "ast_sha256": "6edefaa0c00232cf75753f003b3f856b581a88f6c7fcd1481700f61c893fdac0",
+      "lines": 801,
       "structure": 1085
     },
     "application|module_lines.executable|src/conversion/converter.py::<module>": {
-      "ast_sha256": "e507f1fbcdd2562c0865b97e43daf5a40f6ae21984f4e30440be0550748c6346",
-      "lines": 1452,
+      "ast_sha256": "1c310725ab323d3cb0c4f3ef7185c2bce5937d7025cd63d49554ad2e5e7947d3",
+      "lines": 1442,
       "structure": 1772
     },
     "application|module_lines.executable|src/conversion/extension_registry.py::<module>": {
@@ -1613,113 +1405,113 @@
       "structure": 2255
     },
     "application|module_lines.executable|src/conversion/fonts.py::<module>": {
-      "ast_sha256": "f6929026415197cfacc599f908fb0ef2d62183af7ff47bf8ba06b680527f8555",
-      "lines": 812,
+      "ast_sha256": "e419eba97ce25be93554f645180c08907227f6a3540b7813347a7b8015b03d30",
+      "lines": 806,
       "structure": 1361
     },
     "application|module_lines.executable|src/conversion/generation_inventory.py::<module>": {
       "ast_sha256": "7b649edb28df25928b8f898a1cdb77c47b76175884a934c769ecd2a98e83ec28",
-      "lines": 1410,
+      "lines": 1403,
       "structure": 2404
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/emitter.py::<module>": {
-      "ast_sha256": "544bf78a236317584f58ecdbe2fa2206a88ddee432ac3ecfddcc3bd204cf375b",
-      "lines": 1449,
+      "ast_sha256": "6ff2fe26a5c7687bfe86ed5ded2849de86ae86d524de58ce0a6bb80aaf170536",
+      "lines": 1438,
       "structure": 3187
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/gml_function_dispatch.py::<module>": {
-      "ast_sha256": "e1095752ee56aa2d3dc69c2d82c3f473fb1d5b753ba61c6f7b521b4439098148",
+      "ast_sha256": "35590cd41eb4449beccaec76bd23b6faad44d413a4192bcc319c9ffa37bf8c35",
       "lines": 1546,
       "structure": 4021
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": {
-      "ast_sha256": "b062705af45e3f2790823e643bb9d3daad6b80d686cc6a79297c3398980a76ea",
-      "lines": 889,
+      "ast_sha256": "abb5935a6054fa9bd50bd2d9817e5c83ddc580f6188b5315b8aeeb8ec27a89ee",
+      "lines": 888,
       "structure": 1543
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": {
       "ast_sha256": "9bbfcdffeafa03b9e9306f8cac7f2cc3eaff99b30438504e0ee78aba3ab4957e",
-      "lines": 1190,
+      "lines": 1180,
       "structure": 2362
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": {
-      "ast_sha256": "99048b0e5f01399a34d980c8241334f9ea1ac05ed97fbd9584bcc62aa72ff02c",
+      "ast_sha256": "ee4445d111dcd3ab1c83069a964d0bf8abbbf28668ae5203a64f938cfa0219e5",
       "lines": 2771,
       "structure": 4644
     },
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": {
-      "ast_sha256": "c36fdac70b4ceef814b9f8847791e3ae46f38ef4b5c5f16bf3f5992c3b033025",
+      "ast_sha256": "63d7d151ee359069acff27060cf51e57a0e23cf7b7f416b79bc6914d9050ee17",
       "lines": 990,
       "structure": 1557
     },
     "application|module_lines.executable|src/conversion/included_files.py::<module>": {
-      "ast_sha256": "ac054eefd2a266ce03579dbd44fd4e8cf992a4955c2fe052e42810582d1c73bd",
-      "lines": 12130,
+      "ast_sha256": "6036c939baa146d5003e0d52e51c56ee78cafabb7482a6a69d7351f67fe03eb2",
+      "lines": 12122,
       "structure": 16958
     },
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": {
-      "ast_sha256": "d54599b0e43fcdf5d35fca0247b9b38d2dbc4948e05dda791e6b3fb380156644",
-      "lines": 5054,
+      "ast_sha256": "4f824817cf5076e568c3dff8fb4e99b6056f0bd84dfc29485fdb2450d15eb2e7",
+      "lines": 5043,
       "structure": 7149
     },
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": {
       "ast_sha256": "c018ed9ed580cc44e28fa3e37a31c47ad9ac86383a97b79bed022d122e481786",
-      "lines": 2646,
+      "lines": 2641,
       "structure": 4143
     },
     "application|module_lines.executable|src/conversion/objects.py::<module>": {
-      "ast_sha256": "030f4de3191133e721e2478c6d203023f057d020dcb1e3628026514b9def7f1d",
-      "lines": 1913,
+      "ast_sha256": "37810aabb301f84fe1aa6f13c053da3a3f7c037f83949994f375f9cf666fee38",
+      "lines": 1901,
       "structure": 2994
     },
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": {
       "ast_sha256": "2611fe5bc4e91989553c8fc483a8123e4a926e197cf528961b0ea3a69fe7bbc0",
-      "lines": 1088,
+      "lines": 1087,
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "706f545df199d2bace46f520eb4900b401bcd82ee1290784cb14af01fb70216f",
-      "lines": 1091,
-      "structure": 1984
+      "ast_sha256": "5fc241c064711d2452444d9540e13e59170fb6ba60a18efc6875d2bc4bc50b80",
+      "lines": 1092,
+      "structure": 1983
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",
-      "lines": 864,
+      "lines": 858,
       "structure": 1550
     },
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": {
       "ast_sha256": "1dcfc4c3be513e1db14e16e2a2593670a504b60f4542c3527ebced1d69b008b3",
-      "lines": 1431,
+      "lines": 1427,
       "structure": 2949
     },
     "application|module_lines.executable|src/conversion/rooms.py::<module>": {
-      "ast_sha256": "9d3f0d8fb32e43da4072dc3a7495842e9802e214a82e54e2da6c8c61bc1c346e",
-      "lines": 952,
+      "ast_sha256": "b6369abff442832410d9b2a7412a572b3415f53b12d5e04046c75e5b09a3edb7",
+      "lines": 949,
       "structure": 1582
     },
     "application|module_lines.executable|src/conversion/scripts.py::<module>": {
-      "ast_sha256": "62ecb5d15f9f7122a44a040d512df2f1266211354f4addf15f5fd99aa47372eb",
-      "lines": 1104,
+      "ast_sha256": "789e9cc21b823d28d6a657ef9ba95b57b15430520ccf5e2ac9ee29d481d08a15",
+      "lines": 1100,
       "structure": 1775
     },
     "application|module_lines.executable|src/conversion/sequence_assets.py::<module>": {
       "ast_sha256": "bb592e4b3bedbcdfa71b368c3df861a7237236383bf28da8a790d7f23168a262",
-      "lines": 1196,
+      "lines": 1195,
       "structure": 1865
     },
     "application|module_lines.executable|src/conversion/shader_translation.py::<module>": {
       "ast_sha256": "5a5d8db38dbf058c68e11636ed1dc5ff1ec3aaffbddb8dc7d33cc9615f9393bb",
-      "lines": 1717,
+      "lines": 1716,
       "structure": 2876
     },
     "application|module_lines.executable|src/conversion/sprites.py::<module>": {
-      "ast_sha256": "c8deee05767f8879768df6b174a84dc0a5effd9b87b1238559fa4afb27d10959",
+      "ast_sha256": "844e2fc062aa5b53b763569cc724e4e740f42aac217e0fbe9c4eb0b42fc66349",
       "lines": 1688,
       "structure": 3056
     },
     "application|module_lines.executable|src/conversion/tilesets.py::<module>": {
-      "ast_sha256": "2a715196875f716ccf762ff04e2abecf2e59597ff4c02639952cb68d21e98123",
-      "lines": 1068,
+      "ast_sha256": "73bd0f0bfe9ae6b9bb016697ceebcc6db8bb45abbe5dc8e32e420c618d6d930d",
+      "lines": 1062,
       "structure": 1822
     },
     "application|module_lines.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": {
@@ -1834,67 +1626,67 @@
     },
     "tests|module_lines.executable|tests/test_anchored_artifacts.py::<module>": {
       "ast_sha256": "f15a3b78f6bfe78e0be3d25270deac31f08107ab6dc403e386dc62c42b3531ef",
-      "lines": 4534,
+      "lines": 4530,
       "structure": 8570
     },
     "tests|module_lines.executable|tests/test_anchored_receipt_darwin.py::<module>": {
-      "ast_sha256": "cdc289c05a3803f776142a62928d1e1e312267acd83afc8f63d8eea4041bb1b8",
-      "lines": 2277,
+      "ast_sha256": "36769ba4911da7516e30904a200068054ae84ab39c9046430504fc715ca79bc7",
+      "lines": 2276,
       "structure": 4534
     },
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_integration.py::<module>": {
-      "ast_sha256": "5aad77369668de2af477ce00bb0b9c106498aef105acdcda7cff97b27a7f3972",
-      "lines": 1684,
-      "structure": 3927
+      "ast_sha256": "351607f6e791fb34909ce4472d2bcfc32be6cde48cedbd9b61996e6778b87955",
+      "lines": 1681,
+      "structure": 3925
     },
     "tests|module_lines.executable|tests/test_anchored_receipt_windows_relative.py::<module>": {
-      "ast_sha256": "75488f00979d417812df20b1e271f62accdbb3f5daf60d660c3a916da13ce66f",
-      "lines": 2164,
+      "ast_sha256": "921d8bcc2a145a8229458bf8ffa565f27cc6ba23454388d1ce0f611f484626ff",
+      "lines": 2163,
       "structure": 5376
     },
     "tests|module_lines.executable|tests/test_architecture_policy.py::<module>": {
-      "ast_sha256": "bae198d365c0e234cb3b084e9b2ab7840dba59ecf6f51e91499f72517fdca0ef",
+      "ast_sha256": "879dd5d146cb95ca3151afa98d91c0f769439ccddc0f3f75f64d86596da4e4bd",
       "lines": 1650,
       "structure": 2893
     },
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": {
-      "ast_sha256": "d534f1b8a9d232bacb8fe17d68617f5b64fb8ef2c916f23c36ee06085a2d2960",
-      "lines": 5544,
+      "ast_sha256": "0d4222013127f9e960bad86d2262335911d38e763aafd751d19771ca22cba704",
+      "lines": 5543,
       "structure": 9989
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {
-      "ast_sha256": "40db60825d65387916655515e2031da254910d88ce77674cae9ab3020ca0693f",
-      "lines": 6689,
+      "ast_sha256": "c6e7df2464487776a07b897e2185220bd6ab573d3a310ce56c74c13754cb82b4",
+      "lines": 6688,
       "structure": 12303
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
-      "ast_sha256": "c494654a542bade2ef948088dedda9bd92097e2e4da8f53417ca7c0d201d9237",
-      "lines": 3610,
+      "ast_sha256": "472ef4db48ff38eae4d19f17968e76343b4f619fbd156f398976bb40819ec578",
+      "lines": 3602,
       "structure": 7094
     },
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": {
-      "ast_sha256": "de92afb55f755a1c0957ac0098a1460221664efe13c35050366ad0c7dba59ed0",
-      "lines": 2739,
-      "structure": 4414
+      "ast_sha256": "888f29e0303cde82f6aa827277f39e4a975e5bd20cba36ef73da50d757bf27c9",
+      "lines": 2731,
+      "structure": 4412
     },
     "tests|module_lines.executable|tests/test_converter.py::<module>": {
-      "ast_sha256": "41ad4fd7827a2a30f950923dceedae357c0c8cce8898e8d2adbe88671ab4084a",
-      "lines": 1565,
+      "ast_sha256": "b3a07ef5cdf1a8058d99deb35bfa966bb958dd22156ac9c429de7228c39335e6",
+      "lines": 1556,
       "structure": 2978
     },
     "tests|module_lines.executable|tests/test_dependency_policy.py::<module>": {
-      "ast_sha256": "007a8194fe72f29cd02a95e1553dbf31846f43b7f19f97b2aa3316834505ab8c",
-      "lines": 2533,
+      "ast_sha256": "eb9737b363fec5450864963b29be122f6b4d25f2bc018d500d4a5a28298ded1e",
+      "lines": 2532,
       "structure": 5674
     },
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": {
-      "ast_sha256": "af41d04138d7738cf9d0e992deee1a6d19cafc649aa0705ad624c37645e4ba9f",
-      "lines": 1905,
+      "ast_sha256": "f6f6cecc3a2f1615720315f9ad4096a852552b7a66d3a3937a2997ae442e35f3",
+      "lines": 1904,
       "structure": 3794
     },
     "tests|module_lines.executable|tests/test_gml_runtime.py::<module>": {
       "ast_sha256": "3c5b3a10562377e5b4c6b682a6fa1e01c47f4c301a239934a5a0a5020d0b4b57",
-      "lines": 3339,
+      "lines": 3338,
       "structure": 7220
     },
     "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": {
@@ -1903,37 +1695,37 @@
       "structure": 6430
     },
     "tests|module_lines.executable|tests/test_included_files.py::<module>": {
-      "ast_sha256": "9b7d836e0e104c1a8dce198aee5712237de9f13576841edd5b514054ce1a1aa4",
-      "lines": 12913,
+      "ast_sha256": "0d8ae53db46713b607e3d0080606454666bd7b87d1d81fe0e41777a2b68d44cd",
+      "lines": 12906,
       "structure": 22695
     },
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": {
-      "ast_sha256": "5f6ca4f2582f952175af941242554c946ef593a196e357fe2bd9097ef648af75",
-      "lines": 1713,
-      "structure": 2547
+      "ast_sha256": "c6201be19afa33938144fa63e57edfe02271a0579edae25b4cac077fce0253b1",
+      "lines": 1705,
+      "structure": 2546
     },
     "tests|module_lines.executable|tests/test_objects.py::<module>": {
-      "ast_sha256": "1f88b6d3ad3a5f1e475d293cd0e6d7f1811f5aacba81597d8c043feee95d7641",
-      "lines": 3147,
+      "ast_sha256": "cad4042d07e3114c13a71ed460624d9185d522affda0b393ccf5266bd3c8e8bd",
+      "lines": 3146,
       "structure": 6677
     },
     "tests|module_lines.executable|tests/test_release_publisher.py::<module>": {
-      "ast_sha256": "8611ac2fda3eae619ee37523cd47bbb19405ae1d5a68f5c0617bad9da16bc9cc",
-      "lines": 2011,
+      "ast_sha256": "4248d70d77b53548649487a269e2006a48ac0dd94ee1e0d70087ab8da643dd3d",
+      "lines": 2010,
       "structure": 3634
     },
     "tests|module_lines.executable|tests/test_rooms.py::<module>": {
-      "ast_sha256": "115ac33f2fa12bede737a928aa95f93dc61288766c2771b185ec4f58ce31eb9c",
-      "lines": 2384,
+      "ast_sha256": "8d2729281b222a5b392a8a06c9ae8f7f940783b66248092174704a74355b974e",
+      "lines": 2383,
       "structure": 4821
     },
     "tests|module_lines.executable|tests/test_sprites.py::<module>": {
       "ast_sha256": "ad015030b8e718527b9c9ffe2cb695a8f4bf6b9e0b79b40e669277c88a3edefd",
-      "lines": 2711,
+      "lines": 2705,
       "structure": 6223
     },
     "tests|module_lines.executable|tests/test_tilesets.py::<module>": {
-      "ast_sha256": "1cdddd2f3883956172ae83cb1c9f8b39b575d6cdc3172e8842ac78468f29368a",
+      "ast_sha256": "a2af065600b871ea7c5639b51faf81352207bfc6a2b0bb68fa0a79d31317fe8b",
       "lines": 1657,
       "structure": 2992
     },
@@ -1983,33 +1775,33 @@
       "structure": 289
     },
     "tooling|module_lines.executable|scripts/_anchored_output.py::<module>": {
-      "ast_sha256": "b6cba823f99079bad6c61b1c3100b89ca1ff68c72e0bbf92bdd0530c3fa271b1",
+      "ast_sha256": "b242a5afc6328c403f53f50e4524972df7b1232120a2a47156afd4b3ca907822",
       "lines": 2430,
       "structure": 4370
     },
     "tooling|module_lines.executable|scripts/_anchored_receipt_posix.py::<module>": {
-      "ast_sha256": "851000d8ecfc67953762f0c6436e210b48fffc2247740f989f14fb97656c815e",
-      "lines": 1347,
+      "ast_sha256": "1a605eacd906863eedd151b275613b4fa8f6ef61b494239c7ef081b284039453",
+      "lines": 1346,
       "structure": 1902
     },
     "tooling|module_lines.executable|scripts/_anchored_receipt_windows.py::<module>": {
-      "ast_sha256": "1887421a7b98f8a282406d7aee1edf6abde9db554b8c02635ecf28f909613ff7",
-      "lines": 1583,
+      "ast_sha256": "4ba1b0e026249e6b6f96c3d620cde79a88fd8c7df2a32c04782dd157e2268407",
+      "lines": 1582,
       "structure": 2845
     },
     "tooling|module_lines.executable|scripts/build_dependency_snapshot.py::<module>": {
-      "ast_sha256": "04e6f2583af0e51977e562c6e89ca4c5a1dfe248ca15677189a79489d9963884",
+      "ast_sha256": "2e57c9a77a79eb1bc94bd71ec5a3ab7f653c25c8b7a4fa493ba79de67b635f54",
       "lines": 1576,
       "structure": 3381
     },
     "tooling|module_lines.executable|scripts/release_publisher.py::<module>": {
-      "ast_sha256": "62aedfe5f5d94eab2a0a782790835c597d364e913d52b5e66fe732792739e2a8",
-      "lines": 1928,
+      "ast_sha256": "f47cd07e7990556e097c779905473ed2f17c997e39e2b207ff861a53618d269e",
+      "lines": 1927,
       "structure": 3760
     },
     "tooling|module_lines.executable|scripts/verify_dependency_environment.py::<module>": {
-      "ast_sha256": "a7c7ee1784079bb3ab4bfb86d5c2851aab4fabd9368b0afb85eed6a80d0ec381",
-      "lines": 1900,
+      "ast_sha256": "6abb4beeef5e6d62316602cca15a48baab3b5a1b92a693b89778a4d78687edda",
+      "lines": 1899,
       "structure": 3216
     }
   }

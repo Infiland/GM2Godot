@@ -2,8 +2,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
-from PyInstaller.utils.hooks.qt import add_qt6_dependencies  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
-
+from PyInstaller.utils.hooks.qt import (
+    add_qt6_dependencies,  # pyright: ignore[reportMissingImports, reportUnknownVariableType]
+)
 
 QtBinary = tuple[str, str]
 QtData = tuple[str, str]

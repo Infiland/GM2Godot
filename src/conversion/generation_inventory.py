@@ -14,9 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Mapping, cast
 
 from src.conversion.anchored_artifacts import VerifiedDirectory, modes_match
-from src.conversion.conversion_artifact_generation import (
-    is_conversion_generation_auxiliary,
-)
+from src.conversion.conversion_artifact_generation import is_conversion_generation_auxiliary
 from src.conversion.conversion_plan import conversion_step_map
 from src.conversion.managed_output_workspace import (
     DESTINATION_LOCK_NAME,
@@ -26,12 +24,7 @@ from src.conversion.managed_output_workspace import (
     ManagedOutputWorkspace,
     StagedFileReceipt,
 )
-from src.conversion.project_godot import (
-    GODOT_PROJECT_FILENAME,
-    MANAGED_OUTPUT_DIRECTORIES,
-    MANAGED_OUTPUT_FILES,
-)
-
+from src.conversion.project_godot import GODOT_PROJECT_FILENAME, MANAGED_OUTPUT_DIRECTORIES, MANAGED_OUTPUT_FILES
 
 GENERATION_INVENTORY_FORMAT_VERSION = 1
 GENERATION_INVENTORY_MAX_BYTES = 32 * 1024 * 1024

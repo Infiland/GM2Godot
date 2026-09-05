@@ -1,28 +1,21 @@
 # pyright: reportPrivateUsage=false
+import json
 import os
 import posixpath
 import re
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict, cast
 
-from src.localization import get_localized
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path, resource_sibling_path
 from src.conversion.asset_registry import AssetRegistryConverter
-from src.conversion.asset_output_paths import (
-    build_asset_output_paths,
-    resource_filesystem_path,
-    resource_sibling_path,
-)
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.events.base import EventMapping
 from src.conversion.gamemaker_json import parse_gamemaker_json
-from src.conversion.generated_paths import (
-    generated_nested_resource_path,
-)
+from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     GMLSourceMap,
@@ -39,25 +32,19 @@ from src.conversion.gml_transpiler_parts.constants import (
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
     GML_LITERAL_IDENTIFIERS,
 )
-from src.conversion.gml_transpiler_parts.lexical_api import (
-    preprocess_gml_source,
-    tokenize_gml_source,
-)
+from src.conversion.gml_transpiler_parts.lexical_api import preprocess_gml_source, tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import Token
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
+from src.conversion.project_manifest import ProjectManifestDiagnostic, load_gamemaker_project_manifest
 from src.conversion.project_source_discovery import project_gml_source_paths
 from src.conversion.project_source_paths import (
-    is_safe_project_source_component,
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
+    is_safe_project_source_component,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.project_manifest import (
-    ProjectManifestDiagnostic,
-    load_gamemaker_project_manifest,
-)
-from src.conversion.project_enums import collect_project_enum_values
-from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.script_generator import (
     ObjectRuntimeConfig,
     SpriteRuntimeConfig,
@@ -65,6 +52,7 @@ from src.conversion.script_generator import (
     generate_script_content,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.localization import get_localized
 
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"

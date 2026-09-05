@@ -1691,7 +1691,7 @@
       "task_id": "G01",
       "issue": 867,
       "title": "GML typed lowering context",
-      "state": "reviewing",
+      "state": "changes requested",
       "problem_and_evidence": "transpile_statement has 1161 lines/C122; bulk is increment/assignment lowering, not parser cursor methods.",
       "expected_benefit": "Localized typed handlers; dispatcher and new handlers <=15 complexity/150 lines with unchanged facade.",
       "current_owner": "gml_transpiler_parts/statements.py",
@@ -1754,7 +1754,18 @@
       },
       "measured_result": "parameters15\u21922; C122 unchanged. Actual physical/structural sizes: model76/143, statements2766/4641, lowerer1155/1940, parser1149/2296, factory17/31. Baseline1056\u21921055, one removed key and six reductions; no new debt. Dispatcher decomposition remains G02-G05.",
       "local_proof": "Pyright0/0, both Ruff checks,25 unit/48 required tests with0skips and exact Godot; all40 retained method ASTs unchanged.",
-      "remaining_verification": "Frozen full-suite with all5 pinned projects, repeated benchmark, immutable5fixture/14field plus same-ref parity, root metadata review and exact PR/merge CI/native proof."
+      "remaining_verification": "Independent/root review of one-file architecture import correction; new frozen full run with all five pinned projects; immutable five-fixture fourteen-field parity and same-ref control; exact PR/merge CI/native proof.",
+      "full_run_finding": {
+        "candidate": "349753137a10557ed6fa84eb4c7c9c9bfb738d4a",
+        "collected": 3072,
+        "passed": 3015,
+        "skipped": 56,
+        "failed": 1,
+        "failing_method": "tests.test_gml_transpiler_architecture.TestGMLTranspilerArchitecture.test_repository_has_zero_cross_module_private_or_module_object_imports",
+        "correction": "Only new context test canonical imports, fixed mock targets and existing static export helper; eight IDs and assertion values preserved, no production edits",
+        "required_gate_amendment": "Append exact existing architecture method after unchanged original 48 IDs; no skips or other gate changes",
+        "benchmark": "Unchanged production: five isolated samples per revision, 2000 calls each; median 472.005 to 484.257 ms (+2.60%); RSS medians 27754496 to 27721728 bytes with overlapping ranges"
+      }
     },
     {
       "task_id": "G02",

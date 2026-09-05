@@ -792,7 +792,8 @@
         "tests.test_assignment_index_postincrement_godot.TestAssignmentIndexPostincrementGodotSmoke.test_array_index_postincrement_executes_on_exact_godot_4_7_2",
         "tests.test_bound_method_context_godot.TestBoundMethodContextGodot.test_fixture_preserves_dynamic_other_script_rebinding_and_constructors",
         "tests.test_bound_method_context_godot.TestBoundMethodContextGodot.test_unmarked_custom_callable_fails_closed",
-        "tests.test_script_runtime_godot.TestScriptRuntimeGodotSmoke.test_script_execute_legacy_arguments_and_callable_lookup"
+        "tests.test_script_runtime_godot.TestScriptRuntimeGodotSmoke.test_script_execute_legacy_arguments_and_callable_lookup",
+        "tests.test_gml_transpiler_architecture.TestGMLTranspilerArchitecture.test_repository_has_zero_cross_module_private_or_module_object_imports"
       ],
       "required_environment": {
         "GODOT_BIN": "required-executable",

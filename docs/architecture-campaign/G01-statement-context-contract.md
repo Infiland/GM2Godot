@@ -110,3 +110,22 @@ bypass is introduced. Root registers those same ordered 48 methods in the G01 ga
 with unchanged R01 runtime, environment, fixture and fourteen-field parity contracts
 and no allowed skips. Full-suite, benchmark, immutable parity and native CI are
 still outstanding and the task is not yet verified.
+
+
+The first full run at `3497531` collected 3,072 tests: 3,015 passed, 56 had
+classified host skips, and the repository-wide module-object import rule failed
+on the new context test. Its failure receipt remains preserved. Root accepts a
+correction confined to that test: direct canonical public symbols, fixed mock
+targets, the existing static export helper, and test-relative source paths. All
+eight IDs and 88 ordered assertion ASTs retain their values under explicit symbol
+spelling; production bytes remain unchanged. The corrected test is 409 physical
+and 1,136 structural units. No exception, suppression or threshold is added.
+
+Root appends the existing repository import-rule method to the G01 required list,
+keeping its original 48 IDs in order and every other gate field unchanged. The
+resulting 49-method gate allows no skips. Independent and root correction review,
+a new frozen full run, immutable parity, and exact PR/merge evidence are required.
+The earlier benchmark remains valid for unchanged production: five isolated samples
+per revision, 2,000 calls each, median 472.005 to 484.257 ms (+2.60%); peak RSS medians
+27,754,496 to 27,721,728 bytes with overlapping ranges. This is measured context
+workload overhead, not a whole-conversion performance claim.

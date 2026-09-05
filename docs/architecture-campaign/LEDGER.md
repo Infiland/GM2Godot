@@ -7,8 +7,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through R03 PR #880 at
-  `1240a7b`. R03, C01, D01, R10 and N01 passed final PR and merge CI.
+- Integration branch: `dev/080-architecture-campaign`, through initial R04 PR #881 at
+  `f40402c`. Initial R04, R03, C01, D01, R10 and N01 passed final PR and merge CI.
 - Progress counts fully verified roadmap tasks: 7 of 54 (13.0%). Integration and
   pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
@@ -17,9 +17,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
-- No external blocker. R03 is verified. R04 has approved code and frozen full-suite
-  proof at `ef75836`; exact PR/merge CI and separate bridge retirement remain
-  required before R04 is verified.
+- No external blocker. Initial R04 is integrated and verified at `f40402c`.
+  Its separate four-file bridge retirement is approved at `bfe9b1f` under the
+  [cleanup contract](R04-cleanup-contract.md); exact cleanup PR/merge proof remains
+  required before the R04 task is verified.
   Other planned rows need bounded contract acceptance before implementation.
 
 ## Ownership and progress
@@ -34,7 +35,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | N01 native receipts | verified | audit_transactions_cli, `66bfcfe`; reviewed corrections through `b06c15b`; PR #879 merged `47642d8` | Independent and root code/integration reviews approved | `N01/pr-ci-final.json`, `N01/merge-push-run.json`; six zero-skip native artifacts at each exact revision |
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
-| R04 import layout | approved | audit_policy_tests_docs, `ef75836`, fixed parent `1240a7b` | Independent and root actual-code reviews approved | 252 reviewed files; 3,064 full tests; exact PR/merge CI and separate bridge retirement required |
+| R04 import layout | approved | Initial PR #881 at `f40402c`; cleanup `bfe9b1f` by audit_policy_tests_docs | Initial and cleanup actual code approved independently and by root | Initial PR/merge proof and cleanup local checks pass; exact cleanup PR/merge proof remains |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -73,6 +74,11 @@ Raw evidence is retained outside the worktrees at
    separate import pass. R05 follows R04/R26 so remaining reflective test seams
    and exception ownership are stable; W02 waits for final R05 enforcement.
    Existing I001/B debt checks continue throughout. No task or limit is removed.
+
+9. After independent review, root accepts [conditional parallel implementation entry](R04-parallel-entry-contract.md)
+   for R11/I01/G01 from approved frozen cleanup candidate C. All entry checks and
+   explicit isolated assignments remain required. Child PRs/integration wait for
+   successful cleanup merge proof. Root serializes baseline and shared metadata.
 
 ## Validation checkpoint
 
@@ -163,6 +169,20 @@ Raw evidence is retained outside the worktrees at
   exact-parent bridge deletion remain required; this row is not yet verified.
 - The earlier exploratory TCC/Monophobia run overlapped root source edits and is
   not immutable baseline evidence; its explicit caveat remains with the raw log.
+
+- R04 initial PR #881 at `fef28b6` and merge `f40402c` passed CI `33939639226`
+  and `33941403378`: 24 successful jobs and the sole permitted dependency submission
+  skip. Native receipt methods passed twice per platform (10/13/16), and artifact
+  mode tests passed Linux/macOS 6 each and Windows 2, all without skips. Both actual
+  parent comparisons resolved `1240a7b`; the merge tree matches the reviewed PR.
+  Cleanup begins from the complete new-policy `f40402c` baseline with 1,056 entries.
+
+- R04 cleanup `bfe9b1f` matches the four-file reviewed projection. Independent and
+  root actual-code reviews approve; Pyright 0/0, both Ruff paths, 61 focused tests
+  with zero skips and the 1,056-entry strict gate pass. Actual S `f40402c` accepts;
+  baseline-bearing legacy P `1240a7b` rejects. Bootstrap, baseline/debt/evidence,
+  all five R03 test bodies and the other 370 source files remain unchanged.
+  Required cleanup PR and merge CI/native proof remain outstanding.
 
 Full-suite times from concurrent validation are not performance comparisons.
 Windows and Linux claims require their actual native CI receipts.

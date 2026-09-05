@@ -156,12 +156,9 @@ means invalid configuration or unavailable measurement prerequisites. Review
 changes to the measurement policy separately; dependency upgrades must also
 review any change to the pinned Ruff measurement semantics.
 
-The baseline records the import layout alongside the other policy fields. R04's
-temporary transition accepts only its frozen Git parent and raw baseline hash;
-candidate baselines must contain the complete current policy. During that migration,
-use the explicit parent in the [R04 contract](docs/architecture-campaign/R04-import-contract.md),
-including for local checks. R04 removes this bridge in a separate verified change
-after integration; formatting-only reductions retain the existing size allowances.
+The baseline records the import layout alongside the other policy fields.
+Candidate baselines and baseline-bearing Git parents must match the complete
+current policy. Formatting-only reductions retain the existing size allowances.
 
 Import graphs are syntax-based and never import application code. They include
 relative/absolute imports, package initializers, re-exports, imports in functions

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
 from typing import cast
 
 from src.conversion.diagnostic_models import ResourceModelDiagnostic
+from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
@@ -447,10 +447,8 @@ def _base_kwargs(
 
 def _read_lenient_json_file(path: str) -> JsonDict | None:
     try:
-        with open(path, "r", encoding="utf-8") as file:
-            source = file.read()
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
-        return cast(JsonDict, data) if isinstance(data, dict) else None
+        data = read_gamemaker_json(path).value
+        return data if isinstance(data, dict) else None
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 

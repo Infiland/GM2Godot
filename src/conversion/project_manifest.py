@@ -9,6 +9,7 @@ from typing import Callable, Iterable, Mapping, cast
 # D01 compatibility export for deferred resource consumers; retired by R26.
 from src.conversion.diagnostic_models import ProjectManifestDiagnostic as ProjectManifestDiagnostic
 from src.conversion.diagnostic_models import ProjectSourceLocation
+from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
@@ -326,10 +327,9 @@ def _find_yyp_path(
 
 def _read_lenient_json_file(path: str) -> tuple[JsonDict | None, str]:
     try:
-        with open(path, "r", encoding="utf-8") as file:
-            source = file.read()
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
-        return (cast(JsonDict, data), source) if isinstance(data, dict) else (None, source)
+        document = read_gamemaker_json(path)
+        data = document.value
+        return (data, document.source) if isinstance(data, dict) else (None, document.source)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None, ""
 

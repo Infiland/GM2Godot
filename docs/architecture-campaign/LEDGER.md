@@ -7,21 +7,23 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through verified I02
-  PR #890 at `4787f4bd3a86f1ba881337fb10562ca0644d92ea`.
-- Progress counts fully verified roadmap tasks: 15 of 54 (27.8%). Source review,
-  integration and pending checks do not count as verification.
-- Main's 11 dirty policy files remain untouched. Twenty-two unused worktrees
-  were removed after preserving their branches/commits and required evidence;
-  the main, campaign, active L02 and active R13 worktrees remain.
-- Approved local environment: native CPython 3.12.10 arm64 and exact Godot
-  `4.7.2.stable.official.ed1daf0bf`. Python 3.14 is not proof.
-- The single final v0.8.0 release follows full campaign verification and merge
-  of `dev/080-architecture-campaign` into `main`, as confirmed by the user.
-- L02 source and complete local proof are approved; the reviewed combination with verified
-  I02 has passed bounded checks; final native PR/merge proof is next. R13 source
-  has passed65 focused tests and is under independent/root review. I03 remains
-  a prospective contract with typing and characterization prerequisites.
+- Integration branch: `dev/080-architecture-campaign`, through verified L02
+  PR #891 at `5faa683a07a913c96d5283d06b8e2cb1b44e5b30`.
+- Verified progress: 16 of 54 tasks (29.6%). Pending local or native checks do
+  not count as completed tasks.
+- Main's 11 dirty policy files remain preserved. Twenty-three completed
+  worktrees were removed with their branches and required evidence retained.
+  Main, campaign, R13 and this reused I03 worktree remain active.
+- Use native CPython3.12.10 arm64 and exact Godot
+  `4.7.2.stable.official.ed1daf0bf`; Python3.14 is not proof.
+- R13 has local/combined approval in its separate branch; PR #892 native CI
+  remains pending. It is not part of this I03 implementation base.
+- I03's old characterization and corrected concrete binding map are accepted
+  independently/root. Root assigns review_r13_full to the eight scoped files
+  under the accepted I03 contract. Type/lint feasibility and candidate proof
+  remain outstanding.
+- Merge the fully verified campaign into main, then publish the single final
+  v0.8.0 release, as confirmed by the user.
 
 ## Ownership and progress
 
@@ -43,7 +45,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
 | I02 Included Files POSIX operations | verified | audit_transactions_cli; PR #890 merged4787f4b | Independent/root source, local, combined and exact CI APPROVE | PR33968388651/merge33971661125;50new+31retained native/runtime, R12/T01/CLI/artifacts/modes/coverage,strict1045actualb9; I02/final-verification.json |
-| L02 CLI request and session ownership | approved | audit_policy_tests_docs; sourced3a05b2, root combination with4787f4b | Independent/root source, final local and actual combined proof APPROVE |3139full/56known skips,all5fixtures,6entry commands,nine-case parity/same-ref,12controls,12timing workers; L02/L02-root-final-local-proof-review.json |
+| L02 CLI request and session ownership | verified | PR #891 merged `5faa683` | Independent/root local, combined and exact CI APPROVE | PR33978428787/merge33980543144; all six native/CLI/runtime/artifact/coverage/strict-parent verifiers passed; L02/final-verification.json |
+| I03 Windows operations and validation streams | implementing | review_r13_full; dev/080-windows-filesystem at5faa | Proposal,20 test bodies,18 old outcomes and corrected binding map independently/root accepted | 77 actual pairs/97 generations;42 positive sites plus preserved zero-rename case; typing, candidate242 and native34 pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

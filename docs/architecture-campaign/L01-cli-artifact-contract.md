@@ -445,3 +445,57 @@ integrated R04 parent and recheck the five-source-path allowance; any changed se
 budget is a reported dependency. During implementation characterize the corrected True-mode
 fixture first, then remove the dead production branch, then run focused/type/lint/gate/full
 and native proof. Root alone approves final commit/integration after actual-code review.
+
+
+## Approved implementation and local proof
+
+The accepted source is `87d96d58b81edc929292fb33ada02fd2046419c6` on verified
+parent `feb22c30ea13475116c0190e302df0fc7fe08383`. Independent source review and
+root actual-code review approve all four owner files. A second independent reviewer
+and root also approve the final local evidence. Integration and exact native PR/merge
+CI remain pending; this task is approved, not verified.
+
+The unsupported False capability branch and its obsolete canonical-report adapter are
+removed. Real Converter finalizers, artifact refresh, transaction decisions and external
+repair remain authoritative. The separate full-dataclass terminal-attempt comparison,
+primary error precedence, one-summary output, exit mapping and pre/post-decision SIGINT
+behavior remain intact. The temporary True marker used during characterization is gone.
+
+Measured source changes (physical/structural units) are CLI 1401/2036 to 1134/1710,
+coordinator 579/794 C98 to 336/490 C56, and surviving repair 29/51 C7. The new support
+owner is 152/285, maximum C6. The test owner is 3403/7057. The actual Converter at the
+accepted parent was 1442/1772; its one-marker deletion yields 1441/1771. These are source
+measurements, distinct from retained proportional physical allowances. L03 still owns
+the final thin coordinator. Baseline entries fall from 1056 to 1048: eight retirements
+and nine lowered allowances, without a new allowance or policy change.
+
+Before production deletion, the corrected True-mode characterization ran all 78 CLI
+methods with one Windows-only skip. The candidate preserves 71 IDs and the seven
+accepted mappings, three factory ASTs, 49 non-stub and 28 native/real test bodies.
+Focused checks, strict Pyright (zero errors/warnings), Ruff, the trusted-parent gate
+and diff check passed. The frozen full suite ran 3064 tests in 767.319 seconds:
+3008 passed and 56 host skips (53 Windows, two Linux bind mounts, one case-sensitive
+filesystem requirement). All 373 source hashes, native Python 3.12.10, exact Godot
+4.7.2 official ed1daf0bf and all five immutable fixture commits were checked.
+
+Nine real CLI scenarios at immutable base, same-ref control and candidate compare
+complete outcomes, ordered calls, stdout/stderr, signal restoration and public artifact
+bytes/hashes/modes. Each also replays the 78 preserved characterization assertions;
+these are later replays, not recovered earlier output streams. All comparisons match.
+The first comparison correctly failed on private UUID/inode differences and is retained.
+The reviewed correction permits only three known private receipt schemas: it validates
+exact inventories and fields, transaction/name bindings, raw desired-record references,
+sizes/modes and shared destination identities before projecting specified volatile
+identifiers and digests. Public bytes remain exact, unknown private fields/files fail,
+and eight rejection plus four nonvolatile-change controls pass. It makes no historical
+inode-stat, cross-phase inode-persistence or removed-journal-integrity claim. No time or
+memory improvement is claimed for this deletion slice.
+
+Final local proof index SHA256 is
+`225845d3142b0292beb514029a00e68ff2791ea5d5ab1268f6a27758965762f2` (27 artifacts).
+Independent final proof receipt SHA256 is
+`b54a3ca4e531a7710d7feaac1d17bece1ac8011fa9bdf5fcef2dea2651081f86`.
+Native selections already include the full CLI owner; existing coverage includes both
+production owners. No workflow, gate selector, coverage floor or production coverage
+cohort change is needed. Required CLI POSIX/Windows, real Converter cancellation/crash,
+Linux bind-mount and final combined revision evidence remain explicit completion gates.

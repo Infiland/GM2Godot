@@ -322,7 +322,7 @@
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1157,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2770,
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": 990,
-    "application|module_lines.executable|src/conversion/included_files.py::<module>": 11552,
+    "application|module_lines.executable|src/conversion/included_files.py::<module>": 11139,
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": 5054,
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1913,
@@ -361,7 +361,7 @@
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/tokens.py::<module>": 1018,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 886,
     "application|module_structure.executable|src/conversion/godot_validation.py::<module>": 1557,
-    "application|module_structure.executable|src/conversion/included_files.py::<module>": 16077,
+    "application|module_structure.executable|src/conversion/included_files.py::<module>": 15473,
     "application|module_structure.executable|src/conversion/managed_output_publisher.py::<module>": 7149,
     "application|module_structure.executable|src/conversion/managed_output_workspace.py::<module>": 4143,
     "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
@@ -579,14 +579,14 @@
     "tests|function_structure|tests/test_gml_runtime.py::TestGMLRuntimeScript.test_runtime_defines_shared_value_helpers": 732,
     "tests|function_structure|tests/test_gml_runtime.py::TestGMLRuntimeScript.test_runtime_ds_collection_runtime_functions": 229,
     "tests|function_structure|tests/test_gml_statement_api.py::GMLStatementAPITests.test_exact_frozen_model_shapes_signatures_and_types": 202,
-    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_canonical_tampered_commit_receipts_are_rejected_without_cleanup": 286,
+    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_canonical_tampered_commit_receipts_are_rejected_without_cleanup": 285,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_changed_generation_receipts_are_boundary_bound": 216,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_committed_cleanup_preserves_unknown_content_inside_recorded_trees": 323,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary": 341,
-    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_marker_only_committed_recovery_uses_embedded_cleanup_manifest": 256,
+    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_marker_only_committed_recovery_uses_embedded_cleanup_manifest": 255,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_project_lock_initialization_recovers_after_hard_exit": 208,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary": 332,
-    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit": 280,
+    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit": 279,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_windows_cleanup_binding_operations_scale_with_depth": 236,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_windows_multilevel_cleanup_binding_operations_are_linear": 242,
     "tests|function_structure|tests/test_layers_runtime_godot.py::_write_smoke_scene": 287,
@@ -800,7 +800,7 @@
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": 1905,
     "tests|module_lines.executable|tests/test_gml_runtime.py::<module>": 3339,
     "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": 5411,
-    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12420,
+    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12306,
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": 1713,
     "tests|module_lines.executable|tests/test_objects.py::<module>": 3147,
     "tests|module_lines.executable|tests/test_release_publisher.py::<module>": 2011,
@@ -829,7 +829,7 @@
     "tests|module_structure.executable|tests/test_gml_runtime.py::<module>": 7220,
     "tests|module_structure.executable|tests/test_gml_transpiler.py::<module>": 6430,
     "tests|module_structure.executable|tests/test_godot_validation.py::<module>": 2227,
-    "tests|module_structure.executable|tests/test_included_files.py::<module>": 21674,
+    "tests|module_structure.executable|tests/test_included_files.py::<module>": 21384,
     "tests|module_structure.executable|tests/test_linux_gui_artifact_verifier.py::<module>": 1502,
     "tests|module_structure.executable|tests/test_managed_output_crash_recovery.py::<module>": 2546,
     "tests|module_structure.executable|tests/test_managed_output_publisher.py::<module>": 1726,
@@ -1184,22 +1184,22 @@
       "structure": 682
     },
     "application|function_lines|src/conversion/included_files.py::_acquire_included_project_lock": {
-      "ast_sha256": "568d804f3970369b2751f83caf667dfc4ff3e5c7d36f723efc4fc1069e59bd48",
+      "ast_sha256": "53768fd8b8e2870f3161083bf609445e3066bc2c07b5213ccb532d3f9697ae6e",
       "lines": 159,
       "structure": 239
     },
     "application|function_lines|src/conversion/included_files.py::_capture_included_registry": {
-      "ast_sha256": "1b723668d4631edb8d58d60e18878d8693b87a54c09583f4490b04475e091dd5",
+      "ast_sha256": "ee653debc0d97e19128731698369d1f5164aba5bb5a711ba664e784ab167d6c4",
       "lines": 173,
       "structure": 205
     },
     "application|function_lines|src/conversion/included_files.py::_capture_included_tree_fallback": {
-      "ast_sha256": "df395c0a7f988792a310521ced7795c42435e90f460026b09ae011e9839702a6",
+      "ast_sha256": "ee8cc509487dc1b71289ac7b53c5a90f667311c6b01c63890c2bda3ce22a18b5",
       "lines": 163,
       "structure": 237
     },
     "application|function_lines|src/conversion/included_files.py::_chmod_exact_included_file": {
-      "ast_sha256": "de0433d6dd60ea666f022048b10c67c9452d243645af3a94fe8d5887f69e2ea7",
+      "ast_sha256": "51dde520a40d7d2367cac490a3f9619ba3c30689e6b760154d7296adc4b8dd7b",
       "lines": 165,
       "structure": 285
     },
@@ -1209,27 +1209,27 @@
       "structure": 291
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_directory": {
-      "ast_sha256": "494f8507de86f3556f29079ed3483d5184d3fb25627bccd99e454a48f2c4a43c",
+      "ast_sha256": "469360c100d8e0d5df38dd492a761d552dce49bf2a60df97fe60242bad2fd0e2",
       "lines": 170,
       "structure": 221
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_file": {
-      "ast_sha256": "425953b002c1d562280af661d3664127262afb502d8a9620bb891a762ec38001",
+      "ast_sha256": "cbeb9289f07b9d830eb1c8dfb3d698d595127830b8fad203d552ed731905171a",
       "lines": 157,
       "structure": 184
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_tree": {
-      "ast_sha256": "1fb4003121ce71f2fea88b6825f0f9c484db71eef380d6022cf32c25c7f800a8",
+      "ast_sha256": "6b4f9111f924a1e53ee96eca3420284dac8e9a57d459f461ec05b903fa1439e6",
       "lines": 430,
       "structure": 622
     },
     "application|function_lines|src/conversion/included_files.py::_commit_included_output_set": {
-      "ast_sha256": "ec41a7e23f89ca747c8c11986c6c223c901610bfddfda8cf341b0a2d2b5e6555",
+      "ast_sha256": "7b7422525d848ca1486514550d82e819d238d63df879d03b1470361f1422e8cf",
       "lines": 486,
       "structure": 570
     },
     "application|function_lines|src/conversion/included_files.py::_included_bounded_record_state": {
-      "ast_sha256": "f8c467edf332be1a9bcbe3a6a94bd2bba9b3832f7c495aef9d7e9238297d98d1",
+      "ast_sha256": "2ec0991e5bc683fa826e26671dd93417040ebd0fc33676a82ff36dd10d40b36a",
       "lines": 163,
       "structure": 277
     },
@@ -1244,12 +1244,12 @@
       "structure": 433
     },
     "application|function_lines|src/conversion/included_files.py::_move_exact_included_entry": {
-      "ast_sha256": "ee1658a605eb529c3589a7b6429e2d759c60117d1093a9788e6005a89f5bd181",
+      "ast_sha256": "b10119c2e8d0c50b076dec0e9f8f85eee4b254da5bccae88d36c980078228694",
       "lines": 213,
       "structure": 278
     },
     "application|function_lines|src/conversion/included_files.py::_recover_included_output_set": {
-      "ast_sha256": "1fadbdafd67529fd48d5b858b13920e12715cb56efb5860c0a2f889e5044197b",
+      "ast_sha256": "af0a85bdc6f36bb72a1e83a4cb114e0e7e97106caa88e7edc81398275e6e6d6e",
       "lines": 191,
       "structure": 258
     },
@@ -1259,7 +1259,7 @@
       "structure": 255
     },
     "application|function_lines|src/conversion/included_files.py::_stage_included_output_at": {
-      "ast_sha256": "42bfc3bd7309606044b0ce8e63cd7909e169a39fa24469d1c46bb5190c20aa4d",
+      "ast_sha256": "4de227b2038536027f1bf357f1720bdf3b0e1bf4b82707e53821cef555a96f5a",
       "lines": 157,
       "structure": 242
     },
@@ -1444,9 +1444,9 @@
       "structure": 1557
     },
     "application|module_lines.executable|src/conversion/included_files.py::<module>": {
-      "ast_sha256": "355d04fd4f06b45486589e96d7e24c9529e9a2fd4f5f2d5deca27bd2bccb710c",
-      "lines": 11552,
-      "structure": 16077
+      "ast_sha256": "a6246a3f75e06dd48b5bcced726270fdbd73b4520affa18f0db5df251df76fc3",
+      "lines": 11139,
+      "structure": 15473
     },
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": {
       "ast_sha256": "4f824817cf5076e568c3dff8fb4e99b6056f0bd84dfc29485fdb2450d15eb2e7",
@@ -1694,9 +1694,9 @@
       "structure": 6430
     },
     "tests|module_lines.executable|tests/test_included_files.py::<module>": {
-      "ast_sha256": "ecba75991c63dcaf7e943ab7bbf6cc6bbe86a836b1a5f7809fa7ad6c7a9e8a38",
-      "lines": 12420,
-      "structure": 21674
+      "ast_sha256": "7ec48c54b804bbcecc70610ebe9885801180304e7d1e4fa49a431f2eeafef38b",
+      "lines": 12306,
+      "structure": 21384
     },
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": {
       "ast_sha256": "c6201be19afa33938144fa63e57edfe02271a0579edae25b4cac077fce0253b1",

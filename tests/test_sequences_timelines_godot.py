@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,25 +13,11 @@ from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryE
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sequence_assets import normalize_sequence_asset, render_sequence_resource
 from src.conversion.type_defs import JsonDict
+from tests.godot_test_support import require_exact_godot
 
 AUTHORED_SEQUENCE_FIXTURE = (
     Path(__file__).parent / "fixtures" / "authored_sequences" / "fixture.json"
 )
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -509,9 +494,7 @@ def _write_authored_smoke_scene(project_dir: Path) -> None:
 
 class TestSequencesTimelinesGodotSmoke(unittest.TestCase):
     def test_sequence_timeline_runtime_smoke_scene(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
@@ -550,9 +533,7 @@ class TestSequencesTimelinesGodotSmoke(unittest.TestCase):
         self.assertIn("SEQUENCES_TIMELINES_SMOKE_OK", output)
 
     def test_authored_track_keyframe_playback_and_order(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             project_dir = Path(tmpdir)
@@ -594,9 +575,7 @@ class TestSequencesTimelinesGodotSmoke(unittest.TestCase):
         self.assertIn("AUTHORED_SEQUENCES_TIMELINES_OK", output)
 
     def test_converted_timeline_gml_runs_in_frame_order(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             case_dir = Path(tmpdir)

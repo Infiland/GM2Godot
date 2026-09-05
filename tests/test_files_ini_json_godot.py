@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,21 +12,7 @@ from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.included_files import IncludedFilesConverter
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -39,24 +24,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
     def test_recovered_committed_included_generation_boots_without_mixing(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         interruption_script = textwrap.dedent(
             """\
@@ -325,24 +293,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
     def test_included_files_fail_closed_while_transaction_journal_exists(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         smoke_script = textwrap.dedent(
             """\
@@ -489,24 +440,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
     def test_large_included_file_first_access_uses_startup_prewarm(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         payload_size = 64 * 1024 * 1024
         smoke_script = textwrap.dedent(
@@ -669,24 +603,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
     def test_same_size_pretrust_mutation_rejects_complete_generation(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         smoke_script = textwrap.dedent(
             """\
@@ -805,24 +722,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
         )
 
     def test_untrusted_registry_does_not_expose_loose_payload(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         smoke_script = textwrap.dedent(
             """\
@@ -932,24 +832,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                 )
 
     def test_files_ini_json_and_path_mapping(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         smoke_script = textwrap.dedent(
             """\

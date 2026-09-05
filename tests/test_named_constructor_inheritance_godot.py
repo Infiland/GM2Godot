@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,17 +12,7 @@ from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.script_functions import modern_script_function_declarations
 from src.conversion.scripts import ScriptConverter
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -34,9 +22,7 @@ def _write_text(path: Path, content: str) -> None:
 
 class TestNamedConstructorInheritanceGodot(unittest.TestCase):
     def test_named_inheritance_registers_runs_and_keeps_original_source_lines(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         source = (
             "// Named constructor inheritance fixture\n"

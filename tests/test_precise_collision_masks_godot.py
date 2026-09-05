@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,6 +13,7 @@ from PIL import Image
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sprites import SpriteConverter
+from tests.godot_test_support import require_exact_godot
 
 _EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
@@ -37,19 +37,6 @@ class _FixtureSpec(TypedDict):
     collision_tolerance: int
     frames: list[list[str]]
     sprites: list[_SpriteSpec]
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -385,22 +372,7 @@ def _write_godot_probe(project_dir: Path) -> None:
 
 class TestPreciseCollisionMasksGodot(unittest.TestCase):
     def test_rectangle_static_and_per_frame_masks_have_distinct_outcomes(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        if version_result.stdout.strip() != _EXPECTED_GODOT_VERSION:
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

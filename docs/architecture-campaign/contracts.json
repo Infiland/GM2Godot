@@ -924,7 +924,7 @@
         },
         "legacy_baseline": "1056 entries retained; aggregate function265to261/module989to984 only; no new or grown debt"
       },
-      "remaining_verification": "Prepared integration review; actual verified-parent refresh; exact final native PR and merge CI. Final original local proof and its metadata are approved.",
+      "remaining_verification": "Final three-document metadata review, then exact native PR and merge CI against verified T01. Original local and guarded combined proofs approved.",
       "final_local_proof": {
         "verdict": "APPROVE independent and root",
         "candidate": "0763d71879d1f166b90134159c1594ce84b10db8",
@@ -960,6 +960,25 @@
         "inputs_sha256": "60043630166ab54999f4ef033c2e96ef4295aeb61cf8774b8797a0293bc87084",
         "results_sha256": "01fdbf08d2ddca50867da7788ea78ac6ff464585a26ff6ea0c487856dc54930d",
         "state": "Prepared combined checks passed; final independent/root integration metadata review and actual verified-parent/native PR/merge evidence pending"
+      },
+      "final_parent_preparation": {
+        "prepared_head": "c225210ad92025c1cb66058cdba9e8ed2ff54bb5",
+        "actual_verified_parent": "e142714a0f24a085d5717132f24f44f3c2d488f8",
+        "prepared_tree": "8cfd2a2ff8a9c11ef4be02d62f209feb7361987b",
+        "ancestry_only_prior": "3b6665df941a6438c030521765b62cf7f1a6c9b8",
+        "all_files_unchanged_by_ancestry": true,
+        "approved_source_owners": 6,
+        "other_python_exact_parent": 385,
+        "python_count": 391,
+        "frozen_tracked_inputs": 588,
+        "checks": "Pyright0/0 Ruff strict1045 newguards2/0 CLI78/oneexactWindowslocalhostskip; actual-e142 strictPASS",
+        "baseline_sha256": "deb164ed001d9f3b0bb77199a97f2bdd06c6ce1f9d1f47ea903c35dc954df3f0",
+        "inputs_sha256": "103b9556ef15c48e50a45070df08793ba93bf583ec61ef29541a29960a385e26",
+        "results_sha256": "8427f351376b30686262307c9597ae85dbb701d1f10f07a2cb550008136e320d",
+        "independent_review_sha256": "7418b530f4c1994e2eac3b1061e81a3925229e6967334db8d0b24c2d95084c0e",
+        "root_review_sha256": "6d6977ccf37b3a4da1b91186589ca7bbc458072e32588b889b6216e28725b955",
+        "native_selection": "All35 =33Linux unit/consumer and2actualGodot; inheritedT01/nativegates unchanged",
+        "full_parity_benchmark_attribution": "Original0763d71; not rerun or relabeled for ancestry/doc/two-test parent delta"
       }
     },
     {
@@ -2391,7 +2410,7 @@
       "task_id": "T01",
       "issue": 867,
       "title": "Test support exact Godot discovery",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "Repeated engine/path/temp-process setup obscures behavior and skips.",
       "expected_benefit": "Zero duplicate Godot discovery in accepted inventory; helpers <=300 lines; meaningful assertions remain in tests.",
       "current_owner": "Godot/fixture tests and sys.path-modifying tests",
@@ -2532,7 +2551,7 @@
         "independent_receipt_sha256": "44c17c5d29ad6110b22ca70c2e3a85bb40d4f1912c3dca2f99dd7cbe4cb3fdb3",
         "root_review_sha256": "dd4e3efe01510bc29ef9b1f5350f0cb39fdbd4a9e638ba1d4d1fe191557c6dbd"
       },
-      "remaining_verification": "Final metadata review and exact native PR/merge CI:12 helper cases zero skips on Linux/macOS/Windows and65 applicable runtime IDs actual Godot success. The66th runtime case retains explicit required local proof.",
+      "remaining_verification": "None for T01; T02 and T03 remain separate tasks.",
       "combined_integration": {
         "state": "Prepared and locally checked; reviewed L01 parent native CI pending",
         "prepared_merge": "b0c47b0587df9183924765bf13f02a0d6e9768ae",
@@ -2566,6 +2585,16 @@
         "independent_review_sha256": "2311e02cc2e7eb47ac7dd92afed0c34ecbea72acfbae2377a0bd006e8f92aaa1",
         "root_review_sha256": "97ec0eb6e57c76a4d36ac7cc9a83376aede81454cd8b1a7234c7a65e05191202",
         "proof_limits": "Prior full/runtime/negative-control/timing evidence retains original source attribution. No source changes to53 T01 owners; actual native PR/merge CI pending."
+      },
+      "final_verification": {
+        "pr": 888,
+        "pr_head": "78f9c6f7e956d515e8ab5b08f135ed2f30627d2a",
+        "pr_ci": 33960637423,
+        "merge": "e142714a0f24a085d5717132f24f44f3c2d488f8",
+        "merge_ci": 33961965330,
+        "proof_sha256": "ed3eb8b2ab0a548d5cce3274cceec9bb71be81fe8afce0fa18e9871204cdab3c",
+        "both_exact_revisions": "25strictjobs24success;6N01;mode6/6/2;78CLIeachhost with exact host skips;requiredConverter/crash/bind/guards/coverage;65runtimecasesinLinuxGodot and12helperspernativehost0skips",
+        "local_only_runtime": "66th runtime remains original immutable local requirement; not CI credit"
       }
     },
     {

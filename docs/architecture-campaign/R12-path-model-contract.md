@@ -336,3 +336,44 @@ and exact native PR/merge evidence remain completion gates.
 
 Combined input SHA256: `60043630166ab54999f4ef033c2e96ef4295aeb61cf8774b8797a0293bc87084`.
 Combined result SHA256: `01fdbf08d2ddca50867da7788ea78ac6ff464585a26ff6ea0c487856dc54930d`.
+
+
+## Final preparation against verified T01
+
+T01 PR #888 is verified at merged `e142714a0f24a085d5717132f24f44f3c2d488f8`.
+Exact PR CI `33960637423` and merge CI `33961965330` passed the aggregate, six
+native receipts, artifact-mode cases, inherited CLI/Converter/crash/bind and
+coverage proof. Each revision also passed 65 runtime cases in the Linux Godot job, and all
+12 helper cases on each of Linux, macOS and Windows. Its 66th runtime case retains the
+explicit local requirement; no extra native runtime credit is inferred.
+
+R12 prepared head `c225210ad92025c1cb66058cdba9e8ed2ff54bb5` includes that
+actual merge ancestry. It has the exact prior `3b6665d` tree
+`8cfd2a2ff8a9c11ef4be02d62f209feb7361987b`; the ancestry step changed no file.
+All six R12 source owners still match approved `9e01fd1`. The other 385 of 391
+Python files match the reviewed T01 parent. The final L01 guard addition was
+checked on 588 frozen tracked files with Pyright zero errors/warnings, Ruff,
+the strict gate and two public guards plus all 78 CLI methods. Both guards
+passed; the CLI cohort retained only its exact Windows-only local skip.
+
+The strict gate now passes against actual `e142714` with 1,045 keys. The only
+R12 allowance reductions remain aggregate parser structure 265 to 261 and
+module structure 989 to 984. Baseline hash is
+`deb164ed001d9f3b0bb77199a97f2bdd06c6ce1f9d1f47ea903c35dc954df3f0`.
+All prior gate objects, runtime assertions and coverage floors remain intact;
+only the approved R12 gate and path_model coverage membership are added.
+
+Guarded input SHA256: `103b9556ef15c48e50a45070df08793ba93bf583ec61ef29541a29960a385e26`.
+Guarded result SHA256: `8427f351376b30686262307c9597ae85dbb701d1f10f07a2cb550008136e320d`.
+Independent/root guarded-parent approvals:
+`7418b530f4c1994e2eac3b1061e81a3925229e6967334db8d0b24c2d95084c0e` /
+`6d6977ccf37b3a4da1b91186589ca7bbc458072e32588b889b6216e28725b955`.
+T01 final verification SHA256:
+`ed3eb8b2ab0a548d5cce3274cceec9bb71be81fe8afce0fa18e9871204cdab3c`.
+
+The original full suite, five-fixture parity/control and benchmark retain their
+immutable `0763d71` attribution. Later ancestry, documentation and the two
+preflight guards do not relabel or duplicate those runs. R12 exact PR and merge
+CI must still prove all 35 selected cases: 33 Linux unit/consumer methods and
+two actual exact-Godot runtime methods, plus inherited T01/native requirements.
+Final metadata review and those CI receipts remain before R12 verification.

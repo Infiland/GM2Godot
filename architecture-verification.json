@@ -742,6 +742,219 @@
         "facade_module": "src.conversion.gml_transpiler"
       },
       "validation_kind": "conversion-parity"
+    },
+    "G01": {
+      "unittest_ids": [
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_empty_statement_precedes_context_field_normalization",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_none_defaults_and_falsey_mapping_preserve_existing_rules",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_mutable_channels_and_generated_counter_keep_identity",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_parser_reads_fresh_context_in_original_argument_order",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_parser_capture_is_present_only_at_existing_call_site",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_recursive_increment_retains_normalized_state_and_omits_capture",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_context_is_frozen_with_live_referenced_containers",
+        "tests.test_gml_statement_context.TestStatementLoweringContext.test_statement_phase_contract_and_facade_stay_unchanged",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_exact_static_alphabetized_api_and_model_surfaces",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_exact_api_signatures_and_resolved_types",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_exact_frozen_model_shapes_signatures_and_types",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_result_preserves_mutable_identity_and_explicit_final_state",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_nested_switch_propagates_child_local_and_instance_state",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_static_declaration_contract_skips_nested_functions_and_is_stable",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_empty_input_returns_explicit_fresh_state",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_parser_error_preserves_exact_text_line_and_column",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_statement_contract_remains_package_internal",
+        "tests.test_gml_statement_api.GMLStatementAPITests.test_fresh_process_import_orders_preserve_function_literal_parsing",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_constructs_every_shared_phase_model_from_explicit_exports",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_constructs_every_expression_model_and_union_member",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_constructs_every_result_model_and_preserves_serialization",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_constructs_every_statement_model_and_preserves_mutable_channels",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_phase_reexports_preserve_model_identity",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_explicit_model_all_declarations_are_static_and_exact",
+        "tests.test_gml_transpiler_models.TestGMLTranspilerModels.test_model_modules_are_dependency_only",
+        "tests.test_gml_source_maps.TestGMLSourceMaps.test_source_map_tracks_comments_macros_multiline_and_nested_blocks",
+        "tests.test_gml_source_maps.TestGMLSourceMaps.test_malformed_syntax_reports_source_span",
+        "tests.test_gml_source_maps.TestGMLSourceMaps.test_reserved_name_and_case_collision_diagnostics_have_locations",
+        "tests.test_gml_source_maps.TestGMLSourceMaps.test_initializer_values_are_not_reported_as_declared_identifiers",
+        "tests.test_gml_source_maps.TestGMLSourceMaps.test_verbatim_contents_do_not_become_source_comments_or_identifiers",
+        "tests.test_gml_transpiler.TestGMLExpressionTranspiler.test_transpiles_ds_grid_mutation_targets_once",
+        "tests.test_gml_transpiler.TestGMLExpressionTranspiler.test_nested_mixed_accessor_mutation_caches_grid_cell_container",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_transpiles_function_return_statements",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_event_inherited_calls_parent_event_and_continues_child_body",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_finally_preserves_abrupt_control_flow_from_try_body",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_rejects_control_flow_inside_finally_blocks",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_with_preserves_enclosing_local_mutation",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_do_until_continue_checks_condition_first",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_switch_continue_targets_outer_loop",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_for_loop_preserves_execution_order",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_for_continue_runs_operation_clause",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_scope_lookup_precedence_and_asset_values_are_explicit",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_transpiles_mutation_expressions",
+        "tests.test_gml_transpiler.TestGMLStatementTranspiler.test_transpiles_postincrement_in_simple_array_assignment_index",
+        "tests.test_assignment_index_postincrement_godot.TestAssignmentIndexPostincrementGodotSmoke.test_array_index_postincrement_executes_on_exact_godot_4_7_2",
+        "tests.test_bound_method_context_godot.TestBoundMethodContextGodot.test_fixture_preserves_dynamic_other_script_rebinding_and_constructors",
+        "tests.test_bound_method_context_godot.TestBoundMethodContextGodot.test_unmarked_custom_callable_fails_closed",
+        "tests.test_script_runtime_godot.TestScriptRuntimeGodotSmoke.test_script_execute_legacy_arguments_and_callable_lookup"
+      ],
+      "required_environment": {
+        "GODOT_BIN": "required-executable",
+        "SNAP_PROJECT_PATH": "required-git-checkout",
+        "ADDING_PROJECT_PATH": "required-git-checkout",
+        "SIMPLE_TOPDOWN_PROJECT_PATH": "required-git-checkout"
+      },
+      "required_paths": [
+        "src/conversion/gml_transpiler.py",
+        "tests/gml_transpiler_architecture_support.py",
+        "tests/test_gml_transpiler_architecture.py",
+        "tests/fixtures/golden/basic_scripts/BasicScripts.yyp",
+        "tests/fixtures/part2/projects/resource_matrix/ResourceMatrix.yyp",
+        "constraints/requirements-macos-py312.lock",
+        "src/conversion/gml_transpiler_parts/statement_models.py",
+        "src/conversion/gml_transpiler_parts/statement_parser.py",
+        "src/conversion/gml_transpiler_parts/statements.py",
+        "tests/test_gml_statement_context.py"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.10",
+        "platform": "darwin",
+        "machine": "arm64",
+        "godot_binary_environment": "GODOT_BIN",
+        "godot_version": "4.7.2.stable.official.ed1daf0bf"
+      },
+      "external_repositories": [
+        {
+          "name": "snap",
+          "environment": "SNAP_PROJECT_PATH",
+          "remote": "https://github.com/JujuAdams/SNAP.git",
+          "commit": "b4191e195c7c84359f995d568d8906c452b83e50",
+          "tree": "d933a9cd28ce965779e75f5d961b65a8203fb534"
+        },
+        {
+          "name": "adding",
+          "environment": "ADDING_PROJECT_PATH",
+          "remote": "https://github.com/WuffMakesGames/Adding.git",
+          "commit": "1bf032618be258242f78505de7cd151242452776",
+          "tree": "b5e9d66287101b90227460d54becd6dbd12c0578"
+        },
+        {
+          "name": "simple_topdown",
+          "environment": "SIMPLE_TOPDOWN_PROJECT_PATH",
+          "remote": "https://github.com/Infiland/GM2GodotGameTest_SimpleTopDown.git",
+          "commit": "2413d7714b0dbd5d548058ea4c74f591f0d4e1e3",
+          "tree": "26e60949d2ce9ab69ca6122255b5a16e641f72fa"
+        }
+      ],
+      "parity": {
+        "destination": {
+          "seed_project_godot": "[application]\nconfig/name=\"GM2Godot parity seed\"\n",
+          "same_absolute_path": true,
+          "reset_between_base_and_head": true,
+          "transaction_provenance": {
+            "root": ".gm2godot-managed-output",
+            "lock": ".gm2godot-managed-output.lock",
+            "volatile_fields": [
+              "transaction_id",
+              "destination_identity",
+              "parent_identity",
+              "managed_identities",
+              "evidence.attempt.identity",
+              "evidence.manifest.identity",
+              "generation_record.identity",
+              "generation_record.name",
+              "generation_record.sha256",
+              "journal_sha256"
+            ]
+          }
+        },
+        "dependency_locks": [
+          {
+            "path": "constraints/requirements-macos-py312.lock",
+            "sha256": "739ffd4c1281f1d6d279c0830b792fa71c7fb34e6849bccb4bd44207e0f9ad53"
+          },
+          {
+            "path": "requirements-bootstrap.txt",
+            "sha256": "90c82b6bda1db6d1665cdab218349663bd7903622fb010ddc01438141497a0d2"
+          },
+          {
+            "path": "requirements.txt",
+            "sha256": "6d55718ca1e4fc63ab64a2efa2dd6612a31b010d908b02662cebc2d2d56d0ad4"
+          },
+          {
+            "path": "requirements-tooling.txt",
+            "sha256": "ea632cc2f500df05d59e7b203772a334da64347ad8ec57f3f8927218931407ee"
+          }
+        ],
+        "fixtures": [
+          {
+            "id": "golden-basic-scripts",
+            "repository_path": "tests/fixtures/golden/basic_scripts",
+            "project_relative_path": "BasicScripts.yyp",
+            "sha256": "c9577649cac4c807d94ed0049e9175ffcb2448bb168939f5882debaef0562cef",
+            "only": [
+              "scripts"
+            ],
+            "expected_exit": 0,
+            "max_warnings": 0,
+            "max_errors": 0,
+            "max_unsupported": 0
+          },
+          {
+            "id": "part2-resource-matrix",
+            "repository_path": "tests/fixtures/part2/projects/resource_matrix",
+            "project_relative_path": "ResourceMatrix.yyp",
+            "sha256": "f3326f6db31a99ec36c53476b1ae405094b2e7efd925fcc534b582c996aea957",
+            "only": [],
+            "expected_exit": 0
+          },
+          {
+            "id": "snap-lts",
+            "environment": "SNAP_PROJECT_PATH",
+            "project_relative_path": "snap.yyp",
+            "sha256": "a837cc7aacb9b21898f0d117e88b365c47a19985d375675828377ea32cc9a6e8",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          },
+          {
+            "id": "adding-lts",
+            "environment": "ADDING_PROJECT_PATH",
+            "project_relative_path": "Adding.yyp",
+            "sha256": "ee4d6eeca8078b16621abe3f8796c68bd3a8177b9184007d69d399315c93bac0",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          },
+          {
+            "id": "simple-topdown",
+            "environment": "SIMPLE_TOPDOWN_PROJECT_PATH",
+            "project_relative_path": "GM2GodotGameTest_SimpleTopDown.yyp",
+            "sha256": "9ed406accd7a5697703fdd69055ce359ae211632ae23775f5f8f3d2d6b72ff6d",
+            "only": [],
+            "expected_exit": 0,
+            "expected_outcome_state": "partial",
+            "expected_skipped_resources": 1
+          }
+        ],
+        "fields": [
+          "relative_paths",
+          "file_bytes",
+          "modes",
+          "generated_gdscript",
+          "source_maps",
+          "diagnostics",
+          "diagnostic_ids",
+          "parser_error",
+          "stdout",
+          "stderr",
+          "exit_status",
+          "terminal_output_state",
+          "transaction_provenance",
+          "runtime_markers"
+        ],
+        "facade_module": "src.conversion.gml_transpiler"
+      },
+      "validation_kind": "conversion-parity"
     }
   }
 }

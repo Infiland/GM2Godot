@@ -79,7 +79,7 @@
     "application|function_lines|src/conversion/gml_transpiler_parts/preprocessor.py::preprocess_gml_source_preserving_layout": 219,
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::_assignment_target_reader_writer": 266,
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 151,
-    "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1161,
+    "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1159,
     "application|function_lines|src/conversion/godot_validation.py::validate_generated_godot_project": 267,
     "application|function_lines|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 541,
     "application|function_lines|src/conversion/included_files.py::_acquire_included_project_lock": 159,
@@ -173,7 +173,7 @@
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_expression_to_temp": 210,
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 284,
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_var_statement": 169,
-    "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1944,
+    "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1940,
     "application|function_structure|src/conversion/gml_transpiler_parts/tokens.py::tokenize_gml_source": 368,
     "application|function_structure|src/conversion/godot_validation.py::validate_generated_godot_project": 384,
     "application|function_structure|src/conversion/included_file_paths.py::plan_included_file_paths": 157,
@@ -319,8 +319,8 @@
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/emitter.py::<module>": 1449,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/gml_function_dispatch.py::<module>": 1546,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": 890,
-    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1190,
-    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2771,
+    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1157,
+    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2770,
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": 990,
     "application|module_lines.executable|src/conversion/included_files.py::<module>": 12130,
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": 5054,
@@ -356,8 +356,8 @@
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/gml_manual_scope.py::<module>": 928,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": 1543,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/source_map.py::<module>": 891,
-    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 2362,
-    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 4644,
+    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 2296,
+    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 4641,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/tokens.py::<module>": 1018,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 886,
     "application|module_structure.executable|src/conversion/godot_validation.py::<module>": 1557,
@@ -454,7 +454,6 @@
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 9,
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_increment_expression_to_value": 10,
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_var_statement": 9,
-    "application|parameters|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 15,
     "application|parameters|src/conversion/included_files.py::IncludedFilesConverter.__init__": 10,
     "application|parameters|src/conversion/included_files.py::_cleanup_recorded_included_file": 10,
     "application|parameters|src/conversion/included_files.py::_read_opened_included_bounded_record_payload": 9,
@@ -1170,9 +1169,9 @@
       "structure": 284
     },
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": {
-      "ast_sha256": "7f13d0f7a4267eac085c42b7f1e86ef8b55a4a3c99117a3effd1e58f9a042723",
-      "lines": 1161,
-      "structure": 1944
+      "ast_sha256": "7540aa3f034617d2b0a46c6f25d7e099f742b41f7b6824238975c253afa2276f",
+      "lines": 1155,
+      "structure": 1940
     },
     "application|function_lines|src/conversion/godot_validation.py::validate_generated_godot_project": {
       "ast_sha256": "15bed2927695c2a518a8e6e7e00162f20f5956f186cb7407d12e10aa60a78783",
@@ -1430,14 +1429,14 @@
       "structure": 1543
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": {
-      "ast_sha256": "9bbfcdffeafa03b9e9306f8cac7f2cc3eaff99b30438504e0ee78aba3ab4957e",
-      "lines": 1180,
-      "structure": 2362
+      "ast_sha256": "45ccb2a85e57633e41c33e20342636fba32410cf0e5c2e4b79338121b9a3cd00",
+      "lines": 1149,
+      "structure": 2296
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": {
-      "ast_sha256": "ee4445d111dcd3ab1c83069a964d0bf8abbbf28668ae5203a64f938cfa0219e5",
-      "lines": 2771,
-      "structure": 4644
+      "ast_sha256": "cdee41a1093d5b2eb2808dc2c0a20fcdda517d13b62e83ba903baaded371056f",
+      "lines": 2766,
+      "structure": 4641
     },
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": {
       "ast_sha256": "63d7d151ee359069acff27060cf51e57a0e23cf7b7f416b79bc6914d9050ee17",

@@ -2,7 +2,7 @@
 
 Status: ACCEPTED and assigned by root after independent and root contract review. Fixed implementation parent C is `ec257912ec907161b2e89d552a76dc591ed33b68`. The final source/import/metric refresh is verified in `/Users/infi/Documents/Github/.gm2godot-v080-evidence/G01/final-C-entry-source-confirmation.json`. This entry supersedes historical proposal status/source and completed-R04 implementation-start wording below; all substantive API, behavior, scope, size and proof requirements remain binding.
 
-Sole implementer: `audit_policy_tests_docs` in `/Users/infi/Documents/Github/GM2Godot-080-statement-context`. Independent actual-code reviewer: `audit_transactions_cli`, then root. The conditional start follows [R04's reviewed entry contract](R04-parallel-entry-contract.md). Cleanup PR #883 and CI `33943223988` are pending; no child PR or campaign integration is authorized before successful exact cleanup PR and merge proof. If cleanup changes or fails, root reassesses affected work and invalidates stale evidence.
+Sole implementer: `audit_policy_tests_docs` in `/Users/infi/Documents/Github/GM2Godot-080-statement-context`. Independent actual-code reviewer: `audit_transactions_cli`, then root. The conditional start follows [R04's reviewed entry contract](R04-parallel-entry-contract.md). Cleanup PR #883 is verified at merge `feb22c30ea13475116c0190e302df0fc7fe08383`: exact PR CI `33943223988` and merge CI `33943927132` passed, including native receipts and strict actual-parent proof. The cleanup dependency is satisfied; G01 still needs its own full/benchmark/parity and exact PR/merge proof.
 
 Root has accepted the original finite contract SHA256 `db995a2a85d82a3fc04c058e2cf94e17bb6be513359704152d773d7da232a9fc` and confirmed all 16 source inputs at C. Applicable current measurements/import projections are recorded in the external final source receipt; historical measurement tables below remain provenance where earlier source counts differ. Strict comparison uses immutable C; policy thresholds, retained evidence, scopes and suppressions may not grow.
 
@@ -12,7 +12,7 @@ Freeze source before proof. Coordinate a reserved CPU window with root before fu
 
 ## Problem, benefit and ownership
 
-`statements.transpile_statement` has **15 parameters including statement**, not the roadmap's provisional 16. Four parser calls repeat 13 or 14 state arguments; the lowerer has one recursive call. The current owners are `_StatementParser` for live parser state and `statements` for statement lowering. Introduce one frozen `StatementLoweringContext` in the existing model owner; retain state and lifecycle ownership in those same two implementations. This reduces the lowerer to two parameters and centralizes fresh parser-state construction before the later handler slices. It does not claim to decompose the remaining C120/1151-line lowerer.
+`statements.transpile_statement` has **15 parameters including statement**, not the roadmap's provisional 16. Four parser calls repeat 13 or 14 state arguments; the lowerer has one recursive call. The current owners are `_StatementParser` for live parser state and `statements` for statement lowering. Introduce one frozen `StatementLoweringContext` in the existing model owner; retain state and lifecycle ownership in those same two implementations. This reduces the lowerer to two parameters and centralizes fresh parser-state construction before the later handler slices. It does not claim to decompose the remaining C122/1155-line lowerer.
 
 ## Inputs, outputs and finite internal contract
 
@@ -82,3 +82,31 @@ Shared parser allocation changes require a bounded performance comparison. `G01-
 ## Completion and removal
 
 Implementation owner is assigned by root after independent/root contract acceptance and actual post-R04 ref/hash/metric refresh. Complete only after all five callers migrate, old repeated argument lists disappear, public contracts remain intact, both owner/test budgets pass, characterization/performance/full/parity proof is tied to frozen source, independent then root actual-code review approves, and exact integration checks verify. No temporary adapter is introduced. Therefore no deferred removal or fallback path is authorized; any newly discovered behavioral discrepancy is reported for separate finite scope instead of being silently repaired here.
+
+## Accepted final typing refinement and code review
+
+The two explicit None guards use `set[str]()` after strict Pyright demonstrated
+unknown element types with unannotated empty sets. Keep the first
+`prelude_lines: list[str] = []` declaration, and replace exactly five later identical
+annotations in the same function with `prelude_lines = []`. Every allocation stays
+in place; this consolidates one local type declaration without changing any lowering
+branch. No helper, cast, suppression, threshold or allowance is added. Historical
+projection metrics above are superseded by the following measured final source.
+
+At source commit `82faae38dc3e8eb7aed48963b8e1062b8954ebe2`, statement_models is
+76 physical/143 structural units; statements is 2766/4641, its lowerer is
+1155/1940, and statement_parser is 1149/2296. The context factory is 17/31.
+McCabe complexity remains C122; later handler tasks own its reduction. This slice
+reduces fifteen parameters to two and retires that one debt key. The strict
+immutable-C gate has 1055 remaining keys, six further reductions and no new debt.
+The final one-line initializer alignment correction is AST-neutral.
+
+Independent and root actual-code reviews approve all seven frozen owner files.
+Full Pyright has zero errors/warnings; both Ruff checks pass. All forty retained
+method ASTs are unchanged, and all 48 required methods, including the eight new
+cases and four exact-Godot cases, passed with zero skips. The new tests use public
+statement parsing and a finite factory-order assertion; no private import/type-check
+bypass is introduced. Root registers those same ordered 48 methods in the G01 gate,
+with unchanged R01 runtime, environment, fixture and fourteen-field parity contracts
+and no allowed skips. Full-suite, benchmark, immutable parity and native CI are
+still outstanding and the task is not yet verified.

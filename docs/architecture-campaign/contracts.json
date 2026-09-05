@@ -278,7 +278,7 @@
       "task_id": "R04",
       "issue": 795,
       "title": "Complete I001 import sorting lint cohort",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "213 inherited I001 owner entries; fixed explicit layout detects 247 findings on the accepted R03 source. Project/isolated defaults previously disagreed; frozen source has 372 Python inputs and 41 Markdown inputs.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current I001 import sorting baseline entries",
@@ -579,7 +579,7 @@
         "owner_commit": "bfe9b1fffd91d2142ab134acf00b588e034eeb26",
         "review_verdict": "Independent audit_transactions_cli and root actual-code APPROVE; four exact files, 372 source hashes and unchanged baseline verified",
         "local_proof": "Pyright 0 errors/warnings; project/tracked Ruff; 61 policy/metrics/docs tests with zero skips; strict gate 1056 against f40402c; actual new-policy S accepts and old baseline-bearing P rejects; diff check passes",
-        "required_before_verification": "Exact cleanup PR and merge CI/native/current-parent proof remains mandatory"
+        "required_before_verification": "Satisfied by exact cleanup PR and merge CI/native/current-parent proof."
       },
       "conditional_parallel_entry": {
         "contract": "R04-parallel-entry-contract.md",
@@ -588,9 +588,17 @@
           "I01",
           "G01"
         ],
-        "status": "Root accepted after independent review; actual approved final cleanup candidate C and child-specific source/contract refresh remain required before assignment",
-        "integration_gate": "No child PR or campaign integration until exact cleanup merge proof succeeds",
+        "status": "Satisfied: immutable cleanup candidate inputs match verified cleanup merge feb22c30ea13475116c0190e302df0fc7fe08383.",
+        "integration_gate": "Cleanup dependency satisfied; each child still requires its own source, full/parity and exact CI/native proof.",
         "baseline_owner": "root serializes every child baseline generation and combined integration; no concurrent baseline writers"
+      },
+      "final_cleanup_verification": {
+        "pr": 883,
+        "candidate": "ec257912ec907161b2e89d552a76dc591ed33b68",
+        "merge": "feb22c30ea13475116c0190e302df0fc7fe08383",
+        "pr_ci": 33943223988,
+        "merge_ci": 33943927132,
+        "result": "Both exact revisions passed all required CI, six ordered zero-skip N01 artifacts, native mode tests and strict actual-parent comparison. Root verified merge parents/tree."
       }
     },
     {
@@ -1683,7 +1691,7 @@
       "task_id": "G01",
       "issue": 867,
       "title": "GML typed lowering context",
-      "state": "implementing",
+      "state": "reviewing",
       "problem_and_evidence": "transpile_statement has 1161 lines/C122; bulk is increment/assignment lowering, not parser cursor methods.",
       "expected_benefit": "Localized typed handlers; dispatcher and new handlers <=15 complexity/150 lines with unchanged facade.",
       "current_owner": "gml_transpiler_parts/statements.py",
@@ -1714,8 +1722,8 @@
       "independent_reviewers": "audit_transactions_cli read-only, then root actual-code review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "ACCEPTED by root after independent review. G01-statement-context-contract.md is authoritative; fixed C=ec257912ec907161b2e89d552a76dc591ed33b68, actual input/import/metric refresh verified. Conditional isolated start accepted; child PR/integration waits completed R04 cleanup proof.",
-      "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
+      "plan_verdict": "ACCEPTED finite G01 contract plus exact typed-guard/redundant-annotation refinement; verified R04 cleanup merge retains all16 source inputs.",
+      "implementation_entry_condition": "Satisfied at immutable C with independently reviewed source/contract refresh; cleanup merge feb22c30ea13475116c0190e302df0fc7fe08383 is verified.",
       "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths.",
       "accepted_entry": {
         "contract": "G01-statement-context-contract.md",
@@ -1735,7 +1743,18 @@
         "root_only_baseline": "maintainability-baseline.json; root serializes generation and integration",
         "proof_coordination": "Reserve root CPU window before full/parity/performance runs",
         "implementation_authorized": true
-      }
+      },
+      "accepted_normalization_refinement": "Two explicit None guards use set[str](); retain the first prelude_lines:list[str] declaration and remove only five later repeated annotations in the same function. All allocations/branches preserved; no helper, cast, suppression or allowance growth.",
+      "code_review": {
+        "verdict": "APPROVE actual code; proof pending",
+        "source_commit": "82faae38dc3e8eb7aed48963b8e1062b8954ebe2",
+        "independent": "G01/implementation/G01-independent-code-review.md",
+        "root": "G01/implementation/root-code-review.json",
+        "frozen_index_sha256": "0acd3fe55b67b1ff5b0a5211df31db1265a0709a00e837934489414eaf24cbce"
+      },
+      "measured_result": "parameters15\u21922; C122 unchanged. Actual physical/structural sizes: model76/143, statements2766/4641, lowerer1155/1940, parser1149/2296, factory17/31. Baseline1056\u21921055, one removed key and six reductions; no new debt. Dispatcher decomposition remains G02-G05.",
+      "local_proof": "Pyright0/0, both Ruff checks,25 unit/48 required tests with0skips and exact Godot; all40 retained method ASTs unchanged.",
+      "remaining_verification": "Frozen full-suite with all5 pinned projects, repeated benchmark, immutable5fixture/14field plus same-ref parity, root metadata review and exact PR/merge CI/native proof."
     },
     {
       "task_id": "G02",

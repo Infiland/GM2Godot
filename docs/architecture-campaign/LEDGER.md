@@ -7,21 +7,20 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through initial R04 PR #881 at
-  `f40402c`. Initial R04, R03, C01, D01, R10 and N01 passed final PR and merge CI.
-- Progress counts fully verified roadmap tasks: 7 of 54 (13.0%). Integration and
-  pending checks do not count as verification.
+- Integration branch: `dev/080-architecture-campaign`, through R04 cleanup PR #883
+  at `feb22c30ea13475116c0190e302df0fc7fe08383`. Exact PR and merge CI, native
+  receipts and strict actual-parent checks passed.
+- Progress counts fully verified roadmap tasks: 8 of 54 (14.8%). Source review,
+  integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
 - Approved local environment: native CPython 3.12.10 arm64 and exact Godot
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
-  campaign intermediate. Root will coordinate the single final v0.8.0 release.
-- No external blocker. Initial R04 is integrated and verified at `f40402c`.
-  Its separate four-file bridge retirement is approved at `bfe9b1f` under the
-  [cleanup contract](R04-cleanup-contract.md); exact cleanup PR/merge proof remains
-  required before the R04 task is verified.
-  Other planned rows need bounded contract acceptance before implementation.
+  campaign intermediate. Root coordinates the single final v0.8.0 release.
+- No external blocker. G01's independent and root code reviews and strict gate passed.
+  Its full suite, benchmark, immutable parity and exact PR/merge proof remain
+  required. R11 and I01 continue in their isolated worktrees.
 
 ## Ownership and progress
 
@@ -35,8 +34,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | N01 native receipts | verified | audit_transactions_cli, `66bfcfe`; reviewed corrections through `b06c15b`; PR #879 merged `47642d8` | Independent and root code/integration reviews approved | `N01/pr-ci-final.json`, `N01/merge-push-run.json`; six zero-skip native artifacts at each exact revision |
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
-| R04 import layout | approved | Initial PR #881 at `f40402c`; cleanup `bfe9b1f` by audit_policy_tests_docs | Initial and cleanup actual code approved independently and by root | Initial PR/merge proof and cleanup local checks pass; exact cleanup PR/merge proof remains |
-| G01 GML typed lowering context | implementing | audit_policy_tests_docs; accepted parent `ec25791` | Contract independently and root approved; actual-code review required | G01-statement-context-contract.md; exact final source/import/metric refresh verified; conditional isolated entry |
+| R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
+| G01 GML typed lowering context | reviewing | audit_policy_tests_docs, `82faae3` | Independent and root actual-code APPROVE | 48 required methods/zero skips; unchanged C122 and public44 exports; debt1055; full/benchmark/parity/exact CI pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

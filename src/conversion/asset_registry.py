@@ -3196,8 +3196,8 @@ class AssetRegistryConverter(BaseConverter):
             groups[manifest_group.name] = _AudioGroupRegistryEntry(
                 name=manifest_group.name,
                 targets=manifest_group.targets,
-                loaded=self._audio_group_initial_loaded(manifest_group.name, manifest_group.raw_data),
-                gain=self._metadata_float(manifest_group.raw_data.get("gain"), 1.0),
+                loaded=manifest_group.initial_loaded,
+                gain=manifest_group.gain,
             )
 
         groups.setdefault(
@@ -3317,16 +3317,6 @@ class AssetRegistryConverter(BaseConverter):
             if group.name == name:
                 return group
         return None
-
-    @staticmethod
-    def _audio_group_initial_loaded(name: str, raw_data: JsonDict) -> bool:
-        if name in {"", "audiogroup_default"}:
-            return True
-        for key in ("loaded", "preload", "loadOnStartup"):
-            value = raw_data.get(key)
-            if isinstance(value, bool):
-                return value
-        return False
 
     def _sequence_metadata(self, resource: _ProjectResource) -> JsonDict:
         descriptor, issues = normalize_sequence_asset(resource.raw_data)

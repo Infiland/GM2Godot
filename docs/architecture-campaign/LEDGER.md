@@ -7,10 +7,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through G01 PR #886 at
-  `7fdd97cfb0149bb166175fd5479b5193f3d64423`. G01 exact PR/merge CI, native
-  receipts, all 49 selected tests and actual-parent proof are fully verified.
-- Progress counts fully verified roadmap tasks: 11 of 54 (20.4%). Source review,
+- Integration branch: `dev/080-architecture-campaign`, through L01 PR #887 at
+  `7dd2b9c2eb1bb4c805ca822821c6f5c38284b998`. Exact PR/merge CI, native CLI,
+  artifact receipts, coverage floors and actual-parent proof are verified.
+- Progress counts fully verified roadmap tasks: 12 of 54 (22.2%). Source review,
   integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -18,11 +18,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. G01 is verified at `7fdd97c`. L01's Windows assertion
-  now passes. Both L01 runs exposed a coverage fraction change after removal of
-  the obsolete covered flag. Two public preflight guard tests are independently
-  and root approved; the unchanged floor and final exact PR/merge proof remain
-  pending. Production source and all 1,047 debt allowances are unchanged.
+- No external blocker. L01 is verified; its two earlier failed runs remain
+  preserved. T01 has approved source and combined local proof, including the final
+  L01 guard tests. T01 exact PR/merge native verification is next. R12's prepared
+  combination and I02's pre-extraction observations proceed separately.
 
 
 ## Ownership and progress
@@ -41,8 +40,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
-| L01 CLI artifact ownership | approved | audit_transactions_cli; PR #887, source `87d96d5`, corrected parent `397e1bc` | Independent/root implementation, Windows assertion and two public preflight guard tests APPROVE | New2/0,CLI78/1 hostskip,retained6/0; strict1047 unchanged; final Linux coverage and exact native PR/merge proof pending |
-| T01 exact Godot test discovery | approved | audit_policy_tests_docs; source `4defcb3`, prepared L01 merge `b0c47b0` | Independent/root code and immutable local proof APPROVE; combined local checks pass | Reviewed-parent1045 gate; required78/0, G01 required49/0 and113 CLI/policy tests/1 Windows skip; actual-parent and native PR/merge proof pending |
+| L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
+| T01 exact Godot test discovery | approved | audit_policy_tests_docs; source `4defcb3`, actual-parent preparation `bfca73a` | Independent/root source and guarded-parent delta APPROVE | Strict1045 actual `7dd2b9c`; new2/0 plusCLI78/1 host skip, earlier required78/0 and G01 49/0 retained; final metadata and native PR/merge proof pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

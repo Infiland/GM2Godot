@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -17,6 +16,7 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.rooms import RoomConverter
 from src.conversion.sprites import SpriteConverter
+from tests.godot_test_support import require_exact_godot
 
 _EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
@@ -25,17 +25,6 @@ _FIXTURE_PATH = (
     / "authored_particles"
     / "fixture.json"
 )
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -394,22 +383,7 @@ def _write_probe(project_dir: Path, room_path: str) -> None:
 
 class TestAuthoredParticlesGodot(unittest.TestCase):
     def test_authored_asset_room_lifecycle_and_cleanup(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stderr)
-        if version_result.stdout.strip() != _EXPECTED_GODOT_VERSION:
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

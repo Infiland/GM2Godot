@@ -20,6 +20,7 @@ from src.conversion.conversion_plan import CONVERSION_STEPS
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.fonts import _find_system_font
 from src.conversion.godot_validation import generated_godot_importable_asset_paths, validate_generated_godot_project
+from tests.godot_test_support import require_exact_godot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_MATRIX_PATH = (
@@ -357,16 +358,7 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
         godot_binary: str,
     ) -> None:
         self.assertTrue(os.path.isfile(godot_binary), godot_binary)
-        version = subprocess.run(
-            [godot_binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        version_output = (version.stdout + version.stderr).strip()
-        self.assertEqual(version.returncode, 0, version_output)
-        self.assertEqual(version_output, "4.7.2.stable.official.ed1daf0bf")
+        require_exact_godot(godot_binary, timeout=30)
 
         resource_report = validate_generated_godot_project(
             os.fspath(destination),

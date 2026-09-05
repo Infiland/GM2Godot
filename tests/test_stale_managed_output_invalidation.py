@@ -5,7 +5,6 @@ import json
 import os
 import shutil
 import stat
-import subprocess
 import tempfile
 import threading
 import unittest
@@ -20,6 +19,7 @@ from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.converter import Converter
 from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
 from src.conversion.managed_resource_outputs import managed_resource_outputs
+from tests.godot_test_support import require_exact_godot
 
 
 class _Setting:
@@ -728,18 +728,7 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
         self.assertEqual(outcome.state, "partial")
         godot_binary = find_godot_binary()
         assert godot_binary is not None
-        version = subprocess.run(
-            [godot_binary, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        self.assertEqual(version.returncode, 0, version.stdout + version.stderr)
-        self.assertEqual(
-            version.stdout.strip(),
-            "4.7.2.stable.official.ed1daf0bf",
-        )
+        require_exact_godot(godot_binary, timeout=20)
         report = validate_generated_godot_project(
             str(self.godot_dir),
             godot_binary=godot_binary,

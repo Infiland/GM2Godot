@@ -129,6 +129,7 @@ EXPECTED_STATEMENT_MODEL_EXPORTS = (
     "ControlFlowCapture",
     "GMLStatementRequest",
     "GMLStatementResult",
+    "StatementLoweringContext",
 )
 
 

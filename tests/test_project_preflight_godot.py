@@ -12,6 +12,7 @@ from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcom
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.project_godot import GodotProjectFile
 from tests.conversion_outcome_helpers import completed_conversion_step_ledger
+from tests.godot_test_support import require_exact_godot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,18 +86,7 @@ class ProjectPreflightGodotTests(unittest.TestCase):
                 project_content,
             )
 
-            version_result = subprocess.run(
-                [godot_binary, "--version"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            self.assertEqual(version_result.returncode, 0, version_result.stderr)
-            self.assertEqual(
-                version_result.stdout.strip(),
-                "4.7.2.stable.official.ed1daf0bf",
-            )
+            require_exact_godot(godot_binary, timeout=30)
 
             open_result = subprocess.run(
                 [

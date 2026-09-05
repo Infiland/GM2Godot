@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.godot_validation import find_godot_binary
 from src.conversion.scripts import ScriptConverter
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -23,24 +23,7 @@ def _write_json(path: Path, data: dict[str, object]) -> None:
 
 class TestScriptTopLevelEnumGodotSmoke(unittest.TestCase):
     def test_modern_script_after_enum_executes_on_exact_godot_4_7_2(self) -> None:
-        godot_binary = find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
-
-        version_result = subprocess.run(
-            [godot_binary, "--version"],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-        )
-        self.assertEqual(version_result.returncode, 0, version_result.stdout)
-        if version_result.stdout.strip() != "4.7.2.stable.official.ed1daf0bf":
-            self.skipTest(
-                "Exact Godot 4.7.2 required; found "
-                + version_result.stdout.strip()
-            )
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

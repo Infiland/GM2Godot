@@ -75,6 +75,7 @@
         "src/conversion/gamemaker_json.py",
         "src/conversion/json_values.py",
         "src/conversion/project_manifest.py",
+        "src/conversion/project_model.py",
         "src/conversion/project_source_discovery.py",
         "src/conversion/project_source_paths.py",
         "src/conversion/resource_models.py"

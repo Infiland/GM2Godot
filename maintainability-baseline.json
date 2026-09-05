@@ -308,7 +308,7 @@
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8139,
     "application|module_lines.executable|src/cli.py::<module>": 1411,
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": 3485,
-    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4138,
+    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4122,
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": 1602,
     "application|module_lines.executable|src/conversion/conversion_artifact_generation.py::<module>": 2006,
     "application|module_lines.executable|src/conversion/conversion_manifest.py::<module>": 812,
@@ -327,7 +327,7 @@
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1913,
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": 1088,
-    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1093,
+    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 984,
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
@@ -341,7 +341,7 @@
     "application|module_structure.executable|src/cli.py::<module>": 2036,
     "application|module_structure.executable|src/conversion/anchored_artifacts.py::<module>": 5906,
     "application|module_structure.executable|src/conversion/architecture_policy.py::<module>": 931,
-    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6881,
+    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6854,
     "application|module_structure.executable|src/conversion/atomic_generated_text.py::<module>": 2371,
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
@@ -367,10 +367,10 @@
     "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1983,
-    "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1716,
+    "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1464,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1035,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 989,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
@@ -1375,9 +1375,9 @@
       "structure": 5906
     },
     "application|module_lines.executable|src/conversion/asset_registry.py::<module>": {
-      "ast_sha256": "f81d9904af94f49ec2460744e55ec7399a034394b2599d92140edfa033da7b75",
-      "lines": 4120,
-      "structure": 6881
+      "ast_sha256": "ebcb52089e2b53b3eb4dd6f60a9f5a8cb6baa0687fcf5243caf603f9e9053bca",
+      "lines": 4110,
+      "structure": 6854
     },
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": {
       "ast_sha256": "438eaa4d91db5d3b556ea12361d83514dd6a8754fd5845b578d5dd357aac174e",
@@ -1470,9 +1470,9 @@
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "5fc241c064711d2452444d9540e13e59170fb6ba60a18efc6875d2bc4bc50b80",
-      "lines": 1092,
-      "structure": 1983
+      "ast_sha256": "45111cecccf39eea4c17561a175c5b2c6c7524e0181bb67469d786e2eb53bd0a",
+      "lines": 984,
+      "structure": 1716
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",

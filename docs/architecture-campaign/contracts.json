@@ -1363,7 +1363,7 @@
       "task_id": "I01",
       "issue": 798,
       "title": "Included Files models and planning",
-      "state": "integrated",
+      "state": "verified",
       "problem_and_evidence": "12130-line transaction and 12914-line tests obscure state/handle/cleanup ownership.",
       "expected_benefit": "Reduce original and destination hotspot sizes/complexity; explicit acyclic lifecycle ownership; no facade aliases for private test internals.",
       "current_owner": "src/conversion/included_files.py",
@@ -1441,14 +1441,16 @@
         "benchmark": "10,000 entries; overlapping ranges; medians 1582.017/1574.664 ms; process peak RSS medians 57278464/55033856 bytes; no general performance claim",
         "baseline": "1056 keys, eight reductions, no growth; strict immutable C gate passes"
       },
-      "remaining_verification": "Exact merge CI33947905402 at 475e96eaa26771beabf9b2454f6023e7b14e2014, including required native receipts and strict actual-parent proof. Root metadata review and exact PR CI/native proof are complete.",
+      "remaining_verification": "None for I01. Parent issue #798 remains open for I02-I10; optional retained Included Files bind-mount proof remains explicitly owned by I04.",
       "integration_proof": {
         "pr": 884,
         "head": "d13e92ebe0c9c1f42fc563ef95419857326ebff8",
         "pr_ci": 33946483807,
         "merge": "475e96eaa26771beabf9b2454f6023e7b14e2014",
         "merge_ci": 33947905402,
-        "status": "PR native and exact-tree integration verified; exact merge CI pending"
+        "status": "Exact PR and merge CI/native/actual-parent proof verified; merge tree equals approved head tree",
+        "evidence": "I01/final-verification.json",
+        "native_proof": "At both revisions: six N01 artifacts10/13/16 twice, mode6/6/2 and all31 I01-specific required native/runtime methods, zero skips;1056 debt against actual feb22c3 parent"
       }
     },
     {

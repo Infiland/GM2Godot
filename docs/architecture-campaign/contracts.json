@@ -824,7 +824,7 @@
       "task_id": "R12",
       "issue": 797,
       "title": "Authoritative paths resource model",
-      "state": "reviewing",
+      "state": "approved",
       "problem_and_evidence": "Descriptive resource_models has no production callers; paths consumers parse raw data separately.",
       "expected_benefit": "One paths parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model.",
       "current_owner": "path_registry.py",
@@ -924,7 +924,22 @@
         },
         "legacy_baseline": "1056 entries retained; aggregate function265to261/module989to984 only; no new or grown debt"
       },
-      "remaining_verification": "Root sharedmetadata review and immutable candidate; required35/0, benchmark3workloads, full exactGodot/all5, five-fixture/all14 parity and same-ref; actualparent integration/exactnative PR/merge CI."
+      "remaining_verification": "Final local metadata review, actual-parent combined integration and exact native PR/merge CI; no completion credit yet.",
+      "final_local_proof": {
+        "verdict": "APPROVE independent and root",
+        "candidate": "0763d71879d1f166b90134159c1594ce84b10db8",
+        "required": 35,
+        "required_skips": 0,
+        "full": 3120,
+        "full_skips": 56,
+        "full_seconds": 768.258,
+        "skip_records_exact_prior_R11": true,
+        "parity": "Both5fixture14field comparisons equal;44facade exports preserve identity",
+        "benchmark": "200paths6400points3passes registry+2.20%/+21.251ms, build/render+18.661ms,aggregate+12.683ms;wholeprocessRSS+3997696B;accepted scoped cost",
+        "final_index_sha256": "6d0ad4c0d976d76b43271c0550dd51b365e69a4e5494598b11e6a4854f5f7912",
+        "independent_receipt_sha256": "bb18fdc0acabd2ab5dd36cca8a67c87dd56b3c8ed04283d228e05b233daa8c56",
+        "root_review_sha256": "d17b2b10358680205e0a73c24b85cbc8d5164143184c7c8f97346256fb6614e3"
+      }
     },
     {
       "task_id": "R13",

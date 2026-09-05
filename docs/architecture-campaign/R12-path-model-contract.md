@@ -260,3 +260,44 @@ project-parsing coverage owner; all floors and historical baselines stay fixed.
 Benchmark, full exact-Godot/all-five-project proof, required gate, five-fixture
 all-fourteen-field parity and same-ref control still require the frozen candidate.
 Final actual-parent integration and native PR/merge CI remain completion criteria.
+
+
+## Final immutable local proof accepted
+
+Independent and root review approve candidate `0763d71879d1f166b90134159c1594ce84b10db8`
+with source commit `9e01fd1610f3aa25375cd763c171d3767bed5646`. The exact R12 gate
+passed 35 tests with zero skips or exceptional results. Full unittest with exact
+Godot and all five projects passed 3,120 tests in 768.258 seconds. Its 56 exact
+skip records match the previous R11 full run: 53 Windows/NTFS, two Linux bind
+mount and one host case-sensitivity case. These remain missing native evidence
+on the local host.
+
+Both actual119-to-candidate and candidate-to-itself comparisons passed all five
+fixtures and 14 unchanged R01 fields, including all visible file hash/size/mode
+maps and the existing transaction-semantics comparison. The 44 facade exports
+match; raw private transaction records remain preserved with their allowed
+volatility. All 580 tracked files, 392 phase inputs, six source/six metadata
+owners, harness hashes and pinned fixture identities remained unchanged.
+
+The final benchmark used two excluded warmups and ten fresh samples, three
+passes per sample. Every output map, byte hash, mode, count, raw log and common
+model field matched. For 200 paths with 6,400 points, registry conversion median
+rose 21.251 ms across three passes (+2.20%); build/render rose 18.661 ms (+14.00%)
+and aggregate construction 12.683 ms (+8.21%). Whole-process median RSS rose
+3,997,696 bytes, including imports and retained results/converters. These scoped
+costs are accepted for canonical validation and ownership. Their cause has not
+been profiled, and no whole-project speed improvement is claimed. The small
+mixed registry-only fixture retains its existing one unavailable Included File
+and exact warning; the separate full CLI/Godot fixture test passed.
+
+The two earlier failed excluded-warmup attempts and their copied source/input
+inventories are preserved. None contributed final samples. Root and independent
+review verified all 151 indexed artifacts, all three attempts' manifests and
+all 12 final raw captures.
+
+Final index SHA256: `6d0ad4c0d976d76b43271c0550dd51b365e69a4e5494598b11e6a4854f5f7912`.
+Independent receipt: `bb18fdc0acabd2ab5dd36cca8a67c87dd56b3c8ed04283d228e05b233daa8c56`.
+Root final review: `d17b2b10358680205e0a73c24b85cbc8d5164143184c7c8f97346256fb6614e3`.
+
+R12 is approved locally. Final metadata review, actual-parent combined source
+checks and exact PR/merge native CI remain required before verification.

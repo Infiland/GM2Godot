@@ -1649,7 +1649,7 @@
       "structure": 12303
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
-      "ast_sha256": "6776f8d62eef12ced3dd906b5a5e4d580a9212dd53a85d80b30ea29045080428",
+      "ast_sha256": "4b558e651231d42d41d53b4056ac4f34f43d3e75a433f23fe349a93ccf024779",
       "lines": 3403,
       "structure": 7057
     },

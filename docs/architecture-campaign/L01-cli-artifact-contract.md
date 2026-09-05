@@ -528,3 +528,36 @@ bound to the original immutable L01 source and its documented refs. The combined
 checks do not relabel it as a new full-suite run. Exact PR/merge CI and the actual
 native Windows/POSIX, cancellation, crash and privileged Linux tests still gate
 final integration and task verification. No release is published by this slice.
+
+
+## Reviewed Windows assertion correction
+
+PR #887 at `16c438e06813b31b5bc0ac9028fcca4dd30c46e7` reached native Windows
+CI run 33954287755. Its transaction job ran 697 tests with one failure and 61
+expected host skips. The failure was the managed-report snapshot membership
+assertion: snapshots already use POSIX keys, while the expected native path used
+backslashes. The retained raw failure contains the actual manifest under
+`gm2godot/conversion_manifest.json` (22,734 bytes among 28 files).
+
+The independently and root-reviewed correction changes only the assertion's
+expected argument to that canonical snapshot key. All 78 CLI IDs, full snapshot
+byte comparison, outcome checks and manifest diagnostic hashes remain intact.
+All other 384 Python files are unchanged from the first PR head. The test module
+remains 3403 physical / 7057 structural units and its method remains 34 / 112.
+Root refreshed only the baseline's measured AST digest; all 1,047 allowances
+remain unchanged and the strict gate passes against actual parent `7fdd97c`.
+
+On the frozen corrected source, Pyright reports zero errors and warnings, Ruff
+and diff check pass, all 78 CLI methods pass with the one Windows-only local
+skip, and six additional transaction/crash methods pass without skips. All 26
+applicable real/native required methods are actual successes. These checks bind
+all 385 Python files, source origins, Python 3.12.10 and exact Godot 4.7.2.
+Earlier full-suite/parity results remain bound to their original source; they
+were not rerun for this test-only correction. Corrected native Windows and final
+exact PR/merge verification remain outstanding. The rejected expression draft
+and original failed run are preserved and supply no final proof credit.
+
+Correction source/proof index SHA256 is
+`24a67df2b50adea24d306df41d06754eac7e7acc7e5b3b70173df3179abb57ec`.
+Independent correction review SHA256 is
+`d5573a41674e47636de5dce757c50c7f872db2232102b58cad4f295d9f5b2151`.

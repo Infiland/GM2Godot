@@ -77,8 +77,8 @@ class TestResourceModels(unittest.TestCase):
 
         models = parse_gamemaker_resource_models(RESOURCE_MATRIX_PATH)
 
-        self.assertEqual(models.project.name, "ResourceMatrix")
-        self.assertEqual(models.project.resource_count, 14)
+        self.assertEqual(models.project.project_name, "ResourceMatrix")
+        self.assertEqual(len(models.project.resources), 14)
         self.assertEqual([sprite.name for sprite in models.sprites], ["spr_checker"])
         self.assertEqual([sound.name for sound in models.sounds], ["snd_click"])
         self.assertEqual([font.name for font in models.fonts], ["fnt_ui"])
@@ -101,7 +101,7 @@ class TestResourceModels(unittest.TestCase):
         diagnostics = {(diagnostic.code, diagnostic.resource_name) for diagnostic in models.diagnostics}
 
         self.assertIn(("GM2GD-RESOURCE-YY-MISSING", "spr_missing"), diagnostics)
-        self.assertEqual(models.project.resource_count, 1)
+        self.assertEqual(len(models.project.resources), 1)
         self.assertEqual(models.sprites, ())
 
     def test_resource_model_rejects_manifest_path_outside_project(self) -> None:

@@ -27,17 +27,6 @@ def _empty_json_dict() -> JsonDict:
 
 
 @dataclass(frozen=True)
-class ProjectModel:
-    name: str
-    yyp_path: str | None
-    resource_type: str
-    resource_version: str
-    resource_count: int
-    audio_group_names: tuple[str, ...] = ()
-    texture_group_names: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class ResourceModel:
     name: str
     kind: str
@@ -133,7 +122,7 @@ class TimelineModel(ResourceModel):
 
 @dataclass(frozen=True)
 class GameMakerResourceModels:
-    project: ProjectModel
+    project: GameMakerProjectManifest
     sprites: tuple[SpriteModel, ...] = ()
     sounds: tuple[SoundModel, ...] = ()
     fonts: tuple[FontModel, ...] = ()
@@ -221,7 +210,7 @@ def parse_gamemaker_resource_models(gm_project_path: str) -> GameMakerResourceMo
             parsed.add(model)
 
     return GameMakerResourceModels(
-        project=_project_model(manifest),
+        project=manifest,
         sprites=tuple(parsed.sprites),
         sounds=tuple(parsed.sounds),
         fonts=tuple(parsed.fonts),
@@ -279,18 +268,6 @@ class _ParsedResourceModelBuckets:
             self.timelines.append(model)
         else:
             self.other_resources.append(model)
-
-
-def _project_model(manifest: GameMakerProjectManifest) -> ProjectModel:
-    return ProjectModel(
-        name=manifest.project_name,
-        yyp_path=manifest.yyp_path,
-        resource_type=manifest.resource_type,
-        resource_version=manifest.resource_version,
-        resource_count=len(manifest.resources),
-        audio_group_names=tuple(group.name for group in manifest.audio_groups if group.name),
-        texture_group_names=tuple(group.name for group in manifest.texture_groups if group.name),
-    )
 
 
 def _parse_resource_model(

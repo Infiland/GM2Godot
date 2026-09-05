@@ -36,7 +36,7 @@
     "application|complexity|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 122,
     "application|complexity|src/conversion/gml_transpiler_parts/tokens.py::tokenize_gml_source": 29,
     "application|complexity|src/conversion/godot_validation.py::validate_generated_godot_project": 18,
-    "application|complexity|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 52,
+    "application|complexity|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 50,
     "application|complexity|src/conversion/included_files.py::_acquire_included_project_lock": 25,
     "application|complexity|src/conversion/included_files.py::_chmod_exact_included_file": 20,
     "application|complexity|src/conversion/included_files.py::_cleanup_orphan_included_recovery_state": 25,
@@ -79,9 +79,9 @@
     "application|function_lines|src/conversion/gml_transpiler_parts/preprocessor.py::preprocess_gml_source_preserving_layout": 219,
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::_assignment_target_reader_writer": 266,
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 151,
-    "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1159,
+    "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1161,
     "application|function_lines|src/conversion/godot_validation.py::validate_generated_godot_project": 267,
-    "application|function_lines|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 541,
+    "application|function_lines|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 531,
     "application|function_lines|src/conversion/included_files.py::_acquire_included_project_lock": 159,
     "application|function_lines|src/conversion/included_files.py::_capture_included_registry": 173,
     "application|function_lines|src/conversion/included_files.py::_capture_included_tree_fallback": 163,
@@ -173,11 +173,11 @@
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_expression_to_temp": 210,
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 284,
     "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::_transpile_var_statement": 169,
-    "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1940,
+    "application|function_structure|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 1944,
     "application|function_structure|src/conversion/gml_transpiler_parts/tokens.py::tokenize_gml_source": 368,
     "application|function_structure|src/conversion/godot_validation.py::validate_generated_godot_project": 384,
     "application|function_structure|src/conversion/included_file_paths.py::plan_included_file_paths": 157,
-    "application|function_structure|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 701,
+    "application|function_structure|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": 682,
     "application|function_structure|src/conversion/included_files.py::_acquire_included_project_lock": 239,
     "application|function_structure|src/conversion/included_files.py::_capture_included_registry": 205,
     "application|function_structure|src/conversion/included_files.py::_capture_included_tree_fallback": 237,
@@ -308,7 +308,7 @@
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8139,
     "application|module_lines.executable|src/cli.py::<module>": 1411,
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": 3485,
-    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4138,
+    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4122,
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": 1602,
     "application|module_lines.executable|src/conversion/conversion_artifact_generation.py::<module>": 2006,
     "application|module_lines.executable|src/conversion/conversion_manifest.py::<module>": 812,
@@ -319,15 +319,15 @@
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/emitter.py::<module>": 1449,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/gml_function_dispatch.py::<module>": 1546,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": 890,
-    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1157,
-    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2770,
+    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1190,
+    "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2771,
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": 990,
-    "application|module_lines.executable|src/conversion/included_files.py::<module>": 12130,
+    "application|module_lines.executable|src/conversion/included_files.py::<module>": 11552,
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": 5054,
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1913,
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": 1088,
-    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1093,
+    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 984,
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
@@ -341,7 +341,7 @@
     "application|module_structure.executable|src/cli.py::<module>": 2036,
     "application|module_structure.executable|src/conversion/anchored_artifacts.py::<module>": 5906,
     "application|module_structure.executable|src/conversion/architecture_policy.py::<module>": 931,
-    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6881,
+    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6854,
     "application|module_structure.executable|src/conversion/atomic_generated_text.py::<module>": 2371,
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
@@ -356,21 +356,21 @@
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/gml_manual_scope.py::<module>": 928,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/preprocessor.py::<module>": 1543,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/source_map.py::<module>": 891,
-    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 2296,
-    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 4641,
+    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 2362,
+    "application|module_structure.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 4644,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/tokens.py::<module>": 1018,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 886,
     "application|module_structure.executable|src/conversion/godot_validation.py::<module>": 1557,
-    "application|module_structure.executable|src/conversion/included_files.py::<module>": 16958,
+    "application|module_structure.executable|src/conversion/included_files.py::<module>": 16077,
     "application|module_structure.executable|src/conversion/managed_output_publisher.py::<module>": 7149,
     "application|module_structure.executable|src/conversion/managed_output_workspace.py::<module>": 4143,
     "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1983,
-    "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1716,
+    "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1464,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1035,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 989,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
@@ -454,6 +454,7 @@
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_assignment_to_emitted_value": 9,
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_increment_expression_to_value": 10,
     "application|parameters|src/conversion/gml_transpiler_parts/statements.py::_transpile_var_statement": 9,
+    "application|parameters|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": 15,
     "application|parameters|src/conversion/included_files.py::IncludedFilesConverter.__init__": 10,
     "application|parameters|src/conversion/included_files.py::_cleanup_recorded_included_file": 10,
     "application|parameters|src/conversion/included_files.py::_read_opened_included_bounded_record_payload": 9,
@@ -580,7 +581,7 @@
     "tests|function_structure|tests/test_gml_runtime.py::TestGMLRuntimeScript.test_runtime_ds_collection_runtime_functions": 229,
     "tests|function_structure|tests/test_gml_statement_api.py::GMLStatementAPITests.test_exact_frozen_model_shapes_signatures_and_types": 202,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_canonical_tampered_commit_receipts_are_rejected_without_cleanup": 286,
-    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_changed_generation_receipts_are_boundary_bound": 218,
+    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_changed_generation_receipts_are_boundary_bound": 216,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_committed_cleanup_preserves_unknown_content_inside_recorded_trees": 323,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary": 341,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_marker_only_committed_recovery_uses_embedded_cleanup_manifest": 256,
@@ -800,7 +801,7 @@
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": 1905,
     "tests|module_lines.executable|tests/test_gml_runtime.py::<module>": 3339,
     "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": 5411,
-    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12913,
+    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12420,
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": 1713,
     "tests|module_lines.executable|tests/test_objects.py::<module>": 3147,
     "tests|module_lines.executable|tests/test_release_publisher.py::<module>": 2011,
@@ -829,7 +830,7 @@
     "tests|module_structure.executable|tests/test_gml_runtime.py::<module>": 7220,
     "tests|module_structure.executable|tests/test_gml_transpiler.py::<module>": 6430,
     "tests|module_structure.executable|tests/test_godot_validation.py::<module>": 2227,
-    "tests|module_structure.executable|tests/test_included_files.py::<module>": 22695,
+    "tests|module_structure.executable|tests/test_included_files.py::<module>": 21674,
     "tests|module_structure.executable|tests/test_linux_gui_artifact_verifier.py::<module>": 1502,
     "tests|module_structure.executable|tests/test_managed_output_crash_recovery.py::<module>": 2546,
     "tests|module_structure.executable|tests/test_managed_output_publisher.py::<module>": 1726,
@@ -1169,9 +1170,9 @@
       "structure": 284
     },
     "application|function_lines|src/conversion/gml_transpiler_parts/statements.py::transpile_statement": {
-      "ast_sha256": "7540aa3f034617d2b0a46c6f25d7e099f742b41f7b6824238975c253afa2276f",
-      "lines": 1155,
-      "structure": 1940
+      "ast_sha256": "7f13d0f7a4267eac085c42b7f1e86ef8b55a4a3c99117a3effd1e58f9a042723",
+      "lines": 1161,
+      "structure": 1944
     },
     "application|function_lines|src/conversion/godot_validation.py::validate_generated_godot_project": {
       "ast_sha256": "15bed2927695c2a518a8e6e7e00162f20f5956f186cb7407d12e10aa60a78783",
@@ -1179,87 +1180,87 @@
       "structure": 384
     },
     "application|function_lines|src/conversion/included_files.py::IncludedFilesConverter.convert_included_files": {
-      "ast_sha256": "c1c179cca258947e9590534c69d0e4aaf589bf207c65fa43e300a1d0d2a20efb",
-      "lines": 541,
-      "structure": 701
+      "ast_sha256": "4febe3d476e46a1fb907a37071306ce80644d95fb476625e95befc39b40162c5",
+      "lines": 531,
+      "structure": 682
     },
     "application|function_lines|src/conversion/included_files.py::_acquire_included_project_lock": {
-      "ast_sha256": "59e091564ee65deca7c1b5e511679352ac50544863507cb57dc9f81ee334b494",
+      "ast_sha256": "568d804f3970369b2751f83caf667dfc4ff3e5c7d36f723efc4fc1069e59bd48",
       "lines": 159,
       "structure": 239
     },
     "application|function_lines|src/conversion/included_files.py::_capture_included_registry": {
-      "ast_sha256": "b7660836c612c7f3aa10f1216b13daa4e0553089d62ade3a079dbcd7b6f5a35a",
+      "ast_sha256": "1b723668d4631edb8d58d60e18878d8693b87a54c09583f4490b04475e091dd5",
       "lines": 173,
       "structure": 205
     },
     "application|function_lines|src/conversion/included_files.py::_capture_included_tree_fallback": {
-      "ast_sha256": "6dd2115931124645533aefc1a900dcc0c1726ec5dc7e235765f623eafa263753",
+      "ast_sha256": "df395c0a7f988792a310521ced7795c42435e90f460026b09ae011e9839702a6",
       "lines": 163,
       "structure": 237
     },
     "application|function_lines|src/conversion/included_files.py::_chmod_exact_included_file": {
-      "ast_sha256": "6413db5c13a5ac14830142be57284e3207f018489cfbd0b7641abc9373de5939",
+      "ast_sha256": "de0433d6dd60ea666f022048b10c67c9452d243645af3a94fe8d5887f69e2ea7",
       "lines": 165,
       "structure": 285
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_orphan_included_recovery_state": {
-      "ast_sha256": "c2c16f80dc43c65043fd3a760b3c0a284c2e1787bc2cb2584eaad6d0e9d38ba1",
+      "ast_sha256": "de8ce773ac41587ae5fb1203e7502eb509393bab662d78f769a8937277558daf",
       "lines": 218,
       "structure": 291
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_directory": {
-      "ast_sha256": "8330181f1c5c86567b63fe12f85269bdef30c2ca22c7c5bc7869e89eb4831b28",
+      "ast_sha256": "494f8507de86f3556f29079ed3483d5184d3fb25627bccd99e454a48f2c4a43c",
       "lines": 170,
       "structure": 221
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_file": {
-      "ast_sha256": "2d99d65d588e0d58ed992aea3729997b72552dbb59e8059f024eb3bed5ae8042",
+      "ast_sha256": "425953b002c1d562280af661d3664127262afb502d8a9620bb891a762ec38001",
       "lines": 157,
       "structure": 184
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_tree": {
-      "ast_sha256": "67d9bac29679c84a23c87bb9d1c99e278b1adfaf2a40d107355569845a1d5e1e",
+      "ast_sha256": "1fb4003121ce71f2fea88b6825f0f9c484db71eef380d6022cf32c25c7f800a8",
       "lines": 430,
       "structure": 622
     },
     "application|function_lines|src/conversion/included_files.py::_commit_included_output_set": {
-      "ast_sha256": "94d6bfbd5cd82430b10f2af58e67cd2c922ad7192bc4906ef9a5b8d26c45b6eb",
+      "ast_sha256": "ec41a7e23f89ca747c8c11986c6c223c901610bfddfda8cf341b0a2d2b5e6555",
       "lines": 486,
       "structure": 570
     },
     "application|function_lines|src/conversion/included_files.py::_included_bounded_record_state": {
-      "ast_sha256": "e230c03aad474aa32603566364bbca6d9874322b2a60a454512d641dc0442c46",
+      "ast_sha256": "f8c467edf332be1a9bcbe3a6a94bd2bba9b3832f7c495aef9d7e9238297d98d1",
       "lines": 163,
       "structure": 277
     },
     "application|function_lines|src/conversion/included_files.py::_included_preflight_placeholder_snapshots": {
-      "ast_sha256": "df7cebc09ddd34a94bca44f54323741966bf5bd83b63ab20add21ddf214eb8fb",
+      "ast_sha256": "53ac10e66e0b75b0e6faaf943ca48a4bd0600b5a03556db72058c3c48379fb06",
       "lines": 179,
       "structure": 219
     },
     "application|function_lines|src/conversion/included_files.py::_included_recovery_journal_from_payload": {
-      "ast_sha256": "fef67e820d51fbd79b6ca376aa28d0975395d9d84854d3b8eac06ee20a7eb906",
+      "ast_sha256": "09dfd88fb3339efa94d5908a9bbe7dfda934764af7739e4d2d483b85d1e6686e",
       "lines": 294,
       "structure": 433
     },
     "application|function_lines|src/conversion/included_files.py::_move_exact_included_entry": {
-      "ast_sha256": "d858fbfafdc59d1eece8bd1ff822a85d68d7a863c8bfa5827106db93d2371edb",
+      "ast_sha256": "ee1658a605eb529c3589a7b6429e2d759c60117d1093a9788e6005a89f5bd181",
       "lines": 213,
       "structure": 278
     },
     "application|function_lines|src/conversion/included_files.py::_recover_included_output_set": {
-      "ast_sha256": "e33ee92842b8c104297641d7b25831c79b70f99a28c400f2334aaed402355b0b",
+      "ast_sha256": "1fadbdafd67529fd48d5b858b13920e12715cb56efb5860c0a2f889e5044197b",
       "lines": 191,
       "structure": 258
     },
     "application|function_lines|src/conversion/included_files.py::_rollback_included_output_set": {
-      "ast_sha256": "68fd3b7a424f27302b1fb383166aa5dc61e79839da02c3ecdb26a21aba044049",
+      "ast_sha256": "e300472889013218286254553684f03ddccb8f0fe8174ab05571adff94a95d00",
       "lines": 217,
       "structure": 255
     },
     "application|function_lines|src/conversion/included_files.py::_stage_included_output_at": {
-      "ast_sha256": "4a1e99ab41ab8c2fc69e296a5cef08ca3e923c171e8e5cab902a8846fd78561d",
+      "ast_sha256": "42bfc3bd7309606044b0ce8e63cd7909e169a39fa24469d1c46bb5190c20aa4d",
       "lines": 157,
       "structure": 242
     },
@@ -1374,9 +1375,9 @@
       "structure": 5906
     },
     "application|module_lines.executable|src/conversion/asset_registry.py::<module>": {
-      "ast_sha256": "f81d9904af94f49ec2460744e55ec7399a034394b2599d92140edfa033da7b75",
-      "lines": 4120,
-      "structure": 6881
+      "ast_sha256": "ebcb52089e2b53b3eb4dd6f60a9f5a8cb6baa0687fcf5243caf603f9e9053bca",
+      "lines": 4110,
+      "structure": 6854
     },
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": {
       "ast_sha256": "438eaa4d91db5d3b556ea12361d83514dd6a8754fd5845b578d5dd357aac174e",
@@ -1429,14 +1430,14 @@
       "structure": 1543
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": {
-      "ast_sha256": "45ccb2a85e57633e41c33e20342636fba32410cf0e5c2e4b79338121b9a3cd00",
-      "lines": 1149,
-      "structure": 2296
+      "ast_sha256": "9bbfcdffeafa03b9e9306f8cac7f2cc3eaff99b30438504e0ee78aba3ab4957e",
+      "lines": 1180,
+      "structure": 2362
     },
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": {
-      "ast_sha256": "cdee41a1093d5b2eb2808dc2c0a20fcdda517d13b62e83ba903baaded371056f",
-      "lines": 2766,
-      "structure": 4641
+      "ast_sha256": "ee4445d111dcd3ab1c83069a964d0bf8abbbf28668ae5203a64f938cfa0219e5",
+      "lines": 2771,
+      "structure": 4644
     },
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": {
       "ast_sha256": "63d7d151ee359069acff27060cf51e57a0e23cf7b7f416b79bc6914d9050ee17",
@@ -1444,9 +1445,9 @@
       "structure": 1557
     },
     "application|module_lines.executable|src/conversion/included_files.py::<module>": {
-      "ast_sha256": "6036c939baa146d5003e0d52e51c56ee78cafabb7482a6a69d7351f67fe03eb2",
-      "lines": 12122,
-      "structure": 16958
+      "ast_sha256": "355d04fd4f06b45486589e96d7e24c9529e9a2fd4f5f2d5deca27bd2bccb710c",
+      "lines": 11552,
+      "structure": 16077
     },
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": {
       "ast_sha256": "4f824817cf5076e568c3dff8fb4e99b6056f0bd84dfc29485fdb2450d15eb2e7",
@@ -1469,9 +1470,9 @@
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "5fc241c064711d2452444d9540e13e59170fb6ba60a18efc6875d2bc4bc50b80",
-      "lines": 1092,
-      "structure": 1983
+      "ast_sha256": "45111cecccf39eea4c17561a175c5b2c6c7524e0181bb67469d786e2eb53bd0a",
+      "lines": 984,
+      "structure": 1716
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",
@@ -1694,9 +1695,9 @@
       "structure": 6430
     },
     "tests|module_lines.executable|tests/test_included_files.py::<module>": {
-      "ast_sha256": "0d8ae53db46713b607e3d0080606454666bd7b87d1d81fe0e41777a2b68d44cd",
-      "lines": 12906,
-      "structure": 22695
+      "ast_sha256": "ecba75991c63dcaf7e943ab7bbf6cc6bbe86a836b1a5f7809fa7ad6c7a9e8a38",
+      "lines": 12420,
+      "structure": 21674
     },
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": {
       "ast_sha256": "c6201be19afa33938144fa63e57edfe02271a0579edae25b4cac077fce0253b1",

@@ -13,58 +13,55 @@ import sys
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import ExitStack
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
 from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.included_file_paths import (
-    IncludedFilePathAssignment,
-    canonical_included_file_lookup_path,
-    plan_included_file_paths,
-)
+from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
-from src.conversion.project_manifest import (
-    GameMakerProjectManifest,
-    ProjectManifestDiagnostic,
-    load_gamemaker_project_manifest,
+from src.conversion.included_files_parts.models import (
+    DeclaredIncludedFile,
+    HandleState,
+    IncludedCleanupFileState,
+    IncludedCommitMarker,
+    IncludedCopyReceipt,
+    IncludedFileConversionPlan,
+    IncludedFileSource,
+    IncludedGenerationContentReceipt,
+    IncludedGenerationMatch,
+    IncludedNoOpSourceReceipt,
+    IncludedOutputSetCancelled,
+    IncludedOutputSetTransaction,
+    IncludedPayloadReceipt,
+    IncludedProjectLock,
+    IncludedRecoveryJournal,
+    IncludedRecoveryRecordSizes,
+    IncludedRegistrySnapshot,
+    IncludedSourceBinding,
+    IncludedSourceDirectoryIdentity,
+    IncludedSourceFingerprint,
+    IncludedTreeDescriptorBinding,
+    IncludedTreeEntry,
+    IncludedTreePathBinding,
+    IncludedTreeSnapshot,
+    PathFingerprint,
+    PathHandleBinding,
+    PathIdentity,
 )
+from src.conversion.included_files_parts.path_validation import (
+    output_components,
+    recovery_relative_path,
+    recovery_tree_entry_path,
+)
+from src.conversion.included_files_parts.planning import build_included_file_plan, plan_output_paths
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
 
-
-@dataclass(frozen=True)
-class _IncludedFileSource:
-    filesystem_path: str
-    relative_path: str
-    owner_source_path: str
-
-
-@dataclass(frozen=True)
-class _DeclaredIncludedFile:
-    name: str
-    source_path: str | None
-    owner_source_path: str
-    manifest_field: str | None
-
-
-@dataclass(frozen=True)
-class _IncludedFileConversionPlan:
-    requested_keys: tuple[str, ...]
-    available_files: tuple[_IncludedFileSource, ...]
-    skipped_keys: tuple[str, ...]
-
-
-_PathIdentity = tuple[int, int]
-_PathFingerprint = tuple[int, int, int, int, int, int]
-_PathHandleBinding = tuple[int, int, int, int, int, int]
-_HandleState = tuple[int, int, int, int, int, int, int]
-_IncludedSourceFingerprint = tuple[int, int, int, int, int, int]
-_IncludedSourceDirectoryIdentity = tuple[str, _PathIdentity]
-_IncludedCleanupFileState = tuple[int, str, _PathFingerprint]
 _INCLUDED_FILES_ROOT_NAME = "included_files"
 _INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
 _INCLUDED_FILES_LOCK_NAME = ".gm2godot-included-files.lock"
@@ -91,19 +88,6 @@ _INCLUDED_FILES_RECOVERY_INTEGER_MAX = (
 ) - 1
 _INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256 = "0" * 64
 _INCLUDED_FILES_LOCK_CONTENT = b"GM2Godot Included Files lock v1\n"
-_WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
-    {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        "CONIN$",
-        "CONOUT$",
-    }
-    | {f"COM{suffix}" for suffix in "123456789¹²³"}
-    | {f"LPT{suffix}" for suffix in "123456789¹²³"}
-)
-
 _IncludedWorkerItem = TypeVar("_IncludedWorkerItem")
 _IncludedWorkerResult = TypeVar("_IncludedWorkerResult")
 
@@ -175,180 +159,6 @@ def _run_bounded_included_worker_phase(
         executor.shutdown(wait=True, cancel_futures=True)
 
 
-@dataclass(frozen=True)
-class _IncludedPayloadReceipt:
-    source_fingerprint: _IncludedSourceFingerprint
-    byte_count: int
-    sha256: str
-
-
-@dataclass(frozen=True)
-class _IncludedCopyReceipt:
-    payload: _IncludedPayloadReceipt
-    output_fingerprint: _PathFingerprint
-    output_ctime_ns: int
-    output_handle_state: _HandleState
-
-    @property
-    def source_fingerprint(self) -> _IncludedSourceFingerprint:
-        return self.payload.source_fingerprint
-
-    @property
-    def byte_count(self) -> int:
-        return self.payload.byte_count
-
-    @property
-    def sha256(self) -> str:
-        return self.payload.sha256
-
-
-@dataclass(frozen=True)
-class _IncludedSourceBinding:
-    filesystem_path: str
-    canonical_path: str
-    directory_identities: tuple[_IncludedSourceDirectoryIdentity, ...]
-    lexical_state: _HandleState
-    path_state: _HandleState
-    handle_state: _HandleState
-
-
-@dataclass(frozen=True)
-class _IncludedNoOpSourceReceipt:
-    logical_path: str
-    assigned_path: str
-    binding: _IncludedSourceBinding
-    byte_count: int
-    sha256: str
-
-
-@dataclass(frozen=True)
-class _IncludedGenerationMatch:
-    unchanged: bool
-    source_receipts: tuple[_IncludedNoOpSourceReceipt, ...]
-
-
-@dataclass(frozen=True)
-class _IncludedGenerationContentReceipt:
-    transaction_id: str
-    generation_identity: _PathIdentity
-    stage_container_identity: _PathIdentity
-    source: _IncludedNoOpSourceReceipt
-    staged_output_path: str
-    public_output_path: str
-    output: _IncludedCopyReceipt
-
-
-@dataclass(frozen=True)
-class _IncludedTreeEntry:
-    relative_path: str
-    kind: str
-    fingerprint: _PathFingerprint
-    ctime_ns: int | None
-    content_sha256: str | None
-
-
-@dataclass(frozen=True)
-class _IncludedTreeSnapshot:
-    root_fingerprint: _PathFingerprint | None
-    entries: tuple[_IncludedTreeEntry, ...]
-
-    @property
-    def identity(self) -> _PathIdentity | None:
-        if self.root_fingerprint is None:
-            return None
-        return self.root_fingerprint[:2]
-
-
-@dataclass(frozen=True)
-class _IncludedTreeDescriptorBinding:
-    parent_fd: int
-    name: str
-    fingerprint: _PathFingerprint
-    display_path: str
-
-
-@dataclass(frozen=True)
-class _IncludedTreePathBinding:
-    path: str
-    identity: _PathIdentity
-
-
-@dataclass(frozen=True)
-class _IncludedRegistrySnapshot:
-    directory_identity: _PathIdentity | None
-    file_identity: _PathIdentity | None
-    file_mode: int | None
-    content: bytes | None
-
-
-@dataclass(frozen=True)
-class _IncludedRecoveryRecordSizes:
-    journal_bytes: int
-    commit_bytes: int
-
-
-@dataclass(frozen=True)
-class _IncludedOutputSetTransaction:
-    project_identity: _PathIdentity
-    stage_container_path: str
-    stage_container_identity: _PathIdentity
-    staged_container_snapshot: _IncludedTreeSnapshot
-    staged_root_path: str
-    staged_root_snapshot: _IncludedTreeSnapshot
-    staged_registry_path: str
-    staged_registry_identity: _PathIdentity
-    staged_registry_mode: int
-    staged_registry_content: bytes
-    previous_root_snapshot: _IncludedTreeSnapshot
-    previous_registry_snapshot: _IncludedRegistrySnapshot
-    recovery_record_sizes: _IncludedRecoveryRecordSizes | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
-    publication_transaction_id: str | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
-    content_receipts: tuple[_IncludedGenerationContentReceipt, ...] = field(
-        default=(),
-        compare=False,
-        repr=False,
-    )
-
-
-@dataclass(frozen=True)
-class _IncludedRecoveryJournal:
-    format_version: int
-    transaction_id: str
-    transaction: _IncludedOutputSetTransaction
-    root_backup_path: str
-    registry_backup_path: str
-    registry_directory_path: str
-    registry_directory_identity: _PathIdentity
-    registry_directory_created: bool
-
-
-@dataclass(frozen=True)
-class _IncludedCommitMarker:
-    format_version: int
-    transaction_id: str
-    project_identity: _PathIdentity
-    root_identity: _PathIdentity
-    root_snapshot_sha256: str
-    registry_directory_identity: _PathIdentity
-    registry_identity: _PathIdentity
-    registry_content_sha256: str
-
-
-@dataclass
-class _IncludedProjectLock:
-    file_descriptor: int
-    path: str
-    windows: bool
-
-
 def _windows_included_file_locking(
     file_descriptor: int,
     mode: int,
@@ -360,10 +170,6 @@ def _windows_included_file_locking(
         getattr(msvcrt, "locking"),
     )
     locking(file_descriptor, mode, 1)
-
-
-class _IncludedOutputSetCancelled(Exception):
-    """Signal cancellation while a reversible output-set commit is active."""
 
 
 _DIRECTORY_OPEN_FLAGS = (
@@ -471,7 +277,7 @@ def _open_pinned_included_parent(path: str) -> tuple[int, str]:
     return _open_pinned_included_directory(parent_path), name
 
 
-def _directory_identity_from_fd(directory_fd: int) -> _PathIdentity:
+def _directory_identity_from_fd(directory_fd: int) -> PathIdentity:
     directory_stat = os.fstat(directory_fd)
     if not stat.S_ISDIR(directory_stat.st_mode):
         raise OSError("Pinned Included Files descriptor is not a directory")
@@ -480,9 +286,9 @@ def _directory_identity_from_fd(directory_fd: int) -> _PathIdentity:
 
 def _verify_included_directory_fd(
     directory_fd: int,
-    expected_identity: _PathIdentity | None,
+    expected_identity: PathIdentity | None,
     display_path: str,
-) -> _PathIdentity:
+) -> PathIdentity:
     current_identity = _directory_identity_from_fd(directory_fd)
     if expected_identity is not None and current_identity != expected_identity:
         raise OSError(f"Included Files directory changed: {display_path}")
@@ -506,7 +312,7 @@ def _included_entry_stat_at(
 def _verify_included_entry_at(
     parent_fd: int,
     name: str,
-    expected_fingerprint: _PathFingerprint,
+    expected_fingerprint: PathFingerprint,
     display_path: str,
 ) -> None:
     current_stat = _included_entry_stat_at(parent_fd, name)
@@ -707,7 +513,7 @@ def _included_linux_mount_id_from_fd(file_descriptor: int) -> int | None:
 
 def _included_directory_mount_id(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
 ) -> int | None:
     """Read a directory mount ID without following a redirected leaf."""
 
@@ -796,7 +602,7 @@ def _verify_included_mount_boundary_path(
         os.close(file_descriptor)
 
 
-def _included_path_fingerprint(path_stat: os.stat_result) -> _PathFingerprint:
+def _included_path_fingerprint(path_stat: os.stat_result) -> PathFingerprint:
     return (
         path_stat.st_dev,
         path_stat.st_ino,
@@ -809,7 +615,7 @@ def _included_path_fingerprint(path_stat: os.stat_result) -> _PathFingerprint:
 
 def _included_path_handle_binding(
     file_stat: os.stat_result,
-) -> _PathHandleBinding:
+) -> PathHandleBinding:
     """Return metadata that is stable across path and handle stat on Windows."""
 
     return (
@@ -822,7 +628,7 @@ def _included_path_handle_binding(
     )
 
 
-def _included_handle_state(file_stat: os.stat_result) -> _HandleState:
+def _included_handle_state(file_stat: os.stat_result) -> HandleState:
     """Return metadata used to detect mutation of one open file handle."""
 
     return (
@@ -838,7 +644,7 @@ def _included_handle_state(file_stat: os.stat_result) -> _HandleState:
 
 def _included_source_fingerprint(
     source_stat: os.stat_result,
-) -> _IncludedSourceFingerprint:
+) -> IncludedSourceFingerprint:
     return (
         source_stat.st_dev,
         source_stat.st_ino,
@@ -962,7 +768,7 @@ def _windows_included_cleanup_parent_identity(
     kernel32: Any,
     handle: int,
     path: str,
-) -> _PathIdentity:
+) -> PathIdentity:
     identity_info = _WindowsIncludedFileIdInfo()
     if not kernel32.GetFileInformationByHandleEx(
         handle,
@@ -1011,7 +817,7 @@ class _WindowsIncludedCleanupParentBinding:
     """
 
     path: str
-    identity: _PathIdentity
+    identity: PathIdentity
     kernel32: Any
     handle: int | None
 
@@ -1019,7 +825,7 @@ class _WindowsIncludedCleanupParentBinding:
     def open(
         cls,
         path: str,
-        expected_identity: _PathIdentity,
+        expected_identity: PathIdentity,
     ) -> "_WindowsIncludedCleanupParentBinding":
         if os.name != "nt":
             raise OSError(
@@ -1148,7 +954,7 @@ class _WindowsIncludedCleanupParentBinding:
 def _verify_windows_included_cleanup_parent_binding(
     binding: _WindowsIncludedCleanupParentBinding,
     parent_path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
 ) -> None:
     """Verify that a retained Windows handle still binds the requested parent."""
 
@@ -1304,7 +1110,7 @@ def _digest_included_regular_file(
 
 def _capture_fallback_directory_ancestors(
     directory_path: str,
-) -> tuple[tuple[str, _PathIdentity], ...]:
+) -> tuple[tuple[str, PathIdentity], ...]:
     absolute_path = os.path.abspath(directory_path)
     drive, tail = os.path.splitdrive(absolute_path)
     anchor = drive + os.sep
@@ -1316,7 +1122,7 @@ def _capture_fallback_directory_ancestors(
     else:
         current_path = anchor
         remaining_components = []
-    identities: list[tuple[str, _PathIdentity]] = []
+    identities: list[tuple[str, PathIdentity]] = []
     for component in (None, *remaining_components):
         if component is not None:
             current_path = os.path.join(current_path, component)
@@ -1341,7 +1147,7 @@ def _capture_fallback_directory_ancestors(
 
 
 def _verify_fallback_directory_ancestors(
-    identities: tuple[tuple[str, _PathIdentity], ...],
+    identities: tuple[tuple[str, PathIdentity], ...],
 ) -> None:
     for directory_path, expected_identity in identities:
         try:
@@ -1363,7 +1169,7 @@ def _verify_fallback_directory_ancestors(
 def _capture_included_source_directory_identities(
     project_root: str,
     source_path: str,
-) -> tuple[str, tuple[_IncludedSourceDirectoryIdentity, ...]]:
+) -> tuple[str, tuple[IncludedSourceDirectoryIdentity, ...]]:
     canonical_root = os.path.normcase(os.path.realpath(project_root))
     canonical_path = os.path.normcase(os.path.realpath(source_path))
     try:
@@ -1380,7 +1186,7 @@ def _capture_included_source_directory_identities(
         )
 
     directory_path = canonical_root
-    directory_identities: list[_IncludedSourceDirectoryIdentity] = []
+    directory_identities: list[IncludedSourceDirectoryIdentity] = []
     relative_directory = os.path.relpath(
         os.path.dirname(canonical_path),
         canonical_root,
@@ -1414,7 +1220,7 @@ def _capture_included_source_directory_identities(
     return canonical_path, tuple(directory_identities)
 
 
-def _included_directory_identity(path: str) -> _PathIdentity | None:
+def _included_directory_identity(path: str) -> PathIdentity | None:
     if _included_descriptor_paths_supported():
         try:
             directory_fd = _open_pinned_included_directory(path)
@@ -1450,8 +1256,8 @@ def _included_regular_file_state_at(
     name: str,
     display_path: str,
     *,
-    allowed_identities: frozenset[_PathIdentity] | None = None,
-) -> tuple[_PathIdentity, int, bytes] | None:
+    allowed_identities: frozenset[PathIdentity] | None = None,
+) -> tuple[PathIdentity, int, bytes] | None:
     parent_stat = os.fstat(parent_fd)
     parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
     parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
@@ -1524,12 +1330,12 @@ def _before_included_fallback_regular_file_open(_path: str) -> None:
 def _included_regular_file_state(
     path: str,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
     expected_fallback_ancestors: (
-        tuple[tuple[str, _PathIdentity], ...] | None
+        tuple[tuple[str, PathIdentity], ...] | None
     ) = None,
-    allowed_identities: frozenset[_PathIdentity] | None = None,
-) -> tuple[_PathIdentity, int, bytes] | None:
+    allowed_identities: frozenset[PathIdentity] | None = None,
+) -> tuple[PathIdentity, int, bytes] | None:
     if _included_descriptor_paths_supported():
         try:
             parent_fd, name = _open_pinned_included_parent(path)
@@ -1743,7 +1549,7 @@ def _open_included_tree_directory_at(parent_fd: int, name: str) -> int:
 
 
 def _verify_included_tree_descriptor_binding(
-    binding: _IncludedTreeDescriptorBinding,
+    binding: IncludedTreeDescriptorBinding,
 ) -> None:
     """Verify one link in a retained descriptor chain."""
 
@@ -1756,7 +1562,7 @@ def _verify_included_tree_descriptor_binding(
 
 
 def _verify_included_tree_path_binding(
-    binding: _IncludedTreePathBinding,
+    binding: IncludedTreePathBinding,
 ) -> os.stat_result:
     """Verify one fallback directory through its complete current path."""
 
@@ -1779,12 +1585,12 @@ def _capture_included_tree_from_fd(
     directory_fd: int,
     relative_directory: str,
     display_path: str,
-    binding: _IncludedTreeDescriptorBinding,
+    binding: IncludedTreeDescriptorBinding,
     boundary_device: int,
     boundary_mount_id: int | None,
     *,
     include_content: bool,
-) -> list[_IncludedTreeEntry]:
+) -> list[IncludedTreeEntry]:
     _verify_included_tree_descriptor_binding(binding)
     try:
         names = sorted(os.listdir(directory_fd))
@@ -1792,7 +1598,7 @@ def _capture_included_tree_from_fd(
         raise OSError(
             f"Could not inspect Included Files directory: {display_path}"
         ) from error
-    entries: list[_IncludedTreeEntry] = []
+    entries: list[IncludedTreeEntry] = []
     for name in names:
         _verify_included_tree_descriptor_binding(binding)
         entry_path = os.path.join(display_path, name)
@@ -1826,7 +1632,7 @@ def _capture_included_tree_from_fd(
                     boundary_mount_id,
                     child_fd,
                 )
-                child_binding = _IncludedTreeDescriptorBinding(
+                child_binding = IncludedTreeDescriptorBinding(
                     parent_fd=directory_fd,
                     name=name,
                     fingerprint=entry_fingerprint,
@@ -1878,7 +1684,7 @@ def _capture_included_tree_from_fd(
                 f"Refusing non-regular entry in Included Files tree: {entry_path}"
             )
         entries.append(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=relative_path,
                 kind=kind,
                 fingerprint=entry_fingerprint,
@@ -1892,10 +1698,10 @@ def _capture_included_tree_from_fd(
 
 def _capture_included_tree_descriptor(
     root_path: str,
-    expected_parent_identity: _PathIdentity | None,
+    expected_parent_identity: PathIdentity | None,
     *,
     include_content: bool,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     parent_fd, root_name = _open_pinned_included_parent(root_path)
     try:
         parent_stat = os.fstat(parent_fd)
@@ -1913,7 +1719,7 @@ def _capture_included_tree_descriptor(
                 raise OSError(
                     f"Included Files root parent changed: {parent_path}"
                 )
-            return _IncludedTreeSnapshot(root_fingerprint=None, entries=())
+            return IncludedTreeSnapshot(root_fingerprint=None, entries=())
         if not stat.S_ISDIR(root_stat.st_mode):
             raise OSError(
                 f"Refusing redirected or non-directory Included Files root: {root_path}"
@@ -1933,7 +1739,7 @@ def _capture_included_tree_descriptor(
                 parent_mount_id,
                 root_fd,
             )
-            root_binding = _IncludedTreeDescriptorBinding(
+            root_binding = IncludedTreeDescriptorBinding(
                 parent_fd=parent_fd,
                 name=root_name,
                 fingerprint=root_fingerprint,
@@ -1954,7 +1760,7 @@ def _capture_included_tree_descriptor(
         _verify_included_tree_descriptor_binding(root_binding)
         if _included_directory_identity(parent_path) != parent_identity:
             raise OSError(f"Included Files root parent changed: {parent_path}")
-        return _IncludedTreeSnapshot(
+        return IncludedTreeSnapshot(
             root_fingerprint=root_fingerprint,
             entries=tuple(
                 sorted(
@@ -1973,10 +1779,10 @@ def _after_included_fallback_tree_directory_scan(_path: str) -> None:
 
 def _capture_included_tree_fallback(
     root_path: str,
-    expected_parent_identity: _PathIdentity | None,
+    expected_parent_identity: PathIdentity | None,
     *,
     include_content: bool,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     root_parent_path = os.path.dirname(os.path.abspath(root_path))
     root_parent_identities = _capture_fallback_directory_ancestors(
         root_parent_path
@@ -1990,7 +1796,7 @@ def _capture_included_tree_fallback(
         root_stat = os.lstat(root_path)
     except FileNotFoundError:
         _verify_fallback_directory_ancestors(root_parent_identities)
-        return _IncludedTreeSnapshot(root_fingerprint=None, entries=())
+        return IncludedTreeSnapshot(root_fingerprint=None, entries=())
     if (
         _included_output_path_is_redirected(root_path, root_stat)
         or not stat.S_ISDIR(root_stat.st_mode)
@@ -2011,11 +1817,11 @@ def _capture_included_tree_fallback(
         parent_mount_id,
         expect_directory=True,
     )
-    entries: list[_IncludedTreeEntry] = []
-    pending: list[tuple[str, _IncludedTreePathBinding]] = [
+    entries: list[IncludedTreeEntry] = []
+    pending: list[tuple[str, IncludedTreePathBinding]] = [
         (
             "",
-            _IncludedTreePathBinding(
+            IncludedTreePathBinding(
                 path=root_path,
                 identity=(root_stat.st_dev, root_stat.st_ino),
             ),
@@ -2075,7 +1881,7 @@ def _capture_included_tree_fallback(
                 pending.append(
                     (
                         relative_path,
-                        _IncludedTreePathBinding(
+                        IncludedTreePathBinding(
                             path=entry_path,
                             identity=(entry_stat.st_dev, entry_stat.st_ino),
                         ),
@@ -2106,7 +1912,7 @@ def _capture_included_tree_fallback(
                     f"Refusing non-regular entry in Included Files tree: {entry_path}"
                 )
             entries.append(
-                _IncludedTreeEntry(
+                IncludedTreeEntry(
                     relative_path=relative_path,
                     kind=kind,
                     fingerprint=_included_path_fingerprint(entry_stat),
@@ -2125,7 +1931,7 @@ def _capture_included_tree_fallback(
         or _included_path_fingerprint(current_root_stat) != root_fingerprint
     ):
         raise OSError(f"Included Files root changed while inspecting: {root_path}")
-    return _IncludedTreeSnapshot(
+    return IncludedTreeSnapshot(
         root_fingerprint=root_fingerprint,
         entries=tuple(
             sorted(
@@ -2139,9 +1945,9 @@ def _capture_included_tree_fallback(
 def _capture_included_tree(
     root_path: str,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
     include_content: bool = True,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     if _included_descriptor_paths_supported():
         return _capture_included_tree_descriptor(
             root_path,
@@ -2157,9 +1963,9 @@ def _capture_included_tree(
 
 def _verify_included_tree_snapshot(
     root_path: str,
-    expected: _IncludedTreeSnapshot,
+    expected: IncludedTreeSnapshot,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
 ) -> None:
     if (
         _capture_included_tree(
@@ -2172,12 +1978,12 @@ def _verify_included_tree_snapshot(
 
 
 def _included_tree_without_content(
-    snapshot: _IncludedTreeSnapshot,
-) -> _IncludedTreeSnapshot:
-    return _IncludedTreeSnapshot(
+    snapshot: IncludedTreeSnapshot,
+) -> IncludedTreeSnapshot:
+    return IncludedTreeSnapshot(
         root_fingerprint=snapshot.root_fingerprint,
         entries=tuple(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=entry.relative_path,
                 kind=entry.kind,
                 fingerprint=entry.fingerprint,
@@ -2191,9 +1997,9 @@ def _included_tree_without_content(
 
 def _verify_included_tree_snapshot_metadata(
     root_path: str,
-    expected: _IncludedTreeSnapshot,
+    expected: IncludedTreeSnapshot,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
 ) -> None:
     current = _capture_included_tree(
         root_path,
@@ -2207,7 +2013,7 @@ def _verify_included_tree_snapshot_metadata(
 
 
 def _included_tree_matches_planned_paths(
-    snapshot: _IncludedTreeSnapshot,
+    snapshot: IncludedTreeSnapshot,
     assigned_paths: set[str],
 ) -> bool:
     if snapshot.identity is None:
@@ -2237,8 +2043,8 @@ def _included_tree_matches_planned_paths(
 
 
 def _included_tree_matches_source_receipts(
-    snapshot: _IncludedTreeSnapshot,
-    assigned_receipts: dict[str, _IncludedNoOpSourceReceipt],
+    snapshot: IncludedTreeSnapshot,
+    assigned_receipts: dict[str, IncludedNoOpSourceReceipt],
 ) -> bool:
     entries_by_path = {
         entry.relative_path: entry
@@ -2257,15 +2063,15 @@ def _included_tree_matches_source_receipts(
 def _included_generation_receipts_by_path(
     *,
     transaction_id: str,
-    generation_identity: _PathIdentity,
-    stage_container_identity: _PathIdentity,
+    generation_identity: PathIdentity,
+    stage_container_identity: PathIdentity,
     staged_root_path: str,
     public_root_path: str,
-    receipts: tuple[_IncludedGenerationContentReceipt, ...],
-) -> dict[str, _IncludedGenerationContentReceipt]:
+    receipts: tuple[IncludedGenerationContentReceipt, ...],
+) -> dict[str, IncludedGenerationContentReceipt]:
     if not receipts:
         raise OSError("Included Files generation receipt set is empty")
-    receipts_by_path: dict[str, _IncludedGenerationContentReceipt] = {}
+    receipts_by_path: dict[str, IncludedGenerationContentReceipt] = {}
     normalized_staged_root = os.path.normcase(os.path.abspath(staged_root_path))
     normalized_public_root = os.path.normcase(os.path.abspath(public_root_path))
     for receipt in receipts:
@@ -2339,13 +2145,13 @@ def _included_generation_receipts_by_path(
 def _capture_included_tree_from_generation_receipts(
     staged_root_path: str,
     *,
-    expected_parent_identity: _PathIdentity,
+    expected_parent_identity: PathIdentity,
     transaction_id: str,
-    generation_identity: _PathIdentity,
-    stage_container_identity: _PathIdentity,
-    receipts: tuple[_IncludedGenerationContentReceipt, ...],
+    generation_identity: PathIdentity,
+    stage_container_identity: PathIdentity,
+    receipts: tuple[IncludedGenerationContentReceipt, ...],
     published: bool = False,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     if not receipts:
         raise OSError("Included Files generation receipt set is empty")
     project_path = os.path.dirname(os.path.dirname(staged_root_path))
@@ -2377,7 +2183,7 @@ def _capture_included_tree_from_generation_receipts(
     if file_entries.keys() != receipts_by_path.keys():
         raise OSError("Included Files generation receipt inventory changed")
 
-    entries: list[_IncludedTreeEntry] = []
+    entries: list[IncludedTreeEntry] = []
     for entry in metadata.entries:
         if entry.kind != "file":
             entries.append(entry)
@@ -2411,14 +2217,14 @@ def _capture_included_tree_from_generation_receipts(
                 content_sha256=receipt.output.sha256,
             )
         )
-    return _IncludedTreeSnapshot(
+    return IncludedTreeSnapshot(
         root_fingerprint=metadata.root_fingerprint,
         entries=tuple(entries),
     )
 
 
 def _verify_included_generation_source_receipt(
-    receipt: _IncludedNoOpSourceReceipt,
+    receipt: IncludedNoOpSourceReceipt,
     *,
     validate_content: bool,
 ) -> None:
@@ -2431,7 +2237,7 @@ def _verify_included_generation_source_receipt(
     ) as source_file:
         expected_stat = os.fstat(source_file.fileno())
 
-        def capture_binding() -> _IncludedSourceBinding:
+        def capture_binding() -> IncludedSourceBinding:
             lexical_stat = os.lstat(source_path)
             path_stat = os.stat(source_path)
             handle_stat = os.fstat(source_file.fileno())
@@ -2455,7 +2261,7 @@ def _verify_included_generation_source_receipt(
                 )
             )
             _verify_fallback_directory_ancestors(directory_identities)
-            return _IncludedSourceBinding(
+            return IncludedSourceBinding(
                 filesystem_path=os.path.normcase(
                     os.path.abspath(source_path)
                 ),
@@ -2491,7 +2297,7 @@ def _verify_included_generation_source_receipt(
 
 
 def _included_registry_receipts_from_tree(
-    snapshot: _IncludedTreeSnapshot,
+    snapshot: IncludedTreeSnapshot,
     assignments_by_source: dict[str, IncludedFilePathAssignment],
     emitted_logical_paths: set[str],
 ) -> dict[str, tuple[int, str]] | None:
@@ -2516,13 +2322,13 @@ def _included_registry_receipts_from_tree(
 
 
 def _included_stage_container_snapshot(
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     stage_path: str,
-    stage_identity: _PathIdentity,
-    staged_root_snapshot: _IncludedTreeSnapshot,
-    staged_registry_identity: _PathIdentity,
+    stage_identity: PathIdentity,
+    staged_root_snapshot: IncludedTreeSnapshot,
+    staged_registry_identity: PathIdentity,
     staged_registry_content: bytes,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     """Bind the complete staged namespace without re-reading payload bodies."""
 
     metadata = _capture_included_tree(
@@ -2578,7 +2384,7 @@ def _included_stage_container_snapshot(
     }
     if actual_files != set(expected_file_hashes) or actual_directories != expected_directories:
         raise OSError("Included Files staging container inventory changed")
-    entries: list[_IncludedTreeEntry] = []
+    entries: list[IncludedTreeEntry] = []
     for entry in metadata.entries:
         if entry.kind == "file" and entry.fingerprint[5] != 1:
             raise OSError(
@@ -2596,7 +2402,7 @@ def _included_stage_container_snapshot(
         ):
             raise OSError("Included File staging registry identity changed")
         entries.append(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=entry.relative_path,
                 kind=entry.kind,
                 fingerprint=entry.fingerprint,
@@ -2608,15 +2414,15 @@ def _included_stage_container_snapshot(
                 ),
             )
         )
-    return _IncludedTreeSnapshot(
+    return IncludedTreeSnapshot(
         root_fingerprint=metadata.root_fingerprint,
         entries=tuple(entries),
     )
 
 
 def _verify_staged_included_inventory(
-    snapshot: _IncludedTreeSnapshot,
-    assigned_receipts: dict[str, _IncludedCopyReceipt],
+    snapshot: IncludedTreeSnapshot,
+    assigned_receipts: dict[str, IncludedCopyReceipt],
 ) -> None:
     if snapshot.identity is None:
         raise OSError("Included Files staging root disappeared before publication")
@@ -2683,9 +2489,9 @@ def _before_included_registry_directory_binding_check(
 def _capture_included_registry(
     project_path: str,
     *,
-    expected_project_identity: _PathIdentity | None = None,
-    allowed_file_identities: frozenset[_PathIdentity] | None = None,
-) -> _IncludedRegistrySnapshot:
+    expected_project_identity: PathIdentity | None = None,
+    allowed_file_identities: frozenset[PathIdentity] | None = None,
+) -> IncludedRegistrySnapshot:
     registry_path = _included_registry_path(project_path)
     registry_directory = os.path.dirname(registry_path)
     if _included_descriptor_paths_supported():
@@ -2710,7 +2516,7 @@ def _capture_included_registry(
                         project_path,
                         expected_project_identity,
                     )
-                return _IncludedRegistrySnapshot(
+                return IncludedRegistrySnapshot(
                     directory_identity=None,
                     file_identity=None,
                     file_mode=None,
@@ -2769,14 +2575,14 @@ def _capture_included_registry(
                     expected_project_identity,
                 )
             if file_state is None:
-                return _IncludedRegistrySnapshot(
+                return IncludedRegistrySnapshot(
                     directory_identity=directory_identity,
                     file_identity=None,
                     file_mode=None,
                     content=None,
                 )
             file_identity, file_mode, content = file_state
-            return _IncludedRegistrySnapshot(
+            return IncludedRegistrySnapshot(
                 directory_identity=directory_identity,
                 file_identity=file_identity,
                 file_mode=file_mode,
@@ -2795,7 +2601,7 @@ def _capture_included_registry(
         registry_directory_stat = os.lstat(registry_directory)
     except FileNotFoundError:
         _verify_fallback_directory_ancestors(project_ancestors)
-        return _IncludedRegistrySnapshot(
+        return IncludedRegistrySnapshot(
             directory_identity=None,
             file_identity=None,
             file_mode=None,
@@ -2840,14 +2646,14 @@ def _capture_included_registry(
     )
     _verify_fallback_directory_ancestors(registry_ancestors)
     if file_state is None:
-        return _IncludedRegistrySnapshot(
+        return IncludedRegistrySnapshot(
             directory_identity=directory_identity,
             file_identity=None,
             file_mode=None,
             content=None,
         )
     file_identity, file_mode, content = file_state
-    return _IncludedRegistrySnapshot(
+    return IncludedRegistrySnapshot(
         directory_identity=directory_identity,
         file_identity=file_identity,
         file_mode=file_mode,
@@ -2857,9 +2663,9 @@ def _capture_included_registry(
 
 def _verify_included_registry_snapshot(
     project_path: str,
-    expected: _IncludedRegistrySnapshot,
+    expected: IncludedRegistrySnapshot,
     *,
-    expected_project_identity: _PathIdentity | None = None,
+    expected_project_identity: PathIdentity | None = None,
 ) -> None:
     if (
         _capture_included_registry(
@@ -2878,7 +2684,7 @@ def _verify_included_registry_snapshot(
 
 def _verify_included_project_identity(
     project_path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
 ) -> None:
     if _included_directory_identity(project_path) != expected_identity:
         raise OSError(f"Godot project root changed during Included Files conversion: {project_path}")
@@ -2886,9 +2692,9 @@ def _verify_included_project_identity(
 
 def _verify_included_stage_container(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     stage_path: str,
-    stage_identity: _PathIdentity,
+    stage_identity: PathIdentity,
 ) -> None:
     _verify_included_project_identity(project_path, project_identity)
     expected_parent = os.path.normcase(os.path.abspath(project_path))
@@ -2911,9 +2717,9 @@ def _verify_included_stage_container(
 
 def _write_included_stage_marker(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     stage_path: str,
-    stage_identity: _PathIdentity,
+    stage_identity: PathIdentity,
 ) -> None:
     marker_path = os.path.join(stage_path, _INCLUDED_FILES_STAGE_MARKER_NAME)
     content = _included_recovery_record_content(
@@ -2962,13 +2768,13 @@ def _write_included_stage_marker(
 
 def _create_included_output_stage(
     project_path: str,
-    project_identity: _PathIdentity,
-) -> tuple[str, _PathIdentity]:
+    project_identity: PathIdentity,
+) -> tuple[str, PathIdentity]:
     _verify_included_project_identity(project_path, project_identity)
     if _included_descriptor_paths_supported():
         project_fd = _open_pinned_included_directory(project_path)
         stage_name = ""
-        stage_identity: _PathIdentity | None = None
+        stage_identity: PathIdentity | None = None
         try:
             _verify_included_directory_fd(
                 project_fd,
@@ -3084,7 +2890,7 @@ def _create_included_output_stage(
 def _verify_included_directory_entry_identity_at(
     parent_fd: int,
     name: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     display_path: str,
 ) -> None:
     current_stat = _included_entry_stat_at(parent_fd, name)
@@ -3113,7 +2919,7 @@ def _before_included_cleanup_remove(
 def _quarantine_included_entry_at(
     parent_fd: int,
     name: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
     expect_directory: bool,
     display_path: str,
@@ -3161,7 +2967,7 @@ def _quarantine_included_entry_at(
 def _unlink_exact_quarantined_entry_at(
     parent_fd: int,
     name: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     display_path: str,
 ) -> None:
     _before_included_cleanup_remove(parent_fd, name)
@@ -3181,7 +2987,7 @@ def _unlink_exact_quarantined_entry_at(
 def _rmdir_exact_quarantined_entry_at(
     parent_fd: int,
     name: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     display_path: str,
 ) -> None:
     _before_included_cleanup_remove(parent_fd, name)
@@ -3324,7 +3130,7 @@ def _before_included_cleanup_remove_fallback(_path: str) -> None:
 
 def _quarantine_included_entry_fallback(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
     expect_directory: bool,
 ) -> str:
@@ -3352,9 +3158,9 @@ def _quarantine_included_entry_fallback(
 
 def _unlink_exact_quarantined_entry_fallback(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -3464,14 +3270,14 @@ def _unlink_exact_quarantined_entry_fallback(
 
 def _chmod_exact_included_directory_fallback(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     mode: int,
-    expected_parent_identity: _PathIdentity,
+    expected_parent_identity: PathIdentity,
     *,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
-    parent_identities: tuple[tuple[str, _PathIdentity], ...] | None
+    parent_identities: tuple[tuple[str, PathIdentity], ...] | None
     if windows_parent_binding is None:
         parent_identities = _capture_fallback_directory_ancestors(parent_path)
         if parent_identities[-1][1] != expected_parent_identity:
@@ -3595,9 +3401,9 @@ def _chmod_exact_included_directory_fallback(
 
 def _rmdir_exact_quarantined_entry_fallback(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -3701,8 +3507,8 @@ def _rmdir_exact_quarantined_entry_fallback(
 
 def _remove_owned_included_tree_fallback(
     path: str,
-    expected_identity: _PathIdentity,
-    expected_parent_identity: _PathIdentity | None,
+    expected_identity: PathIdentity,
+    expected_parent_identity: PathIdentity | None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     parent_identities = _capture_fallback_directory_ancestors(parent_path)
@@ -3741,7 +3547,7 @@ def _remove_owned_included_tree_fallback(
 
     def remove_directory(
         directory_path: str,
-        directory_identity: _PathIdentity,
+        directory_identity: PathIdentity,
     ) -> None:
         directory_ancestors = _capture_fallback_directory_ancestors(
             directory_path
@@ -3817,9 +3623,9 @@ def _remove_owned_included_tree_fallback(
 
 def _remove_owned_included_tree(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
-    expected_parent_identity: _PathIdentity | None = None,
+    expected_parent_identity: PathIdentity | None = None,
 ) -> None:
     if not _included_descriptor_paths_supported():
         _remove_owned_included_tree_fallback(
@@ -3925,9 +3731,9 @@ def _before_included_fallback_chmod_open(_path: str) -> None:
 
 def _chmod_exact_included_file(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     mode: int,
-    expected_parent_identity: _PathIdentity,
+    expected_parent_identity: PathIdentity,
     *,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> None:
@@ -3959,7 +3765,7 @@ def _chmod_exact_included_file(
             os.close(parent_fd)
         return
     parent_path = os.path.dirname(os.path.abspath(path))
-    parent_identities: tuple[tuple[str, _PathIdentity], ...] | None
+    parent_identities: tuple[tuple[str, PathIdentity], ...] | None
     if windows_parent_binding is None:
         parent_identities = _capture_fallback_directory_ancestors(parent_path)
         if parent_identities[-1][1] != expected_parent_identity:
@@ -4129,11 +3935,11 @@ def _rename_included_transaction_entry(source: str, destination: str) -> None:
 def _move_exact_included_entry(
     source: str,
     destination: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
     expect_directory: bool,
-    source_parent_identity: _PathIdentity | None,
-    destination_parent_identity: _PathIdentity | None,
+    source_parent_identity: PathIdentity | None,
+    destination_parent_identity: PathIdentity | None,
     windows_source_parent_binding: (
         _WindowsIncludedCleanupParentBinding | None
     ) = None,
@@ -4223,7 +4029,7 @@ def _move_exact_included_entry(
             os.close(source_parent_fd)
         return
 
-    source_parent_ancestors: tuple[tuple[str, _PathIdentity], ...] | None
+    source_parent_ancestors: tuple[tuple[str, PathIdentity], ...] | None
     if windows_source_parent_binding is None:
         source_parent_ancestors = _capture_fallback_directory_ancestors(
             source_parent_path
@@ -4248,7 +4054,7 @@ def _move_exact_included_entry(
         )
 
     destination_parent_ancestors: (
-        tuple[tuple[str, _PathIdentity], ...] | None
+        tuple[tuple[str, PathIdentity], ...] | None
     )
     if windows_destination_parent_binding is None:
         destination_parent_ancestors = _capture_fallback_directory_ancestors(
@@ -4344,10 +4150,10 @@ def _move_exact_included_entry(
 def _move_exact_included_directory(
     source: str,
     destination: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
-    source_parent_identity: _PathIdentity | None = None,
-    destination_parent_identity: _PathIdentity | None = None,
+    source_parent_identity: PathIdentity | None = None,
+    destination_parent_identity: PathIdentity | None = None,
     windows_source_parent_binding: (
         _WindowsIncludedCleanupParentBinding | None
     ) = None,
@@ -4370,10 +4176,10 @@ def _move_exact_included_directory(
 def _move_exact_included_file(
     source: str,
     destination: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     *,
-    source_parent_identity: _PathIdentity | None = None,
-    destination_parent_identity: _PathIdentity | None = None,
+    source_parent_identity: PathIdentity | None = None,
+    destination_parent_identity: PathIdentity | None = None,
     windows_source_parent_binding: (
         _WindowsIncludedCleanupParentBinding | None
     ) = None,
@@ -4395,7 +4201,7 @@ def _move_exact_included_file(
 
 def _sync_included_directory(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
 ) -> None:
     """Make prior namespace changes durable where Python exposes directory fsync."""
 
@@ -4422,8 +4228,8 @@ def _sync_included_directory(
 
 def _sync_included_tree_directories_bottom_up(
     root_path: str,
-    snapshot: _IncludedTreeSnapshot,
-    expected_parent_identity: _PathIdentity,
+    snapshot: IncludedTreeSnapshot,
+    expected_parent_identity: PathIdentity,
 ) -> None:
     """Durably bind every recorded tree namespace before committing it."""
 
@@ -4445,7 +4251,7 @@ def _sync_included_tree_directories_bottom_up(
     )
     for entry in directories:
         _sync_included_directory(
-            _included_recovery_tree_entry_path(
+            recovery_tree_entry_path(
                 root_path,
                 entry.relative_path,
             ),
@@ -4465,9 +4271,9 @@ def _after_included_transaction_phase(_phase: str) -> None:
 
 def _prepare_included_registry_directory(
     project_path: str,
-    expected: _IncludedRegistrySnapshot,
-    project_identity: _PathIdentity,
-) -> tuple[str, _PathIdentity, bool]:
+    expected: IncludedRegistrySnapshot,
+    project_identity: PathIdentity,
+) -> tuple[str, PathIdentity, bool]:
     registry_directory = os.path.dirname(_included_registry_path(project_path))
     current_identity = _included_directory_identity(registry_directory)
     if expected.directory_identity is not None:
@@ -4566,8 +4372,8 @@ def _write_included_lock_initialization_temporary(file_descriptor: int) -> None:
 
 def _remove_exact_included_lock_initialization_temporary(
     path: str,
-    expected_identity: _PathIdentity,
-    project_identity: _PathIdentity,
+    expected_identity: PathIdentity,
+    project_identity: PathIdentity,
 ) -> None:
     state = _included_lock_initialization_record_state(
         path,
@@ -4662,7 +4468,7 @@ def _remove_exact_included_lock_initialization_temporary(
 
 def _cleanup_included_lock_initialization_temporaries(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
 ) -> None:
     for name in sorted(os.listdir(project_path)):
         managed = False
@@ -4710,14 +4516,14 @@ def _cleanup_included_lock_initialization_temporaries(
 
 def _initialize_included_project_lock(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     *,
     project_fd: int,
 ) -> None:
     lock_path = os.path.join(project_path, _INCLUDED_FILES_LOCK_NAME)
     file_descriptor = -1
     temporary_path = ""
-    temporary_identity: _PathIdentity | None = None
+    temporary_identity: PathIdentity | None = None
     for _attempt in range(100):
         temporary_name = (
             _INCLUDED_FILES_LOCK_TEMP_PREFIX + secrets.token_hex(8) + ".tmp"
@@ -4809,8 +4615,8 @@ def _initialize_included_project_lock(
 
 def _acquire_included_project_lock(
     project_path: str,
-    project_identity: _PathIdentity,
-) -> _IncludedProjectLock:
+    project_identity: PathIdentity,
+) -> IncludedProjectLock:
     """Acquire the cooperative lock that serializes recovery and publication."""
 
     lock_path = os.path.join(project_path, _INCLUDED_FILES_LOCK_NAME)
@@ -4942,7 +4748,7 @@ def _acquire_included_project_lock(
             project_path,
             project_identity,
         )
-        project_lock = _IncludedProjectLock(
+        project_lock = IncludedProjectLock(
             file_descriptor=file_descriptor,
             path=lock_path,
             windows=windows,
@@ -4968,7 +4774,7 @@ def _acquire_included_project_lock(
         raise
 
 
-def _release_included_project_lock(project_lock: _IncludedProjectLock) -> None:
+def _release_included_project_lock(project_lock: IncludedProjectLock) -> None:
     try:
         if project_lock.windows:
             os.lseek(project_lock.file_descriptor, 0, os.SEEK_SET)
@@ -4981,7 +4787,7 @@ def _release_included_project_lock(project_lock: _IncludedProjectLock) -> None:
         os.close(project_lock.file_descriptor)
 
 
-def _included_identity_payload(identity: _PathIdentity | None) -> list[int] | None:
+def _included_identity_payload(identity: PathIdentity | None) -> list[int] | None:
     return None if identity is None else [identity[0], identity[1]]
 
 
@@ -4999,7 +4805,7 @@ def _included_recovery_compact_integer_payload(
 
 
 def _included_compact_identity_payload(
-    identity: _PathIdentity | None,
+    identity: PathIdentity | None,
 ) -> list[str] | None:
     if identity is None:
         return None
@@ -5016,7 +4822,7 @@ def _included_compact_identity_payload(
 
 
 def _included_compact_fingerprint_payload(
-    fingerprint: _PathFingerprint,
+    fingerprint: PathFingerprint,
 ) -> list[str]:
     return [
         _included_recovery_compact_integer_payload(
@@ -5027,7 +4833,7 @@ def _included_compact_fingerprint_payload(
     ]
 
 
-def _included_tree_snapshot_payload(snapshot: _IncludedTreeSnapshot) -> dict[str, Any]:
+def _included_tree_snapshot_payload(snapshot: IncludedTreeSnapshot) -> dict[str, Any]:
     """Serialize the legacy format-v1 tree representation."""
 
     return {
@@ -5050,7 +4856,7 @@ def _included_tree_snapshot_payload(snapshot: _IncludedTreeSnapshot) -> dict[str
 
 
 def _included_compact_tree_snapshot_payload(
-    snapshot: _IncludedTreeSnapshot,
+    snapshot: IncludedTreeSnapshot,
 ) -> list[Any]:
     """Serialize a format-v2 tree without per-entry field-name repetition."""
 
@@ -5085,7 +4891,7 @@ def _included_compact_tree_snapshot_payload(
 
 
 def _included_registry_snapshot_payload(
-    snapshot: _IncludedRegistrySnapshot,
+    snapshot: IncludedRegistrySnapshot,
 ) -> dict[str, Any]:
     """Serialize the legacy format-v1 registry representation."""
 
@@ -5104,7 +4910,7 @@ def _included_registry_snapshot_payload(
 
 
 def _included_compact_registry_snapshot_payload(
-    snapshot: _IncludedRegistrySnapshot,
+    snapshot: IncludedRegistrySnapshot,
 ) -> list[Any]:
     return [
         _included_compact_identity_payload(snapshot.directory_identity),
@@ -5126,7 +4932,7 @@ def _included_compact_registry_snapshot_payload(
 
 
 def _included_registry_backup_location(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> str:
     transaction = journal.transaction
     project_path = os.path.dirname(transaction.stage_container_path)
@@ -5146,7 +4952,7 @@ def _included_registry_backup_location(
 
 
 def _included_recovery_journal_payload_v1(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     transaction = journal.transaction
     registry_backup_location = _included_registry_backup_location(journal)
@@ -5189,7 +4995,7 @@ def _included_recovery_journal_payload_v1(
 
 
 def _included_recovery_journal_payload_v2(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     transaction = journal.transaction
     registry_backup_location = _included_registry_backup_location(journal)
@@ -5239,7 +5045,7 @@ def _included_recovery_journal_payload_v2(
 
 
 def _included_recovery_journal_payload(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     if journal.format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
         return _included_recovery_journal_payload_v1(journal)
@@ -5249,7 +5055,7 @@ def _included_recovery_journal_payload(
 
 
 def _included_tree_snapshot_sha256(
-    snapshot: _IncludedTreeSnapshot,
+    snapshot: IncludedTreeSnapshot,
     format_version: int,
 ) -> str:
     if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
@@ -5269,13 +5075,13 @@ def _included_tree_snapshot_sha256(
 
 
 def _included_commit_marker_from_journal(
-    journal: _IncludedRecoveryJournal,
-) -> _IncludedCommitMarker:
+    journal: IncludedRecoveryJournal,
+) -> IncludedCommitMarker:
     transaction = journal.transaction
     root_identity = transaction.staged_root_snapshot.identity
     if root_identity is None:
         raise AssertionError("A committed Included Files root must be present")
-    return _IncludedCommitMarker(
+    return IncludedCommitMarker(
         format_version=journal.format_version,
         transaction_id=journal.transaction_id,
         project_identity=transaction.project_identity,
@@ -5293,7 +5099,7 @@ def _included_commit_marker_from_journal(
 
 
 def _included_commit_marker_payload_v1(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     versioned_journal = replace(
         journal,
@@ -5323,7 +5129,7 @@ def _included_commit_marker_payload_v1(
 
 
 def _included_commit_marker_payload_v2(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     versioned_journal = replace(
         journal,
@@ -5359,7 +5165,7 @@ def _included_commit_marker_payload_v2(
 
 
 def _included_commit_marker_payload(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
 ) -> dict[str, Any]:
     if journal.format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
         return _included_commit_marker_payload_v1(journal)
@@ -5369,29 +5175,29 @@ def _included_commit_marker_payload(
 
 
 def _included_recovery_record_sizes(
-    journal: _IncludedRecoveryJournal,
-) -> _IncludedRecoveryRecordSizes:
+    journal: IncludedRecoveryJournal,
+) -> IncludedRecoveryRecordSizes:
     journal_content = _included_recovery_record_content(
         _included_recovery_journal_payload(journal)
     )
     commit_content = _included_recovery_record_content(
         _included_commit_marker_payload(journal)
     )
-    return _IncludedRecoveryRecordSizes(
+    return IncludedRecoveryRecordSizes(
         journal_bytes=len(journal_content),
         commit_bytes=len(commit_content),
     )
 
 
 def _included_preflight_placeholder_snapshots(
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     assigned_byte_counts: dict[str, int],
     staged_registry_content: bytes,
 ) -> tuple[
-    _PathIdentity,
-    _IncludedTreeSnapshot,
-    _IncludedTreeSnapshot,
-    _PathIdentity,
+    PathIdentity,
+    IncludedTreeSnapshot,
+    IncludedTreeSnapshot,
+    PathIdentity,
     int,
 ]:
     if len(assigned_byte_counts) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
@@ -5400,7 +5206,7 @@ def _included_preflight_placeholder_snapshots(
     used_inodes = {project_identity[1]}
     next_inode = _INCLUDED_FILES_RECOVERY_INTEGER_MAX
 
-    def allocate_identity() -> _PathIdentity:
+    def allocate_identity() -> PathIdentity:
         nonlocal next_inode
         while next_inode in used_inodes:
             next_inode -= 1
@@ -5412,10 +5218,10 @@ def _included_preflight_placeholder_snapshots(
         return identity
 
     def fingerprint(
-        identity: _PathIdentity,
+        identity: PathIdentity,
         mode: int,
         size: int,
-    ) -> _PathFingerprint:
+    ) -> PathFingerprint:
         return (identity[0], identity[1], mode, size, 0, 1)
 
     assigned_paths = sorted(assigned_byte_counts)
@@ -5431,7 +5237,7 @@ def _included_preflight_placeholder_snapshots(
     ):
         raise OSError("Included Files recovery tree has too many entries")
     for relative_path in (*directory_paths, *assigned_paths):
-        _included_recovery_relative_path(relative_path)
+        recovery_relative_path(relative_path)
 
     staged_root_identity = allocate_identity()
     staged_root_fingerprint = fingerprint(
@@ -5443,13 +5249,13 @@ def _included_preflight_placeholder_snapshots(
         **{path: "directory" for path in directory_paths},
         **{path: "file" for path in assigned_paths},
     }
-    staged_root_entries: list[_IncludedTreeEntry] = []
+    staged_root_entries: list[IncludedTreeEntry] = []
     for relative_path in sorted(entry_kinds):
         kind = entry_kinds[relative_path]
         identity = allocate_identity()
         if kind == "directory":
             staged_root_entries.append(
-                _IncludedTreeEntry(
+                IncludedTreeEntry(
                     relative_path=relative_path,
                     kind=kind,
                     fingerprint=fingerprint(
@@ -5464,7 +5270,7 @@ def _included_preflight_placeholder_snapshots(
         else:
             byte_count = assigned_byte_counts[relative_path]
             staged_root_entries.append(
-                _IncludedTreeEntry(
+                IncludedTreeEntry(
                     relative_path=relative_path,
                     kind=kind,
                     fingerprint=fingerprint(
@@ -5478,7 +5284,7 @@ def _included_preflight_placeholder_snapshots(
                     ),
                 )
             )
-    staged_root_snapshot = _IncludedTreeSnapshot(
+    staged_root_snapshot = IncludedTreeSnapshot(
         root_fingerprint=staged_root_fingerprint,
         entries=tuple(staged_root_entries),
     )
@@ -5498,7 +5304,7 @@ def _included_preflight_placeholder_snapshots(
         }
     )
     container_entries = [
-        _IncludedTreeEntry(
+        IncludedTreeEntry(
             relative_path=_INCLUDED_FILES_STAGE_MARKER_NAME,
             kind="file",
             fingerprint=fingerprint(
@@ -5509,7 +5315,7 @@ def _included_preflight_placeholder_snapshots(
             ctime_ns=0,
             content_sha256=hashlib.sha256(stage_marker_content).hexdigest(),
         ),
-        _IncludedTreeEntry(
+        IncludedTreeEntry(
             relative_path=_INCLUDED_FILES_ROOT_NAME,
             kind="directory",
             fingerprint=staged_root_fingerprint,
@@ -5517,7 +5323,7 @@ def _included_preflight_placeholder_snapshots(
             content_sha256=None,
         ),
         *(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=(
                     _INCLUDED_FILES_ROOT_NAME + "/" + entry.relative_path
                 ),
@@ -5528,7 +5334,7 @@ def _included_preflight_placeholder_snapshots(
             )
             for entry in staged_root_entries
         ),
-        _IncludedTreeEntry(
+        IncludedTreeEntry(
             relative_path="gml_included_file_registry.gd",
             kind="file",
             fingerprint=fingerprint(
@@ -5542,7 +5348,7 @@ def _included_preflight_placeholder_snapshots(
             ).hexdigest(),
         ),
     ]
-    staged_container_snapshot = _IncludedTreeSnapshot(
+    staged_container_snapshot = IncludedTreeSnapshot(
         root_fingerprint=fingerprint(
             stage_container_identity,
             stat.S_IFDIR | 0o700,
@@ -5566,12 +5372,12 @@ def _included_preflight_placeholder_snapshots(
 
 def _preflight_included_recovery_record_sizes(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     assigned_byte_counts: dict[str, int],
     staged_registry_content: bytes,
-    previous_root_snapshot: _IncludedTreeSnapshot,
-    previous_registry_snapshot: _IncludedRegistrySnapshot,
-) -> _IncludedRecoveryRecordSizes:
+    previous_root_snapshot: IncludedTreeSnapshot,
+    previous_registry_snapshot: IncludedRegistrySnapshot,
+) -> IncludedRecoveryRecordSizes:
     """Serialize exact-size format-v2 stand-ins before payload staging."""
 
     try:
@@ -5609,7 +5415,7 @@ def _preflight_included_recovery_record_sizes(
             if previous_registry_snapshot.file_identity is not None
             else project_path
         )
-        transaction = _IncludedOutputSetTransaction(
+        transaction = IncludedOutputSetTransaction(
             project_identity=project_identity,
             stage_container_path=stage_container_path,
             stage_container_identity=stage_container_identity,
@@ -5629,7 +5435,7 @@ def _preflight_included_recovery_record_sizes(
             previous_root_snapshot=previous_root_snapshot,
             previous_registry_snapshot=previous_registry_snapshot,
         )
-        journal = _IncludedRecoveryJournal(
+        journal = IncludedRecoveryJournal(
             format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
             transaction_id="0" * 32,
             transaction=transaction,
@@ -5654,8 +5460,8 @@ def _preflight_included_recovery_record_sizes(
 
 
 def _verify_included_recovery_record_sizes(
-    expected: _IncludedRecoveryRecordSizes,
-    journal: _IncludedRecoveryJournal,
+    expected: IncludedRecoveryRecordSizes,
+    journal: IncludedRecoveryJournal,
 ) -> None:
     actual = _included_recovery_record_sizes(journal)
     if actual != expected:
@@ -5704,7 +5510,7 @@ def _included_recovery_identity(
     label: str,
     *,
     optional: bool = False,
-) -> _PathIdentity | None:
+) -> PathIdentity | None:
     if value is None and optional:
         return None
     if not isinstance(value, list):
@@ -5724,7 +5530,7 @@ def _included_recovery_compact_identity(
     label: str,
     *,
     optional: bool = False,
-) -> _PathIdentity | None:
+) -> PathIdentity | None:
     if value is None and optional:
         return None
     if not isinstance(value, list):
@@ -5744,7 +5550,7 @@ def _included_recovery_identity_for_format(
     format_version: int,
     *,
     optional: bool = False,
-) -> _PathIdentity | None:
+) -> PathIdentity | None:
     if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
         return _included_recovery_identity(
             value,
@@ -5760,7 +5566,7 @@ def _included_recovery_identity_for_format(
     raise OSError("Unsupported Included Files recovery identity format")
 
 
-def _included_recovery_fingerprint(value: Any, label: str) -> _PathFingerprint:
+def _included_recovery_fingerprint(value: Any, label: str) -> PathFingerprint:
     if not isinstance(value, list):
         raise OSError(f"Invalid Included Files recovery {label}")
     components = cast(list[Any], value)
@@ -5771,20 +5577,20 @@ def _included_recovery_fingerprint(value: Any, label: str) -> _PathFingerprint:
     )
     if any(component < 0 for component in fingerprint):
         raise OSError(f"Invalid Included Files recovery {label}")
-    return cast(_PathFingerprint, fingerprint)
+    return cast(PathFingerprint, fingerprint)
 
 
 def _included_recovery_compact_fingerprint(
     value: Any,
     label: str,
-) -> _PathFingerprint:
+) -> PathFingerprint:
     if not isinstance(value, list):
         raise OSError(f"Invalid Included Files recovery {label}")
     components = cast(list[Any], value)
     if len(components) != 6:
         raise OSError(f"Invalid Included Files recovery {label}")
     return cast(
-        _PathFingerprint,
+        PathFingerprint,
         tuple(
             _included_recovery_compact_int(component, label)
             for component in components
@@ -5816,79 +5622,10 @@ def _included_recovery_bytes(value: Any, label: str) -> bytes:
     return decoded
 
 
-def _included_windows_recovery_component_is_ambiguous(component: str) -> bool:
-    if len(component) >= 2 and component[1] == ":":
-        # A drive-relative component such as ``D:payload`` can discard every
-        # previously joined component when reconstructed with Windows paths.
-        return True
-    if component.startswith(" ") or component.endswith((" ", ".")):
-        return True
-    if any(
-        ord(character) < 32 or character in '<>:"|?*'
-        for character in component
-    ):
-        # This includes NTFS alternate-data-stream separators.
-        return True
-    device_stem = component.split(".", 1)[0].rstrip(" ").upper()
-    return device_stem in _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES
-
-
-def _included_recovery_relative_path(value: Any) -> str:
-    if not isinstance(value, str):
-        raise OSError("Invalid Included Files recovery tree path")
-    components = value.split("/")
-    if (
-        value == ""
-        or value.startswith("/")
-        or "\0" in value
-        or "\\" in value
-        or any(component in {"", ".", ".."} for component in components)
-    ):
-        raise OSError("Invalid Included Files recovery tree path")
-    if os.name == "nt" and any(
-        _included_windows_recovery_component_is_ambiguous(component)
-        for component in components
-    ):
-        raise OSError("Windows-ambiguous Included Files recovery tree path")
-    return value
-
-
-def _included_recovery_tree_entry_path(
-    root_path: str,
-    relative_path: str,
-) -> str:
-    """Reconstruct one journal path without permitting platform path resets."""
-
-    validated_relative_path = _included_recovery_relative_path(relative_path)
-    components = validated_relative_path.split("/")
-    absolute_root = os.path.abspath(root_path)
-    native_relative_path = os.path.join(*components)
-    absolute_entry = os.path.abspath(
-        os.path.join(absolute_root, native_relative_path)
-    )
-    try:
-        common_root = os.path.commonpath((absolute_root, absolute_entry))
-        round_trip = os.path.relpath(absolute_entry, absolute_root)
-    except ValueError as error:
-        raise OSError(
-            "Included Files recovery tree path escaped its recorded root"
-        ) from error
-    if (
-        os.path.normcase(common_root) != os.path.normcase(absolute_root)
-        or os.path.isabs(round_trip)
-        or os.path.normcase(round_trip)
-        != os.path.normcase(native_relative_path)
-    ):
-        raise OSError(
-            "Included Files recovery tree path escaped its recorded root"
-        )
-    return absolute_entry
-
-
 def _included_tree_snapshot_from_payload_v1(
     value: Any,
     label: str,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     payload = _included_recovery_dict(value, label)
     _included_recovery_exact_keys(
         payload,
@@ -5910,7 +5647,7 @@ def _included_tree_snapshot_from_payload_v1(
     raw_entries = cast(list[Any], entries_value)
     if len(raw_entries) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
         raise OSError(f"Included Files recovery {label} has too many entries")
-    entries: list[_IncludedTreeEntry] = []
+    entries: list[IncludedTreeEntry] = []
     seen_paths: set[str] = set()
     for raw_entry in raw_entries:
         entry_payload = _included_recovery_dict(raw_entry, label + " entry")
@@ -5927,7 +5664,7 @@ def _included_tree_snapshot_from_payload_v1(
             ),
             label + " entry",
         )
-        relative_path = _included_recovery_relative_path(
+        relative_path = recovery_relative_path(
             entry_payload.get("relative_path")
         )
         if relative_path in seen_paths:
@@ -5964,7 +5701,7 @@ def _included_tree_snapshot_from_payload_v1(
                 "Incomplete Included Files recovery file receipt: " + relative_path
             )
         entries.append(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=relative_path,
                 kind=kind,
                 fingerprint=fingerprint,
@@ -5980,10 +5717,10 @@ def _included_tree_snapshot_from_payload_v1(
 
 
 def _validated_included_tree_snapshot(
-    root_fingerprint: _PathFingerprint | None,
-    entries: list[_IncludedTreeEntry],
+    root_fingerprint: PathFingerprint | None,
+    entries: list[IncludedTreeEntry],
     label: str,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     if root_fingerprint is None and entries:
         raise OSError(f"Invalid Included Files recovery absent {label}")
     if root_fingerprint is not None and not stat.S_ISDIR(root_fingerprint[2]):
@@ -6009,7 +5746,7 @@ def _validated_included_tree_snapshot(
         raise OSError(f"Invalid Included Files recovery {label} topology")
     if entries != sorted(entries, key=lambda entry: entry.relative_path):
         raise OSError(f"Unsorted Included Files recovery {label}")
-    return _IncludedTreeSnapshot(
+    return IncludedTreeSnapshot(
         root_fingerprint=root_fingerprint,
         entries=tuple(entries),
     )
@@ -6018,7 +5755,7 @@ def _validated_included_tree_snapshot(
 def _included_tree_snapshot_from_payload_v2(
     value: Any,
     label: str,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     if not isinstance(value, list):
         raise OSError(f"Invalid Included Files recovery {label}")
     components = cast(list[Any], value)
@@ -6039,7 +5776,7 @@ def _included_tree_snapshot_from_payload_v2(
     if len(raw_entries) > _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES:
         raise OSError(f"Included Files recovery {label} has too many entries")
 
-    entries: list[_IncludedTreeEntry] = []
+    entries: list[IncludedTreeEntry] = []
     seen_paths: set[str] = set()
     for raw_entry in raw_entries:
         if not isinstance(raw_entry, list):
@@ -6054,7 +5791,7 @@ def _included_tree_snapshot_from_payload_v2(
             ctime_value,
             digest_value,
         ) = entry_components
-        relative_path = _included_recovery_relative_path(path_value)
+        relative_path = recovery_relative_path(path_value)
         if relative_path in seen_paths:
             raise OSError(
                 f"Duplicate Included Files recovery tree path: {relative_path}"
@@ -6101,7 +5838,7 @@ def _included_tree_snapshot_from_payload_v2(
                 + relative_path
             )
         entries.append(
-            _IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=relative_path,
                 kind=kind,
                 fingerprint=fingerprint,
@@ -6121,7 +5858,7 @@ def _included_tree_snapshot_from_payload(
     label: str,
     *,
     format_version: int = _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
-) -> _IncludedTreeSnapshot:
+) -> IncludedTreeSnapshot:
     if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
         return _included_tree_snapshot_from_payload_v1(value, label)
     if format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
@@ -6131,7 +5868,7 @@ def _included_tree_snapshot_from_payload(
 
 def _included_registry_snapshot_from_payload_v1(
     value: Any,
-) -> _IncludedRegistrySnapshot:
+) -> IncludedRegistrySnapshot:
     payload = _included_recovery_dict(value, "registry snapshot")
     _included_recovery_exact_keys(
         payload,
@@ -6178,7 +5915,7 @@ def _included_registry_snapshot_from_payload_v1(
         raise OSError("Incomplete Included File registry recovery state")
     elif file_identity[0] != directory_identity[0]:
         raise OSError("Invalid cross-device Included File registry recovery state")
-    return _IncludedRegistrySnapshot(
+    return IncludedRegistrySnapshot(
         directory_identity=directory_identity,
         file_identity=file_identity,
         file_mode=file_mode,
@@ -6188,7 +5925,7 @@ def _included_registry_snapshot_from_payload_v1(
 
 def _included_registry_snapshot_from_payload_v2(
     value: Any,
-) -> _IncludedRegistrySnapshot:
+) -> IncludedRegistrySnapshot:
     if not isinstance(value, list):
         raise OSError("Invalid Included Files recovery registry snapshot")
     components = cast(list[Any], value)
@@ -6234,7 +5971,7 @@ def _included_registry_snapshot_from_payload_v2(
         raise OSError(
             "Invalid cross-device Included File registry recovery state"
         )
-    return _IncludedRegistrySnapshot(
+    return IncludedRegistrySnapshot(
         directory_identity=directory_identity,
         file_identity=file_identity,
         file_mode=file_mode,
@@ -6246,7 +5983,7 @@ def _included_registry_snapshot_from_payload(
     value: Any,
     *,
     format_version: int = _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
-) -> _IncludedRegistrySnapshot:
+) -> IncludedRegistrySnapshot:
     if format_version == _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION:
         return _included_registry_snapshot_from_payload_v1(value)
     if format_version == _INCLUDED_FILES_RECOVERY_FORMAT_VERSION:
@@ -6280,9 +6017,9 @@ def _included_recovery_managed_name(
 
 def _included_recovery_journal_from_payload(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     value: Any,
-) -> _IncludedRecoveryJournal:
+) -> IncludedRecoveryJournal:
     payload = _included_recovery_dict(value, "journal")
     _included_recovery_exact_keys(
         payload,
@@ -6539,7 +6276,7 @@ def _included_recovery_journal_from_payload(
         if registry_backup_location == "project"
         else registry_directory_path
     )
-    transaction = _IncludedOutputSetTransaction(
+    transaction = IncludedOutputSetTransaction(
         project_identity=project_identity,
         stage_container_path=stage_container_path,
         stage_container_identity=stage_container_identity,
@@ -6559,7 +6296,7 @@ def _included_recovery_journal_from_payload(
         previous_root_snapshot=previous_root_snapshot,
         previous_registry_snapshot=previous_registry_snapshot,
     )
-    return _IncludedRecoveryJournal(
+    return IncludedRecoveryJournal(
         format_version=format_version,
         transaction_id=transaction_id,
         transaction=transaction,
@@ -6656,14 +6393,14 @@ def _read_opened_included_bounded_record_payload(
 
 def _included_bounded_record_state(
     path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     *,
     maximum_bytes: int,
     payload_reader: Callable[[BinaryIO], bytes],
     record_label: str,
     size_qualifier: str,
-    allowed_identities: frozenset[_PathIdentity] | None = None,
-) -> tuple[_PathIdentity, int, bytes] | None:
+    allowed_identities: frozenset[PathIdentity] | None = None,
+) -> tuple[PathIdentity, int, bytes] | None:
     if _included_descriptor_paths_supported():
         try:
             parent_fd, name = _open_pinned_included_parent(path)
@@ -6821,10 +6558,10 @@ def _included_bounded_record_state(
 
 def _included_recovery_record_state(
     path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     *,
-    allowed_identities: frozenset[_PathIdentity] | None = None,
-) -> tuple[_PathIdentity, int, bytes] | None:
+    allowed_identities: frozenset[PathIdentity] | None = None,
+) -> tuple[PathIdentity, int, bytes] | None:
     return _included_bounded_record_state(
         path,
         project_identity,
@@ -6838,10 +6575,10 @@ def _included_recovery_record_state(
 
 def _included_lock_initialization_record_state(
     path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     *,
-    allowed_identities: frozenset[_PathIdentity] | None = None,
-) -> tuple[_PathIdentity, int, bytes] | None:
+    allowed_identities: frozenset[PathIdentity] | None = None,
+) -> tuple[PathIdentity, int, bytes] | None:
     return _included_bounded_record_state(
         path,
         project_identity,
@@ -6895,13 +6632,13 @@ def _included_recovery_record_content(payload: dict[str, Any]) -> bytes:
 
 def _publish_included_recovery_record(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
     *,
     filename: str,
     temporary_prefix: str,
     payload: dict[str, Any],
     staged_phase: str | None = None,
-) -> _PathIdentity:
+) -> PathIdentity:
     destination_path = os.path.join(project_path, filename)
     if (
         _included_recovery_record_state(
@@ -7000,8 +6737,8 @@ def _publish_included_recovery_record(
 
 def _read_included_recovery_record(
     path: str,
-    project_identity: _PathIdentity,
-) -> tuple[_PathIdentity, dict[str, Any]] | None:
+    project_identity: PathIdentity,
+) -> tuple[PathIdentity, dict[str, Any]] | None:
     state = _included_recovery_record_state(path, project_identity)
     if state is None:
         return None
@@ -7031,8 +6768,8 @@ def _included_recovery_record_tombstone_path(path: str) -> str:
 
 def _read_included_recovery_record_or_tombstone(
     path: str,
-    project_identity: _PathIdentity,
-) -> tuple[str, _PathIdentity, dict[str, Any]] | None:
+    project_identity: PathIdentity,
+) -> tuple[str, PathIdentity, dict[str, Any]] | None:
     record = _read_included_recovery_record(path, project_identity)
     tombstone_path = _included_recovery_record_tombstone_path(path)
     tombstone_record = _read_included_recovery_record(
@@ -7054,8 +6791,8 @@ def _read_included_recovery_record_or_tombstone(
 def _included_commit_marker_and_journal_from_payload(
     project_path: str,
     payload: dict[str, Any],
-    project_identity: _PathIdentity,
-) -> tuple[_IncludedCommitMarker, _IncludedRecoveryJournal]:
+    project_identity: PathIdentity,
+) -> tuple[IncludedCommitMarker, IncludedRecoveryJournal]:
     _included_recovery_exact_keys(
         payload,
         frozenset(
@@ -7131,7 +6868,7 @@ def _included_commit_marker_and_journal_from_payload(
         or registry_content_sha256 is None
     ):
         raise OSError("Incomplete Included Files recovery commit marker")
-    marker = _IncludedCommitMarker(
+    marker = IncludedCommitMarker(
         format_version=format_version,
         transaction_id=transaction_id,
         project_identity=project_identity,
@@ -7171,7 +6908,7 @@ def _included_commit_marker_and_journal_from_payload(
 
 def _verify_included_commit_marker_generation(
     project_path: str,
-    marker: _IncludedCommitMarker,
+    marker: IncludedCommitMarker,
 ) -> None:
     root_snapshot = _capture_included_tree(
         os.path.join(project_path, _INCLUDED_FILES_ROOT_NAME),
@@ -7204,10 +6941,10 @@ def _verify_included_commit_marker_generation(
 
 def _verify_included_published_journal(
     project_path: str,
-    project_identity: _PathIdentity,
-    expected_journal: _IncludedRecoveryJournal,
-    expected_identity: _PathIdentity | None,
-) -> _PathIdentity:
+    project_identity: PathIdentity,
+    expected_journal: IncludedRecoveryJournal,
+    expected_identity: PathIdentity | None,
+) -> PathIdentity:
     journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
     record = _read_included_recovery_record(journal_path, project_identity)
     if record is None:
@@ -7227,12 +6964,12 @@ def _verify_included_published_journal(
 
 def _verify_included_published_commit_marker(
     project_path: str,
-    project_identity: _PathIdentity,
-    expected_journal: _IncludedRecoveryJournal,
-    expected_identity: _PathIdentity | None,
+    project_identity: PathIdentity,
+    expected_journal: IncludedRecoveryJournal,
+    expected_identity: PathIdentity | None,
     *,
     verify_generation: bool = True,
-) -> _PathIdentity:
+) -> PathIdentity:
     commit_path = os.path.join(project_path, _INCLUDED_FILES_COMMIT_NAME)
     record = _read_included_recovery_record(commit_path, project_identity)
     if record is None:
@@ -7275,11 +7012,11 @@ def _included_cleanup_tombstone_path(
 
 def _included_cleanup_file_state(
     path: str,
-    expected_identity: _PathIdentity,
-    expected_parent_identity: _PathIdentity,
+    expected_identity: PathIdentity,
+    expected_parent_identity: PathIdentity,
     *,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
-) -> _IncludedCleanupFileState | None:
+) -> IncludedCleanupFileState | None:
     if _included_descriptor_paths_supported():
         parent_fd, name = _open_pinned_included_parent(path)
         try:
@@ -7327,7 +7064,7 @@ def _included_cleanup_file_state(
             os.close(parent_fd)
 
     parent_path = os.path.dirname(os.path.abspath(path))
-    parent_identities: tuple[tuple[str, _PathIdentity], ...] | None
+    parent_identities: tuple[tuple[str, PathIdentity], ...] | None
     if windows_parent_binding is None:
         parent_identities = _capture_fallback_directory_ancestors(parent_path)
         if parent_identities[-1][1] != expected_parent_identity:
@@ -7412,8 +7149,8 @@ def _included_cleanup_mode_matches(
 
 
 def _included_cleanup_tombstone_fingerprint_matches(
-    current: _PathFingerprint,
-    expected: _PathFingerprint,
+    current: PathFingerprint,
+    expected: PathFingerprint,
 ) -> bool:
     if current == expected:
         return True
@@ -7429,9 +7166,9 @@ def _included_cleanup_tombstone_fingerprint_matches(
 
 
 def _included_cleanup_file_receipt_matches(
-    state: _IncludedCleanupFileState,
+    state: IncludedCleanupFileState,
     expected_content_sha256: str,
-    expected_fingerprint: _PathFingerprint | None,
+    expected_fingerprint: PathFingerprint | None,
     expected_mode: int | None,
     *,
     allow_windows_writable: bool,
@@ -7462,8 +7199,8 @@ def _included_cleanup_file_receipt_matches(
 
 def _included_cleanup_directory_state(
     path: str,
-    expected_identity: _PathIdentity,
-    expected_parent_identity: _PathIdentity,
+    expected_identity: PathIdentity,
+    expected_parent_identity: PathIdentity,
     *,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> bool | None:
@@ -7554,9 +7291,9 @@ def _included_cleanup_directory_state(
 
 def _remove_included_cleanup_tombstone(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     parent_path: str,
-    parent_identity: _PathIdentity,
+    parent_identity: PathIdentity,
     *,
     expect_directory: bool,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
@@ -7612,14 +7349,14 @@ def _remove_included_cleanup_tombstone(
 
 def _cleanup_recorded_included_file(
     path: str,
-    expected_identity: _PathIdentity,
+    expected_identity: PathIdentity,
     expected_content_sha256: str,
-    expected_parent_identity: _PathIdentity,
+    expected_parent_identity: PathIdentity,
     transaction_id: str,
     role: str,
     relative_path: str,
     *,
-    expected_fingerprint: _PathFingerprint | None = None,
+    expected_fingerprint: PathFingerprint | None = None,
     expected_mode: int | None = None,
     windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
 ) -> tuple[str, ...]:
@@ -7771,8 +7508,8 @@ def _cleanup_recorded_included_file(
 
 def _cleanup_recorded_included_directory(
     path: str,
-    expected_identity: _PathIdentity,
-    expected_parent_identity: _PathIdentity,
+    expected_identity: PathIdentity,
+    expected_parent_identity: PathIdentity,
     transaction_id: str,
     role: str,
     relative_path: str,
@@ -7943,13 +7680,13 @@ def _cleanup_recorded_included_directory(
 
 def _cleanup_recorded_included_tree(
     path: str,
-    snapshot: _IncludedTreeSnapshot,
-    expected_parent_identity: _PathIdentity,
+    snapshot: IncludedTreeSnapshot,
+    expected_parent_identity: PathIdentity,
     transaction_id: str,
     role: str,
 ) -> tuple[str, ...]:
     recorded_entry_paths = {
-        entry.relative_path: _included_recovery_tree_entry_path(
+        entry.relative_path: recovery_tree_entry_path(
             path,
             entry.relative_path,
         )
@@ -7972,7 +7709,7 @@ def _cleanup_recorded_included_tree(
         return (
             f"cross-mount Included Files cleanup tree was preserved: {path}",
         )
-    directory_identities: dict[str, _PathIdentity] = {"": root_identity}
+    directory_identities: dict[str, PathIdentity] = {"": root_identity}
     for entry in snapshot.entries:
         if entry.kind == "directory":
             directory_identities[entry.relative_path] = entry.fingerprint[:2]
@@ -8092,9 +7829,9 @@ def _cleanup_recorded_included_tree(
     else:
         directory_entries_by_parent: dict[
             str,
-            list[_IncludedTreeEntry],
+            list[IncludedTreeEntry],
         ] = {}
-        file_entries_by_parent: dict[str, list[_IncludedTreeEntry]] = {}
+        file_entries_by_parent: dict[str, list[IncludedTreeEntry]] = {}
         for entry in snapshot.entries:
             parent_relative = posixpath.dirname(entry.relative_path)
             entries_by_parent = (
@@ -8235,7 +7972,7 @@ def _cleanup_recorded_included_tree(
             with ExitStack() as cleanup_binding_scope:
                 active_cleanup_bindings = {"": root_parent_binding}
                 cleanup_actions: list[
-                    tuple[str, str, _IncludedTreeEntry | None]
+                    tuple[str, str, IncludedTreeEntry | None]
                 ] = [("enter", "", None)]
                 while cleanup_actions:
                     action, relative_path, own_entry = cleanup_actions.pop()
@@ -8375,9 +8112,9 @@ def _cleanup_recorded_included_tree(
 
 def _remove_included_recovery_record(
     path: str,
-    identity: _PathIdentity,
+    identity: PathIdentity,
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
 ) -> None:
     current_state = _included_recovery_record_state(
         path,
@@ -8434,8 +8171,8 @@ def _remove_included_recovery_record(
 
 def _included_stage_marker_matches(
     payload: dict[str, Any],
-    project_identity: _PathIdentity,
-    stage_identity: _PathIdentity,
+    project_identity: PathIdentity,
+    stage_identity: PathIdentity,
 ) -> bool:
     _included_recovery_exact_keys(
         payload,
@@ -8471,7 +8208,7 @@ def _included_stage_marker_matches(
 
 def _cleanup_orphan_included_recovery_state(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
 ) -> tuple[int, tuple[str, ...]]:
     """Remove exact self-identifying orphans and preserve ambiguous state."""
 
@@ -8690,12 +8427,12 @@ def _cleanup_orphan_included_recovery_state(
 
 
 def _rollback_included_output_set(
-    transaction: _IncludedOutputSetTransaction,
+    transaction: IncludedOutputSetTransaction,
     *,
     root_backup_path: str,
     registry_backup_path: str,
     registry_directory_path: str,
-    registry_directory_identity: _PathIdentity | None,
+    registry_directory_identity: PathIdentity | None,
     registry_directory_created: bool,
 ) -> tuple[Exception, ...]:
     errors: list[Exception] = []
@@ -8909,7 +8646,7 @@ def _rollback_included_output_set(
 
 
 def _cleanup_committed_included_output_set(
-    journal: _IncludedRecoveryJournal,
+    journal: IncludedRecoveryJournal,
     *,
     verify_content: bool = True,
 ) -> tuple[tuple[Exception, ...], tuple[str, ...]]:
@@ -9024,12 +8761,12 @@ def _cleanup_committed_included_output_set(
 
 def _promote_included_journal_temporary(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
 ) -> tuple[bool, tuple[str, ...]]:
     journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
     if os.path.lexists(journal_path):
         return False, ()
-    candidates: list[tuple[str, _PathIdentity]] = []
+    candidates: list[tuple[str, PathIdentity]] = []
     warnings: list[str] = []
     _verify_included_project_identity(project_path, project_identity)
     for name in sorted(os.listdir(project_path)):
@@ -9071,7 +8808,7 @@ def _promote_included_journal_temporary(
             )
             if journal.registry_directory_created:
                 if transaction.previous_registry_snapshot != (
-                    _IncludedRegistrySnapshot(
+                    IncludedRegistrySnapshot(
                         directory_identity=None,
                         file_identity=None,
                         file_mode=None,
@@ -9084,7 +8821,7 @@ def _promote_included_journal_temporary(
                     )
                 _verify_included_registry_snapshot(
                     project_path,
-                    _IncludedRegistrySnapshot(
+                    IncludedRegistrySnapshot(
                         directory_identity=journal.registry_directory_identity,
                         file_identity=None,
                         file_mode=None,
@@ -9127,7 +8864,7 @@ def _promote_included_journal_temporary(
 
 def _recover_included_output_set(
     project_path: str,
-    project_identity: _PathIdentity,
+    project_identity: PathIdentity,
 ) -> str | None:
     journal_path = os.path.join(project_path, _INCLUDED_FILES_JOURNAL_NAME)
     commit_path = os.path.join(project_path, _INCLUDED_FILES_COMMIT_NAME)
@@ -9193,7 +8930,7 @@ def _recover_included_output_set(
         project_identity,
         journal_payload,
     )
-    commit_identity: _PathIdentity | None = None
+    commit_identity: PathIdentity | None = None
     commit_record_path = commit_path
     if commit_record is not None:
         commit_record_path, commit_identity, commit_payload = commit_record
@@ -9320,7 +9057,7 @@ def _recover_included_output_set(
 
 def _commit_included_output_set(
     project_path: str,
-    transaction: _IncludedOutputSetTransaction,
+    transaction: IncludedOutputSetTransaction,
     conversion_running: ConversionRunning,
 ) -> tuple[str, ...]:
     """Publish one journaled, recoverable root/registry generation."""
@@ -9339,11 +9076,11 @@ def _commit_included_output_set(
         else project_path,
         "gml_included_file_registry.gd",
     )
-    registry_directory_identity: _PathIdentity | None = None
+    registry_directory_identity: PathIdentity | None = None
     registry_directory_created = False
-    journal_identity: _PathIdentity | None = None
-    commit_marker_identity: _PathIdentity | None = None
-    recovery_journal: _IncludedRecoveryJournal | None = None
+    journal_identity: PathIdentity | None = None
+    commit_marker_identity: PathIdentity | None = None
+    recovery_journal: IncludedRecoveryJournal | None = None
 
     try:
         _verify_included_project_identity(
@@ -9424,7 +9161,7 @@ def _commit_included_output_set(
         ):
             raise OSError("Included File registry staging candidate changed")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
 
         expected_record_sizes = transaction.recovery_record_sizes
         if expected_record_sizes is None:
@@ -9439,7 +9176,7 @@ def _commit_included_output_set(
                 _INCLUDED_FILES_RECOVERY_INTEGER_MAX,
             )
         )
-        provisional_journal = _IncludedRecoveryJournal(
+        provisional_journal = IncludedRecoveryJournal(
             format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
             transaction_id="0" * 32,
             transaction=transaction,
@@ -9474,7 +9211,7 @@ def _commit_included_output_set(
             else project_path,
             "gml_included_file_registry.gd",
         )
-        recovery_journal = _IncludedRecoveryJournal(
+        recovery_journal = IncludedRecoveryJournal(
             format_version=_INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
             transaction_id=(
                 transaction.publication_transaction_id
@@ -9501,7 +9238,7 @@ def _commit_included_output_set(
         )
         _after_included_transaction_phase("journal-prepared")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
 
         previous_root_identity = transaction.previous_root_snapshot.identity
         if previous_root_identity is not None:
@@ -9515,7 +9252,7 @@ def _commit_included_output_set(
         _sync_included_directory(project_path, transaction.project_identity)
         _after_included_transaction_phase("previous-root-backed-up")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
 
         staged_root_identity = transaction.staged_root_snapshot.identity
         if staged_root_identity is None:
@@ -9539,7 +9276,7 @@ def _commit_included_output_set(
         )
         _after_included_transaction_phase("new-root-published")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
 
         previous_registry_identity = (
             transaction.previous_registry_snapshot.file_identity
@@ -9558,7 +9295,7 @@ def _commit_included_output_set(
         )
         _after_included_transaction_phase("previous-registry-backed-up")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
 
         _move_exact_included_file(
             transaction.staged_registry_path,
@@ -9590,7 +9327,7 @@ def _commit_included_output_set(
             raise OSError("Included File registry changed after publication")
         _after_included_transaction_phase("new-registry-published")
         if not conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
         _sync_included_tree_directories_bottom_up(
             final_root_path,
             transaction.staged_root_snapshot,
@@ -9806,37 +9543,6 @@ def _commit_included_output_set(
     return cleanup_warnings
 
 
-def _included_output_components(
-    project_path: str,
-    output_path: str,
-) -> tuple[str, ...]:
-    project_root = os.path.abspath(project_path)
-    absolute_output = os.path.abspath(output_path)
-    try:
-        contained = os.path.normcase(
-            os.path.commonpath((project_root, absolute_output))
-        ) == os.path.normcase(project_root)
-    except ValueError:
-        contained = False
-    relative_path = (
-        os.path.relpath(absolute_output, project_root)
-        if contained
-        else os.pardir
-    )
-    components = tuple(relative_path.split(os.sep))
-    if (
-        not contained
-        or os.path.isabs(relative_path)
-        or len(components) < 2
-        or components[0] != "included_files"
-        or any(component in {"", ".", ".."} for component in components)
-    ):
-        raise ValueError(
-            f"Generated Included File output escapes its managed root: {output_path}"
-        )
-    return components
-
-
 def _ensure_included_output_project_root(project_path: str) -> tuple[int, int]:
     os.makedirs(project_path, exist_ok=True)
     project_stat = os.lstat(project_path)
@@ -9972,8 +9678,8 @@ def _copy_included_payload(
     source_file: BinaryIO,
     target_file: BinaryIO,
     source_stat: os.stat_result,
-    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
-) -> _IncludedPayloadReceipt:
+    expected_receipt: IncludedNoOpSourceReceipt | None = None,
+) -> IncludedPayloadReceipt:
     expected_fingerprint = _included_source_fingerprint(source_stat)
     if source_file.tell() != 0:
         raise OSError("GameMaker Included File source did not start at offset zero")
@@ -10028,7 +9734,7 @@ def _copy_included_payload(
             raise OSError(
                 "GameMaker Included File source payload changed while copying"
             )
-    return _IncludedPayloadReceipt(
+    return IncludedPayloadReceipt(
         source_fingerprint=expected_fingerprint,
         byte_count=byte_count,
         sha256=streamed_sha256,
@@ -10041,8 +9747,8 @@ def _stage_included_output_at(
     source_file: BinaryIO,
     source_stat: os.stat_result,
     verify_directory: Callable[[], None],
-    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
-) -> _IncludedCopyReceipt:
+    expected_receipt: IncludedNoOpSourceReceipt | None = None,
+) -> IncludedCopyReceipt:
     verify_directory()
     output_identity = _included_output_state_at(directory_fd, filename)
     temporary_name = ""
@@ -10146,7 +9852,7 @@ def _stage_included_output_at(
                 raise OSError(
                     f"Included File output changed after publication: {filename}"
                 )
-            copy_receipt = _IncludedCopyReceipt(
+            copy_receipt = IncludedCopyReceipt(
                 payload=payload_receipt,
                 output_fingerprint=_included_path_fingerprint(current_stat),
                 output_ctime_ns=current_stat.st_ctime_ns,
@@ -10199,8 +9905,8 @@ def _publish_included_output_at(
     components: tuple[str, ...],
     source_file: BinaryIO,
     source_stat: os.stat_result,
-    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
-) -> _IncludedCopyReceipt:
+    expected_receipt: IncludedNoOpSourceReceipt | None = None,
+) -> IncludedCopyReceipt:
     directory_flags = os.O_RDONLY
     directory_flags |= getattr(os, "O_DIRECTORY", 0)
     directory_flags |= getattr(os, "O_NOFOLLOW", 0)
@@ -10409,8 +10115,8 @@ def _publish_included_output_fallback(
     components: tuple[str, ...],
     source_file: BinaryIO,
     source_stat: os.stat_result,
-    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
-) -> _IncludedCopyReceipt:
+    expected_receipt: IncludedNoOpSourceReceipt | None = None,
+) -> IncludedCopyReceipt:
     directory_identities = _prepare_included_output_directories_fallback(
         project_path,
         components[:-1],
@@ -10493,7 +10199,7 @@ def _publish_included_output_fallback(
                 raise OSError(
                     f"Included File output changed after publication: {output_path}"
                 )
-            copy_receipt = _IncludedCopyReceipt(
+            copy_receipt = IncludedCopyReceipt(
                 payload=payload_receipt,
                 output_fingerprint=_included_path_fingerprint(current_stat),
                 output_ctime_ns=current_stat.st_ctime_ns,
@@ -10518,9 +10224,9 @@ def _publish_confined_included_output(
     output_path: str,
     source_file: BinaryIO,
     source_stat: os.stat_result,
-    expected_receipt: _IncludedNoOpSourceReceipt | None = None,
-) -> _IncludedCopyReceipt:
-    components = _included_output_components(project_path, output_path)
+    expected_receipt: IncludedNoOpSourceReceipt | None = None,
+) -> IncludedCopyReceipt:
+    components = output_components(project_path, output_path)
     _ensure_included_output_project_root(project_path)
     if _confined_included_output_supported():
         return _publish_included_output_at(
@@ -10572,8 +10278,8 @@ class IncludedFilesConverter(BaseConverter):
         godot_file_path: str,
         rel_path: str,
         owner_source_path: str = "datafiles",
-        planned_receipt: _IncludedNoOpSourceReceipt | None = None,
-    ) -> tuple[str, bool, _IncludedCopyReceipt | None] | None:
+        planned_receipt: IncludedNoOpSourceReceipt | None = None,
+    ) -> tuple[str, bool, IncludedCopyReceipt | None] | None:
         if not self.conversion_running():
             return None
         self._resource_requested(rel_path)
@@ -10597,18 +10303,18 @@ class IncludedFilesConverter(BaseConverter):
                             self._active_output_project_path
                             or self.godot_project_path
                         )
-                        output_components = _included_output_components(
+                        components = output_components(
                             active_project_path,
                             godot_file_path,
                         )
                         assigned_path = posixpath.join(
-                            *output_components[1:]
+                            *components[1:]
                         )
                         if (
                             planned_receipt.logical_path != rel_path
                             or planned_receipt.assigned_path != assigned_path
                             or self._capture_pinned_included_source_binding(
-                                _IncludedFileSource(
+                                IncludedFileSource(
                                     filesystem_path=gm_file_path,
                                     relative_path=rel_path,
                                     owner_source_path=owner_source_path,
@@ -10642,7 +10348,7 @@ class IncludedFilesConverter(BaseConverter):
                     if (
                         planned_receipt is not None
                         and self._capture_pinned_included_source_binding(
-                            _IncludedFileSource(
+                            IncludedFileSource(
                                 filesystem_path=gm_file_path,
                                 relative_path=rel_path,
                                 owner_source_path=owner_source_path,
@@ -10759,14 +10465,14 @@ class IncludedFilesConverter(BaseConverter):
 
     def _preflight_included_source_byte_counts(
         self,
-        sources: tuple[_IncludedFileSource, ...],
+        sources: tuple[IncludedFileSource, ...],
     ) -> dict[str, int]:
         """Capture byte counts without reading or staging payload bodies."""
 
         byte_counts: dict[str, int] = {}
         for source in sources:
             if not self.conversion_running():
-                raise _IncludedOutputSetCancelled()
+                raise IncludedOutputSetCancelled()
             opened_source = self._open_confined_source_file(
                 source.filesystem_path,
                 owner_source_path=source.owner_source_path,
@@ -10789,10 +10495,10 @@ class IncludedFilesConverter(BaseConverter):
 
     def _capture_pinned_included_source_binding(
         self,
-        source: _IncludedFileSource,
+        source: IncludedFileSource,
         source_file: BinaryIO,
         expected_stat: os.stat_result,
-    ) -> _IncludedSourceBinding:
+    ) -> IncludedSourceBinding:
         resolved = self._resolve_discovered_project_source(
             source.filesystem_path,
             owner_source_path=source.owner_source_path,
@@ -10830,7 +10536,7 @@ class IncludedFilesConverter(BaseConverter):
             )
         )
         _verify_fallback_directory_ancestors(directory_identities)
-        return _IncludedSourceBinding(
+        return IncludedSourceBinding(
             filesystem_path=os.path.normcase(
                 os.path.abspath(resolved.filesystem_path)
             ),
@@ -10843,12 +10549,12 @@ class IncludedFilesConverter(BaseConverter):
 
     def _capture_unchanged_source_receipt(
         self,
-        source: _IncludedFileSource,
+        source: IncludedFileSource,
         *,
         deny_writes: bool,
-    ) -> _IncludedNoOpSourceReceipt:
+    ) -> IncludedNoOpSourceReceipt:
         if not self.conversion_running():
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
         opened_source = self._open_confined_source_file(
             source.filesystem_path,
             owner_source_path=source.owner_source_path,
@@ -10887,8 +10593,8 @@ class IncludedFilesConverter(BaseConverter):
                     f"an unchanged generation: {source.relative_path}"
                 )
         if not self.conversion_running():
-            raise _IncludedOutputSetCancelled()
-        return _IncludedNoOpSourceReceipt(
+            raise IncludedOutputSetCancelled()
+        return IncludedNoOpSourceReceipt(
             logical_path=source.relative_path,
             assigned_path="",
             binding=before_binding,
@@ -10898,17 +10604,17 @@ class IncludedFilesConverter(BaseConverter):
 
     def _collect_unchanged_source_receipts(
         self,
-        sources: tuple[_IncludedFileSource, ...],
+        sources: tuple[IncludedFileSource, ...],
         assignments_by_source: dict[str, IncludedFilePathAssignment],
         *,
         deny_writes: bool,
-    ) -> dict[str, _IncludedNoOpSourceReceipt]:
-        receipts: dict[str, _IncludedNoOpSourceReceipt] = {}
+    ) -> dict[str, IncludedNoOpSourceReceipt]:
+        receipts: dict[str, IncludedNoOpSourceReceipt] = {}
 
         def submit_receipt(
             executor: ThreadPoolExecutor,
-            source: _IncludedFileSource,
-        ) -> Future[_IncludedNoOpSourceReceipt]:
+            source: IncludedFileSource,
+        ) -> Future[IncludedNoOpSourceReceipt]:
             return executor.submit(
                 self._capture_unchanged_source_receipt,
                 source,
@@ -10916,8 +10622,8 @@ class IncludedFilesConverter(BaseConverter):
             )
 
         def consume_receipt(
-            source: _IncludedFileSource,
-            future: Future[_IncludedNoOpSourceReceipt],
+            source: IncludedFileSource,
+            future: Future[IncludedNoOpSourceReceipt],
         ) -> bool:
             receipts[source.relative_path] = replace(
                 future.result(),
@@ -10935,13 +10641,13 @@ class IncludedFilesConverter(BaseConverter):
             consume=consume_receipt,
         )
         if not phase_completed:
-            raise _IncludedOutputSetCancelled()
+            raise IncludedOutputSetCancelled()
         return receipts
 
     def _revalidate_unchanged_source_bindings(
         self,
-        sources: tuple[_IncludedFileSource, ...],
-        receipts: dict[str, _IncludedNoOpSourceReceipt],
+        sources: tuple[IncludedFileSource, ...],
+        receipts: dict[str, IncludedNoOpSourceReceipt],
     ) -> None:
         for source in sources:
             opened_source = self._open_confined_source_file(
@@ -10970,14 +10676,14 @@ class IncludedFilesConverter(BaseConverter):
 
     def _unchanged_included_generation_matches(
         self,
-        sources: tuple[_IncludedFileSource, ...],
+        sources: tuple[IncludedFileSource, ...],
         assignments_by_source: dict[str, IncludedFilePathAssignment],
         expected_registry_content: bytes,
-        previous_root_snapshot: _IncludedTreeSnapshot,
-        previous_registry_snapshot: _IncludedRegistrySnapshot,
-        project_identity: _PathIdentity,
+        previous_root_snapshot: IncludedTreeSnapshot,
+        previous_registry_snapshot: IncludedRegistrySnapshot,
+        project_identity: PathIdentity,
         public_root_path: str,
-    ) -> _IncludedGenerationMatch:
+    ) -> IncludedGenerationMatch:
         assigned_paths = {
             assignments_by_source[source.relative_path].assigned_output_path
             for source in sources
@@ -10991,7 +10697,7 @@ class IncludedFilesConverter(BaseConverter):
                 assigned_paths,
             )
         ):
-            return _IncludedGenerationMatch(
+            return IncludedGenerationMatch(
                 unchanged=False,
                 source_receipts=(),
             )
@@ -11010,7 +10716,7 @@ class IncludedFilesConverter(BaseConverter):
             previous_root_snapshot,
             assigned_receipts,
         ):
-            return _IncludedGenerationMatch(
+            return IncludedGenerationMatch(
                 unchanged=False,
                 source_receipts=tuple(
                     first_receipts[source.relative_path]
@@ -11062,8 +10768,8 @@ class IncludedFilesConverter(BaseConverter):
             project_identity,
         )
         if not self.conversion_running():
-            raise _IncludedOutputSetCancelled()
-        return _IncludedGenerationMatch(
+            raise IncludedOutputSetCancelled()
+        return IncludedGenerationMatch(
             unchanged=True,
             source_receipts=tuple(
                 first_receipts[source.relative_path]
@@ -11161,8 +10867,8 @@ class IncludedFilesConverter(BaseConverter):
     def _collect_included_files(
         self,
         datafiles: ResolvedProjectSourcePath,
-    ) -> list[_IncludedFileSource]:
-        included_files: list[_IncludedFileSource] = []
+    ) -> list[IncludedFileSource]:
+        included_files: list[IncludedFileSource] = []
         pending_directories = [datafiles]
         visited_directories: set[str] = set()
 
@@ -11204,7 +10910,7 @@ class IncludedFilesConverter(BaseConverter):
                     datafiles.source_path,
                 )
                 included_files.append(
-                    _IncludedFileSource(
+                    IncludedFileSource(
                         filesystem_path=entry.filesystem_path,
                         relative_path=relative_path,
                         owner_source_path=directory.source_path,
@@ -11212,66 +10918,22 @@ class IncludedFilesConverter(BaseConverter):
                 )
         return sorted(included_files, key=lambda item: item.relative_path)
 
-    def _included_file_conversion_plan(self) -> _IncludedFileConversionPlan:
+    def _included_file_conversion_plan(self) -> IncludedFileConversionPlan:
         """Plan logical included files before filtering unavailable sources."""
         manifest = load_gamemaker_project_manifest(self.gm_project_path)
         self._record_project_manifest_source_path_diagnostics(
             manifest,
             resource_type="included_file",
         )
-        malformed = any(
-            diagnostic.code == "GM2GD-PROJECT-YYP-MALFORMED"
-            for diagnostic in manifest.diagnostics
-        )
-        manifest_declares_included_files = (
-            "IncludedFiles" in manifest.raw_data
-            or "includedFiles" in manifest.raw_data
-            or any(
-                resource.kind.casefold() == "datafiles"
-                or resource.resource_type.casefold() == "gmincludedfile"
-                for resource in manifest.resources
-            )
-            or any(
-                self._manifest_diagnostic_is_included_file(diagnostic)
-                for diagnostic in manifest.diagnostics
-            )
-        )
-        if (
-            manifest.yyp_path is not None
-            and not malformed
-            and manifest_declares_included_files
-        ):
-            declared_plan = self._plan_manifest_included_files(manifest)
-            # Included Files are directory-backed rather than ordinary Asset
-            # Browser resources: current GameMaker automatically reflects
-            # contained files added under datafiles even before their YYP
-            # metadata is refreshed. Preserve those files while still
-            # accounting for stale manifest declarations.
-            requested_keys = list(declared_plan.requested_keys)
-            available_files = list(declared_plan.available_files)
-            seen_keys = set(requested_keys)
-            for source in self._discovered_included_files():
-                if source.relative_path in seen_keys:
-                    continue
-                seen_keys.add(source.relative_path)
-                requested_keys.append(source.relative_path)
-                available_files.append(source)
-            return _IncludedFileConversionPlan(
-                requested_keys=tuple(requested_keys),
-                available_files=tuple(available_files),
-                skipped_keys=declared_plan.skipped_keys,
-            )
-
-        available_files = self._discovered_included_files()
-        return _IncludedFileConversionPlan(
-            requested_keys=tuple(
-                source.relative_path for source in available_files
-            ),
-            available_files=available_files,
-            skipped_keys=(),
+        return build_included_file_plan(
+            manifest,
+            resolve_declared=self._resolve_project_source,
+            reject_source=self._report_source_path_rejection,
+            report_unavailable=self._report_unavailable_declared_included_file,
+            discover_files=self._discovered_included_files,
         )
 
-    def _discovered_included_files(self) -> tuple[_IncludedFileSource, ...]:
+    def _discovered_included_files(self) -> tuple[IncludedFileSource, ...]:
         """Return every contained regular payload under datafiles."""
 
         datafiles = self._resolve_discovered_project_source(
@@ -11284,231 +10946,9 @@ class IncludedFilesConverter(BaseConverter):
             return ()
         return tuple(self._collect_included_files(datafiles))
 
-    def _plan_manifest_included_files(
-        self,
-        manifest: GameMakerProjectManifest,
-    ) -> _IncludedFileConversionPlan:
-        requested_keys: list[str] = []
-        available_files: list[_IncludedFileSource] = []
-        skipped_keys: list[str] = []
-        seen_keys: set[str] = set()
-
-        for declaration in self._declared_included_files(manifest):
-            resolved: ResolvedProjectSourcePath | None = None
-            unavailable_reason = "its manifest source path was rejected"
-            if declaration.source_path is not None:
-                resolved = self._resolve_project_source(
-                    declaration.source_path,
-                    owner_source_path=declaration.owner_source_path,
-                    resource=declaration.name,
-                    resource_type="included_file",
-                    field=declaration.manifest_field,
-                )
-                if resolved is None:
-                    unavailable_reason = "its manifest source path was rejected"
-
-            relative_path = self._declared_relative_path(declaration, resolved)
-            if relative_path in seen_keys:
-                continue
-            seen_keys.add(relative_path)
-            requested_keys.append(relative_path)
-
-            if resolved is not None:
-                source_root, separator, source_relative = (
-                    resolved.source_path.partition("/")
-                )
-                if (
-                    not separator
-                    or source_root.casefold() != "datafiles"
-                    or not source_relative
-                ):
-                    self._report_source_path_rejection(
-                        declaration.source_path or resolved.source_path,
-                        ProjectSourcePathError(
-                            "Resolved included-file source must remain under "
-                            "the GameMaker 'datafiles' directory"
-                        ),
-                        owner_source_path=declaration.owner_source_path,
-                        resource=declaration.name,
-                        resource_type="included_file",
-                        field=declaration.manifest_field,
-                    )
-                    resolved = None
-                    unavailable_reason = (
-                        "its manifest source path was rejected outside the "
-                        "datafiles resource family"
-                    )
-                elif not os.path.isfile(resolved.filesystem_path):
-                    unavailable_reason = (
-                        f"the source file is missing at {resolved.source_path!r}"
-                    )
-                    resolved = None
-
-            if resolved is None:
-                skipped_keys.append(relative_path)
-                self._report_unavailable_declared_included_file(
-                    declaration,
-                    reason=unavailable_reason,
-                )
-                continue
-
-            available_files.append(
-                _IncludedFileSource(
-                    filesystem_path=resolved.filesystem_path,
-                    relative_path=relative_path,
-                    owner_source_path=declaration.owner_source_path,
-                )
-            )
-
-        return _IncludedFileConversionPlan(
-            requested_keys=tuple(requested_keys),
-            available_files=tuple(available_files),
-            skipped_keys=tuple(skipped_keys),
-        )
-
-    def _declared_included_files(
-        self,
-        manifest: GameMakerProjectManifest,
-    ) -> tuple[_DeclaredIncludedFile, ...]:
-        """Return unique included-file declarations from a valid YYP."""
-        declared: dict[str, _DeclaredIncludedFile] = {}
-
-        def add(resource: _DeclaredIncludedFile, identity: str) -> None:
-            normalized_identity = self._normalized_declaration_path(identity)
-            if not normalized_identity:
-                normalized_identity = resource.name
-            if not normalized_identity:
-                return
-            declared.setdefault(normalized_identity, resource)
-
-        for included_file in manifest.included_files:
-            source = included_file.source
-            field = source.field_path if source is not None else None
-            raw_field = next(
-                (
-                    key
-                    for key in ("path", "filePath", "filename")
-                    if key in included_file.raw_data
-                ),
-                "path",
-            )
-            manifest_field = f"{field}.{raw_field}" if field else raw_field
-            source_path = included_file.path
-            if (
-                raw_field == "filePath"
-                and included_file.name
-                and posixpath.basename(source_path) != included_file.name
-            ):
-                # Current GameMaker YYP files store the containing directory in
-                # ``filePath`` and the payload filename separately in ``name``.
-                source_path = posixpath.join(source_path, included_file.name)
-            add(
-                _DeclaredIncludedFile(
-                    name=included_file.name or included_file.path,
-                    source_path=source_path,
-                    owner_source_path=manifest.yyp_path or "",
-                    manifest_field=manifest_field,
-                ),
-                source_path or included_file.name,
-            )
-
-        for resource in manifest.resources:
-            if (
-                resource.kind.casefold() != "datafiles"
-                and resource.resource_type.casefold() != "gmincludedfile"
-            ):
-                continue
-            field = (
-                f"{resource.source.field_path}.id.path"
-                if resource.source is not None and resource.source.field_path
-                else "resources[].id.path"
-            )
-            add(
-                _DeclaredIncludedFile(
-                    name=resource.name,
-                    source_path=resource.path,
-                    owner_source_path=manifest.yyp_path or "",
-                    manifest_field=field,
-                ),
-                resource.path,
-            )
-
-        for diagnostic in manifest.diagnostics:
-            if (
-                diagnostic.code != "GM2GD-SOURCE-PATH-REJECTED"
-                or not diagnostic.resource
-                or not self._manifest_diagnostic_is_included_file(diagnostic)
-            ):
-                continue
-            source = diagnostic.source
-            field = source.field_path if source is not None else None
-            add(
-                _DeclaredIncludedFile(
-                    name=diagnostic.resource,
-                    source_path=None,
-                    owner_source_path=(
-                        source.path
-                        if source is not None
-                        else manifest.yyp_path or ""
-                    ),
-                    manifest_field=field,
-                ),
-                f"rejected:{diagnostic.resource}",
-            )
-
-        return tuple(declared.values())
-
-    @staticmethod
-    def _manifest_diagnostic_is_included_file(
-        diagnostic: ProjectManifestDiagnostic,
-    ) -> bool:
-        resource_kind = diagnostic.resource_kind
-        resource_type = diagnostic.resource_type
-        return (
-            isinstance(resource_kind, str)
-            and resource_kind.casefold() == "datafiles"
-        ) or (
-            isinstance(resource_type, str)
-            and resource_type.casefold()
-            in {"included_file", "includedfile", "gmincludedfile"}
-        )
-
-    @staticmethod
-    def _normalized_declaration_path(path: str) -> str:
-        normalized = posixpath.normpath(path.replace("\\", "/").strip())
-        return "" if normalized in {"", "."} else normalized
-
-    def _declared_relative_path(
-        self,
-        declaration: _DeclaredIncludedFile,
-        resolved: ResolvedProjectSourcePath | None,
-    ) -> str:
-        if resolved is not None:
-            source_root, separator, source_relative = (
-                resolved.source_path.partition("/")
-            )
-            if (
-                separator
-                and source_root.casefold() == "datafiles"
-                and source_relative
-            ):
-                return source_relative
-
-        fallback = self._normalized_declaration_path(
-            declaration.source_path or declaration.name
-        )
-        source_root, separator, source_relative = fallback.partition("/")
-        if (
-            separator
-            and source_root.casefold() == "datafiles"
-            and source_relative
-        ):
-            return source_relative
-        return fallback or declaration.name
-
     def _report_unavailable_declared_included_file(
         self,
-        declaration: _DeclaredIncludedFile,
+        declaration: DeclaredIncludedFile,
         *,
         reason: str,
     ) -> None:
@@ -11582,17 +11022,7 @@ class IncludedFilesConverter(BaseConverter):
         for resource_key in plan.skipped_keys:
             self._resource_skipped(resource_key)
 
-        planned_logical_paths: list[str] = []
-        for logical_path in (
-            *plan.requested_keys,
-            *(source.relative_path for source in plan.available_files),
-        ):
-            try:
-                canonical_included_file_lookup_path(logical_path)
-            except ProjectSourcePathError:
-                continue
-            planned_logical_paths.append(logical_path)
-        path_assignments = plan_included_file_paths(planned_logical_paths)
+        path_assignments = plan_output_paths(plan)
         assignments_by_source = {
             assignment.original_logical_path: assignment
             for assignment in path_assignments
@@ -11635,8 +11065,8 @@ class IncludedFilesConverter(BaseConverter):
             self.godot_project_path,
             _INCLUDED_FILES_ROOT_NAME,
         )
-        previous_root_snapshot: _IncludedTreeSnapshot
-        previous_registry_snapshot: _IncludedRegistrySnapshot
+        previous_root_snapshot: IncludedTreeSnapshot
+        previous_registry_snapshot: IncludedRegistrySnapshot
         try:
             previous_root_snapshot = _capture_included_tree(
                 public_root_path,
@@ -11662,7 +11092,7 @@ class IncludedFilesConverter(BaseConverter):
             raise
 
         stage_container_path: str | None = None
-        stage_container_identity: _PathIdentity | None = None
+        stage_container_identity: PathIdentity | None = None
         active_error: BaseException | None = None
         transaction_committed = False
         transaction_cleanup_managed = False
@@ -11773,7 +11203,7 @@ class IncludedFilesConverter(BaseConverter):
 
             self._active_output_project_path = stage_container_path
             successful_logical_paths: set[str] = set()
-            copy_receipts: dict[str, _IncludedCopyReceipt] = {}
+            copy_receipts: dict[str, IncludedCopyReceipt] = {}
             worker_failed = False
             worker_cancelled = False
             first_worker_error: BaseException | None = None
@@ -11782,9 +11212,9 @@ class IncludedFilesConverter(BaseConverter):
             try:
                 def submit_copy(
                     executor: ThreadPoolExecutor,
-                    source: _IncludedFileSource,
+                    source: IncludedFileSource,
                 ) -> Future[
-                    tuple[str, bool, _IncludedCopyReceipt | None] | None
+                    tuple[str, bool, IncludedCopyReceipt | None] | None
                 ]:
                     assignment = assignments_by_source[source.relative_path]
                     staged_output_path = os.path.join(
@@ -11812,9 +11242,9 @@ class IncludedFilesConverter(BaseConverter):
                     )
 
                 def consume_copy(
-                    _source: _IncludedFileSource,
+                    _source: IncludedFileSource,
                     future: Future[
-                        tuple[str, bool, _IncludedCopyReceipt | None] | None
+                        tuple[str, bool, IncludedCopyReceipt | None] | None
                     ],
                 ) -> bool:
                     nonlocal worker_failed
@@ -11884,7 +11314,7 @@ class IncludedFilesConverter(BaseConverter):
 
             generation_content_receipts = (
                 tuple(
-                    _IncludedGenerationContentReceipt(
+                    IncludedGenerationContentReceipt(
                         transaction_id=publication_transaction_id,
                         generation_identity=staged_root_identity,
                         stage_container_identity=stage_container_identity,
@@ -12002,7 +11432,7 @@ class IncludedFilesConverter(BaseConverter):
                 staged_registry_content,
             )
 
-            transaction = _IncludedOutputSetTransaction(
+            transaction = IncludedOutputSetTransaction(
                 project_identity=project_identity,
                 stage_container_path=stage_container_path,
                 stage_container_identity=stage_container_identity,
@@ -12049,7 +11479,7 @@ class IncludedFilesConverter(BaseConverter):
                         ).format(path=source.relative_path)
                     )
             self._safe_progress(100)
-        except _IncludedOutputSetCancelled:
+        except IncludedOutputSetCancelled:
             for source in all_files:
                 self._resource_skipped(source.relative_path)
             self.log_callback(

@@ -561,3 +561,42 @@ Correction source/proof index SHA256 is
 `24a67df2b50adea24d306df41d06754eac7e7acc7e5b3b70173df3179abb57ec`.
 Independent correction review SHA256 is
 `d5573a41674e47636de5dce757c50c7f872db2232102b58cad4f295d9f5b2151`.
+
+
+## Public artifact preflight guard characterization
+
+The next bounded follow-up adds only `tests/test_converter_artifact_ownership.py`
+to the implementation scope. Both L01 CI runs 33954287755 and 33956488909
+reported converter-orchestration coverage of 535/576 statements (92.88%) against
+the unchanged 92.89% floor. The actual verified G01 parent reports 536/577.
+Source-aligned coverage proves the entire difference is the removed, executed
+`managed_output_transactional` class marker; remaining covered and missing
+lines are unchanged. The second run passed the Windows assertion and all other
+validation jobs, but its coverage failure still prevents integration.
+
+The two separately named tests call real `Converter.publish_conversion_attempt`
+and `Converter.refresh_conversion_artifacts` before preflight. They require the
+exact RuntimeError, preserve an existing diagnostic and public terminal state,
+leave the running flag and callback buffers unchanged, and fail if fixed recovery,
+snapshot or publication collaborators run. No production/private-method patch,
+process-directory mutation, existing test change or policy adjustment is added.
+The new module is 84 physical / 171 structural units; its largest helper is
+46 / 103, nesting 1 with two parameters. All 385 previous Python files remain
+exact bytes from `397e1bc6184155086105eb7b5d10477dc45747d4`.
+
+Independent and root actual-code/local-proof reviews approve this test-only
+follow-up. Pyright reports zero errors/warnings, both Ruff checks and diff check
+pass, and the strict gate retains 1,047 entries without a baseline change. The
+new two tests pass without skips, all 78 CLI methods pass with one expected local
+Windows-only skip, and six retained transaction/crash tests pass without skips.
+All 26 applicable native/real required cases are actual successes. Source hashes,
+loaded origins, approved Python and exact Godot are bound before and after checks.
+
+Targeted local coverage confirms the real refusal line 679 and branch 678 to 679
+execute. This is not a full-cohort coverage pass. Existing full-suite/parity proof
+keeps its original attribution; the next exact Linux CI run must establish the
+unchanged floor and both new IDs as actual successes. All existing native cohorts
+and required PR/merge proofs remain, with no new native workflow or runner.
+
+Source/proof index SHA256: `e47d3d0368613678642959f58d7eb5a663deda6beb32597b017b19c7627f82a9`.
+Independent guard review SHA256: `a7cac84d1d90c12fbe3a9e6768d5b24f9d5216277fa5307817dc6bbd27b4131f`.

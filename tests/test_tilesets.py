@@ -2,7 +2,6 @@
 
 import os
 import json
-import sys
 import shutil
 import tempfile
 import threading
@@ -10,9 +9,6 @@ import unittest
 from typing import cast
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
 from src.conversion.asset_registry import AssetRegistryConverter

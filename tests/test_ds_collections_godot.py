@@ -6,6 +6,8 @@ import shutil
 import unittest
 from pathlib import Path
 
+from src.conversion.gml_runtime import write_gml_runtime
+
 def _find_godot_binary() -> str | None:
     env_path = os.environ.get("GODOT_BIN")
     if env_path and os.path.isfile(env_path):
@@ -22,7 +24,6 @@ godot_binary = _find_godot_binary()
 
 
 
-from src.conversion.gml_runtime import write_gml_runtime
 
 @unittest.skipIf(godot_binary is None, "Godot binary not found")
 class TestDSCollectionsGodotSmoke(unittest.TestCase):

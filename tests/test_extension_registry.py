@@ -4,15 +4,11 @@ import json
 import os
 import shutil
 import stat
-import sys
 import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,

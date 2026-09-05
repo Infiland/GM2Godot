@@ -20,9 +20,6 @@ from types import SimpleNamespace
 from typing import BinaryIO, Callable
 from unittest.mock import MagicMock, mock_open, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion import included_files as included_files_module
 from src.conversion.included_files import IncludedFilesConverter
@@ -38,6 +35,8 @@ from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:

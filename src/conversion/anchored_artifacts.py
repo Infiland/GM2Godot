@@ -7,7 +7,7 @@ import secrets
 import stat
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Any, Callable, Literal, TypeAlias, cast
 
 
@@ -880,16 +880,10 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
             descriptor_chmod: Callable[[int], None] | None = None
             if callable(fchmod_candidate):
                 fchmod = cast(Callable[[int, int], None], fchmod_candidate)
-                descriptor_chmod = lambda exact_mode: fchmod(
-                    descriptor,
-                    exact_mode,
-                )
+                descriptor_chmod = partial(fchmod, descriptor)
                 descriptor_chmod(mode)
             elif os.chmod in os.supports_fd:
-                descriptor_chmod = lambda exact_mode: os.chmod(
-                    descriptor,
-                    exact_mode,
-                )
+                descriptor_chmod = partial(os.chmod, descriptor)
                 descriptor_chmod(mode)
             else:
                 self.verify_regular_identity(leaf, identity)

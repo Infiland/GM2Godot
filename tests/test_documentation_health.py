@@ -59,7 +59,7 @@ EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E9", "F", "C90"], "mccabe": {"max-complexity": 122}},
+    "lint": {"select": ["E4", "E7", "E9", "F", "C90"], "mccabe": {"max-complexity": 122}},
 }
 EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff
@@ -69,7 +69,7 @@ EXPECTED_RUFF_LINT_STEPS = """\
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
             xargs -0 -- python -m ruff check --isolated --target-version py312 \\
-              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+              --select E4,E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
 """
 
 
@@ -291,9 +291,9 @@ class TestDocumentationHealth(unittest.TestCase):
 
     def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
         required_guidance = (
-            "CI enforces Ruff's `E9` fatal-error checks and the complete "
-            "Pyflakes (`F`) rule family. Do not disable `F` or individual "
-            "`F`-numbered rules globally or per file."
+            "CI enforces Ruff's complete `E4`, `E7`, `E9` and Pyflakes (`F`) "
+            "rule families. Do not disable these families or individual rules "
+            "globally or per file."
         )
         for path in (
             PROJECT_ROOT / "CONTRIBUTING.md",

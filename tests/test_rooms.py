@@ -3,16 +3,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
 import tempfile
 import threading
 import unittest
 from typing import IO, Any, Callable, cast
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 from src.conversion.conversion_outcome import ConversionCounts

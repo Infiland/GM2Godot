@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import posixpath
 import shutil
 import stat
 import subprocess
@@ -22,11 +21,23 @@ from unittest.mock import MagicMock, mock_open, patch
 
 from src.conversion import included_files as included_files_module
 from src.conversion.conversion_outcome import ConversionCounts
-from src.conversion.converter import Converter
-from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
+from src.conversion.diagnostic_models import ConversionDiagnostic
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import IncludedFilePathAssignment, plan_included_file_paths
 from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
 from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts.models import (
+    IncludedCopyReceipt,
+    IncludedFileSource,
+    IncludedNoOpSourceReceipt,
+    IncludedOutputSetTransaction,
+    IncludedRecoveryRecordSizes,
+    IncludedRegistrySnapshot,
+    IncludedTreeEntry,
+    IncludedTreeSnapshot,
+    PathIdentity,
+)
+from src.conversion.included_files_parts.path_validation import recovery_relative_path, recovery_tree_entry_path
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -594,12 +605,12 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
     @staticmethod
     def _recovery_cleanup_snapshot(
         relative_path: str,
-    ) -> included_files_module._IncludedTreeSnapshot:
+    ) -> IncludedTreeSnapshot:
         components = relative_path.split("/")
-        entries: list[included_files_module._IncludedTreeEntry] = []
+        entries: list[IncludedTreeEntry] = []
         for index in range(1, len(components)):
             entries.append(
-                included_files_module._IncludedTreeEntry(
+                IncludedTreeEntry(
                     relative_path="/".join(components[:index]),
                     kind="directory",
                     fingerprint=(
@@ -615,7 +626,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 )
             )
         entries.append(
-            included_files_module._IncludedTreeEntry(
+            IncludedTreeEntry(
                 relative_path=relative_path,
                 kind="file",
                 fingerprint=(11, 401, stat.S_IFREG | 0o600, 0, 0, 1),
@@ -623,7 +634,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 content_sha256=hashlib.sha256(b"").hexdigest(),
             )
         )
-        return included_files_module._IncludedTreeSnapshot(
+        return IncludedTreeSnapshot(
             root_fingerprint=(11, 21, stat.S_IFDIR | 0o700, 0, 0, 1),
             entries=tuple(
                 sorted(entries, key=lambda entry: entry.relative_path)
@@ -702,8 +713,8 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 
     def _transaction_with_native_windows_readonly_staged_root(
         self,
-        transaction: included_files_module._IncludedOutputSetTransaction,
-    ) -> included_files_module._IncludedOutputSetTransaction:
+        transaction: IncludedOutputSetTransaction,
+    ) -> IncludedOutputSetTransaction:
         self._mark_native_windows_tree_read_only(
             transaction.staged_root_path
         )
@@ -4008,7 +4019,7 @@ included_files_module._acquire_included_project_lock(
             registry_content,
         )
         previous_registry_snapshot = (
-            included_files_module._IncludedRegistrySnapshot(
+            IncludedRegistrySnapshot(
                 directory_identity=(1, 10),
                 file_identity=(1, 11),
                 file_mode=0o600,
@@ -4036,7 +4047,7 @@ included_files_module._acquire_included_project_lock(
                 previous_registry_snapshot,
             )
         )
-        expected_sizes = included_files_module._IncludedRecoveryRecordSizes(
+        expected_sizes = IncludedRecoveryRecordSizes(
             journal_bytes=13_865_860,
             commit_bytes=13_866_493,
         )
@@ -4165,13 +4176,13 @@ included_files_module._acquire_included_project_lock(
                 source_file.write(b"x")
 
         captured_sizes: (
-            included_files_module._IncludedRecoveryRecordSizes | None
+            IncludedRecoveryRecordSizes | None
         ) = None
         original_commit = included_files_module._commit_included_output_set
 
         def capture_commit(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             nonlocal captured_sizes
@@ -4235,14 +4246,14 @@ included_files_module._acquire_included_project_lock(
             commit_record[1]["format_version"],
             included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
         )
-        actual_sizes = included_files_module._IncludedRecoveryRecordSizes(
+        actual_sizes = IncludedRecoveryRecordSizes(
             journal_bytes=os.path.getsize(journal_path),
             commit_bytes=os.path.getsize(commit_path),
         )
         self.assertEqual(captured_sizes, actual_sizes)
         self.assertEqual(
             actual_sizes,
-            included_files_module._IncludedRecoveryRecordSizes(
+            IncludedRecoveryRecordSizes(
                 journal_bytes=8_138_698,
                 commit_bytes=8_139_331,
             ),
@@ -5934,13 +5945,13 @@ IncludedFilesConverter(
         for relative_path in cases:
             with self.subTest(relative_path=relative_path):
                 self.assertEqual(
-                    included_files_module._included_recovery_relative_path(
+                    recovery_relative_path(
                         relative_path
                     ),
                     relative_path,
                 )
                 reconstructed = (
-                    included_files_module._included_recovery_tree_entry_path(
+                    recovery_tree_entry_path(
                         root_path,
                         relative_path,
                     )
@@ -5961,7 +5972,7 @@ IncludedFilesConverter(
     @unittest.skipUnless(os.name == "nt", "requires native Windows paths")
     def test_native_windows_recovery_paths_reject_before_io(self) -> None:
         cleanup_root = os.path.join(self.godot_dir, "native-cleanup-root")
-        safe_path = included_files_module._included_recovery_tree_entry_path(
+        safe_path = recovery_tree_entry_path(
             cleanup_root,
             "safe/payload.txt",
         )
@@ -6467,13 +6478,13 @@ os._exit(88)
         previous_pair = self._pair_snapshot()
         self._write("payload.txt", "AFTER!")
         captured_transactions: list[
-            included_files_module._IncludedOutputSetTransaction
+            IncludedOutputSetTransaction
         ] = []
 
         def capture_transaction(
             _project_path: str,
             transaction: (
-                included_files_module._IncludedOutputSetTransaction
+                IncludedOutputSetTransaction
             ),
             _conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
@@ -6830,10 +6841,10 @@ os._exit(88)
             root_path: str,
             *,
             expected_parent_identity: (
-                included_files_module._PathIdentity | None
+                PathIdentity | None
             ) = None,
             include_content: bool = True,
-        ) -> included_files_module._IncludedTreeSnapshot:
+        ) -> IncludedTreeSnapshot:
             nonlocal hardlink_created
             stage_name = os.path.basename(os.path.dirname(root_path))
             if (
@@ -6890,13 +6901,13 @@ os._exit(88)
         )
 
         def snapshot_with_hardlink(
-            project_identity: included_files_module._PathIdentity,
+            project_identity: PathIdentity,
             stage_path: str,
-            stage_identity: included_files_module._PathIdentity,
-            staged_root_snapshot: included_files_module._IncludedTreeSnapshot,
-            staged_registry_identity: included_files_module._PathIdentity,
+            stage_identity: PathIdentity,
+            staged_root_snapshot: IncludedTreeSnapshot,
+            staged_registry_identity: PathIdentity,
             staged_registry_content: bytes,
-        ) -> included_files_module._IncludedTreeSnapshot:
+        ) -> IncludedTreeSnapshot:
             nonlocal external_content
             staged_registry_path = os.path.join(
                 stage_path,
@@ -8060,7 +8071,7 @@ os._exit(88)
 
         def mutate_then_commit(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             nonlocal mutated, preserved_staged_file
@@ -8200,7 +8211,7 @@ os._exit(88)
 
         def inject_registry_before_prepare(
             root_path: str,
-            expected: included_files_module._IncludedTreeSnapshot,
+            expected: IncludedTreeSnapshot,
             *,
             expected_parent_identity: tuple[int, int] | None = None,
         ) -> None:
@@ -8432,7 +8443,7 @@ os._exit(88)
 
         def swap_cleanup_root(
             path: str,
-            snapshot: included_files_module._IncludedTreeSnapshot,
+            snapshot: IncludedTreeSnapshot,
             expected_parent_identity: tuple[int, int],
             transaction_id: str,
             role: str,
@@ -8507,7 +8518,7 @@ os._exit(88)
 
         def inject_unknown_stage_content(
             path: str,
-            snapshot: included_files_module._IncludedTreeSnapshot,
+            snapshot: IncludedTreeSnapshot,
             expected_parent_identity: tuple[int, int],
             transaction_id: str,
             role: str,
@@ -8568,7 +8579,7 @@ os._exit(88)
 
         def inject_unknown_stage_content(
             path: str,
-            snapshot: included_files_module._IncludedTreeSnapshot,
+            snapshot: IncludedTreeSnapshot,
             expected_parent_identity: tuple[int, int],
             transaction_id: str,
             role: str,
@@ -8633,7 +8644,7 @@ os._exit(88)
 
         def inject_unknown_stage_content(
             path: str,
-            snapshot: included_files_module._IncludedTreeSnapshot,
+            snapshot: IncludedTreeSnapshot,
             expected_parent_identity: tuple[int, int],
             transaction_id: str,
             role: str,
@@ -9263,7 +9274,7 @@ os._exit(88)
         with open(sentinel_path, "w", encoding="utf-8") as sentinel_file:
             sentinel_file.write("unknown registry directory")
         project_stat = os.lstat(self.godot_dir)
-        empty_snapshot = included_files_module._IncludedRegistrySnapshot(
+        empty_snapshot = IncludedRegistrySnapshot(
             directory_identity=None,
             file_identity=None,
             file_mode=None,
@@ -9859,7 +9870,7 @@ os._exit(88)
 
         def redirect_stage_then_commit(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             nonlocal stage_link
@@ -10501,10 +10512,10 @@ os._exit(88)
         started: list[str] = []
 
         def fail_first(
-            source: included_files_module._IncludedFileSource,
+            source: IncludedFileSource,
             *,
             deny_writes: bool,
-        ) -> included_files_module._IncludedNoOpSourceReceipt:
+        ) -> IncludedNoOpSourceReceipt:
             started.append(source.relative_path)
             if source.relative_path == "00.txt":
                 raise OSError("injected receipt failure")
@@ -10652,7 +10663,7 @@ os._exit(88)
             output_path: str,
             source_file: BinaryIO,
             source_stat: os.stat_result,
-        ) -> included_files_module._IncludedCopyReceipt:
+        ) -> IncludedCopyReceipt:
             if output_path.endswith("z_fail.txt"):
                 raise OSError("injected worker failure")
             return original_publish(
@@ -10950,7 +10961,7 @@ os._exit(88)
 
         def commit_with_readonly_stage(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             return original_commit(
@@ -11045,7 +11056,7 @@ os._exit(88)
 
         def commit_with_readonly_stage(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             return original_commit(
@@ -11216,7 +11227,7 @@ os._exit(88)
 
         def replace_stage_with_junction(
             project_path: str,
-            transaction: included_files_module._IncludedOutputSetTransaction,
+            transaction: IncludedOutputSetTransaction,
             conversion_running: Callable[[], bool],
         ) -> tuple[str, ...]:
             nonlocal stage_junction
@@ -11305,503 +11316,6 @@ os._exit(88)
                 self._remove_native_windows_junction(backup_junction)
 
         self._assert_no_transaction_debris()
-
-
-class TestIncludedFilesManifestAccounting(unittest.TestCase):
-    def setUp(self) -> None:
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.datafiles_dir = os.path.join(self.gm_dir, "datafiles")
-        os.makedirs(self.datafiles_dir)
-        self.logs: list[str] = []
-
-    def tearDown(self) -> None:
-        shutil.rmtree(self.gm_dir)
-        shutil.rmtree(self.godot_dir)
-
-    def _write_yyp(self, files: list[tuple[str, str]]) -> None:
-        with open(
-            os.path.join(self.gm_dir, "IncludedPaths.yyp"),
-            "w",
-            encoding="utf-8",
-        ) as project_file:
-            json.dump(
-                {
-                    "IncludedFiles": [
-                        {
-                            "name": name,
-                            "filePath": posixpath.dirname(path),
-                        }
-                        for name, path in files
-                    ]
-                },
-                project_file,
-            )
-
-    def _make_converter(
-        self,
-        diagnostics: DiagnosticCollector | None = None,
-    ) -> IncludedFilesConverter:
-        return IncludedFilesConverter(
-            self.gm_dir,
-            self.godot_dir,
-            log_callback=self.logs.append,
-            progress_callback=lambda _value: None,
-            conversion_running=lambda: True,
-            diagnostics=diagnostics,
-            max_workers=1,
-        )
-
-    def test_missing_only_declared_file_makes_conversion_partial(self) -> None:
-        self._write_yyp(
-            [("missing.txt", "datafiles/config/missing.txt")]
-        )
-        running = threading.Event()
-        running.set()
-        converter = Converter(
-            log_callback=lambda message: self.logs.append(str(message)),
-            progress_callback=lambda _value: None,
-            status_callback=lambda _message: None,
-            conversion_running=running,
-        )
-        included_files_enabled = MagicMock()
-        included_files_enabled.get.return_value = True
-
-        outcome = converter.convert(
-            self.gm_dir,
-            "windows",
-            self.godot_dir,
-            {"included_files": included_files_enabled},
-        )
-
-        self.assertEqual(outcome.state, "partial")
-        self.assertEqual(
-            outcome.converters,
-            ConversionCounts(requested=1, executed=1, completed=1),
-        )
-        self.assertEqual(
-            outcome.resources,
-            ConversionCounts(requested=1, skipped=1),
-        )
-        unavailable = [
-            diagnostic
-            for diagnostic in converter.diagnostics.diagnostics()
-            if diagnostic.code
-            == "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE"
-        ]
-        self.assertEqual(len(unavailable), 1)
-        self.assertEqual(unavailable[0].resource, "missing.txt")
-        self.assertEqual(unavailable[0].source_path, "IncludedPaths.yyp")
-        self.assertEqual(
-            unavailable[0].manifest_entry,
-            "IncludedFiles[0].filePath",
-        )
-        with open(
-            os.path.join(
-                self.godot_dir,
-                INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-            ),
-            encoding="utf-8",
-        ) as registry_file:
-            registry_content = registry_file.read()
-        self.assertIn(
-            '"logical_path": "config/missing.txt"',
-            registry_content,
-        )
-        self.assertIn('"emitted": false', registry_content)
-
-    def test_safe_missing_and_disk_only_file_have_strict_counts(self) -> None:
-        safe_source = os.path.join(self.datafiles_dir, "config", "safe.txt")
-        os.makedirs(os.path.dirname(safe_source))
-        with open(safe_source, "w", encoding="utf-8") as source_file:
-            source_file.write("safe")
-        with open(
-            os.path.join(self.datafiles_dir, "orphan.txt"),
-            "w",
-            encoding="utf-8",
-        ) as source_file:
-            source_file.write("orphan")
-        self._write_yyp(
-            [
-                ("safe.txt", "datafiles/config/safe.txt"),
-                ("missing.txt", "datafiles/config/missing.txt"),
-            ]
-        )
-        diagnostics = DiagnosticCollector()
-        converter = self._make_converter(diagnostics)
-
-        converter.convert_all()
-
-        self.assertEqual(
-            converter.conversion_step_result(
-                finalize_unfinished_as=None,
-            ).resources,
-            ConversionCounts(
-                requested=3,
-                executed=2,
-                completed=2,
-                skipped=1,
-            ),
-        )
-        safe_output = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "config",
-            "safe.txt",
-        )
-        with open(safe_output, "r", encoding="utf-8") as output_file:
-            self.assertEqual(output_file.read(), "safe")
-        self.assertFalse(
-            os.path.exists(
-                os.path.join(
-                    self.godot_dir,
-                    "included_files",
-                    "config",
-                    "missing.txt",
-                )
-            )
-        )
-        disk_only_output = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "orphan.txt",
-        )
-        with open(disk_only_output, "r", encoding="utf-8") as output_file:
-            self.assertEqual(output_file.read(), "orphan")
-        unavailable = [
-            diagnostic
-            for diagnostic in diagnostics.diagnostics()
-            if diagnostic.code
-            == "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE"
-        ]
-        self.assertEqual(len(unavailable), 1)
-        self.assertEqual(unavailable[0].resource, "missing.txt")
-        with open(
-            os.path.join(
-                self.godot_dir,
-                INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-            ),
-            encoding="utf-8",
-        ) as registry_file:
-            registry_content = registry_file.read()
-        self.assertIn(
-            '"logical_path": "config/missing.txt"',
-            registry_content,
-        )
-        self.assertIn('"logical_path": "config/safe.txt"', registry_content)
-        self.assertEqual(registry_content.count('"emitted": false'), 1)
-        self.assertEqual(registry_content.count('"emitted": true'), 2)
-
-    def test_duplicate_exact_manifest_file_is_accounted_once(self) -> None:
-        source_path = os.path.join(self.datafiles_dir, "once.txt")
-        with open(source_path, "w", encoding="utf-8") as source_file:
-            source_file.write("once")
-        declaration = ("once.txt", "datafiles/once.txt")
-        self._write_yyp([declaration, declaration])
-        converter = self._make_converter()
-
-        converter.convert_all()
-
-        self.assertEqual(
-            converter.conversion_step_result(
-                finalize_unfinished_as=None,
-            ).resources,
-            ConversionCounts(requested=1, executed=1, completed=1),
-        )
-
-    def test_manifest_declared_yy_payload_is_copied(self) -> None:
-        source_path = os.path.join(self.datafiles_dir, "payload.yy")
-        with open(source_path, "w", encoding="utf-8") as source_file:
-            source_file.write("included payload")
-        self._write_yyp([("payload.yy", "datafiles/payload.yy")])
-
-        self._make_converter().convert_all()
-
-        output_path = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "payload.yy",
-        )
-        with open(output_path, "r", encoding="utf-8") as output_file:
-            self.assertEqual(output_file.read(), "included payload")
-
-    def test_rejected_declared_file_is_requested_and_skipped(self) -> None:
-        self._write_yyp(
-            [
-                (
-                    "rejected.txt",
-                    "datafiles/../../outside/rejected.txt",
-                )
-            ]
-        )
-        diagnostics = DiagnosticCollector()
-        converter = self._make_converter(diagnostics)
-
-        converter.convert_all()
-
-        self.assertEqual(
-            converter.conversion_step_result(
-                finalize_unfinished_as=None,
-            ).resources,
-            ConversionCounts(requested=1, skipped=1),
-        )
-        diagnostic_codes = {
-            diagnostic.code for diagnostic in diagnostics.diagnostics()
-        }
-        self.assertIn("GM2GD-SOURCE-PATH-REJECTED", diagnostic_codes)
-        self.assertIn(
-            "GM2GD-INCLUDED-FILE-SOURCE-UNAVAILABLE",
-            diagnostic_codes,
-        )
-
-
-class TestIncludedFilesConverterNestedDirs(unittest.TestCase):
-    """Test that nested Included Files use GameMaker's packaged names."""
-
-    def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs: list[str] = []
-
-        # Create nested structure like the Asteroids++ project
-        langs_dir = os.path.join(self.gm_dir, "datafiles", "Languages")
-        modding_dir = os.path.join(self.gm_dir, "datafiles", "Modding", "Ranking System")
-        os.makedirs(langs_dir)
-        os.makedirs(modding_dir)
-
-        with open(os.path.join(langs_dir, "english.lang"), "w", encoding="utf-8") as f:
-            f.write("lang data")
-        with open(os.path.join(modding_dir, "ranks.txt"), "w", encoding="utf-8") as f:
-            f.write("rank data")
-
-    def tearDown(self):
-        shutil.rmtree(self.gm_dir)
-        shutil.rmtree(self.godot_dir)
-
-    def _make_converter(
-        self,
-        diagnostics: DiagnosticCollector | None = None,
-    ) -> IncludedFilesConverter:
-        return IncludedFilesConverter(
-            self.gm_dir, self.godot_dir,
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-            diagnostics=diagnostics,
-            max_workers=1,
-        )
-
-    def test_normalizes_nested_packaged_paths(self):
-        converter = self._make_converter()
-        converter.convert_all()
-
-        expected_lang = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "languages",
-            "english.lang",
-        )
-        expected_rank = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "modding",
-            "ranking_system",
-            "ranks.txt",
-        )
-
-        self.assertTrue(os.path.isfile(expected_lang), f"Expected {expected_lang}")
-        self.assertTrue(os.path.isfile(expected_rank), f"Expected {expected_rank}")
-
-        with open(expected_lang, "r", encoding="utf-8") as f:
-            self.assertEqual(f.read(), "lang data")
-        with open(expected_rank, "r", encoding="utf-8") as f:
-            self.assertEqual(f.read(), "rank data")
-
-    def test_collision_paths_reserve_natural_suffixes_and_warn_once(self) -> None:
-        datafiles_dir = os.path.join(self.gm_dir, "datafiles")
-        fixtures = {
-            "read_me.txt": "canonical",
-            "Read Me.txt": "normalized collision",
-            "read_me_2.txt": "natural suffix",
-        }
-        for filename, content in fixtures.items():
-            with open(
-                os.path.join(datafiles_dir, filename),
-                "w",
-                encoding="utf-8",
-            ) as source_file:
-                source_file.write(content)
-
-        diagnostics = DiagnosticCollector()
-        converter = self._make_converter(diagnostics)
-        converter.convert_all()
-
-        expected_outputs = {
-            "read_me.txt": "canonical",
-            "read_me_2.txt": "natural suffix",
-            "read_me_3.txt": "normalized collision",
-        }
-        for filename, content in expected_outputs.items():
-            with self.subTest(filename=filename):
-                output_path = os.path.join(
-                    self.godot_dir,
-                    "included_files",
-                    filename,
-                )
-                with open(output_path, "r", encoding="utf-8") as output_file:
-                    self.assertEqual(output_file.read(), content)
-
-        collision_diagnostics = [
-            diagnostic
-            for diagnostic in diagnostics.diagnostics()
-            if diagnostic.code == "GM2GD-INCLUDED-FILE-PATH-COLLISION"
-        ]
-        self.assertEqual(len(collision_diagnostics), 1)
-        collision = collision_diagnostics[0]
-        self.assertEqual(collision.severity, "warning")
-        self.assertEqual(collision.source_path, "datafiles")
-        self.assertEqual(collision.resource, "read_me.txt")
-        self.assertEqual(collision.resource_type, "included_file")
-        self.assertIn("'read_me.txt' -> 'read_me.txt'", collision.message)
-        self.assertIn("'Read Me.txt' -> 'read_me_3.txt'", collision.message)
-        self.assertEqual(
-            converter.conversion_step_result(
-                finalize_unfinished_as=None,
-            ).resources,
-            ConversionCounts(requested=5, executed=5, completed=5),
-        )
-        with open(
-            os.path.join(
-                self.godot_dir,
-                INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
-            ),
-            encoding="utf-8",
-        ) as registry_file:
-            registry_content = registry_file.read()
-        self.assertIn('"logical_path": "Read Me.txt"', registry_content)
-        self.assertIn('"assigned_path": "read_me_3.txt"', registry_content)
-        self.assertEqual(registry_content.count('"emitted": true'), 5)
-
-    def test_file_directory_prefix_collision_is_relocated_and_reported(
-        self,
-    ) -> None:
-        datafiles_dir = os.path.join(self.gm_dir, "datafiles")
-        with open(
-            os.path.join(datafiles_dir, "foo_bar"),
-            "w",
-            encoding="utf-8",
-        ) as source_file:
-            source_file.write("blocking file")
-        nested_directory = os.path.join(datafiles_dir, "Foo Bar")
-        os.makedirs(nested_directory)
-        with open(
-            os.path.join(nested_directory, "item.txt"),
-            "w",
-            encoding="utf-8",
-        ) as source_file:
-            source_file.write("nested file")
-
-        diagnostics = DiagnosticCollector()
-        converter = self._make_converter(diagnostics)
-        converter.convert_all()
-
-        blocking_output = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "foo_bar_2",
-        )
-        nested_output = os.path.join(
-            self.godot_dir,
-            "included_files",
-            "foo_bar",
-            "item.txt",
-        )
-        with open(blocking_output, "r", encoding="utf-8") as output_file:
-            self.assertEqual(output_file.read(), "blocking file")
-        with open(nested_output, "r", encoding="utf-8") as output_file:
-            self.assertEqual(output_file.read(), "nested file")
-
-        collision_diagnostics = [
-            diagnostic
-            for diagnostic in diagnostics.diagnostics()
-            if diagnostic.code == "GM2GD-INCLUDED-FILE-PATH-COLLISION"
-        ]
-        self.assertEqual(len(collision_diagnostics), 1)
-        collision = collision_diagnostics[0]
-        self.assertEqual(collision.resource, "foo_bar")
-        self.assertEqual(
-            collision.manifest_entry,
-            "normalized Included File output path",
-        )
-        self.assertIn("'foo_bar' -> 'foo_bar_2'", collision.message)
-        self.assertIn(
-            "'Foo Bar/item.txt' -> 'foo_bar/item.txt'",
-            collision.message,
-        )
-        self.assertEqual(
-            converter.conversion_step_result(
-                finalize_unfinished_as=None,
-            ).resources,
-            ConversionCounts(requested=4, executed=4, completed=4),
-        )
-
-
-class TestIncludedFilesConverterSkipsYY(unittest.TestCase):
-    """Test that .yy metadata files are skipped."""
-
-    def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs: list[str] = []
-
-        datafiles_dir = os.path.join(self.gm_dir, "datafiles")
-        os.makedirs(datafiles_dir)
-
-        with open(os.path.join(datafiles_dir, "readme.txt"), "w", encoding="utf-8") as f:
-            f.write("readme")
-        with open(os.path.join(datafiles_dir, "datafiles.yy"), "w", encoding="utf-8") as f:
-            f.write("{}")
-
-    def tearDown(self):
-        shutil.rmtree(self.gm_dir)
-        shutil.rmtree(self.godot_dir)
-
-    def test_skips_yy_files(self):
-        converter = IncludedFilesConverter(
-            self.gm_dir, self.godot_dir,
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-        )
-        converter.convert_all()
-
-        included_dir = os.path.join(self.godot_dir, "included_files")
-        self.assertTrue(os.path.isfile(os.path.join(included_dir, "readme.txt")))
-        self.assertFalse(os.path.exists(os.path.join(included_dir, "datafiles.yy")))
-
-
-class TestIncludedFilesConverterMissingFolder(unittest.TestCase):
-    """When the datafiles folder does not exist the converter should log an error."""
-
-    def setUp(self):
-        self.gm_dir = tempfile.mkdtemp()
-        self.godot_dir = tempfile.mkdtemp()
-        self.logs: list[str] = []
-
-    def tearDown(self):
-        shutil.rmtree(self.gm_dir)
-        shutil.rmtree(self.godot_dir)
-
-    def test_missing_datafiles_no_crash(self):
-        converter = IncludedFilesConverter(
-            self.gm_dir, self.godot_dir,
-            log_callback=lambda msg: self.logs.append(msg),
-            progress_callback=lambda v: None,
-            conversion_running=lambda: True,
-        )
-        converter.convert_all()
-        self.assertTrue(len(self.logs) > 0,
-                        "Expected at least one log message for missing datafiles folder")
 
 
 class TestIncludedFilesConverterOutputContainment(unittest.TestCase):

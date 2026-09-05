@@ -4,8 +4,9 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import cast
 
+from src.conversion.diagnostic_models import ResourceModelDiagnostic
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
@@ -17,21 +18,9 @@ from src.conversion.project_source_paths import (
 from src.conversion.type_defs import JsonDict, JsonList
 
 
-ResourceModelSeverity = Literal["info", "warning", "error"]
-
 
 def _empty_json_dict() -> JsonDict:
     return cast(JsonDict, {})
-
-
-@dataclass(frozen=True)
-class ResourceModelDiagnostic:
-    severity: ResourceModelSeverity
-    code: str
-    message: str
-    source_path: str = ""
-    resource_name: str = ""
-    resource_kind: str = ""
 
 
 @dataclass(frozen=True)

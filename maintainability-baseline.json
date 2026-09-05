@@ -434,7 +434,7 @@
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1914,
     "application|module_lines.executable|src/conversion/project_godot.py::<module>": 1088,
-    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1108,
+    "application|module_lines.executable|src/conversion/project_manifest.py::<module>": 1097,
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
@@ -453,7 +453,7 @@
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
     "application|module_structure.executable|src/conversion/converter.py::<module>": 1772,
-    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 1012,
+    "application|module_structure.executable|src/conversion/diagnostics.py::<module>": 953,
     "application|module_structure.executable|src/conversion/extension_registry.py::<module>": 2255,
     "application|module_structure.executable|src/conversion/fonts.py::<module>": 1361,
     "application|module_structure.executable|src/conversion/generation_inventory.py::<module>": 2404,
@@ -474,11 +474,11 @@
     "application|module_structure.executable|src/conversion/objects.py::<module>": 3002,
     "application|module_structure.executable|src/conversion/particle_assets.py::<module>": 976,
     "application|module_structure.executable|src/conversion/project_godot.py::<module>": 1685,
-    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 2013,
+    "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1992,
     "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1476,
     "application|module_structure.executable|src/conversion/project_source_paths.py::<module>": 892,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1059,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 1047,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
@@ -926,7 +926,6 @@
     "tests|lint.E402|tests/conversion/events/test_user_events.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/conversion/events/test_wallpaper_events.py::<module>|Module level import not at top of file": 2,
     "tests|lint.E402|tests/test_asset_registry.py::<module>|Module level import not at top of file": 11,
-    "tests|lint.E402|tests/test_base_converter.py::<module>|Module level import not at top of file": 4,
     "tests|lint.E402|tests/test_cli.py::<module>|Module level import not at top of file": 8,
     "tests|lint.E402|tests/test_converter.py::<module>|Module level import not at top of file": 7,
     "tests|lint.E402|tests/test_ds_collections_godot.py::<module>|Module level import not at top of file": 1,
@@ -1750,9 +1749,9 @@
       "structure": 1685
     },
     "application|module_lines.executable|src/conversion/project_manifest.py::<module>": {
-      "ast_sha256": "56dafd3e37e96cfc360507db5da9033c2232fe442cb25c1d1ef8ccdcc0c7ada6",
-      "lines": 1108,
-      "structure": 2013
+      "ast_sha256": "fc3f59b674a2a76d7cbd15bc1bed8c7abd7800a56de26163a65a42e7711daeda",
+      "lines": 1091,
+      "structure": 1992
     },
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": {
       "ast_sha256": "098f7c6563e235c9a6796a651f03a7047087039eebfc1f7a98f8a4965e5eac3b",

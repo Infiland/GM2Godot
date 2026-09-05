@@ -12,6 +12,13 @@ from scripts import check_coverage
 
 
 class TestCoveragePolicy(unittest.TestCase):
+    def test_diagnostic_models_remain_in_both_owning_coverage_scopes(self) -> None:
+        policy = check_coverage.load_policy(check_coverage.DEFAULT_POLICY_PATH)
+        scopes = {scope.name: scope for scope in policy.scopes}
+        for name in ("manifests-diagnostics", "project-parsing"):
+            with self.subTest(scope=name):
+                self.assertIn("src/conversion/diagnostic_models.py", scopes[name].include)
+
     def setUp(self) -> None:
         self._temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary_directory.cleanup)

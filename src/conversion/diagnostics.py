@@ -6,7 +6,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
-from typing import Callable, Literal, TypeAlias
+from typing import Callable, TypeAlias
 
 from src.conversion.anchored_artifacts import (
     ArtifactReceipt,
@@ -18,9 +18,14 @@ from src.conversion.anchored_artifacts import (
     stable_artifact_fingerprint,
 )
 from src.conversion.conversion_outcome import ConversionOutcome
+
+# D01 compatibility exports for deferred consumers; retired by R26.
+from src.conversion.diagnostic_models import (
+    ConversionDiagnostic as ConversionDiagnostic,
+)
+from src.conversion.diagnostic_models import DiagnosticSeverity as DiagnosticSeverity
 from src.conversion.type_defs import StrPath
 
-DiagnosticSeverity: TypeAlias = Literal["info", "warning", "error"]
 FileFingerprint: TypeAlias = tuple[int, int, int, int, int]
 PathIdentity: TypeAlias = tuple[int, int]
 
@@ -86,40 +91,6 @@ class ConversionDiagnosticReportPublicationReceipt:
     directory_identity: PathIdentity
     json_report: DiagnosticReportFingerprint
     markdown_report: DiagnosticReportFingerprint
-
-
-@dataclass(frozen=True)
-class ConversionDiagnostic:
-    severity: DiagnosticSeverity
-    code: str
-    message: str
-    source_path: str | None = None
-    line: int | None = None
-    column: int | None = None
-    resource: str | None = None
-    resource_type: str | None = None
-    event: str | None = None
-    api: str | None = None
-    manifest_entry: str | None = None
-    issue_number: int | None = None
-    workaround: str | None = None
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "severity": self.severity,
-            "code": self.code,
-            "message": self.message,
-            "source_path": self.source_path,
-            "line": self.line,
-            "column": self.column,
-            "resource": self.resource,
-            "resource_type": self.resource_type,
-            "event": self.event,
-            "api": self.api,
-            "manifest_entry": self.manifest_entry,
-            "issue_number": self.issue_number,
-            "workaround": self.workaround,
-        }
 
 
 class DiagnosticCollector:

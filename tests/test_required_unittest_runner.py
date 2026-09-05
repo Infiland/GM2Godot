@@ -45,6 +45,7 @@ class TestRequiredUnittestRunner(unittest.TestCase):
                         "schema_version": 1,
                         "gates": {
                             "R01": {
+                                "validation_kind": "conversion-parity",
                                 "unittest_ids": [
                                     "tests.test_required_unittest_runner._RunnerFixture.test_success"
                                 ],

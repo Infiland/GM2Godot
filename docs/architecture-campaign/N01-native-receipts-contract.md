@@ -204,3 +204,22 @@ Root owns the ledger and contracts.json after acceptance. The implementation
 owner may update this contract only for factual evidence and approved scope.
 No additional production native-lease files or new public test-access APIs are
 authorized. A discovered platform defect requires a bounded root refinement.
+
+Root accepted one additional assertion-only scope refinement on 2026-09-05:
+change the expected upload-artifact call counts in
+tests/test_ci_workflows.py::TestCIWorkflows.test_upload_artifact_calls_explicitly_preserve_archives
+from 8 to 12 overall and from 2 to 3 for Dependency Locks, accounting for the
+four required N01 receipt uploads. Per-call archive validation and all other
+imported C01 assertions remain unchanged. The new native_receipt_gate matrix field follows
+the existing tuple fields, preserving their exact contiguous assertions.
+
+Independent review found that the previous two R01 text writers emitted CRLF on
+Windows. Root accepted preservation of those native newline bytes, with no change
+to the shared anchored publisher. The two writers convert serialized JSON LF to
+os.linesep before encoding. Existing native producer tests compare fresh bytes
+with the actual previous NamedTemporaryFile text-writer behavior and then prove
+reuse of a receipt created by that previous writer without inode replacement.
+The frozen full suite completed before this correction; its original source
+inventory and evidence remain separate. Root assumed only this correction while
+the implementation and review agents were unavailable; independent re-review and
+native Windows execution remain required before approval.

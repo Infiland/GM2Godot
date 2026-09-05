@@ -110,7 +110,9 @@
             "repository_path": "tests/fixtures/golden/basic_scripts",
             "project_relative_path": "BasicScripts.yyp",
             "sha256": "c9577649cac4c807d94ed0049e9175ffcb2448bb168939f5882debaef0562cef",
-            "only": ["scripts"],
+            "only": [
+              "scripts"
+            ],
             "expected_exit": 0,
             "max_warnings": 0,
             "max_errors": 0,
@@ -172,6 +174,120 @@
           "runtime_markers"
         ],
         "facade_module": "src.conversion.gml_transpiler"
+      },
+      "validation_kind": "conversion-parity"
+    },
+    "N01-linux": {
+      "validation_kind": "native-receipts",
+      "unittest_ids": [
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_absent_and_identical_preserve_private_inode",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_different_and_linked_targets_fail_without_mutation",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_symlink_parent_and_target_never_redirect_publication",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_real_file_and_directory_fsync_are_executed",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_parent_relocation_is_detected_and_retained_descriptor_closes",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_post_write_failure_cleans_stage_and_closes_descriptor",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_bootstrap_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_environment_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_required_writer_and_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_parity_writer_and_cli_fresh_identical_conflict"
+      ],
+      "required_environment": {},
+      "required_paths": [
+        "scripts/_anchored_output.py",
+        "scripts/_anchored_receipt_posix.py",
+        "scripts/run_required_unittest.py",
+        "scripts/capture_conversion_parity.py",
+        "scripts/verify_dependency_bootstrap.py",
+        "scripts/verify_dependency_environment.py",
+        "requirements-bootstrap.txt",
+        "constraints/requirements-linux-py312.lock",
+        "tests/test_native_receipts_posix.py",
+        "tests/test_native_receipt_producers.py"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.13",
+        "platform": "linux",
+        "machine": "x86_64"
+      }
+    },
+    "N01-macos": {
+      "validation_kind": "native-receipts",
+      "unittest_ids": [
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_absent_and_identical_preserve_private_inode",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_different_and_linked_targets_fail_without_mutation",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_symlink_parent_and_target_never_redirect_publication",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_real_file_and_directory_fsync_are_executed",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_parent_relocation_is_detected_and_retained_descriptor_closes",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_post_write_failure_cleans_stage_and_closes_descriptor",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_tmp_alias_preserves_physical_inode",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_var_alias_preserves_physical_inode",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_redirect_below_trusted_alias_is_rejected",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_bootstrap_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_environment_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_required_writer_and_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_parity_writer_and_cli_fresh_identical_conflict"
+      ],
+      "required_environment": {},
+      "required_paths": [
+        "scripts/_anchored_output.py",
+        "scripts/_anchored_receipt_posix.py",
+        "scripts/run_required_unittest.py",
+        "scripts/capture_conversion_parity.py",
+        "scripts/verify_dependency_bootstrap.py",
+        "scripts/verify_dependency_environment.py",
+        "requirements-bootstrap.txt",
+        "constraints/requirements-macos-py312.lock",
+        "tests/test_native_receipts_posix.py",
+        "tests/test_native_receipts_darwin.py",
+        "tests/test_native_receipt_producers.py"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.10",
+        "platform": "darwin",
+        "machine": "arm64"
+      }
+    },
+    "N01-windows": {
+      "validation_kind": "native-receipts",
+      "unittest_ids": [
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_native_abi_publication_and_identical_identity",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_different_content_and_hardlinks_are_rejected",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_junction_directory_and_reserved_targets_fail_closed",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_retained_ancestors_deny_relocation_then_close",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_existing_target_is_pinned_during_identical_comparison",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_stage_substitution_is_denied",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_concurrent_target_winner_is_not_overwritten",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_long_unicode_path_publishes_and_reuses",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_post_write_failure_cleans_stage_and_handles",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_post_rename_failure_retains_published_identity",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_repeated_publication_does_not_leak_handles",
+        "tests.test_native_receipts_windows.TestNativeReceiptsWindows.test_observers_preserve_ctypes_last_error_and_native_close",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_bootstrap_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_environment_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_required_writer_and_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_parity_writer_and_cli_fresh_identical_conflict"
+      ],
+      "required_environment": {},
+      "required_paths": [
+        "scripts/_anchored_output.py",
+        "scripts/_anchored_receipt_windows.py",
+        "scripts/run_required_unittest.py",
+        "scripts/capture_conversion_parity.py",
+        "scripts/verify_dependency_bootstrap.py",
+        "scripts/verify_dependency_environment.py",
+        "requirements-bootstrap.txt",
+        "constraints/requirements-windows-py312.lock",
+        "tests/test_native_receipts_windows.py",
+        "tests/test_native_receipt_producers.py",
+        "tests/windows_receipt_native_support.py"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.10",
+        "platform": "win32",
+        "machine": "AMD64"
       }
     }
   }

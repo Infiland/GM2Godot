@@ -85,6 +85,13 @@ branch and verify the actual seven-call graph and `ci-success` on its exact
 revision. Do not mark C01 verified from YAML checks alone. C02 owns main's live
 required-status rule and release coupling after the reusable graph is proved.
 
+Root accepted one environment correction during live PR validation: the Linux
+full suite must install and verify the pinned Ruff dependency because R02's
+measurement tests execute it through that environment's Python. Use the existing
+native lock and dependency receipt. Do not skip those tests or assume Code Health's
+separate environment supplies their dependency. All other validation job bodies
+remain unchanged. A focused regression first demonstrated the missing install.
+
 Primary API references: [reusable workflow identity and permissions](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows),
 [workflow syntax and job dependencies](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax),
 and [required status rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets).

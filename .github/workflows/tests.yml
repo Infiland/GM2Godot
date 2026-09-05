@@ -47,13 +47,15 @@ jobs:
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.lock \
             coverage==7.15.2 \
-            packaging==26.2
+            packaging==26.2 \
+            ruff==0.15.22
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
             --require coverage \
             --require packaging \
+            --require ruff \
             --require Pillow \
             --require markdown2 \
             --require requests \
@@ -69,6 +71,25 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends libegl1 libgl1
+
+      - name: Run required native receipt gate
+        timeout-minutes: 10
+        shell: bash
+        env:
+          NATIVE_RECEIPT_PROFILE: stable
+        run: >-
+          python -m scripts.run_required_unittest
+          --manifest architecture-verification.json --gate N01-linux
+          --receipt "$RUNNER_TEMP/n01-tests-linux.json"
+
+      - name: Upload required native receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: n01-tests-linux
+          path: ${{ runner.temp }}/n01-tests-linux.json
+          if-no-files-found: error
+          retention-days: 30
+          archive: true
 
       - name: Run unit tests
         run: |
@@ -160,6 +181,25 @@ jobs:
             --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-macos-dependencies.json"
 
+      - name: Run required native receipt gate
+        timeout-minutes: 10
+        shell: bash
+        env:
+          NATIVE_RECEIPT_PROFILE: stable
+        run: >-
+          python -m scripts.run_required_unittest
+          --manifest architecture-verification.json --gate N01-macos
+          --receipt "$RUNNER_TEMP/n01-tests-macos.json"
+
+      - name: Upload required native receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: n01-tests-macos
+          path: ${{ runner.temp }}/n01-tests-macos.json
+          if-no-files-found: error
+          retention-days: 30
+          archive: true
+
       - name: Run native macOS managed-output transaction tests
         run: >-
           python -m unittest -v
@@ -231,6 +271,25 @@ jobs:
             --bootstrap requirements-bootstrap.txt \
             --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-windows-dependencies.json"
+
+      - name: Run required native receipt gate
+        timeout-minutes: 10
+        shell: bash
+        env:
+          NATIVE_RECEIPT_PROFILE: stable
+        run: >-
+          python -m scripts.run_required_unittest
+          --manifest architecture-verification.json --gate N01-windows
+          --receipt "$RUNNER_TEMP/n01-tests-windows.json"
+
+      - name: Upload required native receipt
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: n01-tests-windows
+          path: ${{ runner.temp }}/n01-tests-windows.json
+          if-no-files-found: error
+          retention-days: 30
+          archive: true
 
       - name: Run Windows outcome and artifact transaction tests
         run: >-

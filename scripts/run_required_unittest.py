@@ -3,18 +3,28 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
-import tempfile
+import traceback
 import unittest
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO, cast
+from typing import Literal, TextIO, cast
 
+from scripts._anchored_output import (
+    AnchoredOutputError,
+    publish_identical_receipt_bytes,
+)
 from scripts.conversion_parity_contract import ParityError, load_parity_definition
 from scripts.conversion_parity_inputs import validate_parity_inputs
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+NATIVE_RUNTIMES = {
+    "N01-linux": ("3.12.13", "linux", "x86_64"),
+    "N01-macos": ("3.12.10", "darwin", "arm64"),
+    "N01-windows": ("3.12.10", "win32", "AMD64"),
+}
 
 
 class ManifestError(ValueError):
@@ -28,6 +38,8 @@ class GateDefinition:
     required_environment: dict[str, str]
     required_paths: tuple[str, ...]
     allowed_skips: dict[str, str]
+    validation_kind: Literal["conversion-parity", "native-receipts"] = "conversion-parity"
+    native_runtime: tuple[str, str, str] | None = None
 
 
 def load_gate(manifest_path: Path, gate: str) -> GateDefinition:
@@ -45,6 +57,7 @@ def load_gate(manifest_path: Path, gate: str) -> GateDefinition:
     if gate not in gates:
         raise ManifestError(f"Verification manifest has no {gate!r} gate")
     definition = _object_mapping(gates[gate], f"verification gate {gate!r}")
+    kind = _validation_kind(definition.get("validation_kind"), gate)
     return GateDefinition(
         gate=gate,
         unittest_ids=_string_tuple(definition.get("unittest_ids"), "unittest_ids"),
@@ -54,11 +67,33 @@ def load_gate(manifest_path: Path, gate: str) -> GateDefinition:
         ),
         required_paths=_string_tuple(definition.get("required_paths"), "required_paths"),
         allowed_skips=_string_mapping(definition.get("allowed_skips", {}), "allowed_skips"),
+        validation_kind=kind,
+        native_runtime=_native_runtime(definition, gate) if kind == "native-receipts" else None,
     )
+
+
+def _validation_kind(value: object, gate: str) -> Literal["conversion-parity", "native-receipts"]:
+    if value == "conversion-parity" and gate not in NATIVE_RUNTIMES:
+        return "conversion-parity"
+    if value == "native-receipts" and gate in NATIVE_RUNTIMES:
+        return "native-receipts"
+    raise ManifestError(f"Invalid validation_kind {value!r} for {gate}")
+
+
+def _native_runtime(definition: Mapping[str, object], gate: str) -> tuple[str, str, str]:
+    runtime = _string_mapping(definition.get("runtime"), "native runtime")
+    expected = dict(zip(("python_version", "platform", "machine"), NATIVE_RUNTIMES[gate], strict=True))
+    if runtime != expected or definition.get("allowed_skips") != {}:
+        raise ManifestError(f"{gate} requires its exact native runtime and zero allowed skips")
+    return NATIVE_RUNTIMES[gate]
 
 
 def verify_prerequisites(definition: GateDefinition, *, root: Path) -> None:
     """Fail before collection when declared files or environment inputs are absent."""
+    if definition.validation_kind == "native-receipts":
+        actual = (platform.python_version(), sys.platform, platform.machine())
+        if definition.native_runtime != actual or definition.allowed_skips:
+            raise ManifestError(f"{definition.gate} requires {definition.native_runtime}, got {actual}; no skips allowed")
     for relative_path in definition.required_paths:
         if not (root / relative_path).is_file():
             raise ManifestError(f"{definition.gate} requires file {relative_path!r}")
@@ -106,26 +141,19 @@ def run_gate(
     """Run one declared gate and produce a deterministic machine receipt."""
     verify_prerequisites(definition, root=root)
     suite, discovered = load_suite(definition.unittest_ids)
+    if definition.validation_kind == "native-receipts" and discovered != definition.unittest_ids:
+        raise ManifestError("Native gate must declare the exact discovered individual method IDs")
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
     receipt = _receipt(definition, discovered, result)
-    return (0 if result_is_allowed(result, definition.allowed_skips) else 1), receipt
+    complete = bool(discovered) and result.testsRun == len(discovered)
+    return (0 if complete and result_is_allowed(result, definition.allowed_skips) else 1), receipt
 
 
 def write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
-    """Atomically write a canonical JSON gate receipt."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Publish a fresh or byte-identical canonical JSON gate receipt."""
     payload = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temporary:
-        temporary.write(payload)
-        temporary_path = Path(temporary.name)
-    temporary_path.replace(path)
+    # Preserve the previous text writer's native newline bytes, including CRLF.
+    publish_identical_receipt_bytes(path, payload.replace("\n", os.linesep).encode("utf-8"))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -143,19 +171,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         definition = load_gate(args.manifest, args.gate)
         verify_prerequisites(definition, root=PROJECT_ROOT)
-        parity_definition = load_parity_definition(
-            args.manifest,
-            args.gate,
-        )
-        validate_parity_inputs(
-            parity_definition,
-            root=PROJECT_ROOT,
-        )
+        if definition.validation_kind == "conversion-parity":
+            parity_definition = load_parity_definition(args.manifest, args.gate)
+            validate_parity_inputs(parity_definition, root=PROJECT_ROOT)
         status, receipt = run_gate(definition, root=PROJECT_ROOT, stream=sys.stdout)
     except (ManifestError, ParityError) as error:
         print(f"verification manifest error: {error}", file=sys.stderr)
         return 2
-    write_receipt(args.receipt, receipt)
+    try:
+        write_receipt(args.receipt, receipt)
+    except AnchoredOutputError as error:
+        print(f"receipt publication error [{error.code}]: {error}", file=sys.stderr)
+        traceback.print_exception(error, file=sys.stderr)
+        return 2
     return status
 
 def _object_mapping(value: object, key: str) -> dict[str, object]:

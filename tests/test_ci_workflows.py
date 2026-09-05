@@ -1391,10 +1391,10 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 8, locations)
+        self.assertEqual(len(locations), 12, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
-            2,
+            3,
             locations,
         )
 
@@ -4111,17 +4111,6 @@ class TestCIWorkflows(unittest.TestCase):
         install_paths = sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")))
         install_paths.extend((PROJECT_ROOT / "build_macos.sh", PROJECT_ROOT / "build.bat"))
 
-        expected_install_files = {
-            ".github/workflows/code-health.yml",
-            ".github/workflows/dependency-locks.yml",
-            ".github/workflows/godot-smoke.yml",
-            ".github/workflows/pyright.yml",
-            ".github/workflows/release.yml",
-            ".github/workflows/tcc-conversion-test.yml",
-            ".github/workflows/tests.yml",
-            "build.bat",
-            "build_macos.sh",
-        }
         expected_profiles: dict[
             str,
             Counter[tuple[str, tuple[str, ...]]],
@@ -4190,6 +4179,7 @@ class TestCIWorkflows(unittest.TestCase):
                         (
                             f"coverage=={COVERAGE_VERSION}",
                             f"packaging=={PACKAGING_VERSION}",
+                            f"ruff=={RUFF_VERSION}",
                         ),
                     ): 1,
                     (MACOS_CONSTRAINT, ("pip",)): 1,
@@ -4298,7 +4288,7 @@ class TestCIWorkflows(unittest.TestCase):
             if relative in expected_profiles:
                 actual_profiles[relative] = profiles
 
-        self.assertEqual(actual_install_files, expected_install_files)
+        self.assertEqual(actual_install_files, set(expected_profiles))
         self.assertEqual(actual_profiles, expected_profiles)
         self.assertEqual(non_dependency_lock_command_count, 27)
         self.assertEqual(dependency_lock_command_count, 8)

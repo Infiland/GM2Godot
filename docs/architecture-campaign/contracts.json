@@ -985,7 +985,7 @@
       "task_id": "R13",
       "issue": 797,
       "title": "Authoritative fonts resource model",
-      "state": "implementing",
+      "state": "approved",
       "problem_and_evidence": "The worker, registry and unused descriptive font aggregate interpret overlapping raw fields differently; fonts -> output paths -> registry -> fonts forms a lazy cycle. Actual b9 95 historical plus366 expanded cases/776 public observations are characterized and reviewed.",
       "expected_benefit": "One normalized frozen FontModel, two concrete planning selectors and one source-lookup leaf; delete duplicated dictionary/descriptive parsing and the lookup cycle.",
       "current_owner": "fonts.py, asset_registry.py, asset_output_paths.py",
@@ -1020,7 +1020,31 @@
       "independent_reviewers": "Separate read-only reviewer, then root actual changed-code review. Root owns baseline, coverage, workflow/gate and all campaign metadata.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Delete FontData, old descriptive FontModel/projection, old lookup definitions/private patch targets, unused bundled resolver and both lazy imports before verification; no temporary adapter is authorized.",
-      "plan_verdict": "APPROVE accepted architecture and reviewed before evidence; root implementation-entry metadata/source binding controls launch. See R13-font-model-contract.md."
+      "plan_verdict": "APPROVE accepted architecture and reviewed before evidence; root implementation-entry metadata/source binding controls launch. See R13-font-model-contract.md.",
+      "source_review": {
+        "root_sha256": "ec69e7e1cf5d5d059601a3e8612a1bb46c664074945e2c6a75369196d9688649",
+        "independent_sha256": "697d13a5bc498f4d25e106e4d48c4a4b3a9055e68cc9d4f28fc1545f69f778fe",
+        "source_index_sha256": "0a8b085f93b0d0169c59a06a00b2a5f70df06556928ea7db78f2645ef0cdeb02",
+        "scope": "12 frozen owners; actual worker/registry and accepted aggregate retirement approved; one constant import and one dead helper deletion are reviewed deviations"
+      },
+      "local_focused_proof": {
+        "required_tests": 65,
+        "successes": 65,
+        "skips": 0,
+        "result_sha256": "7a39101807e01056782d43d6477e6ab4e72ab1e770252b210a0e6ac3a0e2ec55",
+        "checks": "Pyright0errors0warnings,bothRuff,diff; full and native proof remain pending"
+      },
+      "root_baseline": {
+        "parent": "b9c05cd326cbcb8531ca93c24709bcf14cb81748",
+        "entries_before": 1045,
+        "entries_after": 1042,
+        "removed": 3,
+        "lowered": 7,
+        "added": 0,
+        "grown": 0,
+        "receipt_sha256": "9375ad152bc115907250dd2fd3a5e6229c4946c45c0ea3d74aa2ef2c20872a93"
+      },
+      "remaining_verification": "19controls,font matrix and accepted aggregate differences,immutable full with all5fixtures,R01five-input14fieldparity+same-ref,two bounded workloads,actual-parent integration and exact native PR/merge proof."
     },
     {
       "task_id": "R14",

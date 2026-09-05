@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, ClassVar, Iterable, cast
 
+from src.conversion import font_model, font_sources
 from src.conversion.animation_curve_registry import write_animation_curve_registry
 from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text,
@@ -27,7 +28,6 @@ from src.conversion.extension_registry import (
     extension_stub_resource_path,
     write_extension_compatibility_outputs,
 )
-from src.conversion.fonts import bundled_font_output_filename, resolve_system_font_source
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
@@ -3919,9 +3919,8 @@ class AssetRegistryConverter(BaseConverter):
 
     def _font_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         subfolder = self._get_subfolder_from_resource(resource)
-        ttf_name = resource.raw_data.get("TTFName")
-        include_ttf = bool(resource.raw_data.get("includeTTF", False))
-        if include_ttf and isinstance(ttf_name, str) and ttf_name:
+        ttf_name = font_model.bundled_font_reference(resource.raw_data)
+        if ttf_name is not None:
             source_ttf = self._resolve_project_source(
                 ttf_name,
                 owner_source_path=resource.source_path,
@@ -3929,7 +3928,7 @@ class AssetRegistryConverter(BaseConverter):
                 resource_type="font",
                 field="TTFName",
             )
-            output_filename = bundled_font_output_filename(ttf_name)
+            output_filename = font_sources.bundled_font_output_filename(ttf_name)
             if (
                 source_ttf is not None
                 and output_filename is not None
@@ -3944,8 +3943,8 @@ class AssetRegistryConverter(BaseConverter):
                     suffix=suffix,
                 )
 
-        system_font_name = resource.raw_data.get("fontName")
-        if isinstance(system_font_name, str) and system_font_name:
+        system_font_name = font_model.system_font_reference(resource.raw_data)
+        if system_font_name is not None:
             system_path = self._system_font_path(system_font_name)
             if system_path is not None:
                 extension = os.path.splitext(system_path)[1].lower()
@@ -3961,7 +3960,7 @@ class AssetRegistryConverter(BaseConverter):
     def _system_font_path(self, font_name: str) -> str | None:
         cache_key = font_name.casefold()
         if cache_key not in self._system_font_paths:
-            self._system_font_paths[cache_key] = resolve_system_font_source(font_name)
+            self._system_font_paths[cache_key] = font_sources.resolve_system_font_source(font_name)
         return self._system_font_paths[cache_key]
 
     def _get_subfolder_from_resource(self, resource: _ProjectResource) -> str:

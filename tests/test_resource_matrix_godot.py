@@ -18,7 +18,7 @@ from PIL import Image
 from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_plan import CONVERSION_STEPS
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
-from src.conversion.fonts import _find_system_font
+from src.conversion.font_sources import resolve_system_font_source
 from src.conversion.godot_validation import generated_godot_importable_asset_paths, validate_generated_godot_project
 from tests.godot_test_support import require_exact_godot
 
@@ -141,7 +141,7 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
                 "ResourceMatrix source fixture was mutated",
             )
         )
-        system_font_path = _find_system_font("Arial")
+        system_font_path = resolve_system_font_source("Arial")
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_root = Path(temporary_directory)

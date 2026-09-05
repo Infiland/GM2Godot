@@ -154,3 +154,38 @@ All other resource families and #797 completion remain separate roadmap work.
 Detailed immutable evidence is under
 `/Users/infi/Documents/Github/.gm2godot-v080-evidence/R13`, including the accepted
 refinement, test-body proposal, recursion correction and b9 matrix results.
+
+## Frozen source review and root proof metadata
+
+Independent and root actual-code reviews approve the twelve source owners frozen
+in `R13/implementation/review-files.json`. The actual font converter is693/1078;
+the aggregate is563/968. Two reviewed projection corrections add the required
+`FONT_EXTENSIONS` import and remove the now-unreferenced `_float_value` helper.
+The initial diagnostics remain recorded; final Pyright reports0 errors/warnings,
+both Ruff paths pass and all65 required tests pass with zero skips. No source
+change occurred during that run. The strict unchanged baseline generator/checker
+against actual b9 lowers1045 entries to1042: three removed, seven reduced, no new
+or grown debt or changed policy. The targeted font cycle is removed (14to13
+static cycles, one unchanged eager cycle); existing unrelated debt remains.
+
+Root adds exactly the four accepted modules `tests.test_fonts`,
+`tests.test_font_model`, `tests.test_font_sources`, and
+`tests.test_font_model_consumers` to each existing macOS/Windows command. Every
+old module and T01 helper remains. The converted-font runtime case runs in the
+local65-ID and existing Linux exact-Godot selection; these four additions do not
+claim native macOS/Windows Godot execution. The four source/consumer modules
+must execute on their actual native hosts with precise skip attribution.
+
+The canonical font model joins the existing project-parsing coverage cohort
+because the aggregate now consumes it. Every existing pattern, coverage floor,
+baseline and source scope stays unchanged. The font source leaf remains covered
+by overall-production. The new R13 verification gate selects the exact accepted65
+IDs with no allowed skips and retains R12's runtime, immutable fixtures, dependency
+locks and full fourteen-field parity contract; all prior gate objects are exact.
+Its five parity inputs are two repository fixtures and three external projects;
+the separately required full suite runs all five pinned external projects.
+
+Full, controls, font matrix, parity/same-ref, performance, current-parent
+integration and final PR/merge native proof remain outstanding. This source
+snapshot is based on b9; root will preserve the later verified I02/L02 campaign
+state during integration. Original proof will retain its actual source identity.

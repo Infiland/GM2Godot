@@ -43,7 +43,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged `b9c05cd` | Independent/root source, local, combined and exact CI proof APPROVE | PR CI33964091840 and merge CI33965005168; required35/0, retained T01/CLI/native receipts and strict1045 actuale142 passed |
-| R13 authoritative font model | implementing | audit_gml_resources; `dev/080-font-model`, base `b9c05cd` | Design/test bodies and before results independently/root approved; source review remains required | [Contract](R13-font-model-contract.md); original95+366cases/776observations, composed12+1 before successes; root entry approval precedes source edits |
+| R13 authoritative font model | approved | audit_gml_resources; frozen12owners on4bb2ad5/b9 | Independent/root actual source and focused proof APPROVE |65tests/0skips,Pyright0/0,bothRuff,strict1042actualb9; full/controls/matrix/parity/timing/native remain |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -199,3 +199,13 @@ Windows and Linux claims require their actual native CI receipts.
   one permitted dependency-submission skip), six exact-head native receipt artifacts,
   native mode selections 6/6/2 with zero skips, and strict comparison against actual
   parent `f40402c`. The temporary legacy-policy exception is removed.
+
+- R13 source and focused proof are approved:65 tests/zero skips and both source
+  reviews. Exact strict actual-b9 debt is1042 with no new or increased entry.
+  Root adds the accepted four native modules, the canonical model's existing
+  project-parsing coverage membership and the exact65-ID R13 gate. Full,
+  controls, font matrix, fourteen-field parity, performance and final native
+  integration are pending. The earlier checkpoint above is this branch's b9
+  entry snapshot; current external campaign verification is I02 at4787f4b,
+  15of54 (27.8%), with22 unused worktrees removed. Final integration will preserve
+  the then-current campaign ledger and task rows.

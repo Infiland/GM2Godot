@@ -13,7 +13,7 @@ from src.conversion.asset_output_paths import build_asset_output_paths, resource
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
-from src.conversion.fonts import FontConverter, _find_system_font
+from src.conversion.fonts import FontConverter
 
 FontYY: TypeAlias = dict[str, object]
 
@@ -325,7 +325,7 @@ class TestFontConverterTTF(unittest.TestCase):
             self.gm_dir, "fonts", "fnt_custom", "CustomFont.ttf",
         )))
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_rejects_bundled_font_path_traversal_without_corrupting_project(
         self,
         _find_system_font: Mock,
@@ -470,7 +470,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
             if diagnostic.code == "GM2GD-SOURCE-PATH-REJECTED"
         ]
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_uses_exact_declared_nested_font_yy_path(
         self,
         _find_system_font: Mock,
@@ -505,7 +505,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         self.assertNotIn("ReconstructedDecoyFamily", output)
         self.assertEqual(self._rejections(diagnostics), [])
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_rejects_normalized_cross_family_manifest_path_and_keeps_safe_sibling(
         self,
         _find_system_font: Mock,
@@ -599,7 +599,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
             "resources[0].id.path",
         )
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_safe_and_missing_declared_fonts_have_strict_counts(
         self,
         _find_system_font: Mock,
@@ -652,7 +652,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
             "resources[1].id.path",
         )
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_duplicate_exact_manifest_font_reference_is_accounted_once(
         self,
         _find_system_font: Mock,
@@ -713,7 +713,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
             )
         )
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_copies_normal_owner_relative_bundled_font(
         self,
         _find_system_font: Mock,
@@ -812,7 +812,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         self.assertEqual(rejected[0].resource, "fnt_yy_link")
         self.assertEqual(rejected[0].manifest_entry, "discovered font .yy")
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_disk_fallback_rejects_contained_cross_family_font_yy_link(
         self,
         _find_system_font: Mock,
@@ -864,7 +864,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         self.assertEqual(rejected[0].resource_type, "font")
         self.assertEqual(rejected[0].manifest_entry, "discovered font .yy")
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_rejects_bundled_font_file_link_outside_project(
         self,
         _find_system_font: Mock,
@@ -916,7 +916,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         self.assertEqual(rejected[0].resource_type, "font")
         self.assertEqual(rejected[0].manifest_entry, "TTFName")
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_revalidates_bundled_font_immediately_before_copy(
         self,
         _find_system_font: Mock,
@@ -981,7 +981,7 @@ class TestFontConverterSourcePathContainment(unittest.TestCase):
         )
         self.assertEqual(rejected[0].manifest_entry, "TTFName")
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_rejects_malformed_ttf_name_forms_with_owner_diagnostics(
         self,
         _find_system_font: Mock,
@@ -1073,7 +1073,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
         shutil.rmtree(self.godot_dir)
         shutil.rmtree(self.fake_font_dir)
 
-    @patch('src.conversion.fonts._get_system_font_dirs')
+    @patch('src.conversion.font_sources.system_font_directories')
     def test_copies_system_font(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.fake_font_dir]
         diagnostics = DiagnosticCollector()
@@ -1093,7 +1093,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
             [],
         )
 
-    @patch('src.conversion.fonts._get_system_font_dirs')
+    @patch('src.conversion.font_sources.system_font_directories')
     def test_no_tres_when_system_font_found(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.fake_font_dir]
         converter = FontConverter(
@@ -1107,7 +1107,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
         self.assertFalse(os.path.isfile(tres_path),
                          "Should not create .tres when system font was found and copied")
 
-    @patch('src.conversion.fonts._get_system_font_dirs')
+    @patch('src.conversion.font_sources.system_font_directories')
     def test_system_font_copy_does_not_propagate_protected_metadata(self, mock_dirs: Mock) -> None:
         mock_dirs.return_value = [self.fake_font_dir]
         converter = FontConverter(
@@ -1129,7 +1129,7 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
         copystat.assert_not_called()
         self.assertEqual(self._partial_font_files(), [])
 
-    @patch('src.conversion.fonts._get_system_font_dirs')
+    @patch('src.conversion.font_sources.system_font_directories')
     def test_failed_system_font_copy_preserves_existing_file_and_cleans_partial(
         self,
         mock_dirs: Mock,
@@ -1175,46 +1175,6 @@ class TestFontConverterSystemFontLookup(unittest.TestCase):
             for filename in os.listdir(output_dir)
             if filename.startswith(".fnt_sysfont.ttf.") and filename.endswith(".part")
         ]
-
-
-class TestFindSystemFont(unittest.TestCase):
-    """Test the _find_system_font helper function."""
-
-    def setUp(self):
-        self.font_dir = tempfile.mkdtemp()
-        self.font_file = os.path.join(self.font_dir, "MyFont.ttf")
-        with open(self.font_file, "wb") as f:
-            f.write(b"\x00" * 32)
-
-    def tearDown(self):
-        shutil.rmtree(self.font_dir)
-
-    @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_exact_match(self, mock_dirs: Mock) -> None:
-        mock_dirs.return_value = [self.font_dir]
-        result = _find_system_font("MyFont")
-        self.assertEqual(result, self.font_file)
-
-    @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_case_insensitive(self, mock_dirs: Mock) -> None:
-        mock_dirs.return_value = [self.font_dir]
-        result = _find_system_font("myfont")
-        self.assertEqual(result, self.font_file)
-
-    @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_finds_with_regular_suffix(self, mock_dirs: Mock) -> None:
-        regular_font = os.path.join(self.font_dir, "TestFont-Regular.ttf")
-        with open(regular_font, "wb") as f:
-            f.write(b"\x00" * 32)
-        mock_dirs.return_value = [self.font_dir]
-        result = _find_system_font("TestFont")
-        self.assertEqual(result, regular_font)
-
-    @patch('src.conversion.fonts._get_system_font_dirs')
-    def test_returns_none_when_not_found(self, mock_dirs: Mock) -> None:
-        mock_dirs.return_value = [self.font_dir]
-        result = _find_system_font("NoSuchFont")
-        self.assertIsNone(result)
 
 
 class TestFontConverterCollisionSafeOutputs(unittest.TestCase):
@@ -1288,7 +1248,7 @@ class TestFontConverterCollisionSafeOutputs(unittest.TestCase):
         self.assertEqual(self._read_output(paths["fnt_a"]), b"bundled one")
         self.assertEqual(self._read_output(paths["fnt_b"]), b"bundled two")
 
-    @patch("src.conversion.fonts._find_system_font")
+    @patch("src.conversion.font_sources.resolve_system_font_source")
     def test_system_font_collisions_emit_distinct_registry_paths(
         self,
         find_system_font: Mock,
@@ -1310,7 +1270,7 @@ class TestFontConverterCollisionSafeOutputs(unittest.TestCase):
         self.assertEqual(self._read_output(paths["font_ui"]), b"system two")
         self.assertEqual(self._read_output(paths["FontUI"]), b"system one")
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_system_font_fallback_collisions_emit_distinct_registry_paths(
         self,
         _find_system_font: Mock,
@@ -1327,7 +1287,7 @@ class TestFontConverterCollisionSafeOutputs(unittest.TestCase):
         self.assertIn(b'MenuFamilyTwo', self._read_output(paths["menu_font"]))
         self.assertIn(b'MenuFamilyOne', self._read_output(paths["MenuFont"]))
 
-    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    @patch("src.conversion.font_sources.resolve_system_font_source", return_value=None)
     def test_yyp_ownership_excludes_orphan_font_collision(
         self,
         _find_system_font: Mock,

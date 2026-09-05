@@ -2163,7 +2163,7 @@ class TestCLIReports(unittest.TestCase):
         )
         for filename in self._STATIC_REPORT_FILENAMES:
             self.assertIn("gm2godot/" + filename, committed)
-        self.assertIn(CONVERSION_MANIFEST_RELATIVE_PATH, committed)
+        self.assertIn("gm2godot/conversion_manifest.json", committed)
         self._assert_manifest_diagnostic_hashes(godot_dir)
 
     def test_real_preflight_refusal_does_not_publish_conversion_artifacts(self) -> None:

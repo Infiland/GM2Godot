@@ -2128,7 +2128,7 @@
         "full": "3064 tests /3008 pass /56 classified host skips; exact Godot/all five pinned fixtures",
         "parity": "Nine real CLI cases, same-ref control, later78-assertion replays; public bytes exact; reviewed finite private projection and12 controls"
       },
-      "remaining_verification": "Actual-parent combined integration; existing native CLI POSIX/Windows methods, real Converter cancellation/crash and forced Linux bind-mount; exact final PR and merge CI. No task completion yet.",
+      "remaining_verification": "Exact corrected PR/native CLI POSIX/Windows methods, real Converter cancellation/crash and forced Linux bind-mount; merge and exact merge CI. No task completion yet.",
       "combined_integration": {
         "actual_parent": "7fdd97cfb0149bb166175fd5479b5193f3d64423",
         "prepared_merge": "816c4b46caeec3b2350c19fe13cc6184db367c03",
@@ -2155,6 +2155,21 @@
         "inputs_sha256": "cb0f8d22dffe8f4dc916594d8964dd9e7f56ac31cca3f4fa8e2c19a2f41325a3",
         "checks_sha256": "1ec0b713fa7015c92cc2e290d799cdc8e98b264fc47c42475e653228ea330a22",
         "state": "Combined local checks approved; exact native PR/merge CI pending"
+      },
+      "windows_assertion_correction": {
+        "failed_pr_head": "16c438e06813b31b5bc0ac9028fcca4dd30c46e7",
+        "failed_run": 33954287755,
+        "failed_job": 101274650873,
+        "failure": "One Windows expected path separator mismatch; actual POSIX snapshot manifest present,22734 bytes.",
+        "change": "Only expected assertIn argument becomes canonical POSIX snapshot key; all78 IDs and all other assertions unchanged.",
+        "source_sha256": "c3124fb04bb2ee21b6b0ad14b9a82e367ff71adb730953ef7d9ebb7769ad0041",
+        "source_index_sha256": "24a67df2b50adea24d306df41d06754eac7e7acc7e5b3b70173df3179abb57ec",
+        "independent_review_sha256": "d5573a41674e47636de5dce757c50c7f872db2232102b58cad4f295d9f5b2151",
+        "root_review_sha256": "6a76096fc2b3117ce67c4b9b9e32ab1c2c77ee3e59d757f260915dfc192eae7b",
+        "baseline_sha256": "a531b85ca91b9201a21d690192e0bb61323d9dd588aa1f4bb278914d3f423022",
+        "baseline": "1047 unchanged allowances; measured AST digest only; strict actual7fdd PASS",
+        "local": "Pyright0/0; Ruff; CLI78/1 Windows host skip;6 additional0skips;26 applicable required actual successes;385 frozen Python files",
+        "state": "APPROVE locally; corrected native PR and merge CI pending"
       }
     },
     {

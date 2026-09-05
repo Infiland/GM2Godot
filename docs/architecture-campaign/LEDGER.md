@@ -18,10 +18,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. R11 is verified at `1196295`, including exact final PR/merge
-  CI, native receipts and actual-parent proof. G01 source, correction, local proof
-  and combined-source checks are approved; its exact native PR/merge CI remains
-  required. L01 local proof is approved and T01 corrected proof is running.
+- No external blocker. G01 is verified at `7fdd97c`. L01 PR #887's first Windows
+  run found one expected snapshot-key separator mismatch. The one-line test
+  correction is independently/root approved; corrected native PR and merge CI
+  remain required. All production source and 1,047 debt allowances are unchanged.
 
 
 ## Ownership and progress
@@ -40,7 +40,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
-| L01 CLI artifact ownership | approved | audit_transactions_cli; source `87d96d5`, prepared G01 merge `816c4b4` | Independent/root source and local-proof APPROVE; combined local checks pass | Actual-parent1047 gate; 113 tests/1 Windows skip and G01 required49/0; exact native PR/merge CI pending |
+| L01 CLI artifact ownership | approved | audit_transactions_cli; PR #887, source `87d96d5`, prepared G01 merge `816c4b4` | Independent/root source, local proof and one-line Windows assertion correction APPROVE | Original run33954287755 retained; corrected CLI78/1 host skip plus6/0; strict actual-parent1047 with unchanged allowances; exact corrected native PR/merge CI pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

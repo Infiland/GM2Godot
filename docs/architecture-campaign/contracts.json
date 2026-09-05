@@ -123,7 +123,7 @@
       "task_id": "N01",
       "issue": 860,
       "title": "Complete native anchored receipt prerequisite",
-      "state": "reviewing",
+      "state": "verified",
       "problem_and_evidence": "859 merged; 860 and parent844 still open; modeled Windows cannot prove NTFS.",
       "expected_benefit": "Exact native Windows/Linux/macOS proof completes #860/#844 prerequisite without changing receipt semantics.",
       "current_owner": "scripts/_anchored_receipt_* and tests/test_anchored_receipt_contract.py",
@@ -163,13 +163,14 @@
       "independent_reviewers": "audit_policy_tests_docs read-only native and gate review, then root",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "ACCEPTED by root after six bounded independent-review refinements; N01-native-receipts-contract.md is authoritative."
+      "plan_verdict": "ACCEPTED by root after six bounded independent-review refinements; N01-native-receipts-contract.md is authoritative.",
+      "verification_evidence": "PR #879 final 6066856 CI 33934278689 and merge 47642d8 CI 33935348197: all 24 required checks pass; sole permitted dependency-submission skip. Six artifacts at each revision prove the exact 10/13/16 Linux/macOS/Windows methods twice with zero skips. Release environment evidence remains C02/V02; #860/#844 remain open until final integration and proof."
     },
     {
       "task_id": "R03",
       "issue": 795,
       "title": "Complete E4/E7 lint cohort",
-      "state": "implementing",
+      "state": "approved",
       "problem_and_evidence": "199 exact E4/E7 findings across 62 unchanged owners at 6066856; R03-e4-e7-contract.md records the accepted finite scope.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current E4/E7 baseline entries",
@@ -269,7 +270,8 @@
       "independent_reviewers": "audit_gml_resources read-only, then root actual-code review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "No temporary adapter or postponed E4/E7 cleanup authorized.",
-      "plan_verdict": "ACCEPTED by root after independent APPROVE; R03-e4-e7-contract.md is authoritative. Fixed 6066856 permits isolated implementation while final N01 CI runs; integration waits for verified dependencies."
+      "plan_verdict": "ACCEPTED by root after independent APPROVE; R03-e4-e7-contract.md is authoritative. Fixed 6066856 permits isolated implementation while final N01 CI runs; integration waits for verified dependencies.",
+      "review_evidence": "Immutable 356e2ae: independent and root actual-code APPROVE; all 72 frozen hashes unchanged through 3,062 full tests with 56 classified platform/filesystem skips. Pyright 0/0, Ruff/actionlint, 287 focused tests, native macOS 6/6 with zero skips, debt 1,269. Ancestry 456877c has the same owner tree; exact native PR/merge CI is still required."
     },
     {
       "task_id": "R04",

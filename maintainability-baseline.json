@@ -1,6 +1,6 @@
 {
   "debt": {
-    "application|complexity|src/cli.py::_run_convert": 56,
+    "application|complexity|src/cli.py::_run_convert": 43,
     "application|complexity|src/conversion/anchored_artifacts.py::ByteArtifactTransaction._rollback_published_mutations": 16,
     "application|complexity|src/conversion/anchored_artifacts.py::ByteArtifactTransaction._rollback_restore_mutations": 20,
     "application|complexity|src/conversion/anchored_artifacts.py::ByteArtifactTransaction.cleanup": 18,
@@ -62,7 +62,7 @@
     "application|complexity|src/conversion/tilesets.py::TileSetConverter._find_sprite_image": 20,
     "application|complexity|src/conversion/tilesets.py::TileSetConverter.convert_tilesets": 16,
     "application|complexity|src/update_checker.py::UpdateChecker.download_update": 23,
-    "application|function_lines|src/cli.py::_run_convert": 358,
+    "application|function_lines|src/cli.py::_run_convert": 316,
     "application|function_lines|src/conversion/anchored_artifacts.py::ByteArtifactTransaction.publish_specs": 166,
     "application|function_lines|src/conversion/anchored_artifacts.py::ByteArtifactTransaction.restore_snapshots": 180,
     "application|function_lines|src/conversion/atomic_generated_text.py::_publish_bound_windows_readonly_asset_transaction": 180,
@@ -116,7 +116,7 @@
     "application|function_lines|src/conversion/tilesets.py::TileSetConverter._find_sprite_image": 164,
     "application|function_lines|src/conversion/tilesets.py::TileSetConverter.convert_tilesets": 166,
     "application|function_lines|src/gui/theme.py::generate_stylesheet": 186,
-    "application|function_structure|src/cli.py::_run_convert": 490,
+    "application|function_structure|src/cli.py::_run_convert": 432,
     "application|function_structure|src/conversion/anchored_artifacts.py::ByteArtifactTransaction._rollback_restore_mutations": 163,
     "application|function_structure|src/conversion/anchored_artifacts.py::ByteArtifactTransaction._verify_artifact_expectation": 181,
     "application|function_structure|src/conversion/anchored_artifacts.py::ByteArtifactTransaction.publish_specs": 329,
@@ -304,7 +304,7 @@
     "application|lint.B904|src/conversion/managed_output_publisher.py::_restore_previous_pointer|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
     "application|lint.B904|src/conversion/managed_output_publisher.py::_rollback_directories|Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling": 1,
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8139,
-    "application|module_lines.executable|src/cli.py::<module>": 1186,
+    "application|module_lines.executable|src/cli.py::<module>": 932,
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": 3485,
     "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4122,
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": 1602,
@@ -336,7 +336,7 @@
     "application|module_lines.executable|src/conversion/tilesets.py::<module>": 1068,
     "application|module_lines.mixed|src/conversion/gml_transpiler_parts/constants.py::<module>": 1935,
     "application|module_structure.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8335,
-    "application|module_structure.executable|src/cli.py::<module>": 1710,
+    "application|module_structure.executable|src/cli.py::<module>": 1343,
     "application|module_structure.executable|src/conversion/anchored_artifacts.py::<module>": 5906,
     "application|module_structure.executable|src/conversion/architecture_policy.py::<module>": 931,
     "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6854,
@@ -626,7 +626,6 @@
     "tests|lint.B009|tests/test_cli.py::TestCLIReports.test_real_post_decision_sigint_needs_no_artifact_refresh|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_cli.py::TestCLIReports.test_real_post_decision_sigint_never_rewrites_canonical_reports|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_cli.py::TestCLIReports.test_real_sigint_after_generation_decision_does_not_report_cancelled|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "tests|lint.B009|tests/test_cli.py::TestCLIReports.test_sigint_after_handler_restore_cannot_override_committed_exit|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_conversion_manifest.py::TestConversionManifest.test_included_file_manifest_publication_reads_payload_six_times|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_dependency_policy.py::TestDependencyEnvironmentVerifier._invoke_pip_scenario|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tests|lint.B009|tests/test_dependency_policy.py::TestDependencyEnvironmentVerifier.test_expected_pip_is_derived_and_literal_override_is_removed|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
@@ -783,7 +782,7 @@
     "tests|module_lines.executable|tests/test_architecture_policy.py::<module>": 1650,
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": 5544,
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": 6699,
-    "tests|module_lines.executable|tests/test_cli.py::<module>": 3592,
+    "tests|module_lines.executable|tests/test_cli.py::<module>": 3559,
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": 2738,
     "tests|module_lines.executable|tests/test_converter.py::<module>": 1565,
     "tests|module_lines.executable|tests/test_dependency_policy.py::<module>": 2533,
@@ -806,7 +805,7 @@
     "tests|module_structure.executable|tests/test_architecture_policy.py::<module>": 2893,
     "tests|module_structure.executable|tests/test_asset_registry.py::<module>": 9989,
     "tests|module_structure.executable|tests/test_ci_workflows.py::<module>": 12303,
-    "tests|module_structure.executable|tests/test_cli.py::<module>": 7057,
+    "tests|module_structure.executable|tests/test_cli.py::<module>": 6992,
     "tests|module_structure.executable|tests/test_conversion_manifest.py::<module>": 4412,
     "tests|module_structure.executable|tests/test_converter.py::<module>": 2978,
     "tests|module_structure.executable|tests/test_dependency_policy.py::<module>": 5674,
@@ -1079,9 +1078,9 @@
   "schema_version": 2,
   "size_evidence": {
     "application|function_lines|src/cli.py::_run_convert": {
-      "ast_sha256": "8d8a003180afacebf8901bcce7a842c23915ddc26f37082aa5c30b50a251272b",
-      "lines": 336,
-      "structure": 490
+      "ast_sha256": "2e67d294481af1dcab8f1eb8aed3894d5efb636744c39e4c6ad09b9ef324d4d7",
+      "lines": 289,
+      "structure": 432
     },
     "application|function_lines|src/conversion/anchored_artifacts.py::ByteArtifactTransaction.publish_specs": {
       "ast_sha256": "42966e75ff8f6384c5e065ad8d7b71c0c4b3f91fc4700cfd99350b8f2ecab865",
@@ -1354,9 +1353,9 @@
       "structure": 8335
     },
     "application|module_lines.executable|src/cli.py::<module>": {
-      "ast_sha256": "fa834c781f2c6b3ed0e59ea77ed5d4a5b05e45418cf1306155ad6fb199502485",
-      "lines": 1134,
-      "structure": 1710
+      "ast_sha256": "72f57a0738d68f0f6972cb17dff3cf6a2f7fe7e9d1bcfd7b73496dcf68c7a799",
+      "lines": 870,
+      "structure": 1343
     },
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": {
       "ast_sha256": "f5d31522c580647d2c743d5eb555b644026c0221cafa89cc705fde293db12704",
@@ -1649,9 +1648,9 @@
       "structure": 12303
     },
     "tests|module_lines.executable|tests/test_cli.py::<module>": {
-      "ast_sha256": "4b558e651231d42d41d53b4056ac4f34f43d3e75a433f23fe349a93ccf024779",
-      "lines": 3403,
-      "structure": 7057
+      "ast_sha256": "f9d0e5ab59d56128ae552ae2af1a28acae794826697484a4a3c7f1be339fa621",
+      "lines": 3368,
+      "structure": 6992
     },
     "tests|module_lines.executable|tests/test_conversion_manifest.py::<module>": {
       "ast_sha256": "888f29e0303cde82f6aa827277f39e4a975e5bd20cba36ef73da50d757bf27c9",

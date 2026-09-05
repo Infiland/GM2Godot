@@ -427,6 +427,8 @@ jobs:
           tests.test_converter_transaction
           tests.test_stale_managed_output_invalidation
           tests.test_cli
+          tests.test_cli_configuration
+          tests.test_cli_session
           tests.test_gui_conversion_outcomes
           tests.test_godot_test_support
 
@@ -523,6 +525,8 @@ jobs:
           tests.test_converter_transaction
           tests.test_stale_managed_output_invalidation
           tests.test_cli
+          tests.test_cli_configuration
+          tests.test_cli_session
           tests.test_asset_registry
           tests.test_atomic_generated_text
           tests.test_managed_output_workspace

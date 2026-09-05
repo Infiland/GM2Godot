@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -10,21 +8,7 @@ from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
+from tests.godot_test_support import require_exact_godot
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -36,9 +20,7 @@ class TestArrayForeachGodotSmoke(unittest.TestCase):
     def test_array_foreach_matches_lts_range_binding_and_mutation_semantics(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         binding_probe = transpile_gml_code(
             textwrap.dedent(

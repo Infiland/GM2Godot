@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +11,7 @@ from typing import TypedDict, cast
 
 from src.conversion.asset_output_paths import build_asset_output_paths
 from src.conversion.shaders import ShaderConverter
+from tests.godot_test_support import require_exact_godot
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHADER_CORPUS_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "shader_corpus"
@@ -42,24 +42,11 @@ def _load_shader_corpus() -> _ShaderCorpusManifest:
     )
 
 
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
-
-
 class TestConvertedShaderGodotSmoke(unittest.TestCase):
     def test_supported_corpus_compiles_and_loads_in_exact_godot_4_7_2(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
         corpus = _load_shader_corpus()
         self.assertEqual(corpus["format_version"], 1)
         self.assertGreaterEqual(len(corpus["cases"]), 3)
@@ -248,9 +235,7 @@ class TestConvertedShaderGodotSmoke(unittest.TestCase):
         self.assertNotIn("SCRIPT ERROR:", result.stdout)
 
     def test_dual_stage_shader_loads_in_exact_godot_4_7_2(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

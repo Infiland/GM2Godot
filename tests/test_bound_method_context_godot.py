@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -11,19 +10,9 @@ from pathlib import Path
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.scripts import SCRIPT_REGISTRY_RELATIVE_PATH, ScriptConverter
+from tests.godot_test_support import require_exact_godot
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "bound_method_context"
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
 
 
 def _write_text(path: Path, content: str) -> None:
@@ -59,9 +48,7 @@ class TestBoundMethodContextGodot(unittest.TestCase):
     def test_fixture_preserves_dynamic_other_script_rebinding_and_constructors(
         self,
     ) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as gm_tmp, tempfile.TemporaryDirectory() as godot_tmp:
             gm_dir = Path(gm_tmp)
@@ -198,9 +185,7 @@ class TestBoundMethodContextGodot(unittest.TestCase):
         self.assertNotIn("WARNING:", result.stdout)
 
     def test_unmarked_custom_callable_fails_closed(self) -> None:
-        godot_binary = _find_godot_binary()
-        if godot_binary is None:
-            self.skipTest("Godot binary not available")
+        godot_binary = require_exact_godot()
 
         with tempfile.TemporaryDirectory() as godot_tmp:
             godot_dir = Path(godot_tmp)

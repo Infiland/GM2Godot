@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Iterable, Protocol, cast
+from typing import Iterable, Protocol
 
+from src.conversion.gamemaker_json import GameMakerJsonDocument, read_gamemaker_json
+from src.conversion.json_values import JsonObject
+from src.conversion.path_model import PathModel, PathPoint as PathPoint, parse_path_model
 from src.conversion.project_source_paths import ProjectSourcePathError, resolve_project_source_path
-from src.conversion.type_defs import JsonDict
 
 PATH_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_path_registry.gd")
 PATH_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_path_registry.gd"
@@ -30,16 +32,6 @@ class _PathAssetEntry(Protocol):
 
 
 @dataclass(frozen=True)
-class PathPoint:
-    x: float
-    y: float
-    speed: float = 100.0
-
-    def to_godot_dict(self) -> JsonDict:
-        return {"x": self.x, "y": self.y, "speed": self.speed}
-
-
-@dataclass(frozen=True)
 class PathRegistryEntry:
     id: int
     name: str
@@ -49,7 +41,7 @@ class PathRegistryEntry:
     godot_path: str
     points: tuple[PathPoint, ...]
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "id": self.id,
             "name": self.name,
@@ -76,10 +68,17 @@ def build_path_registry_entries(
             )
         except ProjectSourcePathError:
             continue
-        data = _read_json_lenient(resolved_yy.filesystem_path)
-        if data is None:
+        document = _read_path_document(resolved_yy.filesystem_path)
+        if document is None or document.value is None:
             continue
-        path_entries.append(_path_entry_from_yy(asset_entry, data))
+        if not isinstance(document.value, dict):
+            raise ValueError(f"GameMaker path resource must be an object: {resolved_yy.source_path}")
+        model = parse_path_model(
+            document.value,
+            name=asset_entry.name,
+            source_path=resolved_yy.source_path,
+        )
+        path_entries.append(_path_entry_from_model(asset_entry, model))
     return tuple(path_entries)
 
 
@@ -110,29 +109,15 @@ def write_path_registry(
     return registry_path
 
 
-def _path_entry_from_yy(asset_entry: _PathAssetEntry, data: JsonDict) -> PathRegistryEntry:
-    raw_points = data.get("points")
-    points: list[PathPoint] = []
-    if isinstance(raw_points, list):
-        for raw_point in cast(list[object], raw_points):
-            if not isinstance(raw_point, dict):
-                continue
-            point = cast(JsonDict, raw_point)
-            points.append(
-                PathPoint(
-                    x=_number(point.get("x"), 0.0),
-                    y=_number(point.get("y"), 0.0),
-                    speed=_number(point.get("speed"), 100.0),
-                )
-            )
+def _path_entry_from_model(asset_entry: _PathAssetEntry, model: PathModel) -> PathRegistryEntry:
     return PathRegistryEntry(
         id=asset_entry.id,
-        name=asset_entry.name,
-        closed=bool(data.get("closed", False)),
-        kind=int(_number(data.get("kind"), 0.0)),
-        precision=int(_number(data.get("precision"), 4.0)),
+        name=model.name,
+        closed=model.closed,
+        kind=model.kind,
+        precision=model.precision,
         godot_path=asset_entry.godot_path,
-        points=tuple(points),
+        points=model.points,
     )
 
 
@@ -174,30 +159,11 @@ def _write_path_scene(godot_project_path: str, entry: PathRegistryEntry) -> None
         f.write(render_path_scene(entry))
 
 
-def _read_json_lenient(path: str) -> JsonDict | None:
+def _read_path_document(path: str) -> GameMakerJsonDocument | None:
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-    except OSError:
+        return read_gamemaker_json(path)
+    except (OSError, json.JSONDecodeError):
         return None
-    try:
-        return cast(JsonDict, json.loads(_strip_trailing_commas(content)))
-    except json.JSONDecodeError:
-        return None
-
-
-def _strip_trailing_commas(content: str) -> str:
-    import re
-
-    return re.sub(r",\s*([}\]])", r"\1", content)
-
-
-def _number(value: object, default: float) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, int | float):
-        return float(value)
-    return default
 
 
 def _format_number(value: float) -> str:

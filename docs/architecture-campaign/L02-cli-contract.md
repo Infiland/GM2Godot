@@ -191,3 +191,43 @@ Evidence is retained under `.gm2godot-v080-evidence/L02`: final proposal index
 entry index `81e60edc5271420ac27d3ca69685e7aa6b32d9eef0be5692396069f80e3d677d`,
 independent entry review `725ca62e40b65dab7a12180ab2027005efef26fd50d9ed3822a93b20c9aa522d`,
 and root entry review `36415d1cd3545f773f11824ddd892b105d3babfe64cab7cd4af0a2e770d81009`.
+
+## Current-parent integration and accepted local proof
+
+Root combines the immutable reviewed d3 source with verified I02 merge
+`4787f4bd3a86f1ba881337fb10562ca0644d92ea`. All seven Python owners are byte-exact
+d3; all392 unrelated parent Python files remain exact478, for399 Python files.
+The workflow is exact478 plus the two L02 modules in each existing macOS and
+Windows command. All four I02 heredocs, T01/R12 and inherited gates remain.
+Root preserves the actual478 baseline and applies only the reviewed1045-to1044
+reductions; no policy, coverage floor, allowance or normalization is added.
+
+Source and complete local proof are independently/root approved. The immutable
+full suite ran3139 tests in774.589 seconds:3083 successes and56 exact prior host
+skips, including actual success for all five pinned projects. Six actual module/
+main commands per ref matched streams and exits, with public-main Qt/origin proof.
+Nine CLI cases matched at e142, same-ref and d3, with328 public file instances per
+capture,501 replay bytes and all three78-ID replays. The first parity attempt
+failed its ordered-ID guard before replay; only the reviewed two-line alphabetical
+comparison correction passed. All twelve private controls passed with the original
+three-schema projection. No failed attempt is relabeled as successful evidence.
+
+The finite12-worker timing result has19,200 raw samples. The median sum of eight case
+means increased53.50855 microseconds/+1.3483%; the largest per-call increase was
+25.970 microseconds. Four conversion profiles showed positive ranges. Root accepts
+this absolute one-invocation overhead; this is not real conversion throughput or
+a speedup claim. Median whole-process RSS decreased1MiB and includes imports,
+mocks and verification. The accepted actual configuration tests measure200/660;
+the earlier198/642 entry projection above remains historical.
+
+Original local results stay attributed to d3/e142. The new composition requires
+Pyright0/0, both Ruff paths, actionlint,83 CI methods,93 CLI methods with the sole
+exact existing local host skip, and strict1044 against actual478. A new immutable
+native verifier package must bind all399 Python sources and exact final PR/merge
+heads. Each host must execute all15 new methods with zero skips; all inherited
+I02/I01/R12/T01/CLI/native artifact/mode/coverage proof remains mandatory.
+
+Final local approval: `L02/L02-root-final-local-proof-review.json`, SHA
+`fdd769a156e41c5e20580915a0c7998dfe49e8ce419c8c70766e7736adfa6e7d`.
+The combined proposal is `L02/current-parent-4787f4b/review-files.json`, SHA
+`1d1f902101afcad8b161d2d0b115aa875149eec420c156a8e96cbf672829542e`.

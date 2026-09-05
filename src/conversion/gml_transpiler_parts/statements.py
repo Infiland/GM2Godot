@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Callable, Iterable, Mapping, MutableMapping, MutableSet, TypeGuard
 
 from .constants import (
@@ -50,7 +51,7 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
-from .statement_models import ControlFlowCapture
+from .statement_models import ControlFlowCapture, StatementLoweringContext
 from .utils import (
     cache_assignment_part,
     indent_lines,
@@ -99,31 +100,29 @@ def _alarm_array_set(scope_context: _ScopeContext, index: str, value: str) -> st
 
 def transpile_statement(
     statement: str,
-    local_names: MutableSet[str] | None = None,
-    declared_local_names: MutableSet[str] | None = None,
-    instance_variables: MutableSet[str] | None = None,
-    loop_depth: int = 0,
-    continue_depth: int = 0,
-    return_depth: int = 0,
-    finally_depth: int = 0,
-    enum_values: MutableMapping[str, dict[str, int]] | None = None,
-    enum_names: Iterable[str] | None = None,
-    scope_context: _ScopeContext | None = None,
-    inherited_event_call: str | None = None,
-    macro_values: Mapping[str, str] | None = None,
-    generated_counter: list[int] | None = None,
-    control_flow_capture: ControlFlowCapture | None = None,
+    context: StatementLoweringContext | None = None,
 ) -> list[str]:
     if not statement:
         return []
 
+    context = context or StatementLoweringContext()
+    local_names = context.local_names
     if local_names is None:
-        local_names = set()
+        local_names = set[str]()
+    declared_local_names = context.declared_local_names
     if declared_local_names is None:
-        declared_local_names = set()
-    scope_context = normalize_scope_context(scope_context)
-    macro_values = macro_values or {}
-    generated_counter = generated_counter if generated_counter is not None else [0]
+        declared_local_names = set[str]()
+    scope_context = normalize_scope_context(context.scope_context)
+    macro_values = context.macro_values or {}
+    generated_counter = context.generated_counter if context.generated_counter is not None else [0]
+    instance_variables = context.instance_variables
+    loop_depth = context.loop_depth
+    continue_depth = context.continue_depth
+    return_depth = context.return_depth
+    finally_depth = context.finally_depth
+    enum_values = context.enum_values
+    enum_names = context.enum_names
+    control_flow_capture = context.control_flow_capture
 
     if statement == "return":
         _reject_finally_control_flow(finally_depth)
@@ -187,7 +186,7 @@ def transpile_statement(
         if control_flow_capture is not None and control_flow_capture.capture_exit:
             return _captured_control_flow_lines(control_flow_capture, "exit")
         return ["return"]
-    event_inherited_lines = _transpile_event_inherited_statement(statement, inherited_event_call)
+    event_inherited_lines = _transpile_event_inherited_statement(statement, context.inherited_event_call)
     if event_inherited_lines is not None:
         return event_inherited_lines
     if statement == "throw":
@@ -395,7 +394,7 @@ def transpile_statement(
         )
         if selector_target is not None:
             container, key = selector_target
-            prelude_lines: list[str] = []
+            prelude_lines = []
             if isinstance(target_expr, _Member):
                 container = cache_assignment_part(
                     prelude_lines,
@@ -424,7 +423,7 @@ def transpile_statement(
                 local_names,
                 scope_context=scope_context,
             ).text
-            prelude_lines: list[str] = []
+            prelude_lines = []
             container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
@@ -456,7 +455,7 @@ def transpile_statement(
                 local_names,
                 scope_context=scope_context,
             ).text
-            prelude_lines: list[str] = []
+            prelude_lines = []
             container = cache_assignment_part(
                 prelude_lines,
                 target_expr.target,
@@ -484,7 +483,7 @@ def transpile_statement(
         )
         if struct_target is not None:
             container, key = struct_target
-            prelude_lines: list[str] = []
+            prelude_lines = []
             if isinstance(target_expr, _StructAccess):
                 container = cache_assignment_part(
                     prelude_lines,
@@ -656,7 +655,7 @@ def transpile_statement(
                 local_names,
                 scope_context=scope_context,
             ).text
-            prelude_lines: list[str] = []
+            prelude_lines = []
             assigned_value = increment_value_text
             if increment_mode == "postfix":
                 assigned_value = next_generated_name_from_counter(
@@ -668,19 +667,15 @@ def transpile_statement(
             suffix = "++" if increment_delta > 0 else "--"
             increment_lines = transpile_statement(
                 f"{increment_target}{suffix}",
-                local_names,
-                declared_local_names,
-                instance_variables,
-                loop_depth=loop_depth,
-                continue_depth=continue_depth,
-                return_depth=return_depth,
-                finally_depth=finally_depth,
-                enum_values=enum_values,
-                enum_names=enum_names,
-                scope_context=scope_context,
-                inherited_event_call=inherited_event_call,
-                macro_values=macro_values,
-                generated_counter=generated_counter,
+                replace(
+                    context,
+                    local_names=local_names,
+                    declared_local_names=declared_local_names,
+                    scope_context=scope_context,
+                    macro_values=macro_values,
+                    generated_counter=generated_counter,
+                    control_flow_capture=None,
+                ),
             )
             assignment_lines = _transpile_assignment_to_emitted_value(
                 target,

@@ -288,3 +288,20 @@ independent review:
 `200e426410a02c30e297360e0b1a30100cc74b769151068d7007311f5b7eb36b`;
 root review:
 `665409b2da6e36ee1031262adecdb950384c427aa546c52a57c8aea537a7db1f`.
+
+
+## Combined local proof accepted
+
+Prepared merge `4d47f217d8e40d4d99810b682ca8c896ffb7f04f` preserves the
+reviewed395-source projection and both parent identities. The actual-b9 baseline
+update and strict check passed1045 entries, with only the seven approved reductions
+and no baseline byte change. Pyright reports0 errors/0 warnings; both Ruff paths
+and actionlint pass. All83 existing CI workflow/aggregate cases passed in34.764s
+with zero skips. Independent and root source/proof review approve this combination.
+Original full/parity/observer/control receipts retain their original source refs.
+Exact native PR and merge CI remain required before I02 verification.
+
+Combined result SHA:
+`3114a88a1af4d8d71817ed7019cd4547efdb48aaa69efd9b0b236188f925b574`;
+independent review:
+`e55803abcd23f8a2d7db292c65af40dae91d3f874dfe19f43e3f43f13aabd742`.

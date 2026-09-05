@@ -18,8 +18,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. R12 is verified. I02 source and original local proof are
-  approved; its combination with b9 is under review. L02 is implementing in its
+- No external blocker. R12 is verified. I02 source, original local proof and
+  combination with b9 are approved; exact PR/merge CI is next. L02 is implementing in its
   separate e142-based worktree. R13 is resolving a before-test input expectation.
 
 
@@ -42,7 +42,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
-| I02 Included Files POSIX operations | reviewing | audit_transactions_cli; immutable source95831c0, prepared b9 ancestry | Original source/full/parity/observer/44controls and integration proposal independent/root APPROVE | Full3120/56knownhostskips,10case8fieldparity+same-ref,5844rows209253calls; combined static/workflow and exact native PR/merge pending |
+| I02 Included Files POSIX operations | approved | audit_transactions_cli; source95831c0, combined4d47f21 | Original source/full/parity/observer/44controls and combined source/proof independent/root APPROVE | Combined395Python exact,Pyright0/0,Ruff/actionlint,83CItests0skips,strict1045actualb9; original proofs preserved; exact native PR/merge pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

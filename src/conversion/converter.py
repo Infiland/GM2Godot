@@ -106,7 +106,6 @@ class _FinalizerReportCheckpoint:
 
 
 class Converter:
-    managed_output_transactional = True
 
     def __init__(self, log_callback: LogCallback, progress_callback: ProgressCallback,
                  status_callback: LogCallback, conversion_running: RunningFlag,

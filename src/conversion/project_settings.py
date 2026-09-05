@@ -9,10 +9,12 @@ from PIL import Image
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import parse_gamemaker_json
 from src.conversion.project_godot import GodotProjectFile, atomic_rewrite_text, format_godot_string
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     load_gamemaker_project_manifest,
+    parse_project_options_document,
     unsupported_project_option_diagnostics,
 )
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
@@ -436,13 +438,13 @@ class ProjectSettingsConverter(BaseConverter):
             except OSError as error:
                 return ProjectOperationResult("failed", str(error))
             try:
-                raw_data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
+                document = parse_gamemaker_json(source, source_path=candidate_path)
             except (json.JSONDecodeError, TypeError, ValueError):
                 return ProjectOperationResult(
                     "skipped",
                     f"GameMaker options metadata is malformed: {candidate_path}",
                 )
-            if not isinstance(raw_data, dict):
+            if parse_project_options_document(document, platform=self._platform_from_options_path(candidate_path)) is None:
                 return ProjectOperationResult(
                     "skipped",
                     f"GameMaker options metadata is malformed: {candidate_path}",
@@ -455,19 +457,18 @@ class ProjectSettingsConverter(BaseConverter):
         if manifest_result.state != "completed":
             return manifest_result
 
-        missing = object()
-        raw_groups = self.project_manifest.raw_data.get("AudioGroups", missing)
-        if raw_groups is missing:
+        state = self.project_manifest.audio_groups_state
+        if state == "missing":
             return ProjectOperationResult(
                 "skipped",
                 "GameMaker AudioGroups metadata is unavailable.",
             )
-        if not isinstance(raw_groups, (list, dict)):
+        if state == "malformed":
             return ProjectOperationResult(
                 "skipped",
                 "GameMaker AudioGroups metadata is malformed.",
             )
-        if raw_groups and not self.project_manifest.audio_group_names():
+        if state == "unnamed":
             return ProjectOperationResult(
                 "skipped",
                 "GameMaker AudioGroups metadata does not contain valid group names.",

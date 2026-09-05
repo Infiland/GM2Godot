@@ -47,6 +47,7 @@ MODEL_NAMES = (
     "ControlFlowCapture",
     "GMLStatementRequest",
     "GMLStatementResult",
+    "StatementLoweringContext",
 )
 EXPECTED_SIGNATURES = {
     "collect_static_declarations": (

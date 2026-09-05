@@ -2002,7 +2002,7 @@
       "task_id": "T01",
       "issue": 867,
       "title": "Test support exact Godot discovery",
-      "state": "reviewing",
+      "state": "approved",
       "problem_and_evidence": "Repeated engine/path/temp-process setup obscures behavior and skips.",
       "expected_benefit": "Zero duplicate Godot discovery in accepted inventory; helpers <=300 lines; meaningful assertions remain in tests.",
       "current_owner": "Godot/fixture tests and sys.path-modifying tests",
@@ -2112,10 +2112,38 @@
         },
         "index_sha256": "0330beafc6bb268b7e64c06dc1dbb47cbb74986cfe8750d201a0acd87f69b433",
         "independent_receipt_sha256": "77c68e5f2b7102ad30576c8c5b50ec4f514076f07be8639eaefa6e7145134343",
-        "verdict": "APPROVE external correction; corrected runtime/full/benchmark unexecuted"
+        "verdict": "APPROVE external correction and corrected local proof; original failure preserved"
       },
-      "local_proof": "Pyright0/0; bothRuff; light34/0 and independent27/0; actionlint/strict1054; original112/0 owner run. Corrected78 gate/full/15-vs66 timing and exact native PR/merge proof pending.",
-      "remaining_verification": "Freeze root correction metadata; corrected required78/0 and prerequisite controls; finite15/66 overhead; full all-five/exact-Godot; native12/0 on macOS/Windows; actual-parent integration and exact PR/merge CI."
+      "local_proof": {
+        "verdict": "APPROVE independent and root",
+        "candidate": "d99d28a4009e2d4eae7ecc8e526bb6f193cfb43a",
+        "required_tests": 78,
+        "required_skips": 0,
+        "reused_owner_tests": 112,
+        "owner_skips": 0,
+        "full_tests": 3076,
+        "full_seconds": 768.704,
+        "full_skips": 56,
+        "skip_classes": {
+          "Windows/NTFS": 53,
+          "Linux bind mount": 2,
+          "case-insensitive host": 1
+        },
+        "prerequisite_and_induced_skip_controls": "PASS: missing engine exit1 pre-receipt; induced78 exit1 solely one skip/zero errors and failures",
+        "probe_counts": [
+          15,
+          66
+        ],
+        "probe_medians_ms": [
+          376.150207,
+          1671.230631
+        ],
+        "performance_scope": "Finite test verification overhead only; worker RSS excludes child Godot",
+        "final_index_sha256": "44375af32d0745746b7b5d7f5131b12394549a5eb1a97c719f448567f6ccfe6d",
+        "independent_receipt_sha256": "44c17c5d29ad6110b22ca70c2e3a85bb40d4f1912c3dca2f99dd7cbe4cb3fdb3",
+        "root_review_sha256": "dd4e3efe01510bc29ef9b1f5350f0cb39fdbd4a9e638ba1d4d1fe191557c6dbd"
+      },
+      "remaining_verification": "Actual-parent integration and combined checks; native12/0 on macOS/Windows and exact PR/merge CI; no task completion yet."
     },
     {
       "task_id": "T02",

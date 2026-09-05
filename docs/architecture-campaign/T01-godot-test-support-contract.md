@@ -220,3 +220,47 @@ Root must freeze this metadata and reserve the benchmark window before execution
 Native Windows/macOS still require the same twelve helper cases with zero skips;
 Linux/Godot discovery already selects the three camera wrappers. No new workflow or
 Windows Godot-runtime guarantee is introduced. Corrected proof is pending, not passed.
+
+
+## Final corrected local proof accepted
+
+Independent review and root actual-code/proof review approve immutable candidate
+`d99d28a4009e2d4eae7ecc8e526bb6f193cfb43a`. The corrected required cohort passed
+78 tests with zero skips, errors or failures. Missing required GODOT_BIN exited 1
+before a test receipt; the induced real-helper control ran all 78 and exited 1
+solely for its one intended skip, with no errors or failures. The earlier 112-owner
+receipt is reused explicitly: all 374 Python source hashes are unchanged.
+
+The full suite passed 3,076 tests in 768.704 seconds with 56 recorded skips:
+53 Windows/NTFS cases, two Linux bind-mount cases, and one case-insensitive-host
+case. Exact Godot 4.7.2.stable.official.ed1daf0bf and all five pinned projects
+were available. Skipped platform behavior remains missing native evidence locally.
+
+Three alternating pairs measured the actual 15/66 probe workloads. Median totals
+were 376.150207 ms and 1,671.230631 ms, an added 1.295080424 seconds for 51 extra
+version launches. Ranges were 372.528372–376.870085 ms and
+1,649.066960–1,674.186497 ms. The 28,196,864-byte maximum RSS belongs to the
+benchmark Python worker; it does not measure child Godot memory or converter
+performance. The original failed 76-case control and 15/64 static-site timing
+remain preserved with their stated limitations.
+
+The final 49 migrated test owners contain 14,190 physical and 19,088 structural
+lines. The new helper is 31/48 lines and its tests 168/485; combined Python source
+shrinks by 756 physical and 1,235 structural lines. All 43 duplicate finders and
+15 old version blocks are removed, while the 112 existing owner IDs and visible
+runtime assertions remain. The helper function is 19/42 lines and fresh functions
+fit the accepted budgets. The actual-parent baseline retains 1,054 entries with
+two removals and 17 reductions; no allowance grows.
+
+Root rehashed all 21 final artifacts, 374 source files, six frozen metadata files
+and ten correction inputs, and checked the phase chains, origins and raw counts.
+The final proof index SHA256 is
+`44375af32d0745746b7b5d7f5131b12394549a5eb1a97c719f448567f6ccfe6d`.
+Independent final proof receipt SHA256:
+`44c17c5d29ad6110b22ca70c2e3a85bb40d4f1912c3dca2f99dd7cbe4cb3fdb3`.
+Root final proof review SHA256:
+`dd4e3efe01510bc29ef9b1f5350f0cb39fdbd4a9e638ba1d4d1fe191557c6dbd`.
+
+T01 is approved locally. Completion still requires actual-parent integration,
+combined checks and exact PR/merge CI, including twelve helper cases without
+skips on both native macOS and Windows. This approval is not campaign verification.

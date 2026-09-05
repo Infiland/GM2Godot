@@ -1441,7 +1441,7 @@
         "benchmark": "10,000 entries; overlapping ranges; medians 1582.017/1574.664 ms; process peak RSS medians 57278464/55033856 bytes; no general performance claim",
         "baseline": "1056 keys, eight reductions, no growth; strict immutable C gate passes"
       },
-      "remaining_verification": "Root metadata review, exact PR and merge CI, all required native Windows cases and scale proof, Linux required bind-mount proof; no task verification claim yet.",
+      "remaining_verification": "Exact merge CI33947905402 at 475e96eaa26771beabf9b2454f6023e7b14e2014, including required native receipts and strict actual-parent proof. Root metadata review and exact PR CI/native proof are complete.",
       "integration_proof": {
         "pr": 884,
         "head": "d13e92ebe0c9c1f42fc563ef95419857326ebff8",

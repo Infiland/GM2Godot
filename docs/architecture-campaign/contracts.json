@@ -278,7 +278,7 @@
       "task_id": "R04",
       "issue": 795,
       "title": "Complete I001 import sorting lint cohort",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "213 inherited I001 owner entries; fixed explicit layout detects 247 findings on the accepted R03 source. Project/isolated defaults previously disagreed; frozen source has 372 Python inputs and 41 Markdown inputs.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current I001 import sorting baseline entries",
@@ -579,7 +579,7 @@
         "owner_commit": "bfe9b1fffd91d2142ab134acf00b588e034eeb26",
         "review_verdict": "Independent audit_transactions_cli and root actual-code APPROVE; four exact files, 372 source hashes and unchanged baseline verified",
         "local_proof": "Pyright 0 errors/warnings; project/tracked Ruff; 61 policy/metrics/docs tests with zero skips; strict gate 1056 against f40402c; actual new-policy S accepts and old baseline-bearing P rejects; diff check passes",
-        "required_before_verification": "Exact cleanup PR and merge CI/native/current-parent proof remains mandatory"
+        "required_before_verification": "Satisfied by exact cleanup PR and merge CI/native/current-parent proof."
       },
       "conditional_parallel_entry": {
         "contract": "R04-parallel-entry-contract.md",
@@ -588,9 +588,17 @@
           "I01",
           "G01"
         ],
-        "status": "Root accepted after independent review; actual approved final cleanup candidate C and child-specific source/contract refresh remain required before assignment",
-        "integration_gate": "No child PR or campaign integration until exact cleanup merge proof succeeds",
+        "status": "Satisfied: immutable cleanup candidate inputs match verified cleanup merge feb22c30ea13475116c0190e302df0fc7fe08383.",
+        "integration_gate": "Cleanup dependency satisfied; each child still requires its own source, full/parity and exact CI/native proof.",
         "baseline_owner": "root serializes every child baseline generation and combined integration; no concurrent baseline writers"
+      },
+      "final_cleanup_verification": {
+        "pr": 883,
+        "candidate": "ec257912ec907161b2e89d552a76dc591ed33b68",
+        "merge": "feb22c30ea13475116c0190e302df0fc7fe08383",
+        "pr_ci": 33943223988,
+        "merge_ci": 33943927132,
+        "result": "Both exact revisions passed all required CI, six ordered zero-skip N01 artifacts, native mode tests and strict actual-parent comparison. Root verified merge parents/tree."
       }
     },
     {
@@ -1312,7 +1320,7 @@
       "task_id": "I01",
       "issue": 798,
       "title": "Included Files models and planning",
-      "state": "implementing",
+      "state": "approved",
       "problem_and_evidence": "12130-line transaction and 12914-line tests obscure state/handle/cleanup ownership.",
       "expected_benefit": "Reduce original and destination hotspot sizes/complexity; explicit acyclic lifecycle ownership; no facade aliases for private test internals.",
       "current_owner": "src/conversion/included_files.py",
@@ -1347,8 +1355,8 @@
       "independent_reviewers": "audit_gml_resources read-only, then root actual-code review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "ACCEPTED by root after independent review. I01-included-plan-contract.md is authoritative; fixed C=ec257912ec907161b2e89d552a76dc591ed33b68, actual input/import/metric refresh verified. Conditional isolated start accepted; child PR/integration waits completed R04 cleanup proof.",
-      "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
+      "plan_verdict": "ACCEPTED finite I01 contract and final-C addendum; actual cleanup merge feb22c30ea13475116c0190e302df0fc7fe08383 preserves all 15 input hashes.",
+      "implementation_entry_condition": "Satisfied: independently and root-approved immutable cleanup C input bytes match the verified R04 cleanup merge.",
       "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths.",
       "accepted_entry": {
         "contract": "I01-included-plan-contract.md",
@@ -1372,7 +1380,25 @@
         "root_only_baseline": "maintainability-baseline.json; root serializes generation and integration",
         "proof_coordination": "Reserve root CPU window before full/parity/performance runs",
         "implementation_authorized": true
-      }
+      },
+      "code_review": {
+        "verdict": "APPROVE",
+        "source_commit": "93d6ac8acfedd684a9f50674cd5df5e9d748ee6b",
+        "independent": "I01/implementation/I01-independent-code-review.md",
+        "root": "I01/implementation/root-code-review.json",
+        "frozen_index_sha256": "8cd4ff7ed90f6dd41317ba8422ed30fee8a3fb35230320afe730f6652a265fea"
+      },
+      "local_proof": {
+        "full_tests": 3076,
+        "full_skips": 56,
+        "skip_classification": "53 Windows; two Linux bind-mount; one case-sensitive-filesystem requirement",
+        "required_godot_methods": 7,
+        "public_parity_cases": 10,
+        "same_ref_control": "identical",
+        "benchmark": "10,000 entries; overlapping ranges; medians 1582.017/1574.664 ms; process peak RSS medians 57278464/55033856 bytes; no general performance claim",
+        "baseline": "1056 keys, eight reductions, no growth; strict immutable C gate passes"
+      },
+      "remaining_verification": "Root metadata review, exact PR and merge CI, all required native Windows cases and scale proof, Linux required bind-mount proof; no task verification claim yet."
     },
     {
       "task_id": "I02",

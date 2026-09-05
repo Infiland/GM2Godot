@@ -2,7 +2,7 @@
 
 Status: ACCEPTED and assigned by root after independent and root contract review. Fixed implementation parent C is `ec257912ec907161b2e89d552a76dc591ed33b68`. The final source/import/metric refresh is verified in `/Users/infi/Documents/Github/.gm2godot-v080-evidence/I01/final-C-entry-source-confirmation.json`. This entry supersedes historical proposal status/source and completed-R04 implementation-start wording below; all substantive API, behavior, scope, size and proof requirements remain binding.
 
-Sole implementer: `audit_transactions_cli` in `/Users/infi/Documents/Github/GM2Godot-080-included-file-plan`. Independent actual-code reviewer: `audit_gml_resources`, then root. The conditional start follows [R04's reviewed entry contract](R04-parallel-entry-contract.md). Cleanup PR #883 and CI `33943223988` are pending; no child PR or campaign integration is authorized before successful exact cleanup PR and merge proof. If cleanup changes or fails, root reassesses affected work and invalidates stale evidence.
+Sole implementer: `audit_transactions_cli` in `/Users/infi/Documents/Github/GM2Godot-080-included-file-plan`. Independent actual-code reviewer: `audit_gml_resources`, then root. The conditional start follows [R04's reviewed entry contract](R04-parallel-entry-contract.md). Cleanup PR #883 is verified at merge `feb22c30ea13475116c0190e302df0fc7fe08383`: exact PR CI `33943223988` and merge CI `33943927132` passed, including native receipts and strict actual-parent proof. The cleanup dependency is satisfied; I01 still requires exact source approval and its own PR/merge native proof.
 
 Root has accepted the original finite contract SHA256 `5987a20d80010d614a4d64e38e0c726cea1b7a172edeb5d10fe589d25d8c007a` and confirmed all 15 source inputs at C. Applicable current measurements/import projections are recorded in the external final source receipt; historical measurement tables below remain provenance where earlier source counts differ. Strict comparison uses immutable C; policy thresholds, retained evidence, scopes and suppressions may not grow.
 
@@ -445,3 +445,27 @@ performance transcript. Independent reviewer then root read the actual frozen di
 return APPROVE/REQUEST CHANGES. Final CI must cover the exact integrated revision, including
 actual native methods listed above, before I01 is verified. Commit/push/PR/integration remain
 root-owned actions; this implementation assignment does not authorize owner commits or integration.
+
+## Reviewed implementation checkpoint
+
+The extracted package and test additions retain the accepted eleven implementation-owner
+paths (including the two empty package initializers and one corpus-reference change).
+Source commit `93d6ac8acfedd684a9f50674cd5df5e9d748ee6b` contains exactly those eleven
+files. Independent and root actual-code reviews approve the frozen source. The sole
+local naming collision is resolved by renaming the two old `output_components` local
+references in `convert_file` to `components`; the expression and uses are unchanged.
+
+The full suite passed 3,076 tests in 769.978 seconds with all five pinned projects and
+exact Godot. Its 56 skips are 53 Windows cases, two Linux bind-mount cases and one
+case-sensitive-filesystem requirement. These remain missing local platform evidence.
+All seven required Godot methods passed. Ten real public conversion cases and the
+same-ref control match ordered diagnostics, counts, output assignments, registry bytes
+and payload hashes. The 10,000-file planning benchmark has overlapping base/candidate
+ranges (medians 1582.017/1574.664 ms); no general speed improvement is claimed.
+
+The root baseline retains 1,056 keys with eight reductions and no growth. Existing
+workflow selections retain all required Windows methods and the separate scale gate;
+no workflow or existing verification-gate IDs require renaming. Ordinary full unittest
+discovery collects all ten moved and twelve new cases. The unchanged generic required
+Linux bind-mount gate is separate from the Included Files bind-mount method deferred
+to I04. Exact PR and merge CI/native proof is still required before I01 is verified.

@@ -499,3 +499,32 @@ Native selections already include the full CLI owner; existing coverage includes
 production owners. No workflow, gate selector, coverage floor or production coverage
 cohort change is needed. Required CLI POSIX/Windows, real Converter cancellation/crash,
 Linux bind-mount and final combined revision evidence remain explicit completion gates.
+
+
+## Combined G01 integration candidate
+
+The prepared integration includes actual campaign parent
+`7fdd97cfb0149bb166175fd5479b5193f3d64423`. All four L01 source owners remain
+byte-identical to approved source `87d96d58b81edc929292fb33ada02fd2046419c6`;
+the other 381 Python files match that campaign parent. No inherited source or
+shared policy is replaced by an older L01 copy. The G01 merge tree is approved;
+its exact merge CI is a separate completion requirement.
+
+Root seeded the exact actual-parent baseline and regenerated it from the combined
+source. The baseline shrinks from 1,055 to 1,047 entries, removing eight and
+lowering nine without any new or increased allowance. Its AST/size evidence
+reflects actual source; physical allowances retain the existing proportional
+policy and are not confused with measured line counts.
+
+On the 391 frozen Python/metadata inputs, combined Pyright reports zero errors
+and warnings, Ruff passes, and the strict actual-parent gate passes. CLI,
+coverage policy, documentation and conversion architecture checks ran 113 tests
+with one native-Windows-only skip. The existing G01 required cohort passed all
+49 tests with zero skips on exact Godot and the pinned fixture environment.
+All source/input hashes were checked before and after each command.
+
+The earlier full-suite and matched real-CLI parity evidence remains explicitly
+bound to the original immutable L01 source and its documented refs. The combined
+checks do not relabel it as a new full-suite run. Exact PR/merge CI and the actual
+native Windows/POSIX, cancellation, crash and privileged Linux tests still gate
+final integration and task verification. No release is published by this slice.

@@ -7,10 +7,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through R11 PR #885 at
-  `1196295179296dfc12274ff39ba79e6adfb4a1b2`. R04 cleanup, I01 and R11 exact PR/merge
-  CI, native receipts and actual-parent proof are fully verified.
-- Progress counts fully verified roadmap tasks: 10 of 54 (18.5%). Source review,
+- Integration branch: `dev/080-architecture-campaign`, through G01 PR #886 at
+  `7fdd97cfb0149bb166175fd5479b5193f3d64423`. G01 exact PR/merge CI, native
+  receipts, all 49 selected tests and actual-parent proof are fully verified.
+- Progress counts fully verified roadmap tasks: 11 of 54 (20.4%). Source review,
   integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -39,8 +39,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
-| G01 GML typed lowering context | approved | audit_policy_tests_docs; corrected candidate `420d13f` | Independent/root source, correction and final local-proof APPROVE | Required49/0 skips; full3072/56 classified host skips; both five-fixture/fourteen-field parity comparisons match; native/exact integration CI pending |
-| L01 CLI artifact ownership | approved | audit_transactions_cli; source `87d96d5`, accepted parent `feb22c3` | Independent and root actual-code/local-proof reviews approved | Full3064/56 classified host skips; nine real CLI comparisons and same-ref match; coordinator579/C98 to336/C56; native and exact integration CI pending |
+| G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
+| L01 CLI artifact ownership | approved | audit_transactions_cli; source `87d96d5`, prepared G01 merge `816c4b4` | Independent/root source and local-proof APPROVE; combined local checks pass | Actual-parent1047 gate; 113 tests/1 Windows skip and G01 required49/0; exact native PR/merge CI pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

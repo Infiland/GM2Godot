@@ -1799,7 +1799,7 @@
       "task_id": "G01",
       "issue": 867,
       "title": "GML typed lowering context",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "transpile_statement has 1161 lines/C122; bulk is increment/assignment lowering, not parser cursor methods.",
       "expected_benefit": "Localized typed handlers; dispatcher and new handlers <=15 complexity/150 lines with unchanged facade.",
       "current_owner": "gml_transpiler_parts/statements.py",
@@ -1862,7 +1862,7 @@
       },
       "measured_result": "parameters15\u21922; C122 unchanged. Actual physical/structural sizes: model76/143, statements2766/4641, lowerer1155/1940, parser1149/2296, factory17/31. Baseline1056\u21921055, one removed key and six reductions; no new debt. Dispatcher decomposition remains G02-G05.",
       "local_proof": "Corrected immutable420d13f: required49/0skips; full3072/56 classified host skips with exact Godot/all five pins;373source/five metadata hashes stable; immutable C-to-candidate and same-ref parity five fixtures/all14 fields and44facade identities match. Independent and root final local proof approved.",
-      "remaining_verification": "Final root metadata review; actual-parent combined integration checks and exact native PR/merge CI.",
+      "remaining_verification": "G01 complete; statement-family decomposition remains G02-G05.",
       "full_run_finding": {
         "candidate": "349753137a10557ed6fa84eb4c7c9c9bfb738d4a",
         "collected": 3072,
@@ -1875,7 +1875,18 @@
         "benchmark": "Unchanged production: five isolated samples per revision, 2000 calls each; median 472.005 to 484.257 ms (+2.60%); RSS medians 27754496 to 27721728 bytes with overlapping ranges"
       },
       "corrected_candidate": "420d13f5b3d6af9f2471b5619be4359109bae0c6",
-      "corrected_proof_summary_sha256": "f98b48e13d29773175443f253d94f8f700599903855a4106d0c98e1b1af91ece"
+      "corrected_proof_summary_sha256": "f98b48e13d29773175443f253d94f8f700599903855a4106d0c98e1b1af91ece",
+      "final_verification": {
+        "pr": 886,
+        "pr_head": "7f6ccdb41e6406507f9606e97cc0ec62003e2042",
+        "pr_ci": 33951220652,
+        "merge": "7fdd97cfb0149bb166175fd5479b5193f3d64423",
+        "merge_ci": 33952438794,
+        "actual_parent": "1196295179296dfc12274ff39ba79e6adfb4a1b2",
+        "approved_tree": "60bbbe1e065075e06f5e9add02e527a570014f13",
+        "both_revisions": "25 jobs:24 success and sole dependency-submission skip; six native receipts10/13/16 twice; mode6/6/2 and49 G01 tests zero skips; actual-parent1055 debt gate",
+        "proof_sha256": "f49b48d8b976f35dcbe7f8299af56f841f56d541b52dd8e2053b8b4e4c812f9b"
+      }
     },
     {
       "task_id": "G02",
@@ -2117,7 +2128,34 @@
         "full": "3064 tests /3008 pass /56 classified host skips; exact Godot/all five pinned fixtures",
         "parity": "Nine real CLI cases, same-ref control, later78-assertion replays; public bytes exact; reviewed finite private projection and12 controls"
       },
-      "remaining_verification": "Actual-parent combined integration; existing native CLI POSIX/Windows methods, real Converter cancellation/crash and forced Linux bind-mount; exact final PR and merge CI. No task completion yet."
+      "remaining_verification": "Actual-parent combined integration; existing native CLI POSIX/Windows methods, real Converter cancellation/crash and forced Linux bind-mount; exact final PR and merge CI. No task completion yet.",
+      "combined_integration": {
+        "actual_parent": "7fdd97cfb0149bb166175fd5479b5193f3d64423",
+        "prepared_merge": "816c4b46caeec3b2350c19fe13cc6184db367c03",
+        "source_owner_commit": "87d96d58b81edc929292fb33ada02fd2046419c6",
+        "source_owners_unchanged": 4,
+        "remaining_python_exact_parent": 381,
+        "baseline": {
+          "before": 1055,
+          "after": 1047,
+          "removed": 8,
+          "lowered": 9,
+          "new_or_grown": 0
+        },
+        "pyright": "0 errors/0 warnings",
+        "ruff": "PASS",
+        "strict_actual_parent": "PASS1047",
+        "tests": {
+          "cli_and_policy": 113,
+          "skips": 1,
+          "skip_reason": "native Windows handles required",
+          "G01_required": 49,
+          "G01_skips": 0
+        },
+        "inputs_sha256": "cb0f8d22dffe8f4dc916594d8964dd9e7f56ac31cca3f4fa8e2c19a2f41325a3",
+        "checks_sha256": "1ec0b713fa7015c92cc2e290d799cdc8e98b264fc47c42475e653228ea330a22",
+        "state": "Combined local checks approved; exact native PR/merge CI pending"
+      }
     },
     {
       "task_id": "L02",

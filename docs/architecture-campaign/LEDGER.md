@@ -35,7 +35,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
 | R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
-| G01 GML typed lowering context | reviewing | audit_policy_tests_docs, `82faae3` | Independent and root actual-code APPROVE | 48 required methods/zero skips; unchanged C122 and public44 exports; debt1055; full/benchmark/parity/exact CI pending |
+| G01 GML typed lowering context | approved | audit_policy_tests_docs; corrected candidate `420d13f` | Independent/root source, correction and final local-proof APPROVE | Required49/0 skips; full3072/56 classified host skips; both five-fixture/fourteen-field parity comparisons match; native/exact integration CI pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

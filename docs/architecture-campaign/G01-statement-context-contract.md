@@ -129,3 +129,36 @@ The earlier benchmark remains valid for unchanged production: five isolated samp
 per revision, 2,000 calls each, median 472.005 to 484.257 ms (+2.60%); peak RSS medians
 27,754,496 to 27,721,728 bytes with overlapping ranges. This is measured context
 workload overhead, not a whole-conversion performance claim.
+
+
+## Corrected immutable local proof
+
+The correction is committed in `26aedcfb8be3522acbb81cabe64ddd6b018bc8be`;
+reviewed gate/contract metadata produces immutable candidate
+`420d13f5b3d6af9f2471b5619be4359109bae0c6`. Independent and root actual-code
+review approve the correction. The original failed full receipt remains preserved.
+
+At that exact candidate, the 49-method required gate passed with zero skips. The
+new full run passed 3072 tests in 768.035 seconds: 3016 passes and 56 classified
+host skips (53 Windows, two Linux bind mounts, one case skipped on the
+case-insensitive host filesystem).
+Native Python 3.12.10, exact Godot 4.7.2 official ed1daf0bf, all five immutable
+fixture commits, 373 source hashes and five root metadata hashes were verified
+before and after the proof phases. No missing engine/fixture skip is credited.
+
+Immutable C-to-candidate parity and candidate-to-same-ref control both match all
+five selected fixtures across all fourteen fields with empty differences. Both
+sides preserve all 44 public facade binding identities. The existing parity
+normalization is unchanged. Required/full/parity receipts are indexed by
+`G01/correction/corrected-proof-summary.json`, SHA256
+`f98b48e13d29773175443f253d94f8f700599903855a4106d0c98e1b1af91ece`.
+The full log SHA256 is
+`18fd64cce9cb1e5089e8099b708dd498889b87fb64ce4caad444b99c43b46130`.
+The previously reported benchmark remains valid for byte-identical production;
+its measured 2.60% context-workload cost is retained without a broader speed claim.
+
+Independent evidence review and root approve the corrected local proof.
+Combined-source checks against the actual campaign parent and exact native PR/merge
+CI remain required. The final lowerer is still C122; G02-G05 own its decomposition.
+No new production coverage cohort is required because the existing GML parts
+pattern already includes all three owners. No existing native selection changes.

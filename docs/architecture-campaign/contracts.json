@@ -170,7 +170,7 @@
       "task_id": "R03",
       "issue": 795,
       "title": "Complete E4/E7 lint cohort",
-      "state": "integrated",
+      "state": "verified",
       "problem_and_evidence": "199 exact E4/E7 findings across 62 unchanged owners at 6066856; R03-e4-e7-contract.md records the accepted finite scope.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current E4/E7 baseline entries",
@@ -271,14 +271,14 @@
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "No temporary adapter or postponed E4/E7 cleanup authorized.",
       "plan_verdict": "ACCEPTED by root after independent APPROVE; R03-e4-e7-contract.md is authoritative. Fixed 6066856 permits isolated implementation while final N01 CI runs; integration waits for verified dependencies.",
-      "review_evidence": "Immutable 356e2ae: independent and root actual-code APPROVE; all 72 frozen hashes unchanged through 3,062 full tests with 56 classified platform/filesystem skips. Pyright 0/0, Ruff/actionlint, 287 focused tests, native macOS 6/6 with zero skips, debt 1,269. Ancestry 456877c has the same owner tree; exact native PR/merge CI is still required.",
-      "verification_evidence": "PR #880 CI 33936762868 at f1781fc passed all 24 required jobs and the permitted dependency-submission skip. Exact Linux 6, macOS 6 and Windows 2 artifact-mode tests passed without skips. Merge 1240a7b has the approved tree; merge CI 33937769395 is running."
+      "review_evidence": "Immutable 356e2ae: independent and root actual-code APPROVE; all 72 frozen hashes unchanged through 3,062 full tests with 56 classified platform/filesystem skips. Pyright 0/0, Ruff/actionlint, 287 focused tests, native macOS 6/6 with zero skips, debt 1,269. Ancestry 456877c has the same owner tree; exact native PR/merge CI is verified.",
+      "verification_evidence": "PR #880 CI 33936762868 at f1781fc and merge CI 33937769395 at 1240a7b passed all 24 required jobs and the permitted dependency-submission skip. Exact Linux 6, macOS 6 and Windows 2 artifact-mode tests passed without skips at both revisions. The merge tree equals the approved tree."
     },
     {
       "task_id": "R04",
       "issue": 795,
       "title": "Complete I001 import sorting lint cohort",
-      "state": "implementing",
+      "state": "approved",
       "problem_and_evidence": "213 inherited I001 owner entries; fixed explicit layout detects 247 findings on the accepted R03 source. Project/isolated defaults previously disagreed; frozen source has 372 Python inputs and 41 Markdown inputs.",
       "expected_benefit": "Eliminate cohort debt and enforce selected family globally without blanket suppressions.",
       "current_owner": "Files owning exact current I001 import sorting baseline entries",
@@ -553,7 +553,8 @@
       "independent_reviewers": "audit_gml_resources read-only, then root actual-code/integration review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "R04 owns separate post-integration deletion of both legacy constants, exact guard, unused hashlib and temporary acceptance test; strict baseline-bearing parents restored, bootstrap 38b unchanged. R04 cannot be verified before cleanup CI and removed-P rejection pass.",
-      "plan_verdict": "ACCEPTED by root after independent review; R04-import-contract.md is authoritative. Exact parent 1240a7b16d893bc06ba3d258683c731c60dbadca and raw baseline SHA cea9e1b5ec2a55a05c0f720ce43de7c4e11219e2108aabb9d47b888c38e85d7e. Isolated implementation while R03 merge CI runs is approved; PR/integration waits verified R03 and exact P event identities."
+      "plan_verdict": "ACCEPTED by root after independent review; R04-import-contract.md is authoritative. Exact parent 1240a7b16d893bc06ba3d258683c731c60dbadca and raw baseline SHA cea9e1b5ec2a55a05c0f720ce43de7c4e11219e2108aabb9d47b888c38e85d7e. Isolated implementation while R03 merge CI runs is approved; PR/integration waits verified R03 and exact P event identities.",
+      "review_evidence": "Immutable ef758360d91e96f2df0a72fc17769e7e5ed77c09: independent and root actual-code APPROVE; 252 allowed paths and 372 source hashes verified; all 367 import-only ASTs and both dependency graphs preserved. Full suite: 3,064 tests with 56 classified native/filesystem skips, all five pinned projects and exact Godot. Pyright 0 errors/warnings; both Ruff paths and actionlint; 398 focused tests with one Windows-only skip; 80 independent tests and 13 native macOS tests with zero skips; strict gate 1,056 against exact 1240a7b. PR/merge native CI and separate bridge removal remain required."
     },
     {
       "task_id": "R05",

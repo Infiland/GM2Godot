@@ -8,9 +8,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
 - Integration branch: `dev/080-architecture-campaign`, through R03 PR #880 at
-  `1240a7b`. R03 passed all final PR checks; its merge CI is running.
-  C01, D01, R10 and N01 passed final PR and merge CI.
-- Progress counts fully verified roadmap tasks: 6 of 54 (11.1%). Integration and
+  `1240a7b`. R03, C01, D01, R10 and N01 passed final PR and merge CI.
+- Progress counts fully verified roadmap tasks: 7 of 54 (13.0%). Integration and
   pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -18,9 +17,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
-- No external blocker. R03 is integrated with approved code and final PR proof;
-  merge CI remains required. R04 has an accepted exact-parent contract and isolated
-  implementation owner; its PR/integration waits for verified R03.
+- No external blocker. R03 is verified. R04 has approved code and frozen full-suite
+  proof at `ef75836`; exact PR/merge CI and separate bridge retirement remain
+  required before R04 is verified.
   Other planned rows need bounded contract acceptance before implementation.
 
 ## Ownership and progress
@@ -34,8 +33,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | D01 diagnostic models | verified | audit_policy_tests_docs, `a679a2f`; PR #876 merged `c2d55e6` | Independent and root reviews approved extraction and coverage correction | `D01/live-final-run.json`, `D01/merge-push-run.json` |
 | N01 native receipts | verified | audit_transactions_cli, `66bfcfe`; reviewed corrections through `b06c15b`; PR #879 merged `47642d8` | Independent and root code/integration reviews approved | `N01/pr-ci-final.json`, `N01/merge-push-run.json`; six zero-skip native artifacts at each exact revision |
 | R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
-| R03 E4/E7 lint | integrated | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR CI and native 6/6/2 zero-skip proof passed; merge CI pending |
-| R04 import layout | implementing | audit_policy_tests_docs in `GM2Godot-080-import-layout`, fixed parent `1240a7b` | Independent and root contract reviews approved | `R04-import-contract.md`; 252 allowed files; separate bridge retirement required |
+| R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
+| R04 import layout | approved | audit_policy_tests_docs, `ef75836`, fixed parent `1240a7b` | Independent and root actual-code reviews approved | 252 reviewed files; 3,064 full tests; exact PR/merge CI and separate bridge retirement required |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -147,7 +146,21 @@ Raw evidence is retained outside the worktrees at
   identical owner tree. Final PR CI `33936762868` at `f1781fc` passed all 24 required
   checks and the sole permitted dependency-submission skip. Native logs prove
   Linux six, macOS six and Windows two actual executions with zero skips. Merge
-  `1240a7b` has the approved tree; merge CI `33937769395` remains required.
+  `1240a7b` has the approved tree; merge CI `33937769395` passed all 24 required
+  checks and the sole permitted dependency-submission skip. Exact merge native
+  logs also prove Linux six, macOS six and Windows two executions with zero skips.
+- R04 at immutable `ef75836`: the 244-file import cohort plus eleven infrastructure
+  files, with three overlapping paths, match the accepted 252-path scope. Project, tracked-input
+  CI and isolated metrics use the same explicit layout. All 213 I001 debt entries
+  disappear; 1,056 entries remain without any new or increased allowance. Root
+  verified all 372 source hashes, 367 import-only ASTs and the unchanged policy
+  protections. Independent review passed 80 tests with zero skips; owner focused
+  checks passed 398 with one Windows-only skip, and native macOS passed 13/13.
+  Pyright reports zero errors/warnings; both Ruff paths, actionlint and the strict
+  parent gate pass. The frozen full suite passed 3,064 tests on exact Godot with
+  all five pinned projects and 56 classified skips (53 Windows, two Linux bind
+  mounts, one case-sensitive-filesystem case). Final PR/merge CI and the separate
+  exact-parent bridge deletion remain required; this row is not yet verified.
 - The earlier exploratory TCC/Monophobia run overlapped root source edits and is
   not immutable baseline evidence; its explicit caveat remains with the raw log.
 

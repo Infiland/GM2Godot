@@ -301,3 +301,38 @@ Root final review: `d17b2b10358680205e0a73c24b85cbc8d5164143184c7c8f97346256fb66
 
 R12 is approved locally. Final metadata review, actual-parent combined source
 checks and exact PR/merge native CI remain required before verification.
+
+
+## Prepared integration with reviewed T01 and corrected L01
+
+Prepared merge `d6f0d85fd225e146358d2a57b41732e9f94be417` combines the six
+approved R12 source owners from `9e01fd1610f3aa25375cd763c171d3767bed5646`
+with reviewed T01 parent `1d544e02cad9d99d2102c8d9c54e6819f4e548a2`. That
+parent includes the independently reviewed L01 Windows snapshot-key correction
+at `397e1bc6184155086105eb7b5d10477dc45747d4`. These are prepared sources;
+L01 native PR CI and later predecessor/own merge verification remain pending.
+
+All six R12 owners remain exact approved bytes; the other 384 Python files match
+the reviewed T01 parent. The combined tree has 390 Python files. T01's two Godot
+setup migrations in the path-motion and resource-matrix tests are retained with
+all runtime assertions. All seven parent verification gate objects remain intact;
+only the accepted 35-test R12 gate is added. Coverage adds path_model.py to the
+existing project-parsing group, with every other value and floor unchanged.
+
+Root seeded the exact reviewed-parent baseline and regenerated it from combined
+source. All 1,045 keys remain, with only two lower allowances: resource_models'
+parser structure 265 to 261 and module structure 989 to 984. There are no new or
+grown allowances or policy changes. The resulting baseline matches the merged
+source evidence exactly. The strict gate passes against `1d544e0`.
+
+On frozen tracked inputs, Pyright reports zero errors and warnings, Ruff and diff
+check pass, all 35 required R12 cases pass without skips on exact Godot and the
+pinned fixture environment, and 113 CLI/policy tests pass with one expected
+Windows-only local skip. Input hashes are unchanged before and after all checks.
+The earlier full suite, five-fixture parity/control and benchmark remain evidence
+for immutable `0763d71879d1f166b90134159c1594ce84b10db8`; no new full-suite or
+benchmark claim is made. Actual verified-parent ancestry, final metadata review
+and exact native PR/merge evidence remain completion gates.
+
+Combined input SHA256: `60043630166ab54999f4ef033c2e96ef4295aeb61cf8774b8797a0293bc87084`.
+Combined result SHA256: `01fdbf08d2ddca50867da7788ea78ac6ff464585a26ff6ea0c487856dc54930d`.

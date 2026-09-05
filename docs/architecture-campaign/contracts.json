@@ -924,7 +924,7 @@
         },
         "legacy_baseline": "1056 entries retained; aggregate function265to261/module989to984 only; no new or grown debt"
       },
-      "remaining_verification": "Final local metadata review, actual-parent combined integration and exact native PR/merge CI; no completion credit yet.",
+      "remaining_verification": "Prepared integration review; actual verified-parent refresh; exact final native PR and merge CI. Final original local proof and its metadata are approved.",
       "final_local_proof": {
         "verdict": "APPROVE independent and root",
         "candidate": "0763d71879d1f166b90134159c1594ce84b10db8",
@@ -939,6 +939,27 @@
         "final_index_sha256": "6d0ad4c0d976d76b43271c0550dd51b365e69a4e5494598b11e6a4854f5f7912",
         "independent_receipt_sha256": "bb18fdc0acabd2ab5dd36cca8a67c87dd56b3c8ed04283d228e05b233daa8c56",
         "root_review_sha256": "d17b2b10358680205e0a73c24b85cbc8d5164143184c7c8f97346256fb6614e3"
+      },
+      "prepared_combined_integration": {
+        "head": "d6f0d85fd225e146358d2a57b41732e9f94be417",
+        "reviewed_parent": "1d544e02cad9d99d2102c8d9c54e6819f4e548a2",
+        "approved_source": "9e01fd1610f3aa25375cd763c171d3767bed5646",
+        "approved_owners_exact": 6,
+        "other_python_exact_parent": 384,
+        "all_python_count": 390,
+        "preserved_parent_gate_objects": 7,
+        "R12_required_tests": 35,
+        "R12_skips": 0,
+        "cli_policy_tests": 113,
+        "cli_policy_skips": 1,
+        "cli_policy_skip_reason": "native Windows handles required",
+        "pyright": "0 errors/0 warnings",
+        "ruff": "PASS",
+        "baseline": "1045 keys; only parser265to261 and module989to984 lower; zero growth; exact reviewed1d544e0 strictPASS",
+        "baseline_sha256": "deb164ed001d9f3b0bb77199a97f2bdd06c6ce1f9d1f47ea903c35dc954df3f0",
+        "inputs_sha256": "60043630166ab54999f4ef033c2e96ef4295aeb61cf8774b8797a0293bc87084",
+        "results_sha256": "01fdbf08d2ddca50867da7788ea78ac6ff464585a26ff6ea0c487856dc54930d",
+        "state": "Prepared combined checks passed; final independent/root integration metadata review and actual verified-parent/native PR/merge evidence pending"
       }
     },
     {

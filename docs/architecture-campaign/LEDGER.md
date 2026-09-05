@@ -38,7 +38,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
-| R12 Authoritative path resource model | implementing | audit_gml_resources; verified parent `1196295` | Final finite contract and source refresh accepted by root after prior independent review | R12-path-model-contract.md; six owner files plus root baseline; all30 inputs reverified |
+| R12 authoritative paths model | reviewing | audit_gml_resources; six source owners frozen | Independent/root actual-code APPROVE | Pyright0/0, bothRuff; focused35/0, independent21/0; required/full/benchmark/parity and native integration pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

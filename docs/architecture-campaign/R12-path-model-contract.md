@@ -215,3 +215,48 @@ The original external preview classified the then-nonexistent path_model as a se
 No accepted semantic choice changes: stable concrete asset fields, the complete five-field numeric conversion/error-timing matrix, the explicit obsolete descriptive PathModel retirement, #882 non-object root ValueError, raw identity, typed JSON inputs and existing publication/error ordering all remain required. No adapter, broader cast, new allowance, budget inflation or new scope is proposed.
 
 Root must seed and update the baseline from the actual verified entry parent and serialize the existing coverage/required-ID integration. Any newly integrated T01 runtime-helper changes need a source/ID refresh before dispatch; no helper migration is silently included here. Full/native/characterization/parity and reserved benchmark proof remain exactly required by the accepted contract. No tests, benchmark, full suite, production edits or shared metadata edits were performed for this refresh.
+
+
+## Frozen implementation source accepted
+
+Independent review and root actual-code review approve the six owner files in
+source index SHA256 `9912f6435997317e3f7d13f4613b48d6b2489c16dcbc113053525da639934a36`.
+The independent receipt is
+`d99054adcbf38cfacad87dd398fc4fb748c0245182928729b0a681a632c8ca70`;
+root actual-code review is `424a31410d4e66505164b25a719c0f4552405e842424c2aa6fa884fd741c4252`.
+
+The canonical model is 74 physical/109 structural lines. Registry shrinks from
+206/394 to 172/323, and aggregate from 582/989 to 578/984. The two new test owners
+are 197/728 and 212/724; registry tests are 243/670. Fresh production functions
+remain at most 14/35 lines and fresh tests at most 42/168, within the accepted
+complexity, nesting and parameter budgets. Small deletion-boundary blank-line
+cleanup is not an architectural improvement. The strict actual1196295 baseline
+retains 1,056 entries; only aggregate function structure 265→261 and module
+structure 989→984 decrease. No mapping, new allowance or threshold changes.
+
+One pure parser owns point filtering and x/y/speed then closed/kind/precision
+coercion. Registry and aggregate consume its exact canonical model; renderers
+and publication function bodies remain unchanged. The old descriptive model and
+three unchecked casts disappear. Raw-object identity, parsed snapshots, source
+containment, exception boundaries and ordered partial writes retain their
+accepted behavior. Only the reviewed full-domain eager aggregate errors and
+issue #882 non-object ValueError differ. All other resource-family branches
+remain unchanged.
+
+Before-production proof recorded 88 direct outcomes, 404 numeric outcomes and
+14 root/publication cases. Five new writer tests and three retained registry
+tests passed against unchanged parent source. Final source-bound comparison
+preserves all 303 builder/render numeric outcomes and all output maps; the
+22 aggregate errors and eight non-object errors match the accepted domains.
+Pyright reports zero errors/warnings; both Ruff paths and diff checks pass.
+The exact-Godot focused cohort passed 35/35 without skips, and the independent
+21-case unit check also passed without skips. These checks are local evidence.
+
+Root registers those exact 35 IDs as the R12 gate with zero allowed skips and
+unchanged R11 runtime, external fixtures, parity fields and normalization. Six
+owner paths become required inputs. The canonical path model joins the existing
+project-parsing coverage owner; all floors and historical baselines stay fixed.
+
+Benchmark, full exact-Godot/all-five-project proof, required gate, five-fixture
+all-fourteen-field parity and same-ref control still require the frozen candidate.
+Final actual-parent integration and native PR/merge CI remain completion criteria.

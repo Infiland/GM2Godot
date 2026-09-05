@@ -726,7 +726,7 @@
       "task_id": "R11",
       "issue": 797,
       "title": "Authoritative project resource model",
-      "state": "planned",
+      "state": "implementing",
       "problem_and_evidence": "Descriptive resource_models has no production callers; project consumers parse raw data separately.",
       "expected_benefit": "One project parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model.",
       "current_owner": "project_manifest.py, project_settings.py",
@@ -738,11 +738,14 @@
         "R10"
       ],
       "allowed_files": [
+        "src/conversion/project_model.py",
         "src/conversion/project_manifest.py",
         "src/conversion/project_settings.py",
-        "one corresponding canonical model module",
+        "src/conversion/asset_registry.py",
         "src/conversion/resource_models.py",
-        "focused family tests/fixtures",
+        "tests/test_project_model.py",
+        "tests/test_project_model_consumers.py",
+        "tests/test_conversion_architecture.py",
         "maintainability-baseline.json"
       ],
       "non_goals": "No feature changes, wholesale formatting, new framework, or version/release metadata edits.",
@@ -751,13 +754,33 @@
       "expected_measurable_improvement": "One project parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
       "characterization_tests": "Characterize missing/null/malformed/unknown field behavior and exact options/resource order/audio/texture metadata. Preserve diagnostic text/default coercions until separately approved changes. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
-      "implementation_owner": "One designated R11 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
-      "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
+      "implementation_owner": "audit_gml_resources in GM2Godot-080-project-model",
+      "independent_reviewers": "audit_policy_tests_docs read-only, then root actual-code review",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation.",
+      "plan_verdict": "ACCEPTED by root after independent review. R11-project-model-contract.md is authoritative; fixed C=ec257912ec907161b2e89d552a76dc591ed33b68, actual input/import/metric refresh verified. Conditional isolated start accepted; child PR/integration waits completed R04 cleanup proof.",
       "implementation_entry_condition": "Original completed-R04 start is overridden only by R04-parallel-entry-contract.md: isolated work may begin from approved immutable cleanup candidate C after all local/code/source/contract entry checks. Child PR/integration still waits completed R04 cleanup merge proof.",
-      "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths."
+      "parallel_shared_metadata_owner": "Root alone serializes baseline generation, coverage/verification registration and campaign metadata; implementation owners do not concurrently edit these paths.",
+      "accepted_entry": {
+        "contract": "R11-project-model-contract.md",
+        "base_ref": "ec257912ec907161b2e89d552a76dc591ed33b68",
+        "original_contract_sha256": "4052f2e8aba9183ea2aa54cafac0b13c06e2cadc4900f07b0b2f3ae66f7937e6",
+        "source_count": 12,
+        "source_confirmation_sha256": "d8acfafff0ceb429b34c81c15dbe2a2ee7be60090deb6c244500d5f12720de03",
+        "implementation_files": [
+          "src/conversion/project_model.py",
+          "src/conversion/project_manifest.py",
+          "src/conversion/project_settings.py",
+          "src/conversion/asset_registry.py",
+          "src/conversion/resource_models.py",
+          "tests/test_project_model.py",
+          "tests/test_project_model_consumers.py",
+          "tests/test_conversion_architecture.py"
+        ],
+        "root_only_baseline": "maintainability-baseline.json; root serializes generation and integration",
+        "proof_coordination": "Reserve root CPU window before full/parity/performance runs",
+        "implementation_authorized": true
+      }
     },
     {
       "task_id": "R12",

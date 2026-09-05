@@ -7,10 +7,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through L01 PR #887 at
-  `7dd2b9c2eb1bb4c805ca822821c6f5c38284b998`. Exact PR/merge CI, native CLI,
-  artifact receipts, coverage floors and actual-parent proof are verified.
-- Progress counts fully verified roadmap tasks: 12 of 54 (22.2%). Source review,
+- Integration branch: `dev/080-architecture-campaign`, through R12 PR #889 at
+  `b9c05cd326cbcb8531ca93c24709bcf14cb81748`. Exact PR/merge CI, native helpers,
+  Godot runtime, artifact receipts and actual-parent proof are verified.
+- Progress counts fully verified roadmap tasks: 14 of 54 (25.9%). Source review,
   integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -18,10 +18,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. L01 is verified; its two earlier failed runs remain
-  preserved. T01 has approved source and combined local proof, including the final
-  L01 guard tests. T01 exact PR/merge native verification is next. R12's prepared
-  combination and I02's pre-extraction observations proceed separately.
+- No external blocker. R12 is verified. I02 is preparing combined-parent
+  integration. L02 begins from verified e142 with completed before evidence;
+  later combined integration preserves R12. Font before evidence proceeds separately.
 
 
 ## Ownership and progress
@@ -41,7 +40,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
 | G01 GML typed lowering context | verified | audit_policy_tests_docs; PR #886 merged `7fdd97c` | Independent/root source, corrected proof and combined metadata APPROVE | PR CI33951220652 and merge CI33952438794; six native artifacts, mode cases and all49 selected tests/zero skips; actual-parent1055 gate |
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
-| T01 exact Godot test discovery | approved | audit_policy_tests_docs; source `4defcb3`, actual-parent preparation `bfca73a` | Independent/root source and guarded-parent delta APPROVE | Strict1045 actual `7dd2b9c`; new2/0 plusCLI78/1 host skip, earlier required78/0 and G01 49/0 retained; final metadata and native PR/merge proof pending |
+| T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
+| R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
+| L02 CLI request and session | approved | audit_policy_tests_docs; dev/080-cli-session based on verified e142 | Proposal and actual entry independent/root APPROVE; entry metadata review before source assignment | Before10/0 plus retained78/1exactWindows-hostskip; L02-cli-contract.md and external actual-t01-entry/before-proof; no production extraction yet |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

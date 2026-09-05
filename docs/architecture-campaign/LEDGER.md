@@ -8,9 +8,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
 - Integration branch: `dev/080-architecture-campaign`, through R10 PR #878 at
-  `91a33c1`. C01 and D01 passed final PR and merge CI; R10 passed final PR CI and
-  its merge CI is running.
-- Progress counts fully verified roadmap tasks: 4 of 54 (7.4%). Integration and
+  `91a33c1`. C01, D01 and R10 passed final PR and merge CI.
+- Progress counts fully verified roadmap tasks: 5 of 54 (9.3%). Integration and
   pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -19,7 +18,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
 - No external blocker. N01 has approved code and six successful native receipt
-  artifacts at `b06c15b`; root is verifying the combined R10/N01 revision. The remaining
+  artifacts at final combined `6066856`; its aggregate CI is running. R03 has an
+  accepted contract and isolated implementation owner. The remaining
   planned rows need bounded contract acceptance before implementation.
 
 ## Ownership and progress
@@ -32,7 +32,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | C01 aggregate CI | verified | audit_transactions_cli, root integration corrections through `244f8aa`; PR #875 merged `3579cdd` | Independent and root reviews approved | `C01/live-final-run.json`, `C01/merge-push-run.json` |
 | D01 diagnostic models | verified | audit_policy_tests_docs, `a679a2f`; PR #876 merged `c2d55e6` | Independent and root reviews approved extraction and coverage correction | `D01/live-final-run.json`, `D01/merge-push-run.json` |
 | N01 native receipts | reviewing | audit_transactions_cli, `66bfcfe`; root newline correction and reviewed Windows test through `b06c15b`; PR #879 | Independent and root code reviews approved | Six zero-skip native receipts; combined revision CI remains required |
-| R10 recursive JSON | integrated | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | Both immutable parity runs match; final PR CI passed; merge CI running |
+| R10 recursive JSON | verified | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | `R10/pr-ci-final.json`, `R10/merge-push-run.json`; both immutable parity runs match |
+| R03 E4/E7 lint | implementing | audit_transactions_cli in `GM2Godot-080-e4-e7`, source `6066856` | GML independent and root contract reviews approved | `R03-e4-e7-contract.md`; 72 allowed files; implementation and final proof pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -67,6 +68,10 @@ Raw evidence is retained outside the worktrees at
 7. Root opened #877 for early Included Files recovery/snapshot interruption that
    bypasses lock release. It needs its own regression and reviewed behavior-fix
    scope in the existing locking/coordinator work; I01 must not hide the fix.
+8. R03 owns the exact 199 E4/E7 findings and native chmod proof. R04 remains a
+   separate import pass. R05 follows R04/R26 so remaining reflective test seams
+   and exception ownership are stable; W02 waits for final R05 enforcement.
+   Existing I001/B debt checks continue throughout. No task or limit is removed.
 
 ## Validation checkpoint
 
@@ -113,7 +118,8 @@ Raw evidence is retained outside the worktrees at
   log hashes. Immutable base/candidate and same-reference comparisons match across
   five fixtures and all fourteen fields, including the 44-export facade contract.
   Final PR CI `33932635435` at `e56a5e3` passed all 24 required checks; merge CI
-  `33933858620` at `91a33c1` is running. The merge tree equals the approved PR tree.
+  `33933858620` at `91a33c1` passed all 24 required checks and the sole permitted
+  dependency-submission skip. The merge tree equals the approved PR tree.
 - N01's frozen full run passed 3,031 tests with 56 classified native/filesystem
   skips across all five external projects. Reviewed follow-up corrections preserve
   legacy native newline bytes and assert the actual NT directory handle chain.
@@ -121,7 +127,9 @@ Raw evidence is retained outside the worktrees at
   macOS 13 and Windows 16 tests, each executed twice with zero skips. Root verified
   exact selected methods, success fields and artifact hashes. After combining R10,
   Pyright 0/0, Ruff, 131 focused tests, 287 R10 required tests, 13 required macOS
-  receipt tests and the 1,338-entry gate passed. Combined revision CI is pending.
+  receipt tests and the 1,338-entry gate passed. All six native receipts also
+  passed at final combined `6066856` in run `33934278689`, with zero skips. Its
+  aggregate CI remains pending.
 - The earlier exploratory TCC/Monophobia run overlapped root source edits and is
   not immutable baseline evidence; its explicit caveat remains with the raw log.
 

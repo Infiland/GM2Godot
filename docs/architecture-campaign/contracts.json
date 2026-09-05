@@ -985,7 +985,7 @@
       "task_id": "R13",
       "issue": 797,
       "title": "Authoritative fonts resource model",
-      "state": "approved",
+      "state": "reviewing",
       "problem_and_evidence": "The worker, registry and unused descriptive font aggregate interpret overlapping raw fields differently; fonts -> output paths -> registry -> fonts forms a lazy cycle. Actual b9 95 historical plus366 expanded cases/776 public observations are characterized and reviewed.",
       "expected_benefit": "One normalized frozen FontModel, two concrete planning selectors and one source-lookup leaf; delete duplicated dictionary/descriptive parsing and the lookup cycle.",
       "current_owner": "fonts.py, asset_registry.py, asset_output_paths.py",
@@ -1008,7 +1008,8 @@
         "tests/test_font_model_consumers.py",
         "tests/test_font_runtime_godot.py",
         "tests/test_resource_matrix_godot.py",
-        "src/conversion/conversion_architecture.md"
+        "src/conversion/conversion_architecture.md",
+        "tests/test_path_model_consumers.py"
       ],
       "non_goals": "No feature changes, wholesale formatting, new framework, or version/release metadata edits.",
       "compatibility_constraints": "Exact GameMaker LTS/Godot target and all worker/registry bytes, ordering, coercion and error phases; accepted aggregate field/default/shape retirement only. Preserve R12 PathModel/T01 and unsorted lookup precedence. No aliases or adapters.",
@@ -1044,7 +1045,18 @@
         "grown": 0,
         "receipt_sha256": "9375ad152bc115907250dd2fd3a5e6229c4946c45c0ea3d74aa2ef2c20872a93"
       },
-      "remaining_verification": "19controls,font matrix and accepted aggregate differences,immutable full with all5fixtures,R01five-input14fieldparity+same-ref,two bounded workloads,actual-parent integration and exact native PR/merge proof."
+      "remaining_verification": "19controls,font matrix and accepted aggregate differences,immutable full with all5fixtures,R01five-input14fieldparity+same-ref,two bounded workloads,actual-parent integration and exact native PR/merge proof.",
+      "cross_family_snapshot_amendment": {
+        "scope": "Only the expected 64-character digest in TestPathModelConsumers.test_resource_matrix_and_empty_project_preserve_other_families; retain all seven assertions, all record families, fixture data and path normalization. The original twelve owner files remain unchanged.",
+        "proposal_index_sha256": "fe3798891d6950e74c8a5e09dc9e5a5adf106df71dcbc24a92b26b950cf1bee3",
+        "old_record_digest": "651ad1121c018bae0ede16519da370d0c5e567e1f37127702aa25cefbd813622",
+        "derived_record_digest": "e2ab818a5d5a81569b433364a932c452aa6250ccdf06ab46319d825ae323404e",
+        "derivation": "Retained actual R12 complete before snapshot; replace only its font record with the accepted canonical ten-field projection. All twelve other record groups exact; no candidate application import.",
+        "failed_source": "465b562380313fad75245b2f97c5ecdd4824228c",
+        "failed_full_result_sha256": "e6d12849bd5e617499275531ce7e6dc73e803307985fb7a2538794c7e0ec865e",
+        "failed_full_outcome": "3161 tests: 3104 successes, one stale snapshot failure, 56 exact prior host skips; all five pinned external fixture tests passed, all595 source and fixture bindings unchanged.",
+        "next_validation": "After source correction: Pyright0/0, both Ruff and explicitly recorded66 selected tests (existing65 plus corrected retained method), then new immutable source and separately reviewed full-v2 with the same suite/five fixtures/skip policy. Rebind unexecuted packages to the corrected source in fresh locations; preserve all original and failed evidence."
+      }
     },
     {
       "task_id": "R14",

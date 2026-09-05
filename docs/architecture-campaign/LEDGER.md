@@ -43,7 +43,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | L01 CLI artifact ownership | verified | audit_transactions_cli; PR #887 merged `7dd2b9c` | Independent/root source, corrections and final proof APPROVE | PR CI33958314011 and merge CI33959387452; exact native CLI/Converter/crash/bind, six N01 receipts, mode cases, two preflight guards and unchanged coverage floors; strict1047 actual7fdd |
 | T01 exact Godot test discovery | verified | audit_policy_tests_docs; PR #888 merged `e142714` | Independent/root source, guarded-parent and exact CI proof APPROVE | PR CI33960637423 and merge CI33961965330;65 runtime cases in Linux Godot and12 helpers per native host,0skips; six receipts, mode/CLI/guards/crash/bind/coverage and strict1045 actual7dd |
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged `b9c05cd` | Independent/root source, local, combined and exact CI proof APPROVE | PR CI33964091840 and merge CI33965005168; required35/0, retained T01/CLI/native receipts and strict1045 actuale142 passed |
-| R13 authoritative font model | approved | audit_gml_resources; frozen12owners on4bb2ad5/b9 | Independent/root actual source and focused proof APPROVE |65tests/0skips,Pyright0/0,bothRuff,strict1042actualb9; full/controls/matrix/parity/timing/native remain |
+| R13 authoritative font model | reviewing | audit_gml_resources; frozen465 plus narrow snapshot correction | Original12-owner source reviews retained; thirteenth-path amendment reviewed before use |65/0 original focused proof and strict1042; full465 has one stale aggregate snapshot failure among3161 tests; corrected66/full-v2 and other gates pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -209,3 +209,12 @@ Windows and Linux claims require their actual native CI receipts.
   entry snapshot; current external campaign verification is I02 at4787f4b,
   15of54 (27.8%), with22 unused worktrees removed. Final integration will preserve
   the then-current campaign ledger and task rows.
+
+- R13 full465 exposed a retained R12 whole-aggregate snapshot that still includes
+  the retired font projection. Its3161 tests include one failure,56 prior host
+  skips and successful conversion of all five pinned external fixtures. The
+  narrow amendment updates one expected digest derived from retained before
+  records and the accepted canonical font shape; all twelve other record groups
+  and all seven assertions stay intact. Preserve the failed run, validate the
+  corrected66-ID selection, then freeze and verify a new full-v2 source. No R13
+  completion credit is added by the correction or the failed run.

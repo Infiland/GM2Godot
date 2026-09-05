@@ -87,6 +87,7 @@ to R13. GameMaker LTS 2026 and exact Godot
 - `tests/test_font_runtime_godot.py`
 - `tests/test_resource_matrix_godot.py`
 - `src/conversion/conversion_architecture.md`
+- `tests/test_path_model_consumers.py` (only the snapshot literal below)
 
 Root alone owns baseline, coverage, required-test manifest, workflow, contract
 and ledger changes. Add the four font/model/source/consumer modules to the
@@ -189,3 +190,30 @@ Full, controls, font matrix, parity/same-ref, performance, current-parent
 integration and final PR/merge native proof remain outstanding. This source
 snapshot is based on b9; root will preserve the later verified I02/L02 campaign
 state during integration. Original proof will retain its actual source identity.
+
+## Retained whole-aggregate snapshot amendment
+
+The immutable `465b562380313fad75245b2f97c5ecdd4824228c` full run executed
+3161 tests: 3104 successes, one stale snapshot failure and56 exact prior host
+skips. All five pinned external fixture tests passed; all595 tracked files and
+fixture bindings stayed unchanged. Preserve that failed result and its package.
+
+Root authorizes the thirteenth owner path only for the expected digest in
+`TestPathModelConsumers.test_resource_matrix_and_empty_project_preserve_other_families`.
+The retained R12 snapshot includes fonts. Derivation from its complete stored
+before records and the accepted ten-field font shape changes only that font
+record; all twelve other record groups remain exact. The complete expected hash
+changes from `651ad1121c018bae0ede16519da370d0c5e567e1f37127702aa25cefbd813622`
+to `e2ab818a5d5a81569b433364a932c452aa6250ccdf06ab46319d825ae323404e`.
+Keep all seven assertions, all record families, fixture bytes, path normalization
+and the original twelve source owners unchanged. The equal-length literal does
+not change the module/method AST structure or maintainability allowance.
+
+The frozen proposal index is `fe3798891d6950e74c8a5e09dc9e5a5adf106df71dcbc24a92b26b950cf1bee3`.
+After correction, run Pyright with zero errors/warnings, both Ruff checks and an
+explicit66-ID selection: existing65 plus the corrected retained method, no skips.
+Freeze a new source commit and reviewed full-v2 package before the required full
+suite with all five external fixtures. Rebind unexecuted parity, matrix, controls
+and timing packages in fresh locations; preserve all original evidence and every
+accepted payload, assertion, native gate, coverage floor and benchmark workload.
+The failed full result does not establish proof for the corrected tree.

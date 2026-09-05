@@ -203,7 +203,7 @@ class TestPathModelConsumers(unittest.TestCase):
             encoded = encoded.replace("\\\\", "/")
         self.assertEqual(
             hashlib.sha256(encoded.encode("utf-8")).hexdigest(),
-            "651ad1121c018bae0ede16519da370d0c5e567e1f37127702aa25cefbd813622",
+            "e2ab818a5d5a81569b433364a932c452aa6250ccdf06ab46319d825ae323404e",
         )
         self.yyp.write_text('{"name":"Empty","resources":[]}', encoding="utf-8")
         empty = parse_gamemaker_resource_models(str(self.project))

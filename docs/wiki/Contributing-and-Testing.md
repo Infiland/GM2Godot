@@ -123,6 +123,50 @@ Godot validation gives the output reader a bounded drain window, then requests s
 
 Linux packaged-GUI verifier tests use a named 15-second budget for ordinary subprocess integration. Intentional timeout and cleanup cases first require a bounded test-only PID readiness receipt, then exercise a 0.25-second runtime deadline; missing readiness is a distinct startup-test failure. Receipt and loader-diagnostic policy is tested directly where a real process is not part of the behavior. The production release verifier remains fail-closed at 60 seconds and still launches the exact packaged GUI through real Xvfb.
 
+### Required native receipt publication
+
+The native receipt gates use the existing required-test runner. Run the matching
+gate in its verified environment; the runtime tuple is checked before collection:
+
+| Gate | Required native runtime | Exact tests |
+| --- | --- | --- |
+| `N01-linux` | CPython 3.12.13, Linux, x86_64 | 10 |
+| `N01-macos` | CPython 3.12.10, macOS, arm64 | 13 |
+| `N01-windows` | CPython 3.12.10, Windows, AMD64, NTFS | 16 |
+
+For example, from the repository root on the macOS baseline:
+
+```bash
+NATIVE_RECEIPT_PROFILE=stable ./venv/bin/python -m scripts.run_required_unittest \
+  --manifest architecture-verification.json --gate N01-macos \
+  --receipt native-receipts/macos.json
+```
+
+Use `N01-linux` on Linux and `N01-windows` with `venv/Scripts/python.exe` on
+Windows. Each manifest lists individual methods; missing methods, incomplete
+execution, wrong runtimes, and every skip fail the gate. Ordinary full discovery
+still skips tests belonging to a different host. Tests CI runs these gates in
+its three existing native environments. Dependency Locks runs them through its
+verified committed generator with `NATIVE_RECEIPT_PROFILE=native-lock-workflow`,
+requiring `pip` then `pip-tools`. Its native gate artifacts are separate from the
+exact eight dependency-verification receipts.
+
+The gates exercise the public publisher and normal bootstrap/environment CLIs.
+Windows cases use real NTFS handles, metadata, junctions, hard links, sharing
+denials, native ABI observations, and bounded interleavings. Modeled Windows
+fault tests remain useful but do not supply this native evidence. POSIX tests
+verify file and directory `fsync`; Windows guarantees file-data flush and
+namespace/identity revalidation, without claiming a retained-directory flush.
+These checks do not establish behavior on an untested filesystem or simulate a
+power-loss durability guarantee.
+
+All four receipt producers now share fresh-or-identical publication. Identical
+bytes preserve the existing inode/file ID. Different bytes fail without replacing
+the receipt; choose a fresh output path for a different run. The two R01 CLIs
+report a nonzero publication error with its code, cause and cleanup notes.
+Neither R01's complete conversion-parity prerequisites nor its receipt schema
+changes with the new native validation kind.
+
 ### Enforce the GML phase boundary
 
 Run the R01 architecture contract while changing the GML facade or phase owners:

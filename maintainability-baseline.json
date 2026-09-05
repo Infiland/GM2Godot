@@ -1932,7 +1932,7 @@
       "structure": 9997
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {
-      "ast_sha256": "ae72cebfc3f0628e27a3e13b0637a0fcf2257e0a2a77155261b728669846c986",
+      "ast_sha256": "40db60825d65387916655515e2031da254910d88ce77674cae9ab3020ca0693f",
       "lines": 6689,
       "structure": 12303
     },

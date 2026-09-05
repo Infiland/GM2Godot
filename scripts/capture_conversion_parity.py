@@ -9,9 +9,14 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import traceback
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from scripts._anchored_output import (
+    AnchoredOutputError,
+    publish_identical_receipt_bytes,
+)
 from scripts.conversion_parity_contract import (
     DestinationDefinition,
     FixtureDefinition,
@@ -107,20 +112,10 @@ def capture_parity(
 
 
 def write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
-    """Atomically write a canonical parity receipt for review evidence."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Publish a fresh or byte-identical canonical parity receipt."""
     payload = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temporary:
-        temporary.write(payload)
-        temporary_path = Path(temporary.name)
-    temporary_path.replace(path)
+    # Preserve the previous text writer's native newline bytes, including CRLF.
+    publish_identical_receipt_bytes(path, payload.replace("\n", os.linesep).encode("utf-8"))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -148,7 +143,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ParityError as error:
         print(f"parity capture error: {error}", file=sys.stderr)
         return 2
-    write_receipt(args.receipt, receipt)
+    try:
+        write_receipt(args.receipt, receipt)
+    except AnchoredOutputError as error:
+        print(f"receipt publication error [{error.code}]: {error}", file=sys.stderr)
+        traceback.print_exception(error, file=sys.stderr)
+        return 2
     return 0 if receipt["equal"] else 1
 
 

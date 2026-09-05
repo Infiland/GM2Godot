@@ -7,16 +7,19 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through C01 PR #875 at
-  `3579cdd`. Both its final PR and exact merge revision passed aggregate native CI.
+- Integration branch: `dev/080-architecture-campaign`, through R10 PR #878 at
+  `91a33c1`. C01 and D01 passed final PR and merge CI; R10 passed final PR CI and
+  its merge CI is running.
+- Progress counts fully verified roadmap tasks: 4 of 54 (7.4%). Integration and
+  pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
 - Approved local environment: native CPython 3.12.10 arm64 and exact Godot
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root will coordinate the single final v0.8.0 release.
-- No external blocker. N01 is preparing frozen review and native proof. R10 code
-  is approved at `bd0967c`; immutable conversion parity is running. The remaining
+- No external blocker. N01 has approved code and six successful native receipt
+  artifacts at `b06c15b`; root is verifying the combined R10/N01 revision. The remaining
   planned rows need bounded contract acceptance before implementation.
 
 ## Ownership and progress
@@ -27,9 +30,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R02 shrinking policy | verified | audit_transactions_cli, `3d2cfd0`; integrated `50e86af` | audit_policy_tests_docs and root approved | `R02/README.md`; integrated CI at `3579cdd` |
 | R01 GML boundaries | verified | audit_gml_resources, `68dbf847`; integrated `edfe6df` | Independent semantic/structural review and root approved | `r01-corrections-final-index.json`, `r01-integrated-required.json`; integrated CI at `3579cdd` |
 | C01 aggregate CI | verified | audit_transactions_cli, root integration corrections through `244f8aa`; PR #875 merged `3579cdd` | Independent and root reviews approved | `C01/live-final-run.json`, `C01/merge-push-run.json` |
-| D01 diagnostic models | approved | audit_policy_tests_docs, `a679a2f`; root coverage ownership correction `6919ffb` | Independent and root reviews approved both scopes | PR #876 native rerun pending; `D01/coverage-owner-comparison.json` |
-| N01 native receipts | implementing | audit_transactions_cli; accepted contract `5944ecf` | Independent and root reviews underway | `N01-contract-refinement.md`; native CI still required |
-| R10 recursive JSON | reviewing | audit_gml_resources, `bd0967c`; accepted contract `4a60e46` | Independent and root code reviews approved | `R10/candidate-commit.json`, `R10/*-final.json`; immutable parity pending |
+| D01 diagnostic models | verified | audit_policy_tests_docs, `a679a2f`; PR #876 merged `c2d55e6` | Independent and root reviews approved extraction and coverage correction | `D01/live-final-run.json`, `D01/merge-push-run.json` |
+| N01 native receipts | reviewing | audit_transactions_cli, `66bfcfe`; root newline correction and reviewed Windows test through `b06c15b`; PR #879 | Independent and root code reviews approved | Six zero-skip native receipts; combined revision CI remains required |
+| R10 recursive JSON | integrated | audit_gml_resources, `bd0967c`; root integration `e56a5e3`; PR #878 merged `91a33c1` | Independent and root code/integration reviews approved | Both immutable parity runs match; final PR CI passed; merge CI running |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -99,14 +102,26 @@ Raw evidence is retained outside the worktrees at
 - D01's first native CI ran all unit/native/Godot/conversion checks successfully;
   two coverage groups omitted the moved fully covered leaf. The correction passed
   independent review, Pyright 0/0, Ruff, 26 focused tests and the 1,340-entry gate.
-  The same saved Linux report now passes every unchanged coverage floor. A new
-  exact-revision CI run remains required before integration.
+  The same saved Linux report now passes every unchanged coverage floor.
+  Final PR run `33929950992` at `7a27ccd` and merge run `33931958726` at `c2d55e6`
+  each passed 24 checks and the explicitly permitted dependency submission skip.
 - R10: final Pyright 0/0, Ruff, 287 required tests with zero skips and the
   1,338-entry gate passed. The frozen full run passed 3,017 tests with 44 native/
   filesystem skips across all five pinned projects. A subsequent one-line test
   portability correction accepts native directory-open `OSError`; all production
   hashes stayed unchanged and focused proof was rerun. Root verified source and
-  log hashes. Immutable five-fixture, fourteen-field parity is still pending.
+  log hashes. Immutable base/candidate and same-reference comparisons match across
+  five fixtures and all fourteen fields, including the 44-export facade contract.
+  Final PR CI `33932635435` at `e56a5e3` passed all 24 required checks; merge CI
+  `33933858620` at `91a33c1` is running. The merge tree equals the approved PR tree.
+- N01's frozen full run passed 3,031 tests with 56 classified native/filesystem
+  skips across all five external projects. Reviewed follow-up corrections preserve
+  legacy native newline bytes and assert the actual NT directory handle chain.
+  At `b06c15b`, CI `33933576033` produced all six required receipts: Linux 10,
+  macOS 13 and Windows 16 tests, each executed twice with zero skips. Root verified
+  exact selected methods, success fields and artifact hashes. After combining R10,
+  Pyright 0/0, Ruff, 131 focused tests, 287 R10 required tests, 13 required macOS
+  receipt tests and the 1,338-entry gate passed. Combined revision CI is pending.
 - The earlier exploratory TCC/Monophobia run overlapped root source edits and is
   not immutable baseline evidence; its explicit caveat remains with the raw log.
 

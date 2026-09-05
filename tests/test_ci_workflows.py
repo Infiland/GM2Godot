@@ -1391,10 +1391,10 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 8, locations)
+        self.assertEqual(len(locations), 12, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
-            2,
+            3,
             locations,
         )
 

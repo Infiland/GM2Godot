@@ -173,3 +173,69 @@ revisions. Existing Windows14, scale, seven Godot and generic bind proof remain.
 This assignment begins implementation and supplies no completed runtime proof
 or task-verification credit. T01's independent test-helper migration will be
 reconciled from its actual verified parent during serial integration.
+
+
+## Accepted pre-extraction evidence and four-site refinement
+
+The reviewed observer and ten new characterization tests have executed on unchanged
+source at `abd97e414544513111b9e447aeb2356f0d34b337`, whose 384 Python files
+still match the accepted entry. The observer selected all 64 existing IDs: 63
+passed on native macOS Python 3.12.10 and the existing Linux-only bind method skipped
+with exactly `Native Linux bind mounts are unavailable`. Its first host guard
+prevents old-source native profiling on this Mac. That method has no moved-function
+patch; its unchanged shared os.path.ismount patch and native assertions were reviewed.
+Old privileged-Linux profiler edges and counts remain explicitly unavailable.
+The required privileged Linux one-ID command still must pass with zero skips on
+both PR and merge; static review and local models do not replace that evidence.
+
+All 59 expected per-test patch lifetimes were entered and had positive calls to
+their own target, with no missing or unexpected lifetimes. The raw receipt retains
+5,844 rows and 209,253 calls, including real delegates and 301 unmapped Mock rows.
+Source-span review found no moved-function call among those unmapped rows. The ten
+new tests passed 10/10 with zero skips against the real old functions and exact
+reviewed import/patch-target translation. Those tests prove native macOS behavior
+plus their explicitly declared parser, metadata and capability models. Initial
+29/32-file observer/template attempts and their corrected findings remain preserved.
+
+Actual active calls establish 40 facade-only patch sites, two POSIX-only sites and
+four sites needing both lookup owners. Only those four descriptor capability sites
+change from the earlier single-binding projection: streaming cleanup, nested mount,
+deep tree scale and deep ancestor swap. Each first patch targets
+`src.conversion.included_files.descriptor_paths_supported` and binds its original
+configured Mock as descriptor_capability. The immediately following patch installs
+that same object at
+`src.conversion.included_files_parts.posix_operations.descriptor_paths_supported`.
+The existing Boolean, with lifetime, shared call history and reverse restoration
+remain intact. The other 42 sites and all 826 retained assertion ASTs stay unchanged.
+
+The four functions have physical/structural sizes 76/117, 80/137, 81/97 and 82/143.
+Their structural sizes match the accepted projection and physical sizes grow only
+three lines each, remaining below 200. The retained test module becomes
+12,307/21,384, below entry 12,420/21,674. The final POSIX test template is 424/1,129;
+the metadata template is 76/249. No helper, adapter, new allowance or suppression
+is introduced by this refinement. Final candidate typing, global import layout,
+strict actual-parent debt and all focused/full/native checks remain required.
+
+Before the post-extraction observer runs, freeze and review its exact three-source
+call map and four paired-site projection. Map each pair to one original consuming
+lifetime without counting a call twice; retain exact per-test/variant/caller counts.
+The four True lower-call totals must remain 6/1/8/1, with zero lower calls in every
+False variant. Preserve real delegation and both actual lookup owners. The deep
+ancestor test patches os.listdir, so the lower forced-True selector is necessary
+to reach its native race. Only accepted owner/test moves and the existing local
+Boolean rename may otherwise be normalized.
+
+Accepted corrected pre-use index: `e75dd9bb52dbc5f4a9be350fdc3ecb3cbc4a97416b062b801dbc177564ef8e39`.
+Raw binding index: `0270689262b0174d7cf5133011a3ae7b2d40b401c297590c62ab8b8fa43784f9`.
+Ten-test receipt: `a34ae01baa78d980cab33e2f82bf8add2eba24c87aa8632e97964b59dbd588b6`.
+Independent/root data approvals: `8ffdbfe937ecc591d233ad43df639bab1bd2bc1bbc6c7dfcb291493179787c5a` /
+`e46f82b7b8d6e521c1b66dd89e064dbc387ee35fd23fe1480e50e7cb1f36f1f7`.
+Four-site index: `ea60cfb5293edd91fc731b007cf13cdb4a4c5ce8e3922a5a721103f2036ba025`.
+Independent/root four-site approvals: `c6e7c651b1fb1994976a3ec60b949407c504c88c482ec5c8e634f64c42436956` /
+`629479528286c281d6a0adeaf506622e6f49ace26ab75a28c352ec03438ff75a`.
+
+This completes the amended before-production prerequisite. The same seven owner
+paths and six root-only metadata paths remain. Native Linux/macOS 23 each,
+privileged Included Files Linux 1, Windows metadata 3, retained Windows 14 plus
+scale, seven Godot cases and the separate generic bind gate are unchanged. No
+production implementation, native CI or I02 task verification is claimed here.

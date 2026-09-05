@@ -172,7 +172,10 @@ retained-directory flush on Windows or supported behavior on an unproved filesys
    requirements `pip,pip-tools`. Its N01 artifacts live outside `RECEIPT_DIR`,
    whose exact eight-receipt contract remains intact; upload N01 separately with
    missing-file failure. Do not invent a second environment verifier.
-3. Include actual `CreateFileW` ancestor acquisition in bounded observations.
+3. Observe actual `NtCreateFile` receipt ancestor acquisition, including the
+   absolute anchor and complete retained relative-directory handle chain.
+   `CreateFileW` belongs to the separate generic snapshot path; retain its
+   observer so unexpected fallback violates the exact receipt-call inventory.
    Forward factory arguments and real calling conventions and argtypes/restype.
    Keep CloseHandle untouched. Preserve incoming ctypes last-error across
    pre-hooks; capture ctypes.get_last_error immediately after the delegated call
@@ -223,3 +226,16 @@ The frozen full suite completed before this correction; its original source
 inventory and evidence remain separate. Root assumed only this correction while
 the implementation and review agents were unavailable; independent re-review and
 native Windows execution remain required before approval.
+
+Run 33932710267 exercised both real Windows producer profiles and found one
+incorrect test expectation: the receipt call inventory required CreateFileW,
+although all receipt ancestor opens use NtCreateFile. Root accepted a test-only
+correction in this native test module and this contract. Keep the exact seven
+actual receipt APIs and all method IDs. During live callbacks, snapshot each
+successful directory open's immutable name, RootDirectory and returned handle;
+assert access 0x001000A0, sharing 3, options 0x00200021, FILE_OPEN for the absolute
+anchor and FILE_OPEN_IF for children. After immediate handle-closure checks,
+compare the complete physical ancestor names and each child root to its
+preceding returned handle. Preserve all independent metadata/identity, reuse,
+failure and other native cases. No production or manifest/workflow change is
+part of this correction; exact-revision Windows CI must rerun it.

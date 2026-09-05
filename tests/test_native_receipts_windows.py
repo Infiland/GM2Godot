@@ -58,17 +58,7 @@ class TestNativeReceiptsWindows(unittest.TestCase):
 
     def _assert_native_call_abi(self, call: NativeCall) -> None:
         arguments = call.arguments
-        self.assertIsNotNone(call.argtypes)
-        if call.name == "CreateFileW":
-            self.assertEqual(call.argtypes, (ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
-                                            ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p))
-            self.assertEqual(call.restype, ctypes.c_void_p)
-            self.assertEqual(arguments[1], 0xA0)
-            self.assertEqual(arguments[2], 3)
-            self.assertEqual(arguments[4], 3)
-            self.assertEqual(arguments[5], 0x02200000)
-            return
-        elif call.name == "NtCreateFile":
+        if call.name == "NtCreateFile":
             self._assert_nt_open(call)
             return
         elif call.name == "NtSetInformationFile":
@@ -86,7 +76,7 @@ class TestNativeReceiptsWindows(unittest.TestCase):
             self.assertEqual(call.argtypes, (ctypes.c_void_p,))
             self.assertEqual(call.restype, ctypes.c_uint32)
             self.assertEqual(call.result, 1)
-        else:
+        elif call.name in {"WriteFile", "ReadFile", "FlushFileBuffers"}:
             self._assert_native_io(call)
 
     def _assert_native_io(self, call: NativeCall) -> None:
@@ -123,7 +113,6 @@ class TestNativeReceiptsWindows(unittest.TestCase):
         self.assertEqual(name.maximum, name.length + 2)
         self.assertEqual(ctypes.string_at(name.buffer + name.length, 2), b"\0\0")
         options = arguments[8]
-        self.assertIsInstance(options, int)
         assert isinstance(options, int)
         self.assertTrue(options & 0x00200000)
         self.assertEqual(arguments[6], 3 if options & 1 else 1)
@@ -133,6 +122,18 @@ class TestNativeReceiptsWindows(unittest.TestCase):
             completion = ctypes.cast(pointer(arguments[3]), ctypes.POINTER(IoStatus)).contents
             self.assertIsNone(completion.status)
             self.assertIn(completion.information, {1, 2})
+        if options & 1:
+            self._assert_nt_directory_open(call, attributes)
+
+    def _assert_nt_directory_open(self, call: NativeCall, attributes: ObjectAttributes) -> None:
+        self.assertEqual(call.result, 0)
+        self.assertEqual(call.arguments[1], 0x001000A0)
+        self.assertEqual(call.arguments[8], 0x00200021)
+        self.assertEqual(call.arguments[7], 3 if self.directory_opens else 1)
+        name = nt_name(call.arguments)
+        handle = ctypes.cast(pointer(call.arguments[0]), ctypes.POINTER(ctypes.c_void_p)).contents.value
+        assert handle is not None
+        self.directory_opens.append((name, attributes.root, handle))
 
     def _assert_nt_rename(self, call: NativeCall) -> None:
         signature = call.argtypes
@@ -155,12 +156,18 @@ class TestNativeReceiptsWindows(unittest.TestCase):
 
     def test_native_abi_publication_and_identical_identity(self) -> None:
         self.assertEqual(native_abi_layout(), WINDOWS_AMD64_ABI)
+        self.directory_opens: list[tuple[str, int | None, int]] = []
         with NativeCapture(after=self._assert_native_call_abi) as capture:
             publish_identical_receipt_bytes(self.path, PAYLOAD)
         self._assert_closed(capture)
+        anchor = self.root.anchor
+        nt_anchor = "\\??\\UNC\\" + anchor[2:] if anchor.startswith("\\\\") else "\\??\\" + anchor
+        self.assertEqual([name for name, _parent, _handle in self.directory_opens], [nt_anchor, *self.root.parts[1:]])
+        self.assertEqual([parent for _name, parent, _handle in self.directory_opens],
+                         [None, *[handle for _name, _parent, handle in self.directory_opens[:-1]]])
         observed = {call.name for call in capture.calls}
         self.assertEqual(observed, {
-            "CreateFileW", "NtCreateFile", "NtSetInformationFile", "WriteFile", "ReadFile",
+            "NtCreateFile", "NtSetInformationFile", "WriteFile", "ReadFile",
             "FlushFileBuffers", "GetFileInformationByHandleEx", "GetFileType",
         })
         first = self.native.metadata(self.path)

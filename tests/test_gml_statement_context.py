@@ -8,16 +8,20 @@ from pathlib import Path
 from typing import Iterable, Mapping, MutableMapping, MutableSet, NamedTuple, get_type_hints
 from unittest.mock import patch
 
-from src.conversion import gml_transpiler as facade
-from src.conversion.gml_transpiler_parts import statement_api, statement_parser, statements
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
+from src.conversion.gml_transpiler_parts.statement_api import parse_gml_statements
 from src.conversion.gml_transpiler_parts.statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
     GMLStatementResult,
     StatementLoweringContext,
 )
+from src.conversion.gml_transpiler_parts.statements import transpile_statement
+from src.conversion.gml_transpiler_parts.utils import normalize_scope_context
+from tests.gml_facade_contract_support import static_all_exports
+
+PARTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts"
 
 FIELD_NAMES = (
     "local_names",
@@ -52,7 +56,7 @@ FIELD_TYPES = (
     list[int] | None,
     ControlFlowCapture | None,
 )
-LOWER_SIGNATURE = inspect.signature(statements.transpile_statement)
+LOWER_SIGNATURE = inspect.signature(transpile_statement)
 
 
 def _lowering_state(args: tuple[object, ...], kwargs: dict[str, object]) -> dict[str, object]:
@@ -107,8 +111,8 @@ def _parser_calls(source: str) -> list[_ParserCall]:
         calls.append(_ParserCall(statement.replace(" ", ""), state, context))
         return ["LOWERED"]
 
-    with patch.object(statement_parser, "transpile_statement", side_effect=lower):
-        statement_api.parse_gml_statements(GMLStatementRequest(tuple(tokenize_gml_source(source))))
+    with patch("src.conversion.gml_transpiler_parts.statement_parser.transpile_statement", side_effect=lower):
+        parse_gml_statements(GMLStatementRequest(tuple(tokenize_gml_source(source))))
     return calls
 
 
@@ -117,11 +121,14 @@ class TestStatementLoweringContext(unittest.TestCase):
         events: list[str] = []
         macro = _ObservedMapping(events, False)
         counter: list[int] = []
-        with patch.object(statements, "normalize_scope_context", side_effect=AssertionError("scope was read")):
-            first = statements.transpile_statement(
+        with patch(
+            "src.conversion.gml_transpiler_parts.statements.normalize_scope_context",
+            side_effect=AssertionError("scope was read"),
+        ):
+            first = transpile_statement(
                 "", StatementLoweringContext(macro_values=macro, generated_counter=counter)
             )
-            second = statements.transpile_statement(
+            second = transpile_statement(
                 "", StatementLoweringContext(macro_values=macro, generated_counter=counter)
             )
         self.assertEqual(first, [])
@@ -129,16 +136,17 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertIsNot(first, second)
         self.assertEqual(events, [])
         self.assertEqual(counter, [])
-        with patch.object(
-            statements, "StatementLoweringContext", side_effect=AssertionError("context was constructed")
+        with patch(
+            "src.conversion.gml_transpiler_parts.statements.StatementLoweringContext",
+            side_effect=AssertionError("context was constructed"),
         ):
-            self.assertEqual(statements.transpile_statement(""), [])
-        self.assertEqual(statements.transpile_statement("var default"), ["var default = GMRuntime.gml_undefined()"])
+            self.assertEqual(transpile_statement(""), [])
+        self.assertEqual(transpile_statement("var default"), ["var default = GMRuntime.gml_undefined()"])
 
     def test_none_defaults_and_falsey_mapping_preserve_existing_rules(self) -> None:
         observed: list[dict[str, object]] = []
         events: list[str] = []
-        normalize = statements.normalize_scope_context
+        normalize = normalize_scope_context
 
         def scope(value: ScopeContext | None) -> ScopeContext:
             events.append("scope")
@@ -165,12 +173,12 @@ class TestStatementLoweringContext(unittest.TestCase):
         truthy = _ObservedMapping(events, True)
         default_context = StatementLoweringContext(macro_values=falsey)
         with (
-            patch.object(statements, "normalize_scope_context", side_effect=scope),
-            patch.object(statements, "_transpile_var_statement", side_effect=declaration),
+            patch("src.conversion.gml_transpiler_parts.statements.normalize_scope_context", side_effect=scope),
+            patch("src.conversion.gml_transpiler_parts.statements._transpile_var_statement", side_effect=declaration),
         ):
-            statements.transpile_statement("var first", default_context)
-            statements.transpile_statement("var second", default_context)
-            statements.transpile_statement(
+            transpile_statement("var first", default_context)
+            transpile_statement("var second", default_context)
+            transpile_statement(
                 "var third",
                 StatementLoweringContext(
                     local_names=local,
@@ -210,7 +218,7 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertIsNone(record["instance_variables"])
         self.assertIsNone(record["enum_values"])
         self.assertIsNone(record["enum_names"])
-        self.assertIs(record["scope_context"], statements.normalize_scope_context(None))
+        self.assertIs(record["scope_context"], normalize_scope_context(None))
         self.assertEqual(record["macro_values"], {})
         self.assertIsNot(record["macro_values"], falsey)
         self.assertEqual(record["generated_counter"], [0])
@@ -222,7 +230,7 @@ class TestStatementLoweringContext(unittest.TestCase):
         instances = _ObservedSet("instance", events)
         counter = [7]
         self.assertEqual(
-            statements.transpile_statement(
+            transpile_statement(
                 "var score=1",
                 StatementLoweringContext(
                     local_names=local,
@@ -236,7 +244,7 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertEqual(events, [("local", "score"), ("declared", "score")])
         events.clear()
         self.assertEqual(
-            statements.transpile_statement(
+            transpile_statement(
                 "target=score++",
                 StatementLoweringContext(
                     local_names=local,
@@ -258,15 +266,15 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertEqual(instances, {"target"})
         empty: list[int] = []
         self.assertEqual(
-            statements.transpile_statement("var plain=1", StatementLoweringContext(generated_counter=empty)),
+            transpile_statement("var plain=1", StatementLoweringContext(generated_counter=empty)),
             ["var plain = 1"],
         )
         self.assertEqual(
-            statements.transpile_statement("answer=++i", StatementLoweringContext(generated_counter=empty)),
+            transpile_statement("answer=++i", StatementLoweringContext(generated_counter=empty)),
             ["i = GMRuntime.gml_add(i, 1)", "answer = i"],
         )
         with self.assertRaisesRegex(IndexError, "list index out of range"):
-            statements.transpile_statement("answer=i++", StatementLoweringContext(generated_counter=empty))
+            transpile_statement("answer=i++", StatementLoweringContext(generated_counter=empty))
         self.assertEqual(empty, [])
 
     def test_parser_reads_fresh_context_in_original_argument_order(self) -> None:
@@ -296,7 +304,7 @@ class TestStatementLoweringContext(unittest.TestCase):
                 self.assertEqual(_parser_calls(source), [])
 
     def test_recursive_increment_retains_normalized_state_and_omits_capture(self) -> None:
-        lower = statements.transpile_statement
+        lower = transpile_statement
         instances: set[str] = set()
         enum_values = {"Direction": {"LEFT": 2}}
         enum_names = iter(["Direction"])
@@ -310,7 +318,7 @@ class TestStatementLoweringContext(unittest.TestCase):
             self.assertEqual(state["local_names"], {"_gml_increment_value_0"})
             return ["INCREMENT"]
 
-        with patch.object(statements, "transpile_statement", side_effect=recursive):
+        with patch("src.conversion.gml_transpiler_parts.statements.transpile_statement", side_effect=recursive):
             lines = lower(
                 "answer=i++",
                 StatementLoweringContext(
@@ -336,7 +344,7 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertEqual(state["inherited_event_call"], "super.event()")
         self.assertEqual(state["declared_local_names"], set())
         self.assertIsNot(state["local_names"], state["declared_local_names"])
-        self.assertIs(state["scope_context"], statements.normalize_scope_context(None))
+        self.assertIs(state["scope_context"], normalize_scope_context(None))
         self.assertEqual(state["macro_values"], {})
         self.assertIsNone(state["control_flow_capture"])
         self.assertEqual(instances, {"answer"})
@@ -363,7 +371,7 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertEqual(context.generated_counter, [5])
 
     def _assert_factory_field_order(self) -> None:
-        tree = ast.parse(Path(statement_parser.__file__).read_text(encoding="utf-8"))
+        tree = ast.parse((PARTS_PATH / "statement_parser.py").read_text(encoding="utf-8"))
         factory = next(
             node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "_lowering_context"
         )
@@ -384,15 +392,17 @@ class TestStatementLoweringContext(unittest.TestCase):
         self.assertEqual([ast.unparse(value) for value in factory.args.kw_defaults if value is not None], ["False"])
 
     def test_statement_phase_contract_and_facade_stay_unchanged(self) -> None:
-        self.assertEqual(len(facade.__all__), 44)
-        self.assertNotIn("StatementLoweringContext", facade.__all__)
-        self.assertNotIn("StatementLoweringContext", statement_api.__all__)
+        facade_exports = static_all_exports((PARTS_PATH.parent / "gml_transpiler.py").read_text(encoding="utf-8"))
+        phase_exports = static_all_exports((PARTS_PATH / "statement_api.py").read_text(encoding="utf-8"))
+        self.assertEqual(len(facade_exports), 44)
+        self.assertNotIn("StatementLoweringContext", facade_exports)
+        self.assertNotIn("StatementLoweringContext", phase_exports)
         self.assertEqual(
-            tuple(statement_api.__all__), ("collect_static_declarations", "parse_gml_statements", "static_scope_id")
+            tuple(phase_exports), ("collect_static_declarations", "parse_gml_statements", "static_scope_id")
         )
-        self.assertEqual(tuple(inspect.signature(statement_api.parse_gml_statements).parameters), ("request",))
+        self.assertEqual(tuple(inspect.signature(parse_gml_statements).parameters), ("request",))
         instances: set[str] = set()
-        result = statement_api.parse_gml_statements(GMLStatementRequest((), instance_variables=instances))
+        result = parse_gml_statements(GMLStatementRequest((), instance_variables=instances))
         self.assertIsInstance(result, GMLStatementResult)
         self.assertIs(result.instance_variables, instances)
         self.assertEqual(result.lines, ())

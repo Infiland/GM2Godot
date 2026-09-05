@@ -2002,7 +2002,7 @@
       "task_id": "T01",
       "issue": 867,
       "title": "Test support exact Godot discovery",
-      "state": "implementing",
+      "state": "reviewing",
       "problem_and_evidence": "Repeated engine/path/temp-process setup obscures behavior and skips.",
       "expected_benefit": "Zero duplicate Godot discovery in accepted inventory; helpers <=300 lines; meaningful assertions remain in tests.",
       "current_owner": "Godot/fixture tests and sys.path-modifying tests",
@@ -2088,11 +2088,34 @@
         "owner_paths": 53,
         "root_only_baseline": true,
         "production_unchanged": true,
-        "required_ids": 76,
+        "required_ids": 78,
         "allowed_skips": {},
         "heavy_proof": "Reserve root window before full/runtime/performance",
         "implementation_authorized": true
-      }
+      },
+      "code_review": {
+        "verdict": "APPROVE independent and root actual code",
+        "source_commit": "4defcb3f5de3f6bea8bf130488dcc6fc55de4599",
+        "final_index_sha256": "d78600e90ae843962ba62861cb0e85a69918425e1f565deb7fed47793ad84aaa",
+        "baseline_candidate": "c767c48e9f9a129d8e5e62e306a8282712b81821"
+      },
+      "selection_correction": {
+        "old_control": "76 selected;1 intentional skip plus1 invalid camera-helper TypeError; preserved and not accepted as skip-only proof",
+        "scope": "Replace sole private helper ID with three retained public wrappers; other order/source/IDs unchanged",
+        "required_runtime": 66,
+        "helper_methods": 12,
+        "required_total": 78,
+        "static_helper_sites": 64,
+        "actual_probe_counts": {
+          "before": 15,
+          "after": 66
+        },
+        "index_sha256": "0330beafc6bb268b7e64c06dc1dbb47cbb74986cfe8750d201a0acd87f69b433",
+        "independent_receipt_sha256": "77c68e5f2b7102ad30576c8c5b50ec4f514076f07be8639eaefa6e7145134343",
+        "verdict": "APPROVE external correction; corrected runtime/full/benchmark unexecuted"
+      },
+      "local_proof": "Pyright0/0; bothRuff; light34/0 and independent27/0; actionlint/strict1054; original112/0 owner run. Corrected78 gate/full/15-vs66 timing and exact native PR/merge proof pending.",
+      "remaining_verification": "Freeze root correction metadata; corrected required78/0 and prerequisite controls; finite15/66 overhead; full all-five/exact-Godot; native12/0 on macOS/Windows; actual-parent integration and exact PR/merge CI."
     },
     {
       "task_id": "T02",

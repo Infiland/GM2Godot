@@ -36,7 +36,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
 | R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
 | I01 Included Files models and planning | approved | audit_transactions_cli, `93d6ac8` | Independent and root actual-code APPROVE | 3,076 full tests/56 classified skips; ten-case public parity and same-ref match; 10,000-file benchmark; exact PR/merge native proof pending |
-| T01 exact Godot test discovery | implementing | audit_policy_tests_docs; fixed verified parent `feb22c3` | Corrected contract independently/root approved; code review required | T01-godot-test-support-contract.md; all 76 inputs reverified; 53 owner files plus root baseline |
+| T01 exact Godot test discovery | reviewing | audit_policy_tests_docs; approved source `4defcb3`, baseline candidate `c767c48` | Independent/root code APPROVE; external selection correction APPROVE | Owners112/0; static64 sites execute66 runtime probes; corrected required78/full/15-vs66 timing and native PR/merge proof pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at

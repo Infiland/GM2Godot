@@ -167,3 +167,56 @@ One root-assigned T01 implementer in an isolated `dev/` worktree; transactions a
 Acceptance decisions still outstanding: (1) the combined-stream rule and its exact six-site channel changes; (2) final acceptance of the 54-file implementer scope and finite external required-proof invocation (the two native command-list additions are already accepted in principle); (3) retaining the 12 already-canonical runtime methods and parity validator as read-only; (4) scheduling/fixed parent after R04 bridge retirement and exact runtime/performance proof acceptance. No additional permission is inferred from this proposal.
 
 Completion requires zero `_find_godot_binary` definitions/references in the accepted 43-owner inventory, zero local `--version` subprocess blocks at all 15 old sites, all 64 callers on the one test helper, preserved 112 old IDs/visible assertions, the 12 new meaningful test IDs, no source/type/lint/new-debt regressions, required native/exact-engine evidence, independent and root approval, and final PR/merge exact-revision CI. Existing direct production-finder imports solely for DS/stale decorator/global timing remain intentional and are not duplicate finder implementations. No temporary adapter is proposed; all old local definitions and migrated version blocks are deleted in this task before verification. The helper is a permanent small test-only owner; it cannot become a new application discovery owner or T02 subprocess framework.
+
+
+## Accepted executable selection correction
+
+This addendum supersedes the earlier conflation of static call sites, executable
+runtime methods and complete probe counts. All 53 implementation owner files remain
+exactly as independently/root approved at source commit
+`4defcb3f5de3f6bea8bf130488dcc6fc55de4599`; baseline-only commit
+`c767c48e9f9a129d8e5e62e306a8282712b81821` has 1054 entries (two removals,
+17 reductions). No test body, payload, assertion, helper API, native selector or
+production source changes for this correction.
+
+The original 112-owner run passed all 112 tests with zero skips in 81.596 seconds.
+The subsequent induced-skip control selected a private camera helper requiring a
+scene_writer argument. Its TypeError made the 76-case receipt invalid as skip-only
+proof. That failed receipt, the successful owner run and the actual 15/64 timing
+remain preserved. Neither positive required proof nor full suite ran in that attempt.
+
+Replace only TestCamerasDisplayGodotSmoke._run_smoke in the required inventory with
+its three existing public callers, in this order: test_camera_helpers_sync_view_arrays_and_gui_size,
+test_multiview_viewport_state_and_diagnostics, test_window_display_screenshot_apis.
+All other selected IDs and their order are unchanged. Each wrapper invokes the
+helper once with its own scene writer and checks its distinct runtime marker.
+
+The corrected selection contains 66 runtime methods and the same 12 helper methods:
+78 unique public test_ IDs, all required to execute without skips. All 64 static helper
+sites remain: 62 direct public tests, one camera helper called by three tests, and
+one resource-matrix helper called by one test. No repeated direct or looped probe edge
+exists in this finite inventory. The old 15 probe expressions execute once each;
+the candidate runtime cohort executes 66 probes, 51 additional launches. The 49 new
+static sites remain a separate count. The first 15/64 benchmark describes only the
+static workload actually measured. Corrected timing uses three alternating 15/66
+rounds, retaining exact per-launch expressions/durations and all raw samples.
+
+The external corrected harness rejects non-test method IDs before runtime work,
+preserves exact cwd/PYTHONPATH/import-origin binding and uses the unchanged required
+runner. Its corrected 78-method induced real-helper skip control must fail solely
+for the one expected skip, then the untouched positive process must pass all 78 with
+zero skips. Missing required GODOT_BIN still fails before a test receipt. Full unittest
+uses the exact Godot engine and all five pinned fixtures. The previous source-bound
+112/0 receipt is reused because all 374 Python source hashes remain identical.
+
+Root and the independent reviewer accept the external ten-artifact correction index
+SHA256 `0330beafc6bb268b7e64c06dc1dbb47cbb74986cfe8750d201a0acd87f69b433`.
+The independent correction receipt SHA256 is
+`77c68e5f2b7102ad30576c8c5b50ec4f514076f07be8639eaefa6e7145134343`.
+The corrected driver freezes and rechecks all six external code/input hashes plus
+that index, all 374 source files, six root metadata files and all five fixture pins
+before/after each phase. Fresh corrected receipts go in a separate directory.
+Root must freeze this metadata and reserve the benchmark window before execution.
+Native Windows/macOS still require the same twelve helper cases with zero skips;
+Linux/Godot discovery already selects the three camera wrappers. No new workflow or
+Windows Godot-runtime guarantee is introduced. Corrected proof is pending, not passed.

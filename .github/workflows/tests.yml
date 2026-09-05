@@ -101,6 +101,81 @@ jobs:
           tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
           tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
 
+      - name: Run native Linux Included Files POSIX operations
+        shell: bash
+        run: |
+          "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
+          import inspect
+          import json
+          import platform
+          import sys
+          import unittest
+          from pathlib import Path
+
+          root = Path(sys.argv[1]).resolve()
+          venv = Path(sys.argv[2]).resolve()
+          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
+          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
+          assert (platform.python_version(), sys.platform, platform.machine()) == ('3.12.13', 'linux', 'x86_64')
+
+          from scripts.run_required_unittest import load_suite, result_is_allowed
+          from src.conversion.included_files import IncludedFilesConverter
+          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
+          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
+          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
+          from tests.included_files.test_posix_operations import TestIncludedFilesPosixOperations
+          from tests.test_included_files import TestIncludedFilesConverterOutputContainment, TestIncludedFilesManagedRootTransaction
+
+          origins = {
+              load_suite: "scripts/run_required_unittest.py",
+              result_is_allowed: "scripts/run_required_unittest.py",
+              IncludedFilesConverter: "src/conversion/included_files.py",
+              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
+              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
+              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
+              TestIncludedFilesConverterOutputContainment: "tests/test_included_files.py",
+              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
+              TestIncludedFilesPosixOperations: "tests/included_files/test_posix_operations.py",
+          }
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          ids = (
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_linux_mount_id_parser_and_boundary_reject_different_mount",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_preserves_file_and_directory_destinations",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_missing_capability_fails_closed",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_closes_parent_when_mount_check_fails",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_cleanup_streams_payload_receipts",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_moved_and_symlinked_stage_container_is_rejected",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_late_output_directory_relocation_is_rejected_before_publish",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_rejects_final_output_symlink",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_replaces_final_hardlink_without_mutating_referent",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_recovery_record_staging_syncs_parent_before_durable_phase",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_staged_tree_directories_sync_bottom_up_before_commit_record",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_restart_rollback_syncs_registry_before_journal_retirement",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_pinned_directory_transfers_live_fd_and_closes_ancestors",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_failed_child_open_closes_owned_fd_before_reuse",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_borrowed_entry_checks_preserve_fd_and_reject_replacement",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_rename_transfers_entries_and_preserves_errno",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_restore_and_quarantine_preserve_unexpected_entries",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_mount_id_malformed_missing_and_unavailable_policies",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_directory_sync_orders_native_fsync_and_closes_on_failures",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
+          )
+          assert len(ids) == 23
+          suite, discovered = load_suite(ids)
+          assert discovered == ids
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          accepted = result.testsRun == 23 and result_is_allowed(result, {})
+          print(json.dumps({"gate": "I02-linux-posix", "python": sys.executable, "prefix": sys.prefix,
+                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
+                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
+                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
+          raise SystemExit(0 if accepted else 1)
+          PY
+
       - name: Run unit tests
         run: |
           python -m coverage erase
@@ -113,6 +188,54 @@ jobs:
           python -m coverage report
           python -m coverage json
           python -m coverage xml
+
+      - name: Run privileged Linux Included Files bind-mount proof
+        shell: bash
+        run: |
+          sudo -n "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
+          import inspect
+          import json
+          import platform
+          import sys
+          import unittest
+          from pathlib import Path
+
+          root = Path(sys.argv[1]).resolve()
+          venv = Path(sys.argv[2]).resolve()
+          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
+          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
+          assert (platform.python_version(), sys.platform, platform.machine()) == ("3.12.13", "linux", "x86_64")
+
+          from scripts.run_required_unittest import load_suite, result_is_allowed
+          from src.conversion.included_files import IncludedFilesConverter
+          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
+          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
+          from tests.test_included_files import TestIncludedFilesManagedRootTransaction
+
+          origins = {
+              load_suite: "scripts/run_required_unittest.py",
+              result_is_allowed: "scripts/run_required_unittest.py",
+              IncludedFilesConverter: "src/conversion/included_files.py",
+              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
+              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
+              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
+          }
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          ids = (
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_linux_same_device_bind_mount_is_rejected",
+          )
+          assert len(ids) == 1
+          suite, discovered = load_suite(ids)
+          assert discovered == ids
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          accepted = result.testsRun == 1 and result_is_allowed(result, {})
+          print(json.dumps({"gate": "I02-linux-bind", "python": sys.executable, "prefix": sys.prefix,
+                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
+                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
+                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
+          raise SystemExit(0 if accepted else 1)
+          PY
 
       - name: Run native Linux bind-mount transaction gate
         env:
@@ -219,6 +342,81 @@ jobs:
           tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_fd_chmod_rebinding_keeps_selected_rollback_callable
           tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
           tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
+
+      - name: Run native macOS Included Files POSIX operations
+        shell: bash
+        run: |
+          "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
+          import inspect
+          import json
+          import platform
+          import sys
+          import unittest
+          from pathlib import Path
+
+          root = Path(sys.argv[1]).resolve()
+          venv = Path(sys.argv[2]).resolve()
+          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
+          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
+          assert (platform.python_version(), sys.platform, platform.machine()) == ('3.12.10', 'darwin', 'arm64')
+
+          from scripts.run_required_unittest import load_suite, result_is_allowed
+          from src.conversion.included_files import IncludedFilesConverter
+          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
+          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
+          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
+          from tests.included_files.test_posix_operations import TestIncludedFilesPosixOperations
+          from tests.test_included_files import TestIncludedFilesConverterOutputContainment, TestIncludedFilesManagedRootTransaction
+
+          origins = {
+              load_suite: "scripts/run_required_unittest.py",
+              result_is_allowed: "scripts/run_required_unittest.py",
+              IncludedFilesConverter: "src/conversion/included_files.py",
+              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
+              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
+              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
+              TestIncludedFilesConverterOutputContainment: "tests/test_included_files.py",
+              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
+              TestIncludedFilesPosixOperations: "tests/included_files/test_posix_operations.py",
+          }
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          ids = (
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_linux_mount_id_parser_and_boundary_reject_different_mount",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_preserves_file_and_directory_destinations",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_missing_capability_fails_closed",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_closes_parent_when_mount_check_fails",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_cleanup_streams_payload_receipts",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_moved_and_symlinked_stage_container_is_rejected",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_late_output_directory_relocation_is_rejected_before_publish",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_rejects_final_output_symlink",
+              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_replaces_final_hardlink_without_mutating_referent",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_recovery_record_staging_syncs_parent_before_durable_phase",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_staged_tree_directories_sync_bottom_up_before_commit_record",
+              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_restart_rollback_syncs_registry_before_journal_retirement",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_pinned_directory_transfers_live_fd_and_closes_ancestors",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_failed_child_open_closes_owned_fd_before_reuse",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_borrowed_entry_checks_preserve_fd_and_reject_replacement",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_rename_transfers_entries_and_preserves_errno",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_restore_and_quarantine_preserve_unexpected_entries",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_mount_id_malformed_missing_and_unavailable_policies",
+              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_directory_sync_orders_native_fsync_and_closes_on_failures",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
+          )
+          assert len(ids) == 23
+          suite, discovered = load_suite(ids)
+          assert discovered == ids
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          accepted = result.testsRun == 23 and result_is_allowed(result, {})
+          print(json.dumps({"gate": "I02-darwin-posix", "python": sys.executable, "prefix": sys.prefix,
+                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
+                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
+                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
+          raise SystemExit(0 if accepted else 1)
+          PY
 
       - name: Run native macOS managed-output transaction tests
         run: >-
@@ -338,6 +536,57 @@ jobs:
           python -m unittest -v
           tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_readonly_hardlink_is_rejected_without_alias_mutation
           tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_single_link_readonly_publish_and_restore
+
+      - name: Run native Windows Included Files metadata
+        shell: bash
+        run: |
+          venv_python="$(cygpath -u "$VIRTUAL_ENV")/Scripts/python.exe"
+          "$venv_python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
+          import inspect
+          import json
+          import platform
+          import sys
+          import unittest
+          from pathlib import Path
+
+          root = Path(sys.argv[1]).resolve()
+          venv = Path(sys.argv[2]).resolve()
+          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
+          assert Path(sys.executable).resolve() == venv / "Scripts" / "python.exe"
+          assert (platform.python_version(), sys.platform, platform.machine()) == ("3.12.10", "win32", "AMD64")
+
+          from scripts.run_required_unittest import load_suite, result_is_allowed
+          from src.conversion.included_files import IncludedFilesConverter
+          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
+          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
+          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
+
+          origins = {
+              load_suite: "scripts/run_required_unittest.py",
+              result_is_allowed: "scripts/run_required_unittest.py",
+              IncludedFilesConverter: "src/conversion/included_files.py",
+              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
+              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
+              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
+          }
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          ids = (
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
+              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
+          )
+          assert len(ids) == 3
+          suite, discovered = load_suite(ids)
+          assert discovered == ids
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
+          accepted = result.testsRun == 3 and result_is_allowed(result, {})
+          print(json.dumps({"gate": "I02-windows-metadata", "python": sys.executable, "prefix": sys.prefix,
+                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
+                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
+                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
+          raise SystemExit(0 if accepted else 1)
+          PY
 
       - name: Run native Windows Godot output-reader scheduling tests
         run: >-

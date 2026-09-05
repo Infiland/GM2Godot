@@ -734,7 +734,7 @@
       "task_id": "R11",
       "issue": 797,
       "title": "Authoritative project resource model",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "Descriptive resource_models has no production callers; project consumers parse raw data separately.",
       "expected_benefit": "One project parser and canonical model; remove renderer dictionary parsing and obsolete descriptive model.",
       "current_owner": "project_manifest.py, project_settings.py",
@@ -808,7 +808,17 @@
         "parity": "Immutable C-to-source and source-to-same-source: five fixtures, all fourteen fields, no differences",
         "proof_index_sha256": "06c0e826cf27bf0617097c407c114b96eaaa956b1a30fa4155ecd6ebd19a2a74",
         "benchmark": "Five alternating isolated samples per revision and workload. Manifest median +1.80%; fresh Windows settings validation +26.15%, +0.989 ms for three passes of five fixtures. Inputs and outputs match; no whole-conversion speed claim."
-      }
+      },
+      "final_verification": {
+        "pr": 885,
+        "pr_head": "14b380744384bca975d916486286cf5c44d08ae7",
+        "merge": "1196295179296dfc12274ff39ba79e6adfb4a1b2",
+        "pr_ci": 33948869821,
+        "merge_ci": 33949869128,
+        "proof": "R11/final-verification.json",
+        "proof_sha256": "c1ab547dad54a9c35260cfc71f53c06b1d47171c8356059e26d3235adebad99e"
+      },
+      "remaining_verification": "None for R11; parent issue797 remains open for remaining resource families."
     },
     {
       "task_id": "R12",

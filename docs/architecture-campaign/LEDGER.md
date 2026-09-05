@@ -7,10 +7,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through I01 PR #884 at
-  `475e96eaa26771beabf9b2454f6023e7b14e2014`. R04 cleanup and I01 exact PR/merge
+- Integration branch: `dev/080-architecture-campaign`, through R11 PR #885 at
+  `1196295179296dfc12274ff39ba79e6adfb4a1b2`. R04 cleanup, I01 and R11 exact PR/merge
   CI, native receipts and actual-parent proof are fully verified.
-- Progress counts fully verified roadmap tasks: 9 of 54 (16.7%). Source review,
+- Progress counts fully verified roadmap tasks: 10 of 54 (18.5%). Source review,
   integration and pending checks do not count as verification.
 - Main's 11 dirty policy files, preserved #820 work, and unrelated worktrees
   847/852/854/855 remain untouched.
@@ -18,10 +18,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `4.7.2.stable.official.ed1daf0bf`. The primary checkout's Python 3.14 is not proof.
 - Latest published release is v0.7.74. Inherited 0.7.75 metadata is an unpublished
   campaign intermediate. Root coordinates the single final v0.8.0 release.
-- No external blocker. I01 is verified. R11 PR #885 merged as `1196295` with
-  its exact approved tree; merge CI remains running. G01 local source, correction,
-  full suite and both parity comparisons are independently/root approved. Its
-  combined-source and exact native PR/merge checks remain required.
+- No external blocker. R11 is verified at `1196295`, including exact final PR/merge
+  CI, native receipts and actual-parent proof. G01 source, correction, local proof
+  and combined-source checks are approved; its exact native PR/merge CI remains
+  required. L01 local proof is approved and T01 corrected proof is running.
 
 
 ## Ownership and progress
@@ -38,7 +38,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R03 E4/E7 lint | verified | audit_transactions_cli, `356e2ae`; PR #880 merged `1240a7b` | Independent and root code/integration reviews approved | Final PR and merge CI; exact native 6/6/2 zero-skip proof at both revisions |
 | R04 import layout | verified | Initial PR #881 at `f40402c`; cleanup PR #883 at `feb22c3` | Independent and root actual-code and metadata reviews approved | Cleanup PR CI `33943223988`, merge CI `33943927132`; exact native artifacts and actual-parent receipts verified |
 | I01 Included Files models and planning | verified | audit_transactions_cli, `93d6ac8`; PR #884 merged `475e96e` | Independent and root actual-code and metadata APPROVE | PR CI `33946483807` and merge CI `33947905402`; all 31 required native/runtime cases and six native artifacts passed at both exact revisions |
-| R11 Authoritative project resource model | approved | audit_gml_resources, `d4fe60e`; accepted source parent `ec25791` | Independent and root actual-code and local-proof APPROVE | 3,090 full tests/56 host skips; 313 required cases/zero skips; five-fixture fourteen-field parity and same-ref match; repeated benchmark; combined exact CI pending |
+| R11 Authoritative project resource model | verified | audit_gml_resources; PR #885 merged `1196295` | Independent/root source, local-proof and combined-metadata APPROVE | PR CI33948869821 and merge CI33949869128; exact native receipts/mode cases, all26 new methods/zero skips, actual-parent1056 gate passed |
 | G01 GML typed lowering context | approved | audit_policy_tests_docs; corrected candidate `420d13f` | Independent/root source, correction and final local-proof APPROVE | Required49/0 skips; full3072/56 classified host skips; both five-fixture/fourteen-field parity comparisons match; native/exact integration CI pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 

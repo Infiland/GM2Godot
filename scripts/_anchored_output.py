@@ -17,6 +17,7 @@ import sys
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable, Literal, Protocol, cast
 
 
@@ -632,8 +633,7 @@ def _windows_file_api() -> Any:
             "output-anchor-unavailable",
             "Win32 output-directory handles are unavailable on this platform.",
         )
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.CreateFileW.argtypes = (
         ctypes.c_wchar_p,
         ctypes.c_uint32,
@@ -1350,7 +1350,7 @@ def open_output_parent(path: Path) -> OutputParentBinding:
 def _rooted_output_parts(path: Path) -> tuple[Path, Path, tuple[str, ...]]:
     leaf = path.name
     invalid_leaf: ValueError | None = None
-    windows_receipt: Any | None = None
+    windows_receipt: ModuleType | None = None
     if os.name == "nt":
         windows_receipt = _windows_receipt_module()
         try:
@@ -2041,7 +2041,7 @@ def publish_new_bytes(path: Path, payload: bytes) -> None:
                 raise close_error from close_failures[0]
 
 
-def _load_exact_sibling(module_name: str, filename: str, injected: dict[str, object] | None = None) -> Any:
+def _load_exact_sibling(module_name: str, filename: str, injected: dict[str, object] | None = None) -> ModuleType:
     """Load one private sibling by its resolved path, never by import search."""
 
     import importlib.util
@@ -2069,7 +2069,7 @@ def _load_exact_sibling(module_name: str, filename: str, injected: dict[str, obj
 
 
 _posix_receipt_cache: Any | None = None
-_windows_receipt_cache: Any | None = None
+_windows_receipt_cache: ModuleType | None = None
 
 
 def _posix_receipt_module() -> Any:
@@ -2095,7 +2095,7 @@ def _posix_receipt_module() -> Any:
     return _posix_receipt_cache
 
 
-def _windows_receipt_module() -> Any:
+def _windows_receipt_module() -> ModuleType:
     global _windows_receipt_cache
     if _windows_receipt_cache is None:
         _windows_receipt_cache = _load_exact_sibling(

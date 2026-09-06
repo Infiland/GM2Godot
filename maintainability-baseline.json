@@ -274,12 +274,6 @@
     "application|lint.B009|src/conversion/atomic_generated_text.py::_windows_asset_file_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "application|lint.B009|src/conversion/conversion_artifact_generation.py::_ConversionGenerationLock.acquire|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 2,
     "application|lint.B009|src/conversion/conversion_artifact_generation.py::_unlock_generation_descriptor|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 2,
-    "application|lint.B009|src/conversion/included_files.py::_open_included_file_validation_stream|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 2,
-    "application|lint.B009|src/conversion/included_files.py::_windows_included_cleanup_parent_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "application|lint.B009|src/conversion/included_files.py::_windows_included_file_locking|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "application|lint.B009|src/conversion/included_files.py::_windows_included_file_read_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "application|lint.B009|src/conversion/included_files.py::_windows_included_transaction_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "application|lint.B009|src/conversion/included_files.py::_windows_included_transaction_error|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 2,
     "application|lint.B009|src/conversion/managed_output_workspace.py::_windows_api_error|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 2,
     "application|lint.B009|src/conversion/managed_output_workspace.py::_windows_file_locking|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "application|lint.B009|src/conversion/managed_output_workspace.py::_windows_move_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
@@ -319,7 +313,7 @@
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statement_parser.py::<module>": 1157,
     "application|module_lines.executable|src/conversion/gml_transpiler_parts/statements.py::<module>": 2770,
     "application|module_lines.executable|src/conversion/godot_validation.py::<module>": 990,
-    "application|module_lines.executable|src/conversion/included_files.py::<module>": 11139,
+    "application|module_lines.executable|src/conversion/included_files.py::<module>": 10720,
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": 5054,
     "application|module_lines.executable|src/conversion/managed_output_workspace.py::<module>": 2646,
     "application|module_lines.executable|src/conversion/objects.py::<module>": 1913,
@@ -358,7 +352,7 @@
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/tokens.py::<module>": 1018,
     "application|module_structure.executable|src/conversion/gml_transpiler_parts/utils.py::<module>": 886,
     "application|module_structure.executable|src/conversion/godot_validation.py::<module>": 1557,
-    "application|module_structure.executable|src/conversion/included_files.py::<module>": 15473,
+    "application|module_structure.executable|src/conversion/included_files.py::<module>": 14769,
     "application|module_structure.executable|src/conversion/managed_output_publisher.py::<module>": 7149,
     "application|module_structure.executable|src/conversion/managed_output_workspace.py::<module>": 4143,
     "application|module_structure.executable|src/conversion/objects.py::<module>": 2994,
@@ -580,7 +574,7 @@
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_project_lock_initialization_recovers_after_hard_exit": 208,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary": 332,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit": 279,
-    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_windows_cleanup_binding_operations_scale_with_depth": 236,
+    "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_windows_cleanup_binding_operations_scale_with_depth": 233,
     "tests|function_structure|tests/test_included_files.py::TestIncludedFilesManagedRootTransaction.test_windows_multilevel_cleanup_binding_operations_are_linear": 242,
     "tests|function_structure|tests/test_layers_runtime_godot.py::_write_smoke_scene": 287,
     "tests|function_structure|tests/test_lts_2026_conversion.py::TestLTS2026Conversion._assert_common_fixture_contract": 431,
@@ -786,7 +780,7 @@
     "tests|module_lines.executable|tests/test_dependency_snapshot.py::<module>": 1905,
     "tests|module_lines.executable|tests/test_gml_runtime.py::<module>": 3339,
     "tests|module_lines.executable|tests/test_gml_transpiler.py::<module>": 5411,
-    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12306,
+    "tests|module_lines.executable|tests/test_included_files.py::<module>": 12291,
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": 1713,
     "tests|module_lines.executable|tests/test_objects.py::<module>": 3147,
     "tests|module_lines.executable|tests/test_release_publisher.py::<module>": 2011,
@@ -815,7 +809,7 @@
     "tests|module_structure.executable|tests/test_gml_runtime.py::<module>": 7220,
     "tests|module_structure.executable|tests/test_gml_transpiler.py::<module>": 6430,
     "tests|module_structure.executable|tests/test_godot_validation.py::<module>": 2227,
-    "tests|module_structure.executable|tests/test_included_files.py::<module>": 21384,
+    "tests|module_structure.executable|tests/test_included_files.py::<module>": 21250,
     "tests|module_structure.executable|tests/test_linux_gui_artifact_verifier.py::<module>": 1502,
     "tests|module_structure.executable|tests/test_managed_output_crash_recovery.py::<module>": 2546,
     "tests|module_structure.executable|tests/test_managed_output_publisher.py::<module>": 1726,
@@ -981,7 +975,6 @@
     "tooling|function_structure|scripts/verify_macos_bundle_metadata.py::_select_zip_plist": 170,
     "tooling|function_structure|scripts/verify_macos_bundle_metadata.py::inspect_dmg": 158,
     "tooling|lint.B009|scripts/_anchored_output.py::_open_rooted_windows_parent|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
-    "tooling|lint.B009|scripts/_anchored_output.py::_windows_file_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tooling|lint.B009|scripts/_anchored_receipt_windows.py::_last_error|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tooling|lint.B009|scripts/_anchored_receipt_windows.py::_native_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
     "tooling|lint.B009|scripts/_anchored_receipt_windows.py::_native_nt_api|Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.": 1,
@@ -1009,7 +1002,7 @@
     "tooling|module_lines.executable|scripts/build_dependency_snapshot.py::<module>": 1576,
     "tooling|module_lines.executable|scripts/release_publisher.py::<module>": 1928,
     "tooling|module_lines.executable|scripts/verify_dependency_environment.py::<module>": 1900,
-    "tooling|module_structure.executable|scripts/_anchored_output.py::<module>": 4370,
+    "tooling|module_structure.executable|scripts/_anchored_output.py::<module>": 4364,
     "tooling|module_structure.executable|scripts/_anchored_receipt_posix.py::<module>": 1902,
     "tooling|module_structure.executable|scripts/_anchored_receipt_windows.py::<module>": 2845,
     "tooling|module_structure.executable|scripts/build_dependency_snapshot.py::<module>": 3381,
@@ -1170,7 +1163,7 @@
       "structure": 682
     },
     "application|function_lines|src/conversion/included_files.py::_acquire_included_project_lock": {
-      "ast_sha256": "53768fd8b8e2870f3161083bf609445e3066bc2c07b5213ccb532d3f9697ae6e",
+      "ast_sha256": "dc6b9866e7ba5efffebc7162a174935bed91cbaa7ef1411ed14a2b39e759903d",
       "lines": 159,
       "structure": 239
     },
@@ -1185,7 +1178,7 @@
       "structure": 237
     },
     "application|function_lines|src/conversion/included_files.py::_chmod_exact_included_file": {
-      "ast_sha256": "51dde520a40d7d2367cac490a3f9619ba3c30689e6b760154d7296adc4b8dd7b",
+      "ast_sha256": "7082db990e26eb9384375d67a1b0f5b11a1f9936fa73ab008109818e9e9c319a",
       "lines": 165,
       "structure": 285
     },
@@ -1195,17 +1188,17 @@
       "structure": 291
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_directory": {
-      "ast_sha256": "469360c100d8e0d5df38dd492a761d552dce49bf2a60df97fe60242bad2fd0e2",
+      "ast_sha256": "7092dedf9673314f1241435c163ddc8e9af5a16af12f135db86e05ae5e80dec2",
       "lines": 170,
       "structure": 221
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_file": {
-      "ast_sha256": "cbeb9289f07b9d830eb1c8dfb3d698d595127830b8fad203d552ed731905171a",
+      "ast_sha256": "ec21c2e3841a455ca928e6ad82cf4bfd3ba495fcacf8643f04efc624f572c718",
       "lines": 157,
       "structure": 184
     },
     "application|function_lines|src/conversion/included_files.py::_cleanup_recorded_included_tree": {
-      "ast_sha256": "6b4f9111f924a1e53ee96eca3420284dac8e9a57d459f461ec05b903fa1439e6",
+      "ast_sha256": "5965ab8e0b8ed40bf933754262be71a67a8b743a1edeee5158facdc6647d66e8",
       "lines": 430,
       "structure": 622
     },
@@ -1230,7 +1223,7 @@
       "structure": 433
     },
     "application|function_lines|src/conversion/included_files.py::_move_exact_included_entry": {
-      "ast_sha256": "b10119c2e8d0c50b076dec0e9f8f85eee4b254da5bccae88d36c980078228694",
+      "ast_sha256": "95c49c7691cded86a1d35fa8cecd1444068b70edcdf225a85fb9ba5b2960f9aa",
       "lines": 213,
       "structure": 278
     },
@@ -1425,9 +1418,9 @@
       "structure": 1557
     },
     "application|module_lines.executable|src/conversion/included_files.py::<module>": {
-      "ast_sha256": "a6246a3f75e06dd48b5bcced726270fdbd73b4520affa18f0db5df251df76fc3",
-      "lines": 11139,
-      "structure": 15473
+      "ast_sha256": "25af82cad718b39bc4e73988907eb3ca7cf32ad2b4459cccfe2dec8a26ae7b6f",
+      "lines": 10720,
+      "structure": 14769
     },
     "application|module_lines.executable|src/conversion/managed_output_publisher.py::<module>": {
       "ast_sha256": "4f824817cf5076e568c3dff8fb4e99b6056f0bd84dfc29485fdb2450d15eb2e7",
@@ -1675,9 +1668,9 @@
       "structure": 6430
     },
     "tests|module_lines.executable|tests/test_included_files.py::<module>": {
-      "ast_sha256": "7ec48c54b804bbcecc70610ebe9885801180304e7d1e4fa49a431f2eeafef38b",
-      "lines": 12306,
-      "structure": 21384
+      "ast_sha256": "c9f2c13a6d2726a33b172cc41708cc7b06c08b58bcddef8aab27e79376d7ee28",
+      "lines": 12291,
+      "structure": 21250
     },
     "tests|module_lines.executable|tests/test_managed_output_crash_recovery.py::<module>": {
       "ast_sha256": "c6201be19afa33938144fa63e57edfe02271a0579edae25b4cac077fce0253b1",
@@ -1755,9 +1748,9 @@
       "structure": 289
     },
     "tooling|module_lines.executable|scripts/_anchored_output.py::<module>": {
-      "ast_sha256": "b242a5afc6328c403f53f50e4524972df7b1232120a2a47156afd4b3ca907822",
+      "ast_sha256": "b5885ec27db255c6af99dbd44319e90b1810f20efa56a2fabe35e09f7665ac86",
       "lines": 2430,
-      "structure": 4370
+      "structure": 4364
     },
     "tooling|module_lines.executable|scripts/_anchored_receipt_posix.py::<module>": {
       "ast_sha256": "1a605eacd906863eedd151b275613b4fa8f6ef61b494239c7ef081b284039453",

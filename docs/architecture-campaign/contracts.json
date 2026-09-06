@@ -995,7 +995,7 @@
       "task_id": "R13",
       "issue": 797,
       "title": "Authoritative fonts resource model",
-      "state": "approved",
+      "state": "verified",
       "problem_and_evidence": "The worker, registry and unused descriptive font aggregate interpret overlapping raw fields differently; fonts -> output paths -> registry -> fonts forms a lazy cycle. Actual b9 95 historical plus366 expanded cases/776 public observations are characterized and reviewed.",
       "expected_benefit": "One normalized frozen FontModel, two concrete planning selectors and one source-lookup leaf; delete duplicated dictionary/descriptive parsing and the lookup cycle.",
       "current_owner": "fonts.py, asset_registry.py, asset_output_paths.py",
@@ -1055,7 +1055,7 @@
         "grown": 0,
         "receipt_sha256": "9375ad152bc115907250dd2fd3a5e6229c4946c45c0ea3d74aa2ef2c20872a93"
       },
-      "remaining_verification": "Final source and metadata freeze, reviewed native-CI verification package, and exact PR/merge CI on the campaign branch. Independent and root local performance and combined source/static/focused reviews are approved. R13 receives no verified-task credit until integration proof completes.",
+      "remaining_verification": "None for R13; later resource families remain separate tasks.",
       "cross_family_snapshot_amendment": {
         "scope": "Only the expected 64-character digest in TestPathModelConsumers.test_resource_matrix_and_empty_project_preserve_other_families; retain all seven assertions, all record families, fixture data and path normalization. The original twelve owner files remain unchanged.",
         "proposal_index_sha256": "fe3798891d6950e74c8a5e09dc9e5a5adf106df71dcbc24a92b26b950cf1bee3",
@@ -1104,6 +1104,15 @@
           "comparison_sha256": "1334d12795794edbd82886fff2bb877ff217ef50ebb4f05a2ce479ca60d4c1b8"
         },
         "limits": "Original full/parity/matrix/control/timing proof remains bound to321. Final metadata is a separate documentation-only delta. Native PR and merge proof is pending."
+      },
+      "final_verification": {
+        "pr": 892,
+        "pr_head": "9bc9c0e236f7c975fb9e06ec7dbe1cf9a5c94805",
+        "pr_ci": 33996106216,
+        "merge": "ae57bee3b4ea05d2efa5e9206f2514b9dc68a292",
+        "merge_ci": 33998320814,
+        "tree": "65b279a8538386d09236fa570580fda0556f0333",
+        "proof_sha256": "769d585221087609b7bf413b78b1cdae04b4c020d17808673b6b8e05f31588d8"
       }
     },
     {
@@ -1788,14 +1797,14 @@
       "task_id": "I03",
       "issue": 798,
       "title": "Included Files Windows operations",
-      "state": "planned",
-      "problem_and_evidence": "12130-line transaction and 12914-line tests obscure state/handle/cleanup ownership.",
-      "expected_benefit": "Reduce original and destination hotspot sizes/complexity; explicit acyclic lifecycle ownership; no facade aliases for private test internals.",
+      "state": "reviewing",
+      "problem_and_evidence": "Actual verified5faa coordinator has11139 physical/15473 structural lines. Win32 ABI/calls, parent HANDLE ownership and the validation-stream transfer operation have concrete independent leaf boundaries; accepted before tests and43-site binding observations precede extraction.",
+      "expected_benefit": "One owner for Windows calls, parent binding lifecycle and validation streams, without aliases or reverse imports. Coordinator shrinks419 physical/704 structural; coordinator plus three leaves adds117 physical lines and removes2 structural units.",
       "current_owner": "src/conversion/included_files.py",
-      "proposed_owner": "Included Files Windows operations",
-      "inputs_and_outputs": "Existing source and typed contracts -> explicitly owned implementation with unchanged observable output. ABI, file IDs/reparse, non-delete-sharing handles, extended paths, native junction/relocation/read-only and write-through.",
-      "side_effects_and_lifecycle_ownership": "Preserve existing acquisition, transfer, cancellation, publication and cleanup semantics; isolate parsing/model work from writers. Document concrete transfers before extraction.",
-      "callers_to_migrate": "src/conversion/included_files.py and direct production/test consumers found by explicit import and call inventory.",
+      "proposed_owner": "included_files_parts/windows_operations.py, windows_bindings.py and filesystem.py; transaction decisions remain in included_files.py.",
+      "inputs_and_outputs": "See I03-windows-contract.md. Preserve ABI/layout/signatures, lazy independent caches, file IDs/reparse handling, sharing/write-through flags, extended paths, error lookup order and exact conversion behavior.",
+      "side_effects_and_lifecycle_ownership": "Retain HANDLE-to-fd-to-stream ownership transfers, caller stream close, one-shot parent binding close, primary exception/close-note order and every coordinator phase/rollback decision.",
+      "callers_to_migrate": "Exactly15 top-level definitions and17 constants;175 coordinator definitions retain behavior. All43 reviewed patch sites migrate to actual caller lookup bindings, preserving argument/lifetime/zero-call behavior.",
       "dependencies": [
         "I02"
       ],
@@ -1805,21 +1814,53 @@
         "src/conversion/included_files_parts/windows_bindings.py",
         "src/conversion/included_files_parts/filesystem.py",
         "tests/test_included_files.py",
-        "matching tests/included_files/ domain tests and helper",
-        "tests/test_managed_output_crash_recovery.py",
-        "maintainability-baseline.json"
+        "tests/included_files/test_filesystem.py",
+        "tests/included_files/test_windows_bindings.py",
+        "tests/included_files/test_windows_operations.py",
+        "pyrightconfig.json",
+        "scripts/_anchored_output.py"
       ],
       "non_goals": "No transaction redesign, format/cap/path changes, weakened no-follow/reparse/identity/durability/rollback guarantees.",
       "compatibility_constraints": "GameMaker LTS 2026; exact Godot 4.7.2.stable.official.ed1daf0bf; preserve public signatures, generated bytes/maps, ordering, identifiers, diagnostics, exit status and native safety guarantees.",
-      "before_metrics": "12130 lines/264 functions; converter C52/541 lines; commit C35/486; cleanup C46/430; journal parser C20/294.",
-      "expected_measurable_improvement": "Reduce original and destination hotspot sizes/complexity; explicit acyclic lifecycle ownership; no facade aliases for private test internals. New functions <=15 complexity/150 lines; new ordinary modules <=800 lines; no unreviewed debt or cycles.",
-      "characterization_tests": "ABI, file IDs/reparse, non-delete-sharing handles, extended paths, native junction/relocation/read-only and write-through. Add focused characterization before changing behavior; compare same inputs at immutable base and candidate.",
+      "before_metrics": "Actual5faa physical/structural: coordinator11139/15473; main tests12306/21384. Root baseline1044. Projections and finite destination/function caps are in I03-windows-contract.md.",
+      "expected_measurable_improvement": "Actual coordinator10720/14769, operations215/315, bindings237/280, filesystem84/107 physical/structural units. Seven B009 keys retired including anchored output. Baseline1044 to1037 against5faa, seven removed/six lowered/none added or grown.",
+      "characterization_tests": "18 actual old local successes,zero skips;20 reviewed candidate methods with2 native Windows-only. Retain222 old IDs and825 main assertion ASTs. Corrected39 observer:35success/4exactWin skips;77pairs97generations,42positive sites and one preserved zero-rename rejection site.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip.",
-      "implementation_owner": "One designated I03 implementer in an isolated dev/ worktree, assigned in LEDGER.md before edits.",
-      "independent_reviewers": "Separate read-only reviewer, then root reads actual changed code and returns APPROVE / REQUEST CHANGES / BLOCKED.",
+      "implementation_owner": "review_r13_full, dev/080-windows-filesystem, existing GM2Godot-080-i03-preflight; actual implementation base5faa683a07a913c96d5283d06b8e2cb1b44e5b30.",
+      "independent_reviewers": "prepare_r13_ci or another non-implementing agent reviews actual code/results; root reads actual diff and owns integration.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
-      "temporary_adapter_removal_condition": "Remove old adapter when final scoped caller migrates, before this task is verified; any temporary adapter records this task as owner.",
-      "plan_verdict": "PLANNED; root must refresh precise caller/file inventory and accept before implementation."
+      "temporary_adapter_removal_condition": "Delete all moved private definitions and names at extraction; no aliases, forwarding exports, callbacks or temporary adapter are authorized.",
+      "plan_verdict": "APPROVE actual ten-path implementation and bounded typing/metric/close-answer corrections. Independent/root local review complete; combined final full/parity/native and PR/merge verification remain required.",
+      "root_integration_files": [
+        "maintainability-baseline.json",
+        ".github/workflows/tests.yml",
+        "docs/architecture-campaign/I03-windows-contract.md",
+        "docs/architecture-campaign/contracts.json",
+        "docs/architecture-campaign/LEDGER.md"
+      ],
+      "entry_evidence": {
+        "handoff_index_sha256": "0753ef2388a861d00384e354023a12639003720b67202fad51d639e756347cec",
+        "before18_result_sha256": "1a96158de4e44f05b4ee8f4a2b8a7775d540fcab7a57c5d7826c4f05244cbc34",
+        "corrected_observer_result_sha256": "2b5fcb2402ea3219356a77f089a7994c960cc492341a9ab8c8006e4223c42132",
+        "corrected_observer_root_sha256": "a22d95cb597dbb26546d4cbd1ec86e732b9d79fbcbd51669dd3833f7a7a5f8f0",
+        "corrected_observer_independent_sha256": "211479543cf5b1e2e72885888b04ce36b3c19be3312746c7288af606cb008557",
+        "production_verified": false,
+        "native_windows_verified": false
+      },
+      "local_implementation_evidence": {
+        "source_before_close_helper_sha256": "110fcd94f913932a0ce00119e29587ceaa52d17830a5a507ee409056f85bb468",
+        "source_after_close_helper_sha256": "1b242d30c69f3253253b91449a1d85f1c1ee086580b60667f97481af5b5af071",
+        "focused18": "18 successes,0skips on original source",
+        "cohort242": "225 successes,17exact host skips on original source",
+        "observer39": "35 successes,4exact Windows skips;77pairs97generations on original source",
+        "close_helper6": "6 successes,0skips on corrected source; full prior module AST preserved after inlining",
+        "correction_root_sha256": "11dfb18b76fe45557e28104b7a283a6936235f9a7ad1216ea423baff51266e64",
+        "correction_independent_sha256": "089c0b389de8c325e6946480da19b51dfafaf83cb453df9487b897d8b4166c34",
+        "static": "Pyright0 errors/0warnings and both Ruff405Python checks passed",
+        "native_windows_verified": false,
+        "final_full_verified": false,
+        "baseline_proposed_sha256": "5106bf61ad52078dcabef71425012ca752a7a272980bf34b9f8a5f6116a11cb4"
+      }
     },
     {
       "task_id": "I04",

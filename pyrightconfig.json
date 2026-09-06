@@ -10,5 +10,6 @@
     "**/__pycache__"
   ],
   "pythonVersion": "3.12",
+  "pythonPlatform": "All",
   "typeCheckingMode": "strict"
 }

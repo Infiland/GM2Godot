@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import ctypes
 import hashlib
 import json
 import os
@@ -13,8 +12,7 @@ import sys
 import tempfile
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
-from functools import lru_cache
+from dataclasses import replace
 from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
 from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
@@ -22,6 +20,7 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
+from src.conversion.included_files_parts.filesystem import open_validation_stream
 from src.conversion.included_files_parts.filesystem_metadata import (
     handle_state,
     output_path_is_redirected,
@@ -79,6 +78,11 @@ from src.conversion.included_files_parts.posix_operations import (
     verify_mount_boundary,
     verify_mount_boundary_path,
 )
+from src.conversion.included_files_parts.windows_bindings import (
+    WindowsCleanupParentBinding,
+    verify_cleanup_parent_binding,
+)
+from src.conversion.included_files_parts.windows_operations import lock_file, rename_transaction_entry
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
@@ -181,57 +185,14 @@ def _run_bounded_included_worker_phase(
         executor.shutdown(wait=True, cancel_futures=True)
 
 
-def _windows_included_file_locking(
-    file_descriptor: int,
-    mode: int,
-) -> None:
-    import msvcrt
-
-    locking = cast(
-        Callable[[int, int, int], None],
-        getattr(msvcrt, "locking"),
-    )
-    locking(file_descriptor, mode, 1)
 
 
-_WINDOWS_GENERIC_READ = 0x80000000
-_WINDOWS_FILE_TRAVERSE = 0x00000020
-_WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
-_WINDOWS_FILE_SHARE_READ = 0x00000001
-_WINDOWS_FILE_SHARE_WRITE = 0x00000002
-_WINDOWS_FILE_SHARE_DELETE = 0x00000004
-_WINDOWS_OPEN_EXISTING = 3
-_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
-_WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
-_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
-_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
-_WINDOWS_FILE_TYPE_DISK = 1
-_WINDOWS_FILE_BASIC_INFO_CLASS = 0
-_WINDOWS_FILE_ID_INFO_CLASS = 18
-_WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
 
 
-class _WindowsIncludedFileId128(ctypes.Structure):
-    _fields_ = (("Identifier", ctypes.c_uint8 * 16),)
 
 
-class _WindowsIncludedFileIdInfo(ctypes.Structure):
-    _fields_ = (
-        ("VolumeSerialNumber", ctypes.c_uint64),
-        ("FileId", _WindowsIncludedFileId128),
-    )
 
 
-class _WindowsIncludedFileBasicInfo(ctypes.Structure):
-    _fields_ = (
-        ("CreationTime", ctypes.c_int64),
-        ("LastAccessTime", ctypes.c_int64),
-        ("LastWriteTime", ctypes.c_int64),
-        ("ChangeTime", ctypes.c_int64),
-        ("FileAttributes", ctypes.c_uint32),
-    )
 
 
 def _before_included_transaction_rename(
@@ -253,7 +214,7 @@ def _preserve_or_restore_unexpected_moved_entry_fallback(
     destination: str,
 ) -> OSError:
     try:
-        _rename_included_transaction_entry(destination, source)
+        rename_transaction_entry(destination, source)
     except OSError as restore_error:
         quarantine_path = (
             destination
@@ -262,7 +223,7 @@ def _preserve_or_restore_unexpected_moved_entry_fallback(
             + ".quarantine"
         )
         try:
-            _rename_included_transaction_entry(destination, quarantine_path)
+            rename_transaction_entry(destination, quarantine_path)
         except OSError as quarantine_error:
             error = OSError(
                 "Unexpected Included Files replacement was preserved at "
@@ -290,384 +251,24 @@ def _read_included_validation_chunk(opened_file: BinaryIO) -> bytes:
     return opened_file.read(1024 * 1024)
 
 
-@lru_cache(maxsize=1)
-def _windows_included_file_read_api() -> Any:
-    if os.name != "nt":
-        raise OSError("Windows Included File read handles are unavailable")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.CreateFileW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    kernel32.CreateFileW.restype = ctypes.c_void_p
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
 
 
-@lru_cache(maxsize=1)
-def _windows_included_cleanup_parent_api() -> Any:
-    """Return the Win32 calls used to pin one cleanup directory parent."""
-
-    if os.name != "nt":
-        raise OSError(
-            "Windows Included Files cleanup parent handles are unavailable"
-        )
-    if (
-        ctypes.sizeof(_WindowsIncludedFileId128) != 16
-        or ctypes.sizeof(_WindowsIncludedFileIdInfo) != 24
-        or _WindowsIncludedFileIdInfo.FileId.offset != 8
-        or ctypes.sizeof(_WindowsIncludedFileBasicInfo) != 40
-        or _WindowsIncludedFileBasicInfo.FileAttributes.offset != 32
-    ):
-        raise OSError("Unsupported Windows Included Files cleanup ABI layout")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.CreateFileW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    kernel32.CreateFileW.restype = ctypes.c_void_p
-    kernel32.GetFileInformationByHandleEx.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-    )
-    kernel32.GetFileInformationByHandleEx.restype = ctypes.c_int
-    kernel32.GetFileType.argtypes = (ctypes.c_void_p,)
-    kernel32.GetFileType.restype = ctypes.c_uint32
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
 
 
-@lru_cache(maxsize=1)
-def _windows_included_transaction_api() -> Any:
-    if os.name != "nt":
-        raise OSError("Windows Included Files transaction APIs are unavailable")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.MoveFileExW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-    )
-    kernel32.MoveFileExW.restype = ctypes.c_int
-    return kernel32
 
 
-def _windows_included_transaction_error(
-    operation: str,
-    path: str,
-) -> OSError:
-    get_last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
-    format_error = cast(Callable[[int], str], getattr(ctypes, "FormatError"))
-    error_number = get_last_error()
-    return OSError(
-        error_number,
-        f"{operation}: {format_error(error_number).strip()}",
-        path,
-    )
 
 
-def _windows_extended_included_path(path: str) -> str:
-    """Return an absolute Win32 path that does not depend on MAX_PATH policy."""
-
-    absolute_path = os.path.abspath(path)
-    if absolute_path.startswith(("\\\\?\\", "\\\\.\\")):
-        return absolute_path
-    if absolute_path.startswith("\\\\"):
-        return "\\\\?\\UNC\\" + absolute_path[2:]
-    return "\\\\?\\" + absolute_path
 
 
-def _windows_included_cleanup_parent_identity(
-    kernel32: Any,
-    handle: int,
-    path: str,
-) -> PathIdentity:
-    identity_info = _WindowsIncludedFileIdInfo()
-    if not kernel32.GetFileInformationByHandleEx(
-        handle,
-        _WINDOWS_FILE_ID_INFO_CLASS,
-        ctypes.byref(identity_info),
-        ctypes.sizeof(identity_info),
-    ):
-        raise _windows_included_transaction_error(
-            "Could not identify Included Files cleanup parent handle",
-            path,
-        )
-    return (
-        int(identity_info.VolumeSerialNumber),
-        int.from_bytes(bytes(identity_info.FileId.Identifier), "little"),
-    )
 
 
-def _windows_included_cleanup_parent_attributes(
-    kernel32: Any,
-    handle: int,
-    path: str,
-) -> int:
-    basic_info = _WindowsIncludedFileBasicInfo()
-    if not kernel32.GetFileInformationByHandleEx(
-        handle,
-        _WINDOWS_FILE_BASIC_INFO_CLASS,
-        ctypes.byref(basic_info),
-        ctypes.sizeof(basic_info),
-    ):
-        raise _windows_included_transaction_error(
-            "Could not inspect Included Files cleanup parent handle",
-            path,
-        )
-    return int(basic_info.FileAttributes)
 
 
-@dataclass
-class _WindowsIncludedCleanupParentBinding:
-    """Keep one verified cleanup parent immovable for path-based operations.
-
-    Windows has no Python ``dir_fd`` equivalent for the cleanup operations in
-    this module.  The retained directory handle deliberately omits
-    ``FILE_SHARE_DELETE`` so its directory cannot be renamed or deleted while
-    the binding is live.  Callers still revalidate the native file ID and path
-    before every group of path-based child operations.
-    """
-
-    path: str
-    identity: PathIdentity
-    kernel32: Any
-    handle: int | None
-
-    @classmethod
-    def open(
-        cls,
-        path: str,
-        expected_identity: PathIdentity,
-    ) -> "_WindowsIncludedCleanupParentBinding":
-        if os.name != "nt":
-            raise OSError(
-                "Windows Included Files cleanup parent bindings are unavailable"
-            )
-        absolute_path = os.path.abspath(path)
-        try:
-            path_stat = os.lstat(absolute_path)
-        except OSError as error:
-            raise OSError(
-                f"Included Files cleanup parent changed: {absolute_path}"
-            ) from error
-        if (
-            output_path_is_redirected(absolute_path, path_stat)
-            or not stat.S_ISDIR(path_stat.st_mode)
-            or (path_stat.st_dev, path_stat.st_ino) != expected_identity
-        ):
-            raise OSError(
-                f"Included Files cleanup parent changed: {absolute_path}"
-            )
-
-        kernel32 = _windows_included_cleanup_parent_api()
-        handle = kernel32.CreateFileW(
-            _windows_extended_included_path(absolute_path),
-            _WINDOWS_FILE_TRAVERSE | _WINDOWS_FILE_READ_ATTRIBUTES,
-            _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE,
-            None,
-            _WINDOWS_OPEN_EXISTING,
-            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
-            | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
-            None,
-        )
-        invalid_handle = ctypes.c_void_p(-1).value
-        if handle is None or handle == invalid_handle:
-            raise _windows_included_transaction_error(
-                "Could not bind Included Files cleanup parent",
-                absolute_path,
-            )
-        binding = cls(
-            path=absolute_path,
-            identity=expected_identity,
-            kernel32=kernel32,
-            handle=cast(int, handle),
-        )
-        try:
-            binding.verify()
-        except BaseException as error:
-            try:
-                binding.close()
-            except BaseException as close_error:
-                error.add_note(
-                    "Could not close rejected Included Files cleanup parent "
-                    f"binding: {close_error}"
-                )
-            raise
-        return binding
-
-    def __enter__(self) -> "_WindowsIncludedCleanupParentBinding":
-        self.verify()
-        return self
-
-    def __exit__(
-        self,
-        _exception_type: object,
-        active_error: BaseException | None,
-        _traceback: object,
-    ) -> bool | None:
-        try:
-            self.close()
-        except BaseException as close_error:
-            if active_error is None:
-                raise
-            active_error.add_note(
-                "Could not close Included Files cleanup parent binding: "
-                + str(close_error)
-            )
-        return None
-
-    def verify(self) -> None:
-        handle = self.handle
-        if handle is None:
-            raise OSError(
-                f"Included Files cleanup parent binding is closed: {self.path}"
-            )
-        try:
-            path_stat = os.lstat(self.path)
-        except OSError as error:
-            raise OSError(
-                f"Included Files cleanup parent changed: {self.path}"
-            ) from error
-        attributes = _windows_included_cleanup_parent_attributes(
-            self.kernel32,
-            handle,
-            self.path,
-        )
-        if (
-            self.kernel32.GetFileType(handle) != _WINDOWS_FILE_TYPE_DISK
-            or output_path_is_redirected(self.path, path_stat)
-            or not stat.S_ISDIR(path_stat.st_mode)
-            or (path_stat.st_dev, path_stat.st_ino) != self.identity
-            or _windows_included_cleanup_parent_identity(
-                self.kernel32,
-                handle,
-                self.path,
-            )
-            != self.identity
-            or not attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
-            or attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
-        ):
-            raise OSError(
-                f"Included Files cleanup parent changed: {self.path}"
-            )
-
-    def close(self) -> None:
-        handle = self.handle
-        if handle is None:
-            return
-        self.handle = None
-        if not self.kernel32.CloseHandle(handle):
-            raise _windows_included_transaction_error(
-                "Could not close Included Files cleanup parent handle",
-                self.path,
-            )
 
 
-def _verify_windows_included_cleanup_parent_binding(
-    binding: _WindowsIncludedCleanupParentBinding,
-    parent_path: str,
-    expected_identity: PathIdentity,
-) -> None:
-    """Verify that a retained Windows handle still binds the requested parent."""
-
-    absolute_parent_path = os.path.abspath(parent_path)
-    if (
-        os.name != "nt"
-        or os.path.normcase(binding.path)
-        != os.path.normcase(absolute_parent_path)
-        or binding.identity != expected_identity
-    ):
-        raise OSError(
-            f"Included Files cleanup parent binding mismatch: {absolute_parent_path}"
-        )
-    binding.verify()
 
 
-def _open_included_file_validation_stream(
-    path: str,
-    *,
-    deny_writes: bool,
-    no_follow: bool = False,
-) -> BinaryIO:
-    """Open a validation stream with requested sharing and link semantics."""
-
-    if os.name != "nt":
-        if no_follow:
-            file_descriptor = os.open(
-                path,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-            )
-            try:
-                return os.fdopen(file_descriptor, "rb")
-            except BaseException:
-                os.close(file_descriptor)
-                raise
-        return open(path, "rb")
-    if not deny_writes and not no_follow:
-        return open(path, "rb")
-
-    kernel32 = _windows_included_file_read_api()
-    handle_value = kernel32.CreateFileW(
-        _windows_extended_included_path(path),
-        _WINDOWS_GENERIC_READ,
-        _WINDOWS_FILE_SHARE_READ,
-        None,
-        _WINDOWS_OPEN_EXISTING,
-        _WINDOWS_FILE_ATTRIBUTE_NORMAL
-        | (_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT if no_follow else 0)
-        | _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
-        None,
-    )
-    invalid_handle = ctypes.c_void_p(-1).value
-    if handle_value is None or handle_value == invalid_handle:
-        get_last_error = cast(
-            Callable[[], int],
-            getattr(ctypes, "get_last_error"),
-        )
-        error_number = get_last_error()
-        format_error = cast(
-            Callable[[int], str],
-            getattr(ctypes, "FormatError"),
-        )
-        raise OSError(
-            error_number,
-            format_error(error_number).strip(),
-            path,
-        )
-
-    handle = cast(int, handle_value)
-    try:
-        import msvcrt
-
-        file_descriptor = msvcrt.open_osfhandle(
-            handle,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0),
-        )
-    except BaseException:
-        kernel32.CloseHandle(handle)
-        raise
-    try:
-        return os.fdopen(file_descriptor, "rb")
-    except BaseException:
-        os.close(file_descriptor)
-        raise
 
 
 def _digest_open_included_file(
@@ -694,7 +295,7 @@ def _digest_included_regular_file(
     expected_fingerprint = path_fingerprint(expected_stat)
     expected_binding = path_handle_binding(expected_stat)
     expected_ctime_ns = expected_stat.st_ctime_ns
-    with _open_included_file_validation_stream(
+    with open_validation_stream(
         path,
         deny_writes=True,
         no_follow=True,
@@ -1860,7 +1461,7 @@ def _verify_included_generation_source_receipt(
     binding = receipt.binding
     source_path = binding.filesystem_path
     project_root = binding.directory_identities[0][0]
-    with _open_included_file_validation_stream(
+    with open_validation_stream(
         source_path,
         deny_writes=validate_content,
     ) as source_file:
@@ -2750,7 +2351,7 @@ def _quarantine_included_entry_fallback(
 ) -> str:
     quarantine_path = path + "." + secrets.token_hex(8) + ".quarantine"
     _before_included_cleanup_quarantine_fallback(path)
-    _rename_included_transaction_entry(path, quarantine_path)
+    rename_transaction_entry(path, quarantine_path)
     quarantine_stat = os.lstat(quarantine_path)
     quarantine_is_expected_kind = (
         stat.S_ISDIR(quarantine_stat.st_mode)
@@ -2775,7 +2376,7 @@ def _unlink_exact_quarantined_entry_fallback(
     expected_identity: PathIdentity,
     *,
     expected_parent_identity: PathIdentity | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
@@ -2783,7 +2384,7 @@ def _unlink_exact_quarantined_entry_fallback(
             raise OSError(
                 "Included Files cleanup parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -2846,7 +2447,7 @@ def _unlink_exact_quarantined_entry_fallback(
         _after_included_transaction_phase("cleanup-readonly-cleared")
     if windows_parent_binding is not None:
         assert expected_parent_identity is not None
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -2888,7 +2489,7 @@ def _chmod_exact_included_directory_fallback(
     mode: int,
     expected_parent_identity: PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     parent_identities: tuple[tuple[str, PathIdentity], ...] | None
@@ -2901,7 +2502,7 @@ def _chmod_exact_included_directory_fallback(
             )
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -2913,7 +2514,7 @@ def _chmod_exact_included_directory_fallback(
                 raise AssertionError("Missing Included Files directory parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -3018,7 +2619,7 @@ def _rmdir_exact_quarantined_entry_fallback(
     expected_identity: PathIdentity,
     *,
     expected_parent_identity: PathIdentity | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
@@ -3026,7 +2627,7 @@ def _rmdir_exact_quarantined_entry_fallback(
             raise OSError(
                 "Included Files cleanup parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3082,7 +2683,7 @@ def _rmdir_exact_quarantined_entry_fallback(
             )
     if windows_parent_binding is not None:
         assert expected_parent_identity is not None
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3349,7 +2950,7 @@ def _chmod_exact_included_file(
     mode: int,
     expected_parent_identity: PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> None:
     if descriptor_paths_supported():
         parent_fd, name = open_pinned_parent(path)
@@ -3386,7 +2987,7 @@ def _chmod_exact_included_file(
             raise OSError(f"Included Files file parent changed: {path}")
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3398,7 +2999,7 @@ def _chmod_exact_included_file(
                 raise AssertionError("Missing Included Files file parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -3524,26 +3125,6 @@ def _unique_included_transaction_path(
     raise OSError(f"Could not allocate Included Files transaction backup for {label}")
 
 
-def _rename_included_transaction_entry(source: str, destination: str) -> None:
-    if os.name != "nt":
-        raise OSError(
-            "Unsafe path-based Included Files rename is disabled on POSIX"
-        )
-    if sys.platform != "win32":
-        # Cross-platform unit tests model the Windows fallback by patching
-        # os.name; the real Windows runner exercises MoveFileExW below.
-        os.rename(source, destination)
-        return
-    kernel32 = _windows_included_transaction_api()
-    if not kernel32.MoveFileExW(
-        _windows_extended_included_path(source),
-        _windows_extended_included_path(destination),
-        _WINDOWS_MOVEFILE_WRITE_THROUGH,
-    ):
-        raise _windows_included_transaction_error(
-            "Could not durably move Included Files transaction entry",
-            destination,
-        )
 
 
 def _move_exact_included_entry(
@@ -3555,10 +3136,10 @@ def _move_exact_included_entry(
     source_parent_identity: PathIdentity | None,
     destination_parent_identity: PathIdentity | None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
 ) -> None:
     source_parent_path = os.path.dirname(os.path.abspath(source))
@@ -3661,7 +3242,7 @@ def _move_exact_included_entry(
             raise OSError(
                 "Included Files source parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_source_parent_binding,
             source_parent_path,
             source_parent_identity,
@@ -3689,7 +3270,7 @@ def _move_exact_included_entry(
             raise OSError(
                 "Included Files destination parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_destination_parent_binding,
             destination_parent_path,
             destination_parent_identity,
@@ -3703,7 +3284,7 @@ def _move_exact_included_entry(
         else:
             if source_parent_identity is None:
                 raise AssertionError("Missing Included Files source parent identity")
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_source_parent_binding,
                 source_parent_path,
                 source_parent_identity,
@@ -3717,7 +3298,7 @@ def _move_exact_included_entry(
                 raise AssertionError(
                     "Missing Included Files destination parent identity"
                 )
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_destination_parent_binding,
                 destination_parent_path,
                 destination_parent_identity,
@@ -3741,7 +3322,7 @@ def _move_exact_included_entry(
     verify_parents()
     _before_included_transaction_rename_fallback(source, destination)
     verify_parents()
-    _rename_included_transaction_entry(source, destination)
+    rename_transaction_entry(source, destination)
     verify_parents()
     destination_stat = os.lstat(destination)
     destination_is_expected_kind = (
@@ -3769,10 +3350,10 @@ def _move_exact_included_directory(
     source_parent_identity: PathIdentity | None = None,
     destination_parent_identity: PathIdentity | None = None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
 ) -> None:
     _move_exact_included_entry(
@@ -3795,10 +3376,10 @@ def _move_exact_included_file(
     source_parent_identity: PathIdentity | None = None,
     destination_parent_identity: PathIdentity | None = None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        WindowsCleanupParentBinding | None
     ) = None,
 ) -> None:
     _move_exact_included_entry(
@@ -4278,7 +3859,7 @@ def _acquire_included_project_lock(
         if windows:
             os.lseek(file_descriptor, 0, os.SEEK_SET)
             try:
-                _windows_included_file_locking(file_descriptor, 2)
+                lock_file(file_descriptor, 2)
             except OSError as error:
                 raise OSError(
                     "Another GM2Godot conversion is already publishing or "
@@ -4348,7 +3929,7 @@ def _acquire_included_project_lock(
             try:
                 if windows:
                     os.lseek(file_descriptor, 0, os.SEEK_SET)
-                    _windows_included_file_locking(file_descriptor, 0)
+                    lock_file(file_descriptor, 0)
                 else:
                     import fcntl
 
@@ -4365,7 +3946,7 @@ def _release_included_project_lock(project_lock: IncludedProjectLock) -> None:
     try:
         if project_lock.windows:
             os.lseek(project_lock.file_descriptor, 0, os.SEEK_SET)
-            _windows_included_file_locking(project_lock.file_descriptor, 0)
+            lock_file(project_lock.file_descriptor, 0)
         else:
             import fcntl
 
@@ -6602,7 +6183,7 @@ def _included_cleanup_file_state(
     expected_identity: PathIdentity,
     expected_parent_identity: PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> IncludedCleanupFileState | None:
     if descriptor_paths_supported():
         parent_fd, name = open_pinned_parent(path)
@@ -6658,7 +6239,7 @@ def _included_cleanup_file_state(
             raise OSError(f"Included Files cleanup parent changed: {path}")
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -6670,7 +6251,7 @@ def _included_cleanup_file_state(
                 raise AssertionError("Missing Included Files cleanup parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -6789,11 +6370,11 @@ def _included_cleanup_directory_state(
     expected_identity: PathIdentity,
     expected_parent_identity: PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> bool | None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -6801,7 +6382,7 @@ def _included_cleanup_directory_state(
         try:
             path_stat = os.lstat(path)
         except FileNotFoundError:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -6817,7 +6398,7 @@ def _included_cleanup_directory_state(
             parent_path,
             expected_parent_identity,
         )
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -6836,7 +6417,7 @@ def _included_cleanup_directory_state(
             or (final_stat.st_dev, final_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Included Files cleanup directory changed: {path}")
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -6883,12 +6464,12 @@ def _remove_included_cleanup_tombstone(
     parent_identity: PathIdentity,
     *,
     expect_directory: bool,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> None:
     # The fallback removers must observe the original Windows READONLY state
     # themselves so they can restore that attribute after a sharing failure.
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             parent_identity,
@@ -6945,7 +6526,7 @@ def _cleanup_recorded_included_file(
     *,
     expected_fingerprint: PathFingerprint | None = None,
     expected_mode: int | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> tuple[str, ...]:
     warnings: list[str] = []
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -6965,7 +6546,7 @@ def _cleanup_recorded_included_file(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -6984,7 +6565,7 @@ def _cleanup_recorded_included_file(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7016,7 +6597,7 @@ def _cleanup_recorded_included_file(
             )
             return tuple(warnings)
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7076,7 +6657,7 @@ def _cleanup_recorded_included_file(
             + tombstone_path
         )
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -7101,7 +6682,7 @@ def _cleanup_recorded_included_directory(
     role: str,
     relative_path: str,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: WindowsCleanupParentBinding | None = None,
 ) -> tuple[str, ...]:
     warnings: list[str] = []
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -7121,7 +6702,7 @@ def _cleanup_recorded_included_directory(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7140,7 +6721,7 @@ def _cleanup_recorded_included_directory(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7160,7 +6741,7 @@ def _cleanup_recorded_included_directory(
         return tuple(warnings)
     if tombstone_state is not None:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7172,7 +6753,7 @@ def _cleanup_recorded_included_directory(
             )
             return tuple(warnings)
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -7192,7 +6773,7 @@ def _cleanup_recorded_included_directory(
     if source_state is None:
         return tuple(warnings)
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -7217,7 +6798,7 @@ def _cleanup_recorded_included_directory(
             or (current_stat.st_dev, current_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Included Files cleanup directory changed: {path}")
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -7236,7 +6817,7 @@ def _cleanup_recorded_included_directory(
         f"cleanup:{role}:{relative_path}:quarantined"
     )
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -7248,7 +6829,7 @@ def _cleanup_recorded_included_directory(
         )
         return tuple(warnings)
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        verify_cleanup_parent_binding(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -7436,17 +7017,17 @@ def _cleanup_recorded_included_tree(
             )
 
         def verify_parent_binding(
-            binding: _WindowsIncludedCleanupParentBinding,
+            binding: WindowsCleanupParentBinding,
             relative_path: str,
         ) -> None:
-            _verify_windows_included_cleanup_parent_binding(
+            verify_cleanup_parent_binding(
                 binding,
                 parent_path_for(relative_path),
                 directory_identities[relative_path],
             )
 
         with ExitStack() as root_binding_scope:
-            root_parent_binding = _WindowsIncludedCleanupParentBinding.open(
+            root_parent_binding = WindowsCleanupParentBinding.open(
                 path,
                 root_identity,
             )
@@ -7458,10 +7039,10 @@ def _cleanup_recorded_included_tree(
                 binding_scope: ExitStack,
                 active_bindings: dict[
                     str,
-                    _WindowsIncludedCleanupParentBinding,
+                    WindowsCleanupParentBinding,
                 ],
                 relative_path: str,
-            ) -> _WindowsIncludedCleanupParentBinding:
+            ) -> WindowsCleanupParentBinding:
                 parent_relative = posixpath.dirname(relative_path)
                 parent_binding = active_bindings.get(parent_relative)
                 if parent_binding is None:
@@ -7470,7 +7051,7 @@ def _cleanup_recorded_included_tree(
                         + parent_relative
                     )
                 verify_parent_binding(parent_binding, parent_relative)
-                binding = _WindowsIncludedCleanupParentBinding.open(
+                binding = WindowsCleanupParentBinding.open(
                     parent_path_for(relative_path),
                     directory_identities[relative_path],
                 )
@@ -9766,7 +9347,7 @@ def _publish_included_output_fallback(
             raise OSError(
                 f"Included File output changed after publication: {output_path}"
             )
-        with _open_included_file_validation_stream(
+        with open_validation_stream(
             output_path,
             deny_writes=False,
             no_follow=True,
@@ -10009,7 +9590,7 @@ class IncludedFilesConverter(BaseConverter):
             return None
 
         try:
-            source_file = _open_included_file_validation_stream(
+            source_file = open_validation_stream(
                 resolved.filesystem_path,
                 deny_writes=deny_writes,
             )

@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import json
 import os
-import platform
-import re
 import shutil
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal
 
+from src.conversion import font_sources
+from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.font_model import FontModel, parse_font_model
+from src.conversion.font_sources import FONT_EXTENSIONS
+from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.generated_paths import generated_flat_resource_path, generated_resource_stem
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
@@ -19,21 +22,8 @@ from src.conversion.project_manifest import (
     load_gamemaker_project_manifest,
 )
 from src.conversion.project_source_paths import ProjectSourcePathError, validate_project_resource_source_path
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.localization import get_localized
-
-FONT_EXTENSIONS = ('.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2')
-
-
-class FontData(TypedDict):
-    fontName: str
-    name: str
-    size: float
-    bold: bool
-    italic: bool
-    AntiAlias: int
-    includeTTF: bool
-    TTFName: str
 
 
 @dataclass(frozen=True)
@@ -49,91 +39,6 @@ class _FontConversionPlan:
     requested_keys: tuple[str, ...]
     available_fonts: tuple[tuple[str, str], ...]
     skipped_keys: tuple[str, ...]
-
-
-def bundled_font_output_filename(ttf_name: str) -> str | None:
-    """Return the safe, deterministic filename used for an included font."""
-    normalized = ttf_name.replace('\\', '/')
-    if not normalized or normalized.startswith('/') or re.match(r'^[A-Za-z]:', normalized):
-        return None
-    parts = normalized.split('/')
-    if any(part in ('', '.', '..') for part in parts):
-        return None
-    stem, extension = os.path.splitext(parts[-1])
-    if not stem or extension.lower() not in FONT_EXTENSIONS:
-        return None
-    return generated_resource_stem(stem) + extension.lower()
-
-
-def resolve_bundled_font_source(yy_path: str, ttf_name: str) -> str | None:
-    """Resolve an included font without allowing the resource to escape its folder."""
-    output_filename = bundled_font_output_filename(ttf_name)
-    if output_filename is None:
-        return None
-
-    normalized = ttf_name.replace('\\', '/')
-    resource_dir = os.path.realpath(os.path.dirname(yy_path))
-    source_path = os.path.realpath(os.path.join(resource_dir, *normalized.split('/')))
-    try:
-        if os.path.commonpath((resource_dir, source_path)) != resource_dir:
-            return None
-    except ValueError:
-        return None
-    return source_path if os.path.isfile(source_path) else None
-
-
-def _get_system_font_dirs() -> list[str]:
-    """Return a list of system font directories for the current OS."""
-    system = platform.system()
-    dirs: list[str] = []
-    if system == 'Windows':
-        windir = os.environ.get('WINDIR', r'C:\Windows')
-        dirs.append(os.path.join(windir, 'Fonts'))
-        local_app = os.environ.get('LOCALAPPDATA', '')
-        if local_app:
-            dirs.append(os.path.join(local_app, 'Microsoft', 'Windows', 'Fonts'))
-    elif system == 'Darwin':
-        dirs.extend([
-            '/Library/Fonts',
-            '/System/Library/Fonts',
-            os.path.expanduser('~/Library/Fonts'),
-        ])
-    else:
-        dirs.extend([
-            '/usr/share/fonts',
-            '/usr/local/share/fonts',
-            os.path.expanduser('~/.local/share/fonts'),
-            os.path.expanduser('~/.fonts'),
-        ])
-    return [d for d in dirs if os.path.isdir(d)]
-
-
-def _find_system_font(font_name: str) -> str | None:
-    """Search system font directories for a font file matching the given name.
-
-    Returns the path to the font file if found, None otherwise.
-    """
-    font_name_lower = font_name.lower().replace(' ', '')
-    for font_dir in _get_system_font_dirs():
-        for root, _, files in os.walk(font_dir):
-            for filename in files:
-                if not filename.lower().endswith(FONT_EXTENSIONS):
-                    continue
-                name_without_ext = os.path.splitext(filename)[0].lower().replace(' ', '')
-                if name_without_ext == font_name_lower:
-                    return os.path.join(root, filename)
-                # Also match with common suffixes stripped (e.g. "Arial-Regular" -> "Arial")
-                for suffix in ('-regular', '-normal', '_regular', '_normal'):
-                    if name_without_ext.endswith(suffix):
-                        base = name_without_ext[:-len(suffix)]
-                        if base == font_name_lower:
-                            return os.path.join(root, filename)
-    return None
-
-
-def resolve_system_font_source(font_name: str) -> str | None:
-    """Return the system font file the converter would copy, if available."""
-    return _find_system_font(font_name)
 
 
 def _copy_font_file_atomically(
@@ -491,31 +396,21 @@ class FontConverter(BaseConverter):
             pending_directories.extend(reversed(child_directories))
         return font_files
 
-    def _parse_font_yy(self, yy_path: str) -> FontData | None:
+    def _parse_font_yy(self, yy_path: str) -> FontModel | None:
         try:
-            with open(yy_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
-            return {
-                'fontName': str(data['fontName']),
-                'name': str(data['name']),
-                'size': float(data.get('size', 12.0)),
-                'bold': bool(data.get('bold', False)),
-                'italic': bool(data.get('italic', False)),
-                'AntiAlias': int(data.get('AntiAlias', 0)),
-                'includeTTF': bool(data.get('includeTTF', False)),
-                'TTFName': str(data.get('TTFName', '')),
-            }
+            data = read_gamemaker_json(yy_path).value
+            if not isinstance(data, dict):
+                raise TypeError("Font source must be a JSON object")
+            return parse_font_model(data, source_path=yy_path)
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             self._safe_log(get_localized("Console_Convertor_Fonts_ParseError").format(yy_path=yy_path))
             return None
 
-    def _generate_system_font_tres(self, font_data: FontData) -> str:
-        font_name = font_data['fontName']
-        italic = "true" if font_data['italic'] else "false"
-        weight = 700 if font_data['bold'] else 400
-        antialiasing = 1 if font_data['AntiAlias'] else 0
+    def _generate_system_font_tres(self, font_data: FontModel) -> str:
+        font_name = font_data.font_name
+        italic = "true" if font_data.italic else "false"
+        weight = 700 if font_data.bold else 400
+        antialiasing = 1 if font_data.antialiasing else 0
 
         return (
             '[gd_resource type="SystemFont" format=3]\n'
@@ -558,16 +453,16 @@ class FontConverter(BaseConverter):
         if font_data is None:
             return False
 
-        font_name = font_data['name']
-        system_font_name = font_data['fontName']
+        font_name = font_data.name
+        system_font_name = font_data.font_name
         font_source_path: str | None = None
         preserve_metadata = False
         output_filename: str | None = None
         bundled_font = False
 
         # 1. Try bundled TTF from GameMaker project
-        if font_data['includeTTF'] and font_data['TTFName']:
-            ttf_name = font_data['TTFName']
+        ttf_name = font_data.ttf_name
+        if font_data.include_ttf and ttf_name:
             resolved_ttf = self._resolve_project_source(
                 ttf_name,
                 owner_source_path=resolved_yy.source_path,
@@ -575,7 +470,7 @@ class FontConverter(BaseConverter):
                 resource_type="font",
                 field="TTFName",
             )
-            bundled_output_file = bundled_font_output_filename(ttf_name)
+            bundled_output_file = font_sources.bundled_font_output_filename(ttf_name)
             if resolved_ttf is not None and bundled_output_file is None:
                 self._report_source_path_rejection(
                     ttf_name,
@@ -604,7 +499,7 @@ class FontConverter(BaseConverter):
 
         # 2. Try finding the font on the system
         if font_source_path is None:
-            system_path = resolve_system_font_source(system_font_name)
+            system_path = font_sources.resolve_system_font_source(system_font_name)
             if system_path:
                 font_source_path = system_path
                 output_filename = (
@@ -626,7 +521,7 @@ class FontConverter(BaseConverter):
         if font_source_path is not None:
             if bundled_font:
                 refreshed_ttf = self._resolve_project_source(
-                    font_data['TTFName'],
+                    ttf_name,
                     owner_source_path=resolved_yy.source_path,
                     resource=font_name,
                     resource_type="font",
@@ -640,7 +535,7 @@ class FontConverter(BaseConverter):
                             "Console_Convertor_Fonts_TTFMissing"
                         ).format(
                             name=font_name,
-                            ttf_name=font_data['TTFName'],
+                            ttf_name=ttf_name,
                         )
                     )
                     return False
@@ -672,7 +567,7 @@ class FontConverter(BaseConverter):
                 name=font_name, font_name=system_font_name))
 
         if not self.compact_logging:
-            size = font_data['size']
+            size = font_data.size
             self._safe_log(get_localized("Console_Convertor_Fonts_SizeNote").format(
                 name=font_name, size=size))
 
@@ -695,10 +590,6 @@ class FontConverter(BaseConverter):
         font_name: str,
         output_filename: str,
     ) -> str:
-        # Imported lazily because the registry imports this module to plan font
-        # paths before any converter writes output.
-        from src.conversion.asset_output_paths import resource_filesystem_path
-
         resource_name = os.path.splitext(os.path.basename(yy_path))[0]
         resource_path = (
             self._font_output_paths.get(resource_name)
@@ -737,10 +628,6 @@ class FontConverter(BaseConverter):
             else:
                 self.log_callback(get_localized("Console_Convertor_Fonts_Error_NotFound").format(gm_project_path=self.gm_project_path))
             return
-
-        # Imported lazily to avoid the fonts -> asset registry -> fonts import
-        # cycle. The registry is the single authority for collision suffixes.
-        from src.conversion.asset_output_paths import build_asset_output_paths
 
         self._font_output_paths = build_asset_output_paths(
             self.gm_project_path,

@@ -7,23 +7,21 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through verified L02
-  PR #891 at `5faa683a07a913c96d5283d06b8e2cb1b44e5b30`.
-- Verified progress: 16 of 54 tasks (29.6%). Pending local or native checks do
-  not count as completed tasks.
-- Main's 11 dirty policy files remain preserved. Twenty-three completed
-  worktrees were removed with their branches and required evidence retained.
-  Main, campaign, R13 and this reused I03 worktree remain active.
-- Use native CPython3.12.10 arm64 and exact Godot
-  `4.7.2.stable.official.ed1daf0bf`; Python3.14 is not proof.
-- R13 has local/combined approval in its separate branch; PR #892 native CI
-  remains pending. It is not part of this I03 implementation base.
-- I03's old characterization and corrected concrete binding map are accepted
-  independently/root. Root assigns review_r13_full to the eight scoped files
-  under the accepted I03 contract. Type/lint feasibility and candidate proof
-  remain outstanding.
-- Merge the fully verified campaign into main, then publish the single final
+- Integration branch: `dev/080-architecture-campaign`, through verified R13
+  PR #892 at `ae57bee3b4ea05d2efa5e9206f2514b9dc68a292`.
+- Verified progress: 17 of 54 tasks (31.5%). Pending validation does not count
+  as completion.
+- Main's 11 dirty policy files remain preserved. Twenty-four completed
+  worktrees were removed with their branches and evidence retained. Main,
+  the campaign, I03 and R14 are the four active worktrees.
+- Approved environment: native CPython 3.12.10 arm64 and exact Godot
+  `4.7.2.stable.official.ed1daf0bf`. Python 3.14 is not proof.
+- Merge the fully verified campaign into `main`, then publish the single final
   v0.8.0 release, as confirmed by the user.
+- I03's implementation and local focused results are independently/root
+  approved. It is being combined with verified R13 before final full/parity,
+  native Windows and exact PR/merge verification. R14's separate source-policy
+  characterization is in preparation; its production implementation has not begun.
 
 ## Ownership and progress
 
@@ -46,7 +44,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R12 authoritative path model | verified | audit_gml_resources; PR #889 merged b9c05cd | Independent/root source, local, combined and exact CI proof APPROVE | PR33964091840/merge33965005168;35 required/0skips, retainedT01/native/CLI/strict1045; external R12/final-verification.json |
 | I02 Included Files POSIX operations | verified | audit_transactions_cli; PR #890 merged4787f4b | Independent/root source, local, combined and exact CI APPROVE | PR33968388651/merge33971661125;50new+31retained native/runtime, R12/T01/CLI/artifacts/modes/coverage,strict1045actualb9; I02/final-verification.json |
 | L02 CLI request and session ownership | verified | PR #891 merged `5faa683` | Independent/root local, combined and exact CI APPROVE | PR33978428787/merge33980543144; all six native/CLI/runtime/artifact/coverage/strict-parent verifiers passed; L02/final-verification.json |
-| I03 Windows operations and validation streams | implementing | review_r13_full; dev/080-windows-filesystem at5faa | Proposal,20 test bodies,18 old outcomes and corrected binding map independently/root accepted | 77 actual pairs/97 generations;42 positive sites plus preserved zero-rename case; typing, candidate242 and native34 pending |
+| R13 authoritative font model | verified | PR #892 merged `ae57bee` | Independent/root local, combined and exact CI APPROVE | PR33996106216/merge33998320814; all retained native/CLI/runtime/artifact/coverage/strict-parent proofs passed; R13/final-verification.json |
+| I03 Included Files Windows operations | reviewing | Source checkpoint `774b561`; combined parent `ae57bee` | Independent/root implementation and focused proof APPROVE | Final combined full/parity/native/PR/merge verification pending; original18/242/39 and corrected6 retain their source identities |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -209,7 +208,7 @@ Windows and Linux claims require their actual native CI receipts.
   skipped test was credited as native success. The approved PR and merge trees
   match; immutable evidence is `I02/final-verification.json`.
 - L02 local proof is approved at d3 against e142:3139 tests with3083 successes
-  and56 exact prior host skips, all five fixtures, six actual entry commands,
+  and 56 exact prior host skips, all five fixtures, six actual entry commands,
   nine CLI parity cases and same-ref, three78-ID replays and12 private controls.
   The first parity ordering failure remains failed; its reviewed two-line
   correction passed. Twelve timing workers showed up to25.97 microseconds of
@@ -217,12 +216,31 @@ Windows and Linux claims require their actual native CI receipts.
   speed claim. Current-parent checks and exact PR/merge proof remain pending.
 
 - L02 prepared merge2a69dc0 has exactly the reviewed d3/478 source composition:
-  598 files,399 Python files, all unchanged through its checks. Pyright0/0,
+  598 files,399 Python files, all unchanged through its checks. Pyright 0/0,
   both Ruff paths, actionlint and strict1044 against actual478 passed. The83 CI
   methods all passed;93 CLI methods produced92 successes and the exact existing
   Windows-binding directory-relocation skip. All15 new methods passed. The saved
   combined results and independent review are approved; final PR/merge native
   proof remains pending. No original full/parity/timing run was repeated.
+
+- R13 local proof is approved at immutable 321: the corrected 66 selection has
+  zero skips; the successful full retry has 3105 successes and 56 exact prior host
+  skips across 3161 tests. Both earlier failed full runs remain preserved. All
+  five external projects, five-fixture fourteen-field parity and same-ref, the
+  366-case matrix and 19 meaningful controls are independently/root accepted.
+  Equal resource-matrix runtime warnings remain disclosed.
+- R13 performance acceptance includes a material cost: 192 retained font parses
+  take median 0.653276s versus 0.264205708s; whole benchmark-process peak RSS is
+  190,054,400 versus50,085,888 bytes. Full recursive JSON validation and retained
+  raw identity are required by the accepted model contract. The planning/output
+  workload has overlapping timing ranges. No speedup, production per-worker
+  peak or whole-conversion performance claim is made.
+- R13 prepared merge 1a8 preserves all 13 R13 owners and all 13 incoming Python
+  paths across 605 files / 405 Python files. Pyright 0/0, both Ruff checks, actionlint,
+  strict baseline 1044 to 1041 and 242 focused tests passed, with only the exact
+  existing Windows-only CLI skip. Original local full/parity/timing results
+  retain their 321 source identity. Final metadata and exact PR/merge native
+  verification remain required before R13 counts as verified.
 
 - I03 local implementation review is approved:18 characterizations passed, the
   242-method cohort had225 successes/17exact host skips, and the39-method observer
@@ -232,3 +250,8 @@ Windows and Linux claims require their actual native CI receipts.
   Pyright0/0 and both Ruff checks pass. Baseline1044 to1037 removes7 entries and
   lowers6 without additions/growth. Root is composing verified R13 before final
   full/parity/native proof; I03 remains reviewing and is not counted as verified.
+
+- R13 final PR #892 and campaign merge `ae57bee` are verified. Both exact CI
+  runs passed all required jobs and six saved native/runtime/CLI/artifact/coverage
+  proof selectors. The immutable final receipt is `R13/final-verification.json`,
+  SHA256 `769d585221087609b7bf413b78b1cdae04b4c020d17808673b6b8e05f31588d8`.

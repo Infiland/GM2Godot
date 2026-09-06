@@ -26,6 +26,7 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import IncludedFilePathAssignment, plan_included_file_paths
 from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH, render_included_file_registry
 from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts.filesystem import open_validation_stream
 from src.conversion.included_files_parts.filesystem_metadata import (
     output_path_is_redirected,
     path_fingerprint,
@@ -50,6 +51,29 @@ from src.conversion.included_files_parts.posix_operations import (
     open_pinned_parent,
     rename_transaction_entry_at,
     sync_directory,
+)
+from src.conversion.included_files_parts.windows_bindings import (
+    WindowsCleanupParentBinding,
+    verify_cleanup_parent_binding,
+)
+from src.conversion.included_files_parts.windows_operations import (
+    FILE_ATTRIBUTE_DIRECTORY,
+    FILE_ATTRIBUTE_NORMAL,
+    FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_FLAG_SEQUENTIAL_SCAN,
+    FILE_READ_ATTRIBUTES,
+    FILE_SHARE_DELETE,
+    FILE_SHARE_READ,
+    FILE_SHARE_WRITE,
+    FILE_TRAVERSE,
+    FILE_TYPE_DISK,
+    GENERIC_READ,
+    MOVEFILE_WRITE_THROUGH,
+    OPEN_EXISTING,
+    extended_path,
+    rename_transaction_entry,
 )
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 
@@ -367,10 +391,10 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> None:
             original_move(
@@ -487,22 +511,20 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         cleanup_context.enter_context(
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                WindowsCleanupParentBinding,
                 "open",
                 side_effect=binding_opener,
             )
         )
         cleanup_context.enter_context(
-            patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+            patch(
+                "src.conversion.included_files.rename_transaction_entry",
                 side_effect=os.rename,
             )
         )
         cleanup_context.enter_context(
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             )
         )
@@ -587,9 +609,8 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                     "cleanup used the whole-content file-state helper"
                 ),
             ),
-            patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+            patch(
+                "src.conversion.included_files.rename_transaction_entry",
                 side_effect=os.rename,
             ),
             patch.object(
@@ -1670,16 +1691,15 @@ IncludedFilesConverter(
 
                 binding_opener = MagicMock(side_effect=open_binding)
                 verify_parent_binding = (
-                    included_files_module._verify_windows_included_cleanup_parent_binding
+                    verify_cleanup_parent_binding
                 )
                 capture_ancestors = (
                     included_files_module._capture_fallback_directory_ancestors
                 )
                 with (
                     self._modeled_windows_cleanup_context(binding_opener),
-                    patch.object(
-                        included_files_module,
-                        "_verify_windows_included_cleanup_parent_binding",
+                    patch(
+                        "src.conversion.included_files.verify_cleanup_parent_binding",
                         wraps=verify_parent_binding,
                     ) as parent_binding_verifier,
                     patch.object(
@@ -2185,18 +2205,16 @@ IncludedFilesConverter(
                         supports_without_chmod,
                     ),
                     patch.object(
-                        included_files_module._WindowsIncludedCleanupParentBinding,
+                        WindowsCleanupParentBinding,
                         "open",
                         side_effect=open_binding,
                     ) as binding_open,
-                    patch.object(
-                        included_files_module,
-                        "_rename_included_transaction_entry",
+                    patch(
+                        "src.conversion.included_files.rename_transaction_entry",
                         side_effect=os.rename,
                     ),
-                    patch.object(
-                        included_files_module,
-                        "_open_included_file_validation_stream",
+                    patch(
+                        "src.conversion.included_files.open_validation_stream",
                         side_effect=self._open_modeled_windows_validation_stream,
                     ),
                     patch.object(
@@ -2254,10 +2272,10 @@ IncludedFilesConverter(
             self.fail("captured read-only cleanup root unexpectedly disappeared")
         kernel32 = MagicMock()
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 0
-        binding = included_files_module._WindowsIncludedCleanupParentBinding(
+        binding = WindowsCleanupParentBinding(
             path=os.path.abspath(root_path),
             identity=root_identity,
             kernel32=kernel32,
@@ -2286,35 +2304,30 @@ IncludedFilesConverter(
                 supports_without_chmod,
             ),
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                WindowsCleanupParentBinding,
                 "open",
                 return_value=binding,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                 return_value=root_identity,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_transaction_error",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.transaction_error",
                 return_value=close_error,
             ),
-            patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+            patch(
+                "src.conversion.included_files.rename_transaction_entry",
                 side_effect=os.rename,
             ),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -2402,18 +2415,16 @@ IncludedFilesConverter(
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(included_files_module.sys, "platform", "win32"),
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                WindowsCleanupParentBinding,
                 "open",
                 side_effect=open_binding,
             ),
-            patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+            patch(
+                "src.conversion.included_files.rename_transaction_entry",
                 side_effect=os.rename,
             ),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -2489,7 +2500,7 @@ IncludedFilesConverter(
             expected_parent_identity: tuple[int, int],
             *,
             windows_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> bool | None:
             nonlocal replacement_created
@@ -3025,9 +3036,8 @@ IncludedFilesConverter(
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_file_locking",
+            patch(
+                "src.conversion.included_files.lock_file",
                 side_effect=PermissionError("locked byte"),
             ) as locking,
             patch.object(
@@ -3071,9 +3081,8 @@ IncludedFilesConverter(
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_file_locking",
+            patch(
+                "src.conversion.included_files.lock_file",
                 side_effect=record_locking,
             ),
             self.assertRaisesRegex(OSError, "unknown or incomplete file"),
@@ -7361,9 +7370,8 @@ os._exit(88)
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_file_read_api",
+            patch(
+                "src.conversion.included_files_parts.filesystem.file_read_api",
                 return_value=kernel32,
             ),
             patch.dict(sys.modules, {"msvcrt": msvcrt}),
@@ -7374,7 +7382,7 @@ os._exit(88)
             ) as fdopen,
         ):
             opened_stream = (
-                included_files_module._open_included_file_validation_stream(
+                open_validation_stream(
                     path,
                     deny_writes=True,
                     no_follow=True,
@@ -7383,14 +7391,14 @@ os._exit(88)
 
         self.assertIs(opened_stream, binary_stream)
         kernel32.CreateFileW.assert_called_once_with(
-            included_files_module._windows_extended_included_path(path),
-            included_files_module._WINDOWS_GENERIC_READ,
-            included_files_module._WINDOWS_FILE_SHARE_READ,
+            extended_path(path),
+            GENERIC_READ,
+            FILE_SHARE_READ,
             None,
-            included_files_module._WINDOWS_OPEN_EXISTING,
-            included_files_module._WINDOWS_FILE_ATTRIBUTE_NORMAL
-            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
-            | included_files_module._WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL
+            | FILE_FLAG_OPEN_REPARSE_POINT
+            | FILE_FLAG_SEQUENTIAL_SCAN,
             None,
         )
         msvcrt.open_osfhandle.assert_called_once_with(
@@ -7410,32 +7418,29 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_api",
                 return_value=kernel32,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                 return_value=parent_identity,
             ) as identify,
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    FILE_ATTRIBUTE_DIRECTORY
                 ),
             ) as inspect_attributes,
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                WindowsCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7445,20 +7450,20 @@ os._exit(88)
             binding.close()
 
         kernel32.CreateFileW.assert_called_once_with(
-            included_files_module._windows_extended_included_path(parent_path),
-            included_files_module._WINDOWS_FILE_TRAVERSE
-            | included_files_module._WINDOWS_FILE_READ_ATTRIBUTES,
-            included_files_module._WINDOWS_FILE_SHARE_READ
-            | included_files_module._WINDOWS_FILE_SHARE_WRITE,
+            extended_path(parent_path),
+            FILE_TRAVERSE
+            | FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ
+            | FILE_SHARE_WRITE,
             None,
-            included_files_module._WINDOWS_OPEN_EXISTING,
-            included_files_module._WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
-            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS
+            | FILE_FLAG_OPEN_REPARSE_POINT,
             None,
         )
         share_mode = kernel32.CreateFileW.call_args.args[2]
         self.assertEqual(
-            share_mode & included_files_module._WINDOWS_FILE_SHARE_DELETE,
+            share_mode & FILE_SHARE_DELETE,
             0,
         )
         self.assertEqual(identify.call_count, 2)
@@ -7476,32 +7481,29 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_api",
                 return_value=kernel32,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                 side_effect=(parent_identity, changed_identity),
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                WindowsCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7522,33 +7524,30 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_api",
                 return_value=kernel32,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                 return_value=parent_identity,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
-                    | included_files_module._WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+                    FILE_ATTRIBUTE_DIRECTORY
+                    | FILE_ATTRIBUTE_REPARSE_POINT
                 ),
             ),
             self.assertRaisesRegex(OSError, "cleanup parent changed"),
         ):
-            included_files_module._WindowsIncludedCleanupParentBinding.open(
+            WindowsCleanupParentBinding.open(
                 parent_path,
                 parent_identity,
             )
@@ -7565,32 +7564,29 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_api",
                 return_value=kernel32,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                 return_value=parent_identity,
             ),
-            patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+            patch(
+                "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                WindowsCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7598,9 +7594,8 @@ os._exit(88)
             kernel32.CloseHandle.return_value = 0
             close_error = OSError("injected cleanup handle close failure")
             with (
-                patch.object(
-                    included_files_module,
-                    "_windows_included_transaction_error",
+                patch(
+                    "src.conversion.included_files_parts.windows_bindings.transaction_error",
                     return_value=close_error,
                 ),
                 self.assertRaises(OSError) as raised,
@@ -7623,36 +7618,33 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
         binding: (
-            included_files_module._WindowsIncludedCleanupParentBinding | None
+            WindowsCleanupParentBinding | None
         ) = None
 
         try:
             with (
                 patch.object(included_files_module.os, "name", "nt"),
-                patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_api",
+                patch(
+                    "src.conversion.included_files_parts.windows_bindings.cleanup_parent_api",
                     return_value=kernel32,
                 ),
-                patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_identity",
+                patch(
+                    "src.conversion.included_files_parts.windows_bindings.cleanup_parent_identity",
                     return_value=parent_identity,
                 ),
-                patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_attributes",
+                patch(
+                    "src.conversion.included_files_parts.windows_bindings.cleanup_parent_attributes",
                     return_value=(
-                        included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                        FILE_ATTRIBUTE_DIRECTORY
                     ),
                 ),
             ):
                 binding = (
-                    included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    WindowsCleanupParentBinding.open(
                         parent_path,
                         parent_identity,
                     )
@@ -7683,7 +7675,7 @@ os._exit(88)
         parent_stat = os.lstat(parent_path)
         parent_identity = parent_stat.st_dev, parent_stat.st_ino
         binding = (
-            included_files_module._WindowsIncludedCleanupParentBinding.open(
+            WindowsCleanupParentBinding.open(
                 parent_path,
                 parent_identity,
             )
@@ -7714,7 +7706,7 @@ os._exit(88)
         try:
             junction_stat = os.lstat(junction_path)
             with self.assertRaisesRegex(OSError, "cleanup parent changed"):
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                WindowsCleanupParentBinding.open(
                     junction_path,
                     (junction_stat.st_dev, junction_stat.st_ino),
                 )
@@ -7741,7 +7733,7 @@ os._exit(88)
             for path, expected in cases.items():
                 with self.subTest(path=path):
                     self.assertEqual(
-                        included_files_module._windows_extended_included_path(
+                        extended_path(
                             path
                         ),
                         expected,
@@ -7756,13 +7748,12 @@ os._exit(88)
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(included_files_module.sys, "platform", "win32"),
-            patch.object(
-                included_files_module,
-                "_windows_included_transaction_api",
+            patch(
+                "src.conversion.included_files_parts.windows_operations.transaction_api",
                 return_value=kernel32,
             ),
         ):
-            included_files_module._rename_included_transaction_entry(
+            rename_transaction_entry(
                 source,
                 destination,
             )
@@ -7774,7 +7765,7 @@ os._exit(88)
         self.assertTrue(destination_argument.startswith("\\\\?\\"))
         self.assertEqual(
             flags,
-            included_files_module._WINDOWS_MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_WRITE_THROUGH,
         )
 
     def test_windows_validation_stream_closes_fd_when_wrapping_fails(
@@ -7787,9 +7778,8 @@ os._exit(88)
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_windows_included_file_read_api",
+            patch(
+                "src.conversion.included_files_parts.filesystem.file_read_api",
                 return_value=kernel32,
             ),
             patch.dict(sys.modules, {"msvcrt": msvcrt}),
@@ -7801,7 +7791,7 @@ os._exit(88)
             patch.object(included_files_module.os, "close") as close,
             self.assertRaisesRegex(MemoryError, "injected wrapper failure"),
         ):
-            included_files_module._open_included_file_validation_stream(
+            open_validation_stream(
                 os.path.join(self.godot_dir, "payload.bin"),
                 deny_writes=True,
                 no_follow=True,
@@ -8127,10 +8117,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal publication_failed
@@ -9515,9 +9505,8 @@ os._exit(88)
                 "unlink",
                 side_effect=PermissionError("injected Windows sharing failure"),
             ),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             self.assertRaisesRegex(
@@ -9552,9 +9541,8 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
@@ -9616,9 +9604,8 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -9651,9 +9638,8 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
@@ -9699,9 +9685,8 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+            patch(
+                "src.conversion.included_files.open_validation_stream",
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             self.assertRaisesRegex(
@@ -10695,10 +10680,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> None:
             if (
@@ -10866,10 +10851,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal publication_failed
@@ -10961,10 +10946,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                WindowsCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal cancellation_injected

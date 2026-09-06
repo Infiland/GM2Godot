@@ -1,0 +1,512 @@
+{
+  "gates": {
+    "I03-windows-operations": {
+      "body": "native_windows_step.py",
+      "sha256": "7a33e07a66da632db4cb020804bbcb363d63137a2518476dd7c245521d88dbf6",
+      "ids": [
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_abi_records_preserve_sizes_offsets_and_values",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_cached_loaders_preserve_signatures_and_independent_lifetimes",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_loaders_reject_non_windows_before_loading",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_cleanup_loader_rejects_unsupported_layout_before_loading",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_transaction_error_preserves_lookup_order_number_and_filename",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_lock_file_preserves_one_byte_and_error_identity",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_rename_preserves_refusal_fallback_native_flags_and_error",
+        "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_native_windows_abi_and_write_through_rename",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_plain_validation_open_avoids_native_acquisition",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_posix_no_follow_transfers_fd_and_closes_wrapper_failure",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_invalid_handles_preserve_error_without_close",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_handle_transfer_failure_closes_native_handle_once",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_stream_wrapper_failure_closes_only_transferred_fd",
+        "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_native_windows_validation_stream_closure_restores_write_access",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_open_refusals_precede_native_acquisition",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_rejected_verification_retains_primary_error_and_close_note",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_context_entry_and_exit_preserve_verification_and_error_order",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_close_clears_handle_before_native_call_and_never_retries",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_verify_preserves_short_circuit_order_and_closed_refusal",
+        "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_binding_argument_mismatch_precedes_verify",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_recovery_paths_reject_before_io",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_cleanup_parent_binding_blocks_relocation",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_cleanup_parent_binding_rejects_junction",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_noop_hashes_deny_concurrent_writes",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_backup_cleanup_leaves_no_debris",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_cleanup_recovers_after_process_exit",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_commit_failure_rolls_back_cleanly",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_cancellation_rolls_back_cleanly",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_managed_root_junction_is_rejected",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_nested_tree_junction_is_rejected",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_registry_directory_junction_is_rejected",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_stage_container_junction_is_rejected",
+        "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_backup_destination_junction_is_preserved",
+        "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_native_windows_project_lock_blocks_root_relocation"
+      ],
+      "expected_count": 34,
+      "guard_lines": {
+        "prefix": 12,
+        "interpreter": 13,
+        "runtime": 14,
+        "origin": 41,
+        "collection": 81
+      }
+    }
+  },
+  "controls": [
+    "collection",
+    "missing_id",
+    "deleted_id",
+    "skip",
+    "wrong_cwd",
+    "wrong_prefix",
+    "wrong_interpreter",
+    "wrong_runtime",
+    "foreign_production",
+    "foreign_test",
+    "foreign_loader"
+  ],
+  "foreign": {
+    "foreign_production": {
+      "module": "src.conversion.included_files_parts.filesystem",
+      "package_path": "foreign/src/conversion/included_files_parts/filesystem.py",
+      "source_path": "src/conversion/included_files_parts/filesystem.py",
+      "sha256": "a391fdf559ba74537ba26cd079af89467029e348c1181306ba3522b9e635a97f"
+    },
+    "foreign_test": {
+      "module": "tests.included_files.test_windows_operations",
+      "package_path": "foreign/tests/included_files/test_windows_operations.py",
+      "source_path": "tests/included_files/test_windows_operations.py",
+      "sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    "foreign_loader": {
+      "module": "scripts.run_required_unittest",
+      "package_path": "foreign/scripts/run_required_unittest.py",
+      "source_path": "scripts/run_required_unittest.py",
+      "sha256": "c06750ba6f4c3554e9396ad4ad28b4722332cc15433ab8c107c658528d2035de"
+    }
+  },
+  "method_origins": [
+    {
+      "ast_sha256": "0f35fbc72ea7c514529ccc0283dca089bda870d18bc00f8553c15c1614aabd1e",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_abi_records_preserve_sizes_offsets_and_values",
+      "line": 46,
+      "method": "test_abi_records_preserve_sizes_offsets_and_values",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "997cd6e9a881246340be89a7f1f814f43a78b0dc64b0d86696a31b55c9eeed8c",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_cached_loaders_preserve_signatures_and_independent_lifetimes",
+      "line": 92,
+      "method": "test_cached_loaders_preserve_signatures_and_independent_lifetimes",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "55caaf541c48a983c379b7178f81c783d7203352c2f30b90a4de7f5782ff560f",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_loaders_reject_non_windows_before_loading",
+      "line": 122,
+      "method": "test_loaders_reject_non_windows_before_loading",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "fe700133a92884903a141ee820886e8e0429350c2e73df8982067babbb56a5e7",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_cleanup_loader_rejects_unsupported_layout_before_loading",
+      "line": 136,
+      "method": "test_cleanup_loader_rejects_unsupported_layout_before_loading",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "4eebd461cb21ee04ebf82f659b7d83c1e74d32e52b8dc3563fb0f5a63309768b",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_transaction_error_preserves_lookup_order_number_and_filename",
+      "line": 156,
+      "method": "test_transaction_error_preserves_lookup_order_number_and_filename",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "89958fa9f0033a4532562e5762e109dd1192859cee95e47528c4921adab4ff37",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_lock_file_preserves_one_byte_and_error_identity",
+      "line": 196,
+      "method": "test_lock_file_preserves_one_byte_and_error_identity",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "6eb3ef3ef1798edfe74d610727c190d1a0191051d7e715cb92e7726190ed67da",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_rename_preserves_refusal_fallback_native_flags_and_error",
+      "line": 232,
+      "method": "test_rename_preserves_refusal_fallback_native_flags_and_error",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "7bd1a8259f23b854756fc41525afa2d5440cba069592c8401fc42de79042d591",
+      "class": "TestIncludedFilesWindowsOperations",
+      "decorators": [
+        "unittest.skipUnless(sys.platform == 'win32', 'requires native Windows API calls')"
+      ],
+      "id": "tests.included_files.test_windows_operations.TestIncludedFilesWindowsOperations.test_native_windows_abi_and_write_through_rename",
+      "line": 266,
+      "method": "test_native_windows_abi_and_write_through_rename",
+      "module": "tests.included_files.test_windows_operations",
+      "path": "tests/included_files/test_windows_operations.py",
+      "source_sha256": "25ac99f6cc3d6c6cddb44d75d5faa61af718bf26199a8519210f16133e502a54"
+    },
+    {
+      "ast_sha256": "1a73997277f7cc034458bcdb6a8df4d9acfae1a2726ddbf9fea9daa89e565268",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_plain_validation_open_avoids_native_acquisition",
+      "line": 17,
+      "method": "test_plain_validation_open_avoids_native_acquisition",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "9ecb644d2290e9f93bebe12acb8eae7afd98cefe903159ca73023f37ba1b0b48",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_posix_no_follow_transfers_fd_and_closes_wrapper_failure",
+      "line": 47,
+      "method": "test_posix_no_follow_transfers_fd_and_closes_wrapper_failure",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "6a29856645366f199b47a58dcc5e8c4299585fc57f350f7150cd2ed2f025e0cb",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_invalid_handles_preserve_error_without_close",
+      "line": 121,
+      "method": "test_windows_invalid_handles_preserve_error_without_close",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "ad589d9af060e4ea4909f2402afbc2cc22053eb82299d743f1bce7cb7d5e484d",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_handle_transfer_failure_closes_native_handle_once",
+      "line": 127,
+      "method": "test_windows_handle_transfer_failure_closes_native_handle_once",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "1ae90b75586cec1ad8963e055751063915042a456076e7d2d4f5840d06b36a21",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_windows_stream_wrapper_failure_closes_only_transferred_fd",
+      "line": 168,
+      "method": "test_windows_stream_wrapper_failure_closes_only_transferred_fd",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "f8b005fcbde69e58a41c9b34357b12712120e1ac9f7def37e124da6f9689248d",
+      "class": "TestIncludedFilesFilesystem",
+      "decorators": [
+        "unittest.skipUnless(sys.platform == 'win32', 'requires native Windows sharing and handle transfer')"
+      ],
+      "id": "tests.included_files.test_filesystem.TestIncludedFilesFilesystem.test_native_windows_validation_stream_closure_restores_write_access",
+      "line": 204,
+      "method": "test_native_windows_validation_stream_closure_restores_write_access",
+      "module": "tests.included_files.test_filesystem",
+      "path": "tests/included_files/test_filesystem.py",
+      "source_sha256": "6fe3379e4514854a81c4271a0bdda21c073e128b763d6170b4aad98b7475d57d"
+    },
+    {
+      "ast_sha256": "ed2fb85957425284fc63e4cf0563867a7530d1a378c602fcc52eb10598cec073",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_open_refusals_precede_native_acquisition",
+      "line": 36,
+      "method": "test_open_refusals_precede_native_acquisition",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "7655e8e2cf4e5ddbf60295b1b22590171c83cd46d923cfe1a8472d40e0908f77",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_rejected_verification_retains_primary_error_and_close_note",
+      "line": 80,
+      "method": "test_rejected_verification_retains_primary_error_and_close_note",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "36c826113c6133de0fe378a655b7a024114b751971c589acc1918f729d736e82",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_context_entry_and_exit_preserve_verification_and_error_order",
+      "line": 112,
+      "method": "test_context_entry_and_exit_preserve_verification_and_error_order",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "0cb2855d5ae100342a0c725d6e2307c365c94238c49283d3cd9e440ecee4109c",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_close_clears_handle_before_native_call_and_never_retries",
+      "line": 150,
+      "method": "test_close_clears_handle_before_native_call_and_never_retries",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "1efcb3224dc476adf08ec9255672d830d826d4ad16d31134225bb93e7bd361f6",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_verify_preserves_short_circuit_order_and_closed_refusal",
+      "line": 240,
+      "method": "test_verify_preserves_short_circuit_order_and_closed_refusal",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "ab3e4017f79edae064a8e9f1797f8d26209d6949eb6f6471695fa8f4aef66115",
+      "class": "TestIncludedFilesWindowsBindings",
+      "decorators": [],
+      "id": "tests.included_files.test_windows_bindings.TestIncludedFilesWindowsBindings.test_binding_argument_mismatch_precedes_verify",
+      "line": 265,
+      "method": "test_binding_argument_mismatch_precedes_verify",
+      "module": "tests.included_files.test_windows_bindings",
+      "path": "tests/included_files/test_windows_bindings.py",
+      "source_sha256": "7c564c4182d72a4a28aff7ebdc1679f347e8dd68767e4d2df5911cb83e45c0fa"
+    },
+    {
+      "ast_sha256": "a391e28f615c2510384c8b59a980dda0941131e520cb4ac062e7135aa0bfb826",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows paths')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_recovery_paths_reject_before_io",
+      "line": 5962,
+      "method": "test_native_windows_recovery_paths_reject_before_io",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "f7aff54eff58578f83c2adcd6f104e789444915818eb1480f65e0bfb0216d7e4",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_cleanup_parent_binding_blocks_relocation",
+      "line": 7671,
+      "method": "test_native_windows_cleanup_parent_binding_blocks_relocation",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "f61b0a63bef6d4800f6807f462a8c6c695df36c324ade97a473541dcfacddd31",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_cleanup_parent_binding_rejects_junction",
+      "line": 7697,
+      "method": "test_native_windows_cleanup_parent_binding_rejects_junction",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "310f879e26a58f079483cf774d84cd7e5e71094d2419dff68912091d676c876f",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_noop_hashes_deny_concurrent_writes",
+      "line": 7804,
+      "method": "test_native_windows_noop_hashes_deny_concurrent_writes",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "f84b01f04a2a8b3f18b19b22859eed6ed0168fbc3beb0a179bf24dfae4c72d8b",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_backup_cleanup_leaves_no_debris",
+      "line": 10727,
+      "method": "test_native_windows_readonly_backup_cleanup_leaves_no_debris",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "666611c2bead32c4f60ef6b3596599686210ba64e24eed16dd2b1f5ad0e15366",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_cleanup_recovers_after_process_exit",
+      "line": 10757,
+      "method": "test_native_windows_readonly_cleanup_recovers_after_process_exit",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "81eb575ac7d6077663009fe1ae3ca8fe2846e3fae378c18f5538d0255ee9b22f",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_commit_failure_rolls_back_cleanly",
+      "line": 10804,
+      "method": "test_native_windows_readonly_commit_failure_rolls_back_cleanly",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "f85835994bc7729d0609eaf222924a78871a3d2b4afe9f6b0ba87ad9d5d86c3a",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_readonly_cancellation_rolls_back_cleanly",
+      "line": 10899,
+      "method": "test_native_windows_readonly_cancellation_rolls_back_cleanly",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "1d82786f1c651aeded635f8d9b7da8bc5da488c7b972df4d76e8c45e9da0d36c",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_managed_root_junction_is_rejected",
+      "line": 10991,
+      "method": "test_native_windows_managed_root_junction_is_rejected",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "7babb7b16be1b2f0ea259bd94108aaa70848b811d879879de0c5048b8d118fe7",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_nested_tree_junction_is_rejected",
+      "line": 11019,
+      "method": "test_native_windows_nested_tree_junction_is_rejected",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "fb5d5af504163f0f1eab775ed631435f68ecd4f45f432c25036aa94f820ffb98",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_registry_directory_junction_is_rejected",
+      "line": 11049,
+      "method": "test_native_windows_registry_directory_junction_is_rejected",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "1f1e8975ea700f445e1715d0832621ec2e2ce21ee0d48b992a2de7a612e203c2",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_stage_container_junction_is_rejected",
+      "line": 11083,
+      "method": "test_native_windows_stage_container_junction_is_rejected",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "3b0683fffeedbcd5ac3b17f57dd90db4ba22d3b3ee55250ccc7ef2d18393ce87",
+      "class": "TestIncludedFilesManagedRootTransaction",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_windows_backup_destination_junction_is_preserved",
+      "line": 11143,
+      "method": "test_native_windows_backup_destination_junction_is_preserved",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    },
+    {
+      "ast_sha256": "661f2311f7481d17821b9412cae8b38cd0ebd82093166902cca642d8c9aee3ae",
+      "class": "TestIncludedFilesConverterOutputContainment",
+      "decorators": [
+        "unittest.skipUnless(os.name == 'nt', 'requires native Windows semantics')"
+      ],
+      "id": "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_native_windows_project_lock_blocks_root_relocation",
+      "line": 11921,
+      "method": "test_native_windows_project_lock_blocks_root_relocation",
+      "module": "tests.test_included_files",
+      "path": "tests/test_included_files.py",
+      "source_sha256": "79038f2a9e8228a22c7e12730b47638a4edf08f30ec3340aa2a5faa648758e68"
+    }
+  ],
+  "runtime": [
+    "3.12.10",
+    "win32",
+    "AMD64"
+  ],
+  "temporary_branch": "dev/080-i03-native-controls-proof",
+  "source_directory": ".i03-candidate",
+  "transport_directory": ".i03-native-controls-proof",
+  "execution_directory": "i03-native-controls-proof",
+  "source_workflow_path": ".github/workflows/tests.yml",
+  "source_positive_step_name": "Run native Windows Included Files operations",
+  "method_origin_ast_serializer": {
+    "python": "3.12.10",
+    "executable": "/Users/infi/Documents/Github/.gm2godot-campaign-venv/bin/python",
+    "expression": "ast.dump(node, include_attributes=False)",
+    "effect": "CPython3.12 includes empty list fields in dump text."
+  },
+  "method_origin_correction_sha256": "cc1a100dd55f9424be29fd2c709b2b34e5c6ea5b83e8e160fad97fcdfbdd6aa9",
+  "existing_windows_setup_sha256": "090cb5d0a81b4311af83dba9d307baf283470d89b424f6d64123d4984f7b0229"
+}

@@ -1,449 +1,49 @@
-name: Tests
+name: I03 native control proof
 
 on:
-  workflow_call:
+  push:
+    branches: [dev/080-i03-native-controls-proof]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: i03-native-control-proof-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  test:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    env:
-      PIP_CONFIG_FILE: /dev/null
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12.13'
-          architecture: x64
-
-      - name: Install and verify test dependencies
-        run: |
-          venv_dir="$RUNNER_TEMP/gm2godot-tests-linux-venv"
-          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
-            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
-            exit 1
-          fi
-          python scripts/verify_dependency_bootstrap.py \
-            --source requirements-bootstrap.txt \
-            --policy stable \
-            --constraint constraints/requirements-linux-py312.lock \
-            --output "$RUNNER_TEMP/tests-linux-bootstrap.json"
-          python -m venv "$venv_dir"
-          venv_bin="$venv_dir/bin"
-          printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
-          printf '%s\n' "$venv_bin" >> "$GITHUB_PATH"
-          export VIRTUAL_ENV="$venv_dir"
-          export PATH="$venv_bin:$PATH"
-          hash -r
-          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.lock \
-            pip
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.lock \
-            -r requirements.txt
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-linux-py312.lock \
-            coverage==7.15.2 \
-            packaging==26.2 \
-            ruff==0.15.22
-          python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-linux-py312.lock \
-            --mode subset \
-            --require pip \
-            --require coverage \
-            --require packaging \
-            --require ruff \
-            --require Pillow \
-            --require markdown2 \
-            --require requests \
-            --require PySide6 \
-            --expected-python 3.12.13 \
-            --expected-platform linux \
-            --expected-machine x86_64 \
-            --bootstrap requirements-bootstrap.txt \
-            --bootstrap-policy stable \
-            --output "$RUNNER_TEMP/tests-linux-dependencies.json"
-
-      - name: Install Qt system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libegl1 libgl1
-
-      - name: Run required native receipt gate
-        timeout-minutes: 10
-        shell: bash
-        env:
-          NATIVE_RECEIPT_PROFILE: stable
-        run: >-
-          python -m scripts.run_required_unittest
-          --manifest architecture-verification.json --gate N01-linux
-          --receipt "$RUNNER_TEMP/n01-tests-linux.json"
-
-      - name: Upload required native receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: n01-tests-linux
-          path: ${{ runner.temp }}/n01-tests-linux.json
-          if-no-files-found: error
-          retention-days: 30
-          archive: true
-
-      - name: Run native linux artifact mode characterization
-        run: >-
-          python -m unittest -v
-          tests.test_conversion_manifest.TestConversionManifest.test_existing_and_new_artifact_modes_remain_exact
-          tests.test_diagnostics.TestDiagnosticCollector.test_new_private_modes_and_existing_exact_modes_are_preserved
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_callbacks_return_final_mode
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_fd_chmod_rebinding_keeps_selected_rollback_callable
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
-
-      - name: Run native Linux Included Files POSIX operations
-        shell: bash
-        run: |
-          "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
-          import inspect
-          import json
-          import platform
-          import sys
-          import unittest
-          from pathlib import Path
-
-          root = Path(sys.argv[1]).resolve()
-          venv = Path(sys.argv[2]).resolve()
-          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
-          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
-          assert (platform.python_version(), sys.platform, platform.machine()) == ('3.12.13', 'linux', 'x86_64')
-
-          from scripts.run_required_unittest import load_suite, result_is_allowed
-          from src.conversion.included_files import IncludedFilesConverter
-          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
-          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
-          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
-          from tests.included_files.test_posix_operations import TestIncludedFilesPosixOperations
-          from tests.test_included_files import TestIncludedFilesConverterOutputContainment, TestIncludedFilesManagedRootTransaction
-
-          origins = {
-              load_suite: "scripts/run_required_unittest.py",
-              result_is_allowed: "scripts/run_required_unittest.py",
-              IncludedFilesConverter: "src/conversion/included_files.py",
-              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
-              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
-              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
-              TestIncludedFilesConverterOutputContainment: "tests/test_included_files.py",
-              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
-              TestIncludedFilesPosixOperations: "tests/included_files/test_posix_operations.py",
-          }
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          ids = (
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_linux_mount_id_parser_and_boundary_reject_different_mount",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_preserves_file_and_directory_destinations",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_missing_capability_fails_closed",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_closes_parent_when_mount_check_fails",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_cleanup_streams_payload_receipts",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_moved_and_symlinked_stage_container_is_rejected",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_late_output_directory_relocation_is_rejected_before_publish",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_rejects_final_output_symlink",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_replaces_final_hardlink_without_mutating_referent",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_recovery_record_staging_syncs_parent_before_durable_phase",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_staged_tree_directories_sync_bottom_up_before_commit_record",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_restart_rollback_syncs_registry_before_journal_retirement",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_pinned_directory_transfers_live_fd_and_closes_ancestors",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_failed_child_open_closes_owned_fd_before_reuse",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_borrowed_entry_checks_preserve_fd_and_reject_replacement",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_rename_transfers_entries_and_preserves_errno",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_restore_and_quarantine_preserve_unexpected_entries",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_mount_id_malformed_missing_and_unavailable_policies",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_directory_sync_orders_native_fsync_and_closes_on_failures",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
-          )
-          assert len(ids) == 23
-          suite, discovered = load_suite(ids)
-          assert discovered == ids
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          accepted = result.testsRun == 23 and result_is_allowed(result, {})
-          print(json.dumps({"gate": "I02-linux-posix", "python": sys.executable, "prefix": sys.prefix,
-                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
-                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
-                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
-          raise SystemExit(0 if accepted else 1)
-          PY
-
-      - name: Run unit tests
-        run: |
-          python -m coverage erase
-          python -m coverage run -m unittest discover tests/ -v
-
-      - name: Generate Python coverage reports
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p coverage-reports
-          python -m coverage report
-          python -m coverage json
-          python -m coverage xml
-
-      - name: Run privileged Linux Included Files bind-mount proof
-        shell: bash
-        run: |
-          sudo -n "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
-          import inspect
-          import json
-          import platform
-          import sys
-          import unittest
-          from pathlib import Path
-
-          root = Path(sys.argv[1]).resolve()
-          venv = Path(sys.argv[2]).resolve()
-          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
-          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
-          assert (platform.python_version(), sys.platform, platform.machine()) == ("3.12.13", "linux", "x86_64")
-
-          from scripts.run_required_unittest import load_suite, result_is_allowed
-          from src.conversion.included_files import IncludedFilesConverter
-          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
-          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
-          from tests.test_included_files import TestIncludedFilesManagedRootTransaction
-
-          origins = {
-              load_suite: "scripts/run_required_unittest.py",
-              result_is_allowed: "scripts/run_required_unittest.py",
-              IncludedFilesConverter: "src/conversion/included_files.py",
-              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
-              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
-              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
-          }
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          ids = (
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_native_linux_same_device_bind_mount_is_rejected",
-          )
-          assert len(ids) == 1
-          suite, discovered = load_suite(ids)
-          assert discovered == ids
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          accepted = result.testsRun == 1 and result_is_allowed(result, {})
-          print(json.dumps({"gate": "I02-linux-bind", "python": sys.executable, "prefix": sys.prefix,
-                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
-                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
-                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
-          raise SystemExit(0 if accepted else 1)
-          PY
-
-      - name: Run native Linux bind-mount transaction gate
-        env:
-          GM2GODOT_REQUIRE_LINUX_BIND_MOUNT: '1'
-        run: >-
-          python -m unittest -v
-          tests.test_managed_output_crash_recovery.TestManagedOutputCrashRecovery.test_linux_bind_mount_is_rejected_without_reading_external_target
-
-      - name: Enforce Python line and branch coverage floors
-        run: python scripts/check_coverage.py --report coverage-reports/coverage.json
-
-      - name: Upload Python coverage reports
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-coverage-py3.12.13
-          path: |
-            coverage-reports/coverage.json
-            coverage-reports/coverage.xml
-          if-no-files-found: warn
-          retention-days: 7
-          archive: true
-
-  macos-managed-output-transactions:
-    runs-on: macos-26
-    timeout-minutes: 30
-    env:
-      PIP_CONFIG_FILE: /dev/null
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12.10'
-          architecture: arm64
-
-      - name: Install and verify test dependencies
-        run: |
-          venv_dir="$RUNNER_TEMP/gm2godot-tests-macos-venv"
-          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
-            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
-            exit 1
-          fi
-          python scripts/verify_dependency_bootstrap.py \
-            --source requirements-bootstrap.txt \
-            --policy stable \
-            --constraint constraints/requirements-macos-py312.lock \
-            --output "$RUNNER_TEMP/tests-macos-bootstrap.json"
-          python -m venv "$venv_dir"
-          venv_bin="$venv_dir/bin"
-          printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
-          printf '%s\n' "$venv_bin" >> "$GITHUB_PATH"
-          export VIRTUAL_ENV="$venv_dir"
-          export PATH="$venv_bin:$PATH"
-          hash -r
-          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-macos-py312.lock \
-            pip
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-macos-py312.lock \
-            -r requirements.txt
-          python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-macos-py312.lock \
-            --mode subset \
-            --require pip \
-            --require Pillow \
-            --require markdown2 \
-            --require requests \
-            --require PySide6 \
-            --expected-python 3.12.10 \
-            --expected-platform darwin \
-            --expected-machine arm64 \
-            --bootstrap requirements-bootstrap.txt \
-            --bootstrap-policy stable \
-            --output "$RUNNER_TEMP/tests-macos-dependencies.json"
-
-      - name: Run required native receipt gate
-        timeout-minutes: 10
-        shell: bash
-        env:
-          NATIVE_RECEIPT_PROFILE: stable
-        run: >-
-          python -m scripts.run_required_unittest
-          --manifest architecture-verification.json --gate N01-macos
-          --receipt "$RUNNER_TEMP/n01-tests-macos.json"
-
-      - name: Upload required native receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: n01-tests-macos
-          path: ${{ runner.temp }}/n01-tests-macos.json
-          if-no-files-found: error
-          retention-days: 30
-          archive: true
-
-      - name: Run native macos artifact mode characterization
-        run: >-
-          python -m unittest -v
-          tests.test_conversion_manifest.TestConversionManifest.test_existing_and_new_artifact_modes_remain_exact
-          tests.test_diagnostics.TestDiagnosticCollector.test_new_private_modes_and_existing_exact_modes_are_preserved
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_callbacks_return_final_mode
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_fd_chmod_rebinding_keeps_selected_rollback_callable
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_noop_and_expected_mode_guard_precedence
-          tests.test_anchored_directory_modes.TestAnchoredDirectoryModes.test_descriptor_failures_preserve_errors_and_close
-
-      - name: Run native macOS Included Files POSIX operations
-        shell: bash
-        run: |
-          "$VIRTUAL_ENV/bin/python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
-          import inspect
-          import json
-          import platform
-          import sys
-          import unittest
-          from pathlib import Path
-
-          root = Path(sys.argv[1]).resolve()
-          venv = Path(sys.argv[2]).resolve()
-          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
-          assert Path(sys.executable).resolve() == (venv / "bin" / "python").resolve()
-          assert (platform.python_version(), sys.platform, platform.machine()) == ('3.12.10', 'darwin', 'arm64')
-
-          from scripts.run_required_unittest import load_suite, result_is_allowed
-          from src.conversion.included_files import IncludedFilesConverter
-          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
-          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
-          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
-          from tests.included_files.test_posix_operations import TestIncludedFilesPosixOperations
-          from tests.test_included_files import TestIncludedFilesConverterOutputContainment, TestIncludedFilesManagedRootTransaction
-
-          origins = {
-              load_suite: "scripts/run_required_unittest.py",
-              result_is_allowed: "scripts/run_required_unittest.py",
-              IncludedFilesConverter: "src/conversion/included_files.py",
-              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
-              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
-              TestIncludedFilesManagedRootTransaction: "tests/test_included_files.py",
-              TestIncludedFilesConverterOutputContainment: "tests/test_included_files.py",
-              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
-              TestIncludedFilesPosixOperations: "tests/included_files/test_posix_operations.py",
-          }
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          ids = (
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_linux_mount_id_parser_and_boundary_reject_different_mount",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_preserves_file_and_directory_destinations",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_noreplace_missing_capability_fails_closed",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_closes_parent_when_mount_check_fails",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_cleanup_streams_payload_receipts",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_moved_and_symlinked_stage_container_is_rejected",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_late_output_directory_relocation_is_rejected_before_publish",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_rejects_final_output_symlink",
-              "tests.test_included_files.TestIncludedFilesConverterOutputContainment.test_replaces_final_hardlink_without_mutating_referent",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_recovery_record_staging_syncs_parent_before_durable_phase",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_staged_tree_directories_sync_bottom_up_before_commit_record",
-              "tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_restart_rollback_syncs_registry_before_journal_retirement",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_pinned_directory_transfers_live_fd_and_closes_ancestors",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_failed_child_open_closes_owned_fd_before_reuse",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_borrowed_entry_checks_preserve_fd_and_reject_replacement",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_native_rename_transfers_entries_and_preserves_errno",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_restore_and_quarantine_preserve_unexpected_entries",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_mount_id_malformed_missing_and_unavailable_policies",
-              "tests.included_files.test_posix_operations.TestIncludedFilesPosixOperations.test_directory_sync_orders_native_fsync_and_closes_on_failures",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
-          )
-          assert len(ids) == 23
-          suite, discovered = load_suite(ids)
-          assert discovered == ids
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          accepted = result.testsRun == 23 and result_is_allowed(result, {})
-          print(json.dumps({"gate": "I02-darwin-posix", "python": sys.executable, "prefix": sys.prefix,
-                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
-                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
-                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
-          raise SystemExit(0 if accepted else 1)
-          PY
-
-      - name: Run native macOS managed-output transaction tests
-        run: >-
-          python -m unittest -v
-          tests.test_managed_output_workspace
-          tests.test_managed_output_publisher
-          tests.test_managed_output_crash_recovery
-          tests.test_converter_transaction
-          tests.test_stale_managed_output_invalidation
-          tests.test_cli
-          tests.test_cli_configuration
-          tests.test_cli_session
-          tests.test_gui_conversion_outcomes
-          tests.test_godot_test_support
-          tests.test_fonts
-          tests.test_font_model
-          tests.test_font_sources
-          tests.test_font_model_consumers
-
   windows-artifact-transactions:
     runs-on: windows-2025
     timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: .i03-candidate
     env:
       PIP_CONFIG_FILE: nul
       GM2GODOT_SKIP_WINDOWS_INCLUDED_FILES_SCALE_GATE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure byte-exact Git checkouts
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+
+      - name: Check out temporary proof transport
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Check out exact final I03 candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 7175c34813580c12abec7a8d29687cbafc3532cd
+          path: .i03-candidate
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -497,114 +97,27 @@ jobs:
             --bootstrap-policy stable \
             --output "$RUNNER_TEMP/tests-windows-dependencies.json"
 
-      - name: Run required native receipt gate
-        timeout-minutes: 10
-        shell: bash
-        env:
-          NATIVE_RECEIPT_PROFILE: stable
-        run: >-
-          python -m scripts.run_required_unittest
-          --manifest architecture-verification.json --gate N01-windows
-          --receipt "$RUNNER_TEMP/n01-tests-windows.json"
-
-      - name: Upload required native receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: n01-tests-windows
-          path: ${{ runner.temp }}/n01-tests-windows.json
-          if-no-files-found: error
-          retention-days: 30
-          archive: true
-
-      - name: Run Windows outcome and artifact transaction tests
-        run: >-
-          python -m unittest -v
-          tests.test_conversion_outcome
-          tests.test_conversion_manifest
-          tests.test_generation_inventory
-          tests.test_diagnostics
-          tests.test_anchored_artifacts
-          tests.test_architecture_policy
-          tests.test_converter
-          tests.test_converter_transaction
-          tests.test_stale_managed_output_invalidation
-          tests.test_cli
-          tests.test_cli_configuration
-          tests.test_cli_session
-          tests.test_asset_registry
-          tests.test_atomic_generated_text
-          tests.test_managed_output_workspace
-          tests.test_managed_output_publisher
-          tests.test_included_files.TestIncludedFilesManagedRootTransaction
-          tests.test_included_files.TestIncludedFilesConverterOutputContainment
-          tests.test_godot_test_support
-          tests.test_fonts
-          tests.test_font_model
-          tests.test_font_sources
-          tests.test_font_model_consumers
-
-      - name: Run native windows artifact mode characterization
-        run: >-
-          python -m unittest -v
-          tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_readonly_hardlink_is_rejected_without_alias_mutation
-          tests.test_anchored_artifacts.TestAnchoredArtifacts.test_windows_single_link_readonly_publish_and_restore
-
-      - name: Run native Windows Included Files metadata
+      - name: Bind I03 candidate source and Windows runtime
+        id: bind
         shell: bash
         run: |
           venv_python="$(cygpath -u "$VIRTUAL_ENV")/Scripts/python.exe"
-          "$venv_python" - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
-          import inspect
-          import json
-          import platform
-          import sys
-          import unittest
-          from pathlib import Path
+          "$venv_python" -B -I "$GITHUB_WORKSPACE/.i03-native-controls-proof/bind_runtime.py" bind
 
-          root = Path(sys.argv[1]).resolve()
-          venv = Path(sys.argv[2]).resolve()
-          assert Path.cwd().resolve() == root and Path(sys.prefix).resolve() == venv
-          assert Path(sys.executable).resolve() == venv / "Scripts" / "python.exe"
-          assert (platform.python_version(), sys.platform, platform.machine()) == ("3.12.10", "win32", "AMD64")
-
-          from scripts.run_required_unittest import load_suite, result_is_allowed
-          from src.conversion.included_files import IncludedFilesConverter
-          from src.conversion.included_files_parts.filesystem_metadata import path_fingerprint
-          from src.conversion.included_files_parts.posix_operations import descriptor_paths_supported
-          from tests.included_files.test_filesystem_metadata import TestIncludedFilesFilesystemMetadata
-
-          origins = {
-              load_suite: "scripts/run_required_unittest.py",
-              result_is_allowed: "scripts/run_required_unittest.py",
-              IncludedFilesConverter: "src/conversion/included_files.py",
-              path_fingerprint: "src/conversion/included_files_parts/filesystem_metadata.py",
-              descriptor_paths_supported: "src/conversion/included_files_parts/posix_operations.py",
-              TestIncludedFilesFilesystemMetadata: "tests/included_files/test_filesystem_metadata.py",
-          }
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          ids = (
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_stat_projections_preserve_exact_fields_and_order",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_symlink_short_circuit_and_unavailable_junction_policy",
-              "tests.included_files.test_filesystem_metadata.TestIncludedFilesFilesystemMetadata.test_junction_checker_result_and_error_are_forwarded",
-          )
-          assert len(ids) == 3
-          suite, discovered = load_suite(ids)
-          assert discovered == ids
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          assert all(Path(inspect.getfile(owner)).resolve() == root / path for owner, path in origins.items())
-          accepted = result.testsRun == 3 and result_is_allowed(result, {})
-          print(json.dumps({"gate": "I02-windows-metadata", "python": sys.executable, "prefix": sys.prefix,
-                            "root": str(root), "runtime": [platform.python_version(), sys.platform, platform.machine()],
-                            "origins": sorted(set(origins.values())), "selected_ids": list(discovered),
-                            "tests_run": result.testsRun, "skip_count": len(result.skipped), "accepted": accepted}, sort_keys=True))
-          raise SystemExit(0 if accepted else 1)
-          PY
+      - name: Check I03 native invocation refusals
+        shell: bash
+        run: |
+          set -o noclobber
+          venv_python="$(cygpath -u "$VIRTUAL_ENV")/Scripts/python.exe"
+          "$venv_python" -B -I "$I03_CONTROL_PACKAGE/run_controls.proposed.py" > "$RUNNER_TEMP/i03-native-controls-proof/controller.log" 2>&1
 
       - name: Run native Windows Included Files operations
+        if: always() && steps.bind.outcome == 'success'
         shell: bash
         run: |
+          set -o noclobber
           venv_python="$(cygpath -u "$VIRTUAL_ENV")/Scripts/python.exe"
-          "$venv_python" -B - "$GITHUB_WORKSPACE" "$VIRTUAL_ENV" <<'PY'
+          "$venv_python" -B - "$GITHUB_WORKSPACE/.i03-candidate" "$VIRTUAL_ENV" > "$RUNNER_TEMP/i03-native-controls-proof/positive34.log" 2>&1 <<'PY'
           """I03 native Windows operations gate with exact selection and runtime checks."""
 
           import inspect
@@ -699,170 +212,22 @@ jobs:
           raise SystemExit(0 if accepted else 1)
           PY
 
-      - name: Run native Windows Godot output-reader scheduling tests
-        run: >-
-          python -m unittest -v
-          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_deferred_until_after_stop_retains_buffered_diagnostic
-          tests.test_godot_validation.TestGodotValidation.test_reader_retries_after_output_arrives_during_stop_wait
-          tests.test_godot_validation.TestGodotValidation.test_normal_completion_reader_oserror_is_capture_failure
-          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_oserror_is_capture_failure
-          tests.test_godot_validation.TestGodotValidation.test_stop_deadline_leaves_stdout_owned_by_live_reader
+      - name: Verify I03 source transport and runtime after proof
+        if: always() && steps.bind.outcome == 'success'
+        shell: bash
+        run: |
+          venv_python="$(cygpath -u "$VIRTUAL_ENV")/Scripts/python.exe"
+          "$venv_python" -B -I "$GITHUB_WORKSPACE/.i03-native-controls-proof/bind_runtime.py" verify
 
-  windows-included-files-scale:
-    runs-on: windows-2025
-    timeout-minutes: 20
-    env:
-      PIP_CONFIG_FILE: nul
-      GM2GODOT_REQUIRE_WINDOWS_INCLUDED_FILES_SCALE_GATE: '1'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Upload I03 native control proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          python-version: '3.12.10'
-          architecture: x64
-
-      - name: Install and verify test dependencies
-        shell: bash
-        run: |
-          venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-included-files-scale-windows-venv"
-          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
-            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
-            exit 1
-          fi
-          python scripts/verify_dependency_bootstrap.py \
-            --source requirements-bootstrap.txt \
-            --policy stable \
-            --constraint constraints/requirements-windows-py312.lock \
-            --output "$RUNNER_TEMP/included-files-scale-windows-bootstrap.json"
-          python -m venv "$venv_dir"
-          venv_bin="$venv_dir/Scripts"
-          venv_native="$(cygpath -w "$venv_dir")"
-          venv_path_native="$(cygpath -w "$venv_bin")"
-          github_env_file="$(cygpath -u "$GITHUB_ENV")"
-          github_path_file="$(cygpath -u "$GITHUB_PATH")"
-          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
-          printf '%s\n' "$venv_path_native" >> "$github_path_file"
-          export VIRTUAL_ENV="$venv_native"
-          export PATH="$venv_bin:$PATH"
-          hash -r
-          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.lock \
-            pip
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.lock \
-            -r requirements.txt
-          python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-windows-py312.lock \
-            --mode subset \
-            --require pip \
-            --require Pillow \
-            --require markdown2 \
-            --require requests \
-            --require PySide6 \
-            --expected-python 3.12.10 \
-            --expected-platform win32 \
-            --expected-machine AMD64 \
-            --bootstrap requirements-bootstrap.txt \
-            --bootstrap-policy stable \
-            --output "$RUNNER_TEMP/included-files-scale-windows-dependencies.json"
-
-      - name: Run native Windows Included Files scale gate
-        run: python -m scripts.run_windows_included_files_scale_gate
-
-  windows-managed-output-crash-recovery:
-    runs-on: windows-2025
-    timeout-minutes: 30
-    env:
-      PIP_CONFIG_FILE: nul
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: '3.12.10'
-          architecture: x64
-
-      - name: Install and verify test dependencies
-        shell: bash
-        run: |
-          venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-crash-windows-venv"
-          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
-            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
-            exit 1
-          fi
-          python scripts/verify_dependency_bootstrap.py \
-            --source requirements-bootstrap.txt \
-            --policy stable \
-            --constraint constraints/requirements-windows-py312.lock \
-            --output "$RUNNER_TEMP/windows-crash-recovery-bootstrap.json"
-          python -m venv "$venv_dir"
-          venv_bin="$venv_dir/Scripts"
-          venv_native="$(cygpath -w "$venv_dir")"
-          venv_path_native="$(cygpath -w "$venv_bin")"
-          github_env_file="$(cygpath -u "$GITHUB_ENV")"
-          github_path_file="$(cygpath -u "$GITHUB_PATH")"
-          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
-          printf '%s\n' "$venv_path_native" >> "$github_path_file"
-          export VIRTUAL_ENV="$venv_native"
-          export PATH="$venv_bin:$PATH"
-          hash -r
-          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.lock \
-            pip
-          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
-            --constraint constraints/requirements-windows-py312.lock \
-            -r requirements.txt
-          python scripts/verify_dependency_environment.py \
-            --constraint constraints/requirements-windows-py312.lock \
-            --mode subset \
-            --require pip \
-            --require Pillow \
-            --require markdown2 \
-            --require requests \
-            --require PySide6 \
-            --expected-python 3.12.10 \
-            --expected-platform win32 \
-            --expected-machine AMD64 \
-            --bootstrap requirements-bootstrap.txt \
-            --bootstrap-policy stable \
-            --output "$RUNNER_TEMP/windows-crash-recovery-dependencies.json"
-
-      - name: Run native Windows crash recovery matrix
-        run: >-
-          python -m unittest -v
-          tests.test_managed_output_crash_recovery
-          tests.test_gui_conversion_outcomes
-
-  workflow-success:
-    name: workflow-success
-    if: always()
-    needs: [test, macos-managed-output-transactions, windows-artifact-transactions, windows-included-files-scale, windows-managed-output-crash-recovery]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions: {}
-    env:
-      REQUIRED_JOBS: ${{ toJSON(needs) }}
-    steps:
-      - name: Require successful validation jobs
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          expected = {
-              "test": "success",
-              "macos-managed-output-transactions": "success",
-              "windows-artifact-transactions": "success",
-              "windows-included-files-scale": "success",
-              "windows-managed-output-crash-recovery": "success",
-          }
-          actual = {name: job["result"] for name, job in json.loads(os.environ["REQUIRED_JOBS"]).items()}
-          if actual != expected:
-              raise SystemExit(f"Required jobs did not succeed: {actual}; expected {expected}")
-          PY
+          name: i03-native-control-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/i03-native-controls-proof/
+            ${{ runner.temp }}/tests-windows-bootstrap.json
+            ${{ runner.temp }}/tests-windows-dependencies.json
+          if-no-files-found: error
+          retention-days: 30
+          archive: true

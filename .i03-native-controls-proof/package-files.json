@@ -1,0 +1,11 @@
+{
+  "files": {
+    "bind_runtime.py": "d5301f5f266545e662a7c776377ff1a28450360c36a0d4c4147f952a18e2904f",
+    "binding-spec.json": "acad37e10f5fbd662bdb87bd2593a0e34cf84059e9b6cc0715fb092bd58e07c7",
+    "control_worker.proposed.py": "135fcedd85a1c53237c8c3aa792ae2e6c76e92ea57a9a29e24392c734318ad12",
+    "final-source.json": "2dcc128275760d5900bbe0d081d0ac31d06cce330c86802b6bb4371677530fa0",
+    "native_windows_step.py": "7a33e07a66da632db4cb020804bbcb363d63137a2518476dd7c245521d88dbf6",
+    "run_controls.proposed.py": "230affe72621f5ea19f19a1094c291fdebd35d6ca97259944be7356e9771bae7"
+  },
+  "workflow_sha256": "9c22b60dc6c47ea0b9d7d297176a3a5df108814a42cc3ed572c8e7d16e42be28"
+}

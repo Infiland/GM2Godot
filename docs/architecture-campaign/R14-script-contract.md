@@ -172,3 +172,26 @@ At asset_registry:2340 use `script_model, function_names = self._script_model_an
 `aggregate-primary-projection.patch` is the exact isolated existing-owner diff for step4, not a complete runnable R14 candidate. Static AST arithmetic gives module563/968→562/965 physical/structural and parser131/255→131/253; parser body and shader-shared neighbor remain unchanged. The complete candidate still needs all metrics/checks after approved implementation.
 
 No YY read is added. Registry planning and per-script conversion keep separate GML reads and parser calls; dependency consumers keep independent reads and existing macro/enum caches; aggregate keeps its single existing YY decode. This proposal removes the duplicated converter/registry path loop, relocates the discovery raw-name query once, and replaces the aggregate-only class with an actual registry/discovery/aggregate model. It does not invent parsing work to justify the model.
+
+## Implementation entry after actual characterization
+
+The old-source invocation at `3933e07` passed all 71 methods with zero skips:
+59 retained methods and 12 new observable cases. Root and independent result
+reviews accept the exact callback exception/mutation records and real repeated
+reads. The recorded sequence has 11 metadata opens (six YYP and five YY), one
+registry GML read, and the converter's GML read followed by its GD write. Preserve
+the complete ordered arrays; only their recorded temporary project/output root
+prefixes may differ in the candidate comparison. No elapsed-time speed claim is
+made from the concurrent correctness run.
+
+Root now authorizes prepare_i03_observer to implement the exact accepted APIs
+and caller changes within the thirteen allowed paths. Preserve the accepted
+old package and its result; do not rerun its source-bound launcher after edits.
+Port the twelve cases and retain all 59 existing IDs, adding the two candidate
+authority methods and explicit additional authority arms. Complete source,
+static, metrics and focused-result review precedes broad final proof. Root
+owns baseline, architecture selection, workflow and campaign metadata.
+
+Old result SHA256: `61d7d87d4c3a9b49a3ee0faf72fb35d3dd09dc6047255fb8c37c8437faa70291`.
+Independent review: `a0aa0e54f25e4891d4548bf232982b948feda6d88d213bbb784f5219e2d9facb`.
+Root review: `cb5a5c01015717504a8bff78f76a36fa83f0f2166c07a9792764ca7ca3a61354`.

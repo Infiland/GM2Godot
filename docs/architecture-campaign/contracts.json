@@ -1111,7 +1111,7 @@
       "task_id": "R14",
       "issue": 797,
       "title": "Authoritative scripts resource model",
-      "state": "planned",
+      "state": "implementing",
       "problem_and_evidence": "Converter scripts.py:405-492 and registry asset_registry.py:2754-2844 duplicate preferred/fallback sidecar selection. The aggregate ScriptModel is descriptive; script_functions already owns lexical parsing. There is no renderer YY dictionary parser to remove. Verified at ae57bee3b4ea05d2efa5e9206f2514b9dc68a292.",
       "expected_benefit": "One script sidecar search owner for conversion/registry and one dependency-name query; canonical nine-field ScriptModel actually used for registry source reads and alias identity, dependency discovery and aggregate output.",
       "current_owner": "scripts.py, asset_registry.py, project_source_discovery.py, resource_models.py; script_functions lexical ownership is preserved.",
@@ -1143,11 +1143,26 @@
       "expected_measurable_improvement": "Retire duplicated converter/registry sidecar search and registry structure160 debt; aggregate class/union-only projection562physical/965structural and parser131/253. These are proposals, not actual candidate measurements. Every fresh function/test <=15 complexity,4 nesting,8 parameters,150 physical and150 structural; new modules<=800 physical; no retained debt growth.",
       "characterization_tests": "Four model and ten source methods detailed in accepted proposal: nine fields/raw identity, metadata/defaults, ordered dependency names, actual model authority, four policies, enumeration/suffix/unsafe-name/symlink behavior, synchronous callback exceptions/mutations, actual planning-to-conversion rereads, exception boundaries and outer revalidation/deduplication. Preserve59 existing candidate IDs as reuse pool. Freeze executable old-observable cases separately from candidate-only authority tests before launch.",
       "runtime_platform_proof": "Approved native Python; Pyright zero errors/warnings; Ruff; focused tests after fixes; full unittest for shared changes; maintainability and diff gate. Execute exact Godot/LTS and actual affected native platforms where relevant; record every skip. For shared parse/discovery/orchestration, measure repeated identical-input base/candidate elapsed time and peak memory on the approved environment; investigate material regressions. Record input size, repeats, variance and platform measurement units before claiming performance improvement.",
-      "implementation_owner": "prepare_i03_observer; isolated dev/080-script-model worktree. Current authorization is characterization preparation only; production implementation follows accepted old results and exact scope confirmation.",
+      "implementation_owner": "prepare_i03_observer; sole implementation owner in dev/080-script-model. Root authorizes the accepted thirteen-path implementation following accepted old71 results.",
       "independent_reviewers": "prepare_r13_ci read-only; root actual source/results review.",
       "completion_criteria": "All scoped callers migrated; obsolete duplicates removed; measured improvement; matched proof passed; independent and upper approval; integrated exact revision verified.",
       "temporary_adapter_removal_condition": "Remove old _script_yy_source/_source_gml_path, registry _script_source_gml_path/_script_function_names and discovery _script_gml_candidate after caller migration; no compatibility-only adapter remains.",
-      "plan_verdict": "ROOT DESIGN ACCEPTED; independent eb326709 and root cdd45125 approve bounded design. Prepare exact old characterization; no production implementation or proof launch authorized yet."
+      "plan_verdict": "APPROVE IMPLEMENTATION: accepted concrete design and old71/0skip characterization, independently/root reviewed. Preserve exact APIs/four source policies and source/raw identity; implement only the13allowed paths.",
+      "old_characterization": {
+        "source_head": "3933e077f15e91c6f8db7e447765b32ba4a7b781",
+        "source_tree": "15c11f0f426de776fd5aca529eb6df532ba7ac6e",
+        "tests": 71,
+        "successes": 71,
+        "skips": 0,
+        "result_sha256": "61d7d87d4c3a9b49a3ee0faf72fb35d3dd09dc6047255fb8c37c8437faa70291",
+        "raw_sha256": "f146e9621bbddd905395e3b8ff211f27100750591a3b4851d0072d7203d73da3",
+        "root_review_sha256": "cb5a5c01015717504a8bff78f76a36fa83f0f2166c07a9792764ca7ca3a61354",
+        "independent_review_sha256": "a0aa0e54f25e4891d4548bf232982b948feda6d88d213bbb784f5219e2d9facb",
+        "observations_sha256": "a7afc132045f038b9d99db81fb83fc861977f5ad6d63ba2e01cbafcf16619fa1",
+        "read_counts": "11 metadata opens:6 YYP/5 YY; registry1GMLread; converter1GMLread/1GDwrite. Preserve full arrays, replacing only recorded temporary root prefixes in later comparison.",
+        "callbacks": "4 exact exception and4 mutation phase/policy records preserved",
+        "candidate_authority_accepted": false
+      }
     },
     {
       "task_id": "R15",

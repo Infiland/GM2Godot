@@ -255,3 +255,9 @@ Windows and Linux claims require their actual native CI receipts.
   is authorized until actual old results and source implementation scope pass
   review. The registry caller projection leaves one unit below its150 structural
   cap; complete candidate and new tests must be measured.
+
+- R14 old characterization at `3933e07` passed 71 methods with zero skips.
+  Independent and root reviews accept all callback and repeated-read records.
+  Root authorizes the sole owner to implement the accepted thirteen-path design;
+  candidate authority, metrics, full/parity/performance and CI proof remain pending.
+  Verified campaign progress remains 17/54; this entry does not complete R14.

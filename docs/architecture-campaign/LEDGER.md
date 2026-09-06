@@ -241,3 +241,17 @@ Windows and Linux claims require their actual native CI receipts.
   existing Windows-only CLI skip. Original local full/parity/timing results
   retain their 321 source identity. Final metadata and exact PR/merge native
   verification remain required before R13 counts as verified.
+
+- R13 is verified at campaign merge `ae57bee3b4ea05d2efa5e9206f2514b9dc68a292`
+  after PR #892 and exact PR/merge CI runs 33996106216/33998320814. All required
+  local, native, coverage and maintainability evidence is accepted in
+  `R13/final-verification.json`. Campaign completion is 17/54 tasks (31.5%).
+- R14 design accepted at ae57: remove the duplicated script sidecar search,
+  introduce canonical model consumption in registry/discovery/aggregate, and
+  preserve four path policies and the existing lexical parser. Root explicitly
+  accepts the internal class defining-module/inheritance change.
+  `prepare_i03_observer` owns the isolated `dev/080-script-model` worktree;
+  `prepare_r13_ci` reviews independently. Only old characterization preparation
+  is authorized until actual old results and source implementation scope pass
+  review. The registry caller projection leaves one unit below its150 structural
+  cap; complete candidate and new tests must be measured.

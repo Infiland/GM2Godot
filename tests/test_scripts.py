@@ -67,7 +67,7 @@ def _extension_yy(name: str) -> dict[str, object]:
 
 class ScriptSourceProbe(ScriptConverter):
     def source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
-        return self._source_gml_path(entry)
+        return self._conversion_script_source(entry)
 
 
 class TestScriptConverter(unittest.TestCase):

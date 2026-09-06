@@ -1,6 +1,6 @@
 # R14 canonical script model and source ownership contract
 
-Status: ROOT DESIGN ACCEPTED for characterization preparation; production implementation and proof launch remain gated by accepted old observations. Base is clean campaign `ae57bee3b4ea05d2efa5e9206f2514b9dc68a292`, tree `65b279a8538386d09236fa570580fda0556f0333` (605 tracked files, 405 Python). The prior independent investigation and exact read inputs are indexed alongside this document. No candidate source/tree hash exists yet.
+Status: REVIEWING. Implementation, static checks and 73 focused tests with zero skips are independently and upper-agent approved at the source indexed by `R14/implementation-81561810/source-final.json`. Original characterization remains bound to ae57 and entry81561810. Broader proof, composition with verified I03, native CI and final integration are pending. The implementation owner has fourteen allowed source/test paths.
 
 ## Concrete benefit and authority
 
@@ -26,7 +26,7 @@ Existing production edits:
 
 New tests: `tests/test_script_model.py`, `tests/test_script_sources.py`. Narrow existing edits only in `tests/test_scripts.py`, `tests/test_asset_registry.py`, `tests/test_project_source_paths.py`, `tests/test_conversion_architecture.py`, `tests/test_gamemaker_json.py`. Existing private probes at test_scripts:68–70 and test_asset_registry:2216 migrate to their actual successor paths; no compatibility-only old adapter remains. No new tracked fixture is presently justified: use existing fixtures and finite temporary directories.
 
-Root alone owns any R14 contract, ledger, architecture ownership/test-selection and maintainability baseline metadata amendments. No workflow, tool configuration, version, release or unrelated family edits are proposed. `script_functions.py`, `base_converter.py`, `project_source_paths.py`, `project_macros.py`, `project_enums.py`, `objects.py`, `converter.py`, and `tests/test_path_model_consumers.py` remain unchanged preservation inputs.
+Root alone owns any R14 contract, ledger, architecture ownership/test-selection and maintainability baseline metadata amendments. Root additionally owns the bounded native test-selection amendment below. No tool configuration, version, release or unrelated family edits are proposed. `script_functions.py`, `base_converter.py`, `project_source_paths.py`, `project_macros.py`, `project_enums.py`, `objects.py`, `converter.py`, and `tests/test_path_model_consumers.py` remain unchanged preservation inputs.
 
 ## Four path policies remain distinct
 
@@ -123,7 +123,7 @@ The only private source helpers proposed are:
 
 ```python
 def _conversion_yy_source(
-    name: str, source_path: str,
+    source_path: str,
     resolve: ScriptPathResolver, report: ScriptRejectionReporter,
 ) -> ResolvedProjectSourcePath | None: ...
 
@@ -139,7 +139,7 @@ def _preferred_script_source(
 ) -> tuple[str | None, set[str]]: ...
 
 def _fallback_script_source(
-    name: str, yy_source: ResolvedProjectSourcePath,
+    yy_source: ResolvedProjectSourcePath,
     script_directory: ResolvedProjectSourcePath, excluded_filenames: set[str],
     discover: ScriptPathResolver,
 ) -> str | None: ...
@@ -195,3 +195,29 @@ owns baseline, architecture selection, workflow and campaign metadata.
 Old result SHA256: `61d7d87d4c3a9b49a3ee0faf72fb35d3dd09dc6047255fb8c37c8437faa70291`.
 Independent review: `a0aa0e54f25e4891d4548bf232982b948feda6d88d213bbb784f5219e2d9facb`.
 Root review: `cb5a5c01015717504a8bff78f76a36fa83f0f2166c07a9792764ca7ca3a61354`.
+
+
+## Bounded shared test-support owner
+
+Root authorizes one additional implementation path, `tests/script_source_support.py`,
+for `ScriptFixture`, `RegistrySourceProbe`, `RereadingConverter`, and
+`ScriptReadProbe`. Both new test modules import these existing cohesive fixture
+and probe classes. Keep model assertions in `test_script_model.py` and source
+policy/callback assertions in `test_script_sources.py`; neither test module owns
+the other's I/O infrastructure. Preserve all 59 retained IDs, new case IDs,
+assertions, and observable callback/read ordering. This replaces the proposed
+placement of shared probes in the model test module; it adds no new runner,
+policy framework, production API, or behavior. The implementation scope is now
+fourteen paths. All ordinary fresh-code and test-module budgets still apply.
+
+Root also removed two unused private `name` parameters from the YY guard and fallback helper contracts. The three source entrypoint APIs and callback behavior are unchanged.
+
+## Accepted implementation and broader verification
+
+The independent reviewer `review_r13_full` and root accepted the actual implementation: 73 selected successes, zero skips, all retained callback and repeated-read observations preserved, Pyright zero diagnostics and both Ruff checks passed. The accepted external baseline has 1040 allowances against ae57: one removed and six lowered, with none added or grown. I03 composition requires a fresh actual-parent baseline; 1040 is not a claim about that future combined source.
+
+Actual six-module production totals are 6031 to 6015 physical lines and 9995 to 10020 structural units. The benefit is clearer ownership and removal of the duplicate sidecar search; total structural size does not shrink. New owners are 35/52 and 167/286 physical/structural units; the cohesive test support owner is 192/461. All 64 fresh functions satisfy the accepted caps.
+
+Root authorizes only the following workflow amendment: append the exact 73 selected IDs to the existing macOS native command and the 62 missing IDs to the existing Windows command, retaining its eleven already-selected registry IDs. Preserve all prior commands, setup, coverage, native obligations and the unchanged Godot workflow. Require all 73 unique selected successes on each native host; the five conditional symlink skips receive no successful proof credit. The existing R01 manifest supplies the unchanged five-project/fourteen-field parity contract.
+
+The accepted broader plan is indexed by `R14/broader-proof-plan-81561810/review-files.json`. It requires full discovery with five external fixtures, R01 base/candidate and same-ref parity, and twelve fresh SNAP workers (two excluded warmups, five alternating measured pairs). Each worker calls real dependency discovery and `ScriptConverter.convert_all`; compare all outputs and scoped real-open records. Preserve the production registry callback wiring, including its existing silence. Report measured intervals with observation overhead and whole-process macOS RSS bytes. Final source, runtime, input and executable packages require review before use.

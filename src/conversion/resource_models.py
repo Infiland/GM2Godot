@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import cast
+from typing import TypeAlias, cast
 
 from src.conversion.diagnostic_models import ResourceModelDiagnostic
 from src.conversion.font_model import FontModel, parse_font_model
@@ -22,6 +22,7 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
+from src.conversion.script_model import ScriptModel
 from src.conversion.type_defs import JsonDict, JsonList
 
 
@@ -83,9 +84,7 @@ class RoomModel(ResourceModel):
     layers: tuple[RoomLayerModel, ...] = ()
 
 
-@dataclass(frozen=True)
-class ScriptModel(ResourceModel):
-    gml_path: str | None = None
+ParsedResourceModel: TypeAlias = ResourceModel | PathModel | FontModel | ScriptModel
 
 
 @dataclass(frozen=True)
@@ -234,7 +233,7 @@ class _ParsedResourceModelBuckets:
     timelines: list[TimelineModel] = field(default_factory=_empty_timeline_models)
     other_resources: list[ResourceModel] = field(default_factory=_empty_resource_models)
 
-    def add(self, model: ResourceModel | PathModel | FontModel) -> None:
+    def add(self, model: ParsedResourceModel) -> None:
         if isinstance(model, SpriteModel):
             self.sprites.append(model)
         elif isinstance(model, SoundModel):
@@ -264,7 +263,7 @@ class _ParsedResourceModelBuckets:
 def _parse_resource_model(
     gm_project_path: str,
     reference: ProjectResourceReference,
-) -> tuple[ResourceModel | PathModel | FontModel | None, tuple[ResourceModelDiagnostic, ...]]:
+) -> tuple[ParsedResourceModel | None, tuple[ResourceModelDiagnostic, ...]]:
     try:
         resolved_yy = resolve_project_source_path(
             gm_project_path,

@@ -2172,7 +2172,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         owner_source_path = "scripts/owner/custom.yy"
         owner_path = os.path.join(
             self.gm_dir,
-            *owner_source_path.split("/"),
+            "scripts", "owner", "custom.yy",
         )
         _write_json(
             owner_path,
@@ -2203,17 +2203,15 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "function from_safe_fallback() { return 7; }\n",
         )
         diagnostics = DiagnosticCollector()
-        resource = _ProjectResource(
+        selected = self._converter(
+            diagnostics=diagnostics,
+        )._script_model_and_function_names(_ProjectResource(
             kind="scripts",
             name="nested/../safe",
             yy_path=owner_path,
             source_path=owner_source_path,
             raw_data={},
-        )
-
-        selected = self._converter(
-            diagnostics=diagnostics,
-        )._script_source_gml_path(resource)
+        ))[0].gml_path
 
         self.assertEqual(selected, safe_fallback)
         self.assertNotEqual(selected, alias_target)

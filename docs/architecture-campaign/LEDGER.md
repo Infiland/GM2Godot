@@ -261,3 +261,12 @@ Windows and Linux claims require their actual native CI receipts.
   Root authorizes the sole owner to implement the accepted thirteen-path design;
   candidate authority, metrics, full/parity/performance and CI proof remain pending.
   Verified campaign progress remains 17/54; this entry does not complete R14.
+
+R14 bounded implementation review: shared script fixtures and source probes belong in `tests/script_source_support.py`, imported by the two focused test modules. Root added this fourteenth allowed path to keep test responsibilities clear while preserving all selected IDs and assertions. Production contracts and ordinary budgets are unchanged; candidate checks and independent review remain pending.
+
+- R14 implementation is independently and upper-agent approved: 73 selected
+  successes, zero skips, preserved callbacks/read arrays, Pyright zero diagnostics
+  and both Ruff checks. The ae57 baseline loses one allowance and lowers six.
+  Root adds only the reviewed 73 macOS and 62 missing Windows selected IDs.
+  Broader full/parity/timing proof, I03 composition and native PR/merge CI remain
+  pending; R14 has not earned verified-task credit.

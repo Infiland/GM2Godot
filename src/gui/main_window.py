@@ -2,16 +2,18 @@ import os
 from typing import Any, cast
 import platform
 import threading
-import time
 import webbrowser
 import multiprocessing
 
-from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject
-from PySide6.QtGui import QCloseEvent, QIcon
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QDialog, QTextBrowser, QPushButton
+from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject, QUrl
+from PySide6.QtGui import QCloseEvent, QIcon, QDesktopServices
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QDialog, QTextBrowser, QPushButton, QTabWidget, QLabel
 
 from src.deep.jobs import DeepJob, pending_jobs
 from src.deep.settings import load_settings
+from src.deep.progress import DeepProgress
+from src.gui.panels.deep_progress_panel import DeepProgressPanel
+from src.gui.run_timer import RunTimer
 from src.gui.icons import AppIcons
 from src.gui.setting_value import SettingValue
 from src.gui.workers import ConversionWorker, ConversionWorkerResult, DeepConversionWorker
@@ -69,10 +71,13 @@ class MainWindow(QMainWindow):
         self._deep_worker: DeepConversionWorker | None = None
         self._deep_execute = False
         self._deep_job: DeepJob | None = None
+        self._deep_reconfigure = False
+        self._run_deep_enabled = False
         self._update_thread: QThread | None = None
         self._close_pending = False
         self._timer_running = False
-        self._start_time = 0
+        self._run_timer = RunTimer()
+        self._progress_saved_at = 0.0
 
         self._release_notes = ReleaseNotesDialog(self)
         self._init_ui()
@@ -127,10 +132,20 @@ class MainWindow(QMainWindow):
 
         # Console
         self._console = ConsolePanel()
-        layout.addWidget(self._console, stretch=1)
+        self._work_tabs = QTabWidget()
+        self._work_tabs.addTab(self._console, "Log")
+        self._deep_progress = DeepProgressPanel()
+        self._deep_progress.pause_requested.connect(self._stop_conversion)
+        self._deep_progress.resume_requested.connect(self._resume_current_deep)
+        self._deep_progress.limits_changed.connect(self._configure_deep)
+        self._deep_progress.artifacts_requested.connect(self._open_deep_artifacts)
+        self._work_tabs.addTab(self._deep_progress, "Deep progress")
+        self._work_tabs.setTabVisible(1, False)
+        layout.addWidget(self._work_tabs, stretch=1)
 
         # Progress
         self._progress = ProgressPanel()
+        self._progress.timer_label.setToolTip("Active conversion time, including research and implementation. Paused time and plan review are excluded.")
         layout.addWidget(self._progress)
 
         # Info bar
@@ -201,6 +216,12 @@ class MainWindow(QMainWindow):
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self._conversion_settings, self._compact_logging, self._deep_conversion, self._gm_platform, self._max_workers, parent=self)
+        if self._conversion_running.is_set() or self._deep_worker is not None:
+            notice = QLabel("These settings apply to the next conversion. Use Deep progress to change active worker limits or pause and switch models.")
+            notice.setWordWrap(True)
+            dialog_layout = dialog.layout()
+            if isinstance(dialog_layout, QVBoxLayout):
+                dialog_layout.insertWidget(0, notice)
         if dialog.exec():
             self._gm_platform = dialog.selected_platform()
             self._max_workers = dialog.selected_max_workers()
@@ -349,7 +370,10 @@ class MainWindow(QMainWindow):
     def _prepare_for_conversion(self) -> None:
         self._action_panel.convert_button.setEnabled(False)
         self._action_panel.stop_button.setEnabled(True)
-        self._action_panel.settings_button.setEnabled(False)
+        self._action_panel.settings_button.setEnabled(True)
+        self._run_deep_enabled = self._deep_conversion.get()
+        self._work_tabs.setCurrentIndex(0)
+        self._work_tabs.setTabVisible(1, False)
         self._conversion_running.set()
         self._console.clear()
         self._progress.progress_bar.set_progress(0)
@@ -372,7 +396,7 @@ class MainWindow(QMainWindow):
             self._present_conversion_result(result)
         finally:
             self._finish_conversion_lifecycle()
-        if result.error_message is None and result.outcome is not None and result.outcome.state in {"success", "partial"} and self._deep_conversion.get() and not self._close_pending:
+        if result.error_message is None and result.outcome is not None and result.outcome.state in {"success", "partial"} and self._run_deep_enabled and not self._close_pending:
             self._start_deep_conversion()
 
     def _present_conversion_result(self, result: ConversionWorkerResult) -> None:
@@ -452,7 +476,7 @@ class MainWindow(QMainWindow):
             if job.phase == "review":
                 self._review_deep_plan({})
             else:
-                settings_dialog = DeepResumeDialog(job.settings, self)
+                settings_dialog = DeepResumeDialog(job.settings, self, installation=job.installation)
                 if settings_dialog.exec():
                     job.settings = settings_dialog.settings()
                     job.save()
@@ -473,6 +497,8 @@ class MainWindow(QMainWindow):
                     return
                 settings.allowRemoteSourceUpload = True
                 self._deep_job = DeepJob.create(self._path_panel.gamemaker_path(), self._path_panel.godot_path(), settings)
+                self._deep_job.elapsed_seconds = self._run_timer.elapsed
+                self._deep_job.save()
             self._launch_deep("convert" if execute else "research")
         except Exception as error:
             QMessageBox.warning(self, "Deep conversion", str(error))
@@ -481,6 +507,13 @@ class MainWindow(QMainWindow):
         if self._deep_job is None:
             return
         self._deep_execute = method == "convert"
+        model = DeepProgress.load(self._deep_job.root)
+        model.state = "running"
+        self._deep_progress.begin(model, self._deep_job.settings)
+        self._work_tabs.setTabVisible(1, True)
+        self._work_tabs.setCurrentIndex(1)
+        self._progress.progress_bar.set_progress(0)
+        self._progress.set_running_status("Deep · Preparing saved work")
         self._deep_worker = DeepConversionWorker(self._deep_job, method=method)
         self._deep_thread = QThread()
         self._deep_worker.moveToThread(self._deep_thread)
@@ -490,16 +523,64 @@ class MainWindow(QMainWindow):
         self._deep_thread.started.connect(self._deep_worker.run)
         self._action_panel.convert_button.setEnabled(False)
         self._action_panel.stop_button.setEnabled(True)
-        self._action_panel.settings_button.setEnabled(False)
+        self._action_panel.settings_button.setEnabled(True)
+        self._start_timer(self._deep_job.elapsed_seconds)
         self._deep_thread.start()
+
+    def _configure_deep(self, workers: int, free_workers: int) -> None:
+        try:
+            if self._deep_worker is None:
+                raise RuntimeError("The job is paused. Adjust limits when resuming.")
+            self._deep_worker.configure(workers, free_workers)
+        except (OSError, RuntimeError, ValueError) as error:
+            self._deep_progress.control_result({}, {"message": str(error)})
+
+    def _resume_current_deep(self) -> None:
+        if self._deep_job is None or self._close_pending or self._conversion_running.is_set():
+            return
+        if self._deep_worker is not None:
+            self._deep_reconfigure = True
+            self._stop_conversion()
+            return
+        if self._deep_job.phase == "review":
+            self._review_deep_plan({})
+            return
+        dialog = DeepResumeDialog(self._deep_job.settings, self, allow_model_change=self._deep_progress.model.features.get("resumeModelSelection", False), installation=self._deep_job.installation)
+        if dialog.exec():
+            self._deep_job.settings = dialog.settings()
+            self._deep_job.save()
+            self._launch_deep("resume")
+
+    def _open_deep_artifacts(self) -> None:
+        if self._deep_job:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._deep_job.root)))
 
     @Slot(object)
     def _deep_event(self, raw: object) -> None:
         if not isinstance(raw, dict):
             return
         event = cast(dict[str, Any], raw)
-        result = event.get("result", {})
-        phase = str(result.get("phase", event.get("type", "Research"))).capitalize()
+        raw_result = event.get("result", {})
+        if not isinstance(raw_result, dict):
+            return
+        result = cast(dict[str, Any], raw_result)
+        if event.get("type") == "control":
+            if event.get("method") == "configure":
+                error = event.get("error")
+                self._deep_progress.control_result(result, error)
+                if not error and self._deep_job:
+                    self._deep_job.settings.analysisWorkers = int(result.get("requestedAnalysisWorkers", result.get("analysisWorkers", self._deep_job.settings.analysisWorkers)))
+                    self._deep_job.settings.freeProviderConcurrency = int(result.get("freeProviderConcurrency", self._deep_job.settings.freeProviderConcurrency))
+                    self._deep_job.save()
+            return
+        model = self._deep_progress.model
+        if event.get("type") == "progress":
+            model.state = "running"
+        model.apply(event)
+        self._deep_progress.schedule_refresh()
+        if event.get("type") == "capabilities":
+            return
+        phase = model.phase.capitalize()
         message = result.get("message")
         if message:
             self._console.append_log(f"Deep: {message}")
@@ -509,10 +590,12 @@ class MainWindow(QMainWindow):
         active = result.get("activeAgents")
         if isinstance(active, int):
             status.append(f"{active} active agents")
-        completed, total = result.get("completed"), result.get("total")
+        completed, total, _attention = model.counts(model.phase)
+        if not total:
+            completed, total = result.get("completed"), result.get("total")
         if isinstance(completed, int) and isinstance(total, int) and total > 0:
-            status.append(f"{completed}/{total} research units")
-            self._progress.progress_bar.set_progress(int(100 * completed / total))
+            status.append(f"{completed}/{total} tasks accounted for")
+            self._progress.progress_bar.set_progress(100 * completed / total)
         blocked = result.get("blocked")
         if isinstance(blocked, int) and blocked:
             status.append(f"{blocked} blocked")
@@ -521,7 +604,21 @@ class MainWindow(QMainWindow):
     @Slot(bool, str)
     def _deep_finished(self, success: bool, message: str) -> None:
         result: dict[str, Any] = self._deep_worker.result.get("result", {}) if self._deep_worker else {}
-        self._console.append_log("Deep conversion: " + message, "success" if success else "error")
+        self._stop_timer()
+        state = self._deep_job.phase if self._deep_job else "paused"
+        failure = result.get("error", {})
+        description = str(cast(dict[str, Any], failure).get("message", "")) if isinstance(failure, dict) else ""
+        if not description and not success:
+            description = message
+        description = description or ({"paused": "Progress saved. Resume with another model or adjust limits when ready.", "review": "Research saved. Review the plan before conversion.", "complete": "Deep conversion complete.", "partial": "Deep conversion produced a partial result. Review the saved report."}.get(state, message))
+        self._deep_progress.model.finish(state, description)
+        self._deep_progress.set_running(False)
+        self._deep_progress.refresh()
+        self._save_deep_progress()
+        self._progress.set_terminal_status(description, "success" if state == "complete" else "partial")
+        if state == "complete":
+            self._progress.progress_bar.set_progress(100)
+        self._console.append_log("Deep conversion: " + description, "success" if state == "complete" else "warning")
         if self._deep_thread:
             self._deep_thread.quit()
             self._deep_thread.wait()
@@ -530,6 +627,11 @@ class MainWindow(QMainWindow):
         self._action_panel.convert_button.setEnabled(True)
         self._action_panel.stop_button.setEnabled(False)
         self._action_panel.settings_button.setEnabled(True)
+        if self._deep_reconfigure:
+            self._deep_reconfigure = False
+            if not self._close_pending:
+                QTimer.singleShot(0, self._resume_current_deep)
+            return
         if success and self._deep_job and self._deep_job.phase == "review" and not self._close_pending:
             self._review_deep_plan(result)
 
@@ -573,22 +675,43 @@ class MainWindow(QMainWindow):
 
     # --- Timer ---
 
-    def _start_timer(self) -> None:
+    def _start_timer(self, elapsed: float = 0) -> None:
         self._timer_running = True
-        self._start_time = time.time()
+        self._run_timer.start(elapsed)
+        self._progress_saved_at = elapsed
         self._timer.start()
+        self._update_timer()
 
     def _stop_timer(self) -> None:
+        self._run_timer.stop()
         self._timer_running = False
         self._timer.stop()
+        self._update_timer()
 
     def _update_timer(self) -> None:
-        elapsed = int(time.time() - self._start_time)
+        elapsed = int(self._run_timer.elapsed)
         h, remainder = divmod(elapsed, 3600)
         m, s = divmod(remainder, 60)
         self._progress.timer_label.setText(
             f"{get_localized('Menu_UI_Time_Heading')} {h:02d}:{m:02d}:{s:02d}"
         )
+        if self._deep_worker is not None and elapsed - self._progress_saved_at >= 5:
+            self._save_deep_progress()
+            self._progress_saved_at = elapsed
+
+    def _save_deep_progress(self) -> None:
+        if self._deep_job is None:
+            return
+        try:
+            self._deep_job.elapsed_seconds = self._run_timer.elapsed
+            # The engine owns initial workspace activation. Extra files or client.tmp
+            # during that atomic preparation would make its pristine-root check fail.
+            if not (self._deep_job.root / "host-job.json").is_file():
+                return
+            self._deep_job.save()
+            self._deep_progress.model.save(self._deep_job.root)
+        except OSError as error:
+            self._console.append_log(f"Unable to save progress display: {error}", "warning")
 
     # --- Close ---
 

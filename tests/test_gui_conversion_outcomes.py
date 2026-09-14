@@ -43,6 +43,7 @@ class _MainWindowOutcomeHarness:
         self._conversion_thread = None
         self._worker = None
         self._deep_conversion = SettingValue(False)
+        self._run_deep_enabled = False
         self._deep_worker = None
         self._deep_thread = None
         self._close_pending = False

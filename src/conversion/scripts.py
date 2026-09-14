@@ -1044,7 +1044,7 @@ class ScriptConverter(BaseConverter):
                 )
             else:
                 self._resource_skipped(entry.name)
-            self._safe_progress(int(index / total * 100))
+            self._safe_progress(index / total * 100)
 
         registry_path = os.path.join(self.godot_project_path, SCRIPT_REGISTRY_RELATIVE_PATH)
         self._atomic_write_text(

@@ -1035,7 +1035,7 @@ class TileSetConverter(BaseConverter):
                             tileWidth=td["tileWidth"],
                             tileHeight=td["tileHeight"]))
 
-                self._safe_progress(int(processed_tilesets / total_tilesets * 100))
+                self._safe_progress(processed_tilesets / total_tilesets * 100)
 
         self.log_callback(get_localized("Console_Convertor_Tilesets_Complete"))
 

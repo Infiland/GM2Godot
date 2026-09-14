@@ -1892,7 +1892,7 @@ class ObjectConverter(BaseConverter):
                 else:
                     failed_objects.add(object_name)
 
-                self._safe_progress(int(processed / total * 100))
+                self._safe_progress(processed / total * 100)
 
         for object_name in sorted(completed_objects):
             self._resource_completed(object_name)

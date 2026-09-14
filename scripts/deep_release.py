@@ -34,7 +34,7 @@ def seal_manifest(directory: Path, source_revision: str, client_revision: str, v
         packages[platform] = package
     path = directory / "deep-manifest.json"
     path.write_text(json.dumps({
-        "protocolVersion": 1, "version": version, "minClientVersion": "0.8.0",
+        "protocolVersion": 1, "version": version, "minClientVersion": "0.8.1",
         "sourceRevision": source_revision, "clientRevision": client_revision, "packages": packages,
     }, indent=2) + "\n")
     return path

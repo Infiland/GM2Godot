@@ -1617,7 +1617,7 @@ class SpriteConverter(BaseConverter):
 
                 if not new_filename:
                     failed_sprites.add(sprite_name)
-                    self._safe_progress(int(processed_images / total_images * 100))
+                    self._safe_progress(processed_images / total_images * 100)
                     continue
 
                 if self.compact_logging:
@@ -1627,7 +1627,7 @@ class SpriteConverter(BaseConverter):
                         relative_path=os.path.relpath(gm_sprite_path, self.gm_project_path),
                         sprite_name=sprite_name, new_filename=new_filename))
 
-                self._safe_progress(int(processed_images / total_images * 100))
+                self._safe_progress(processed_images / total_images * 100)
 
         for sprite_name in sorted(failed_sprites):
             self._resource_failed(sprite_name)

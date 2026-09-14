@@ -38,7 +38,7 @@ def _status_color(state: ProgressPresentationState) -> str:
 class GradientProgressBar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._progress = 0
+        self._progress = 0.0
         self._presentation_state: ProgressPresentationState = "running"
         self.setFixedHeight(30)
 
@@ -46,9 +46,13 @@ class GradientProgressBar(QWidget):
     def presentation_state(self) -> ProgressPresentationState:
         return self._presentation_state
 
-    def set_progress(self, value: int) -> None:
-        self._progress = max(0, min(100, value))
+    def set_progress(self, value: float) -> None:
+        self._progress = max(0.0, min(100.0, value))
         self.update()
+
+    @property
+    def progress_text(self) -> str:
+        return f"{self._progress:.2f}%"
 
     def set_running_status(self) -> None:
         self._presentation_state = "running"
@@ -95,13 +99,13 @@ class GradientProgressBar(QWidget):
         painter.save()
         painter.setClipRect(0, 0, fill_width, h)
         painter.setPen(QColor(THEME["bg_primary"]))
-        painter.drawText(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, f"{self._progress}%")
+        painter.drawText(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, self.progress_text)
         painter.restore()
 
         painter.save()
         painter.setClipRect(fill_width, 0, w - fill_width, h)
         painter.setPen(QColor(THEME["fg_white"]))
-        painter.drawText(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, f"{self._progress}%")
+        painter.drawText(0, 0, w, h, Qt.AlignmentFlag.AlignCenter, self.progress_text)
         painter.restore()
 
         painter.end()

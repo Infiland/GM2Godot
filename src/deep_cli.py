@@ -119,7 +119,7 @@ def _research(args: argparse.Namespace) -> int:
         from src.cli import main as convert_main
 
         result = convert_main(["convert", "--gm-project", args.gm_project, "--godot-project", args.godot_project])
-        if result not in {0, 1} or not Path(args.godot_project, "project.godot").is_file():
+        if result not in {0, 2} or not Path(args.godot_project, "project.godot").is_file():
             return result or 1
     job = DeepJob.create(args.gm_project, args.godot_project, settings, manager)
     write_host_snapshot(job.source, str(job.root / "host-snapshot.json"))

@@ -276,3 +276,7 @@ The template's embedded `README` field explains the required keys ([GitHub copy]
 ## License
 
 By contributing to GM2Godot, you agree that your contributions will be licensed under the project's [Apache License 2.0](LICENSE).
+
+## Deep extension development
+
+See [Deep conversion](docs/DEEP_CONVERSION.md) for the client/engine boundary, local setup and pinned release workflow. Track implementation and native/live acceptance evidence in [issue #894](https://github.com/Infiland/GM2Godot/issues/894).

@@ -24,7 +24,6 @@ from urllib.parse import quote
 
 from scripts import build_dependency_snapshot as dependency_snapshot
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_GODOT_ENV_LINES = (
     "GODOT_VERSION: 4.7.2-stable",
@@ -1396,7 +1395,7 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 8, locations)
+        self.assertEqual(len(locations), 10, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             2,
@@ -4679,6 +4678,7 @@ class TestCIWorkflows(unittest.TestCase):
                 "markdown2": "2.5.5",
                 "requests": "2.34.2",
                 "pyside6": "6.11.1",
+                "keyring": "25.7.0",
             },
         )
         self.assertEqual(

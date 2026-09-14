@@ -22,8 +22,20 @@ coverage==7.15.2
     # via -r requirements-tooling.txt
 idna==3.18
     # via requests
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
+keyring==25.7.0
+    # via -r requirements.txt
 markdown2==2.5.5
     # via -r requirements.txt
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
 nodeenv==1.10.0
     # via pyright
 nodejs-wheel-binaries==24.16.0
@@ -76,6 +88,7 @@ urllib3==2.7.0
     # via requests
 wheel==0.47.0
     # via pip-tools
+
 
 # The following packages are considered to be unsafe in a requirements file:
 pip==26.2.1

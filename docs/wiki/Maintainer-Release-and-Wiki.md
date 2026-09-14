@@ -1,8 +1,8 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.7.74 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.0 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-04
+> **Last reviewed:** 2026-09-14
 
 This page documents the current maintainer path for a versioned release and for publishing the reviewed Wiki sources. It does not replace branch protection or repository settings.
 

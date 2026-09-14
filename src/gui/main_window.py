@@ -1,4 +1,5 @@
 import os
+from typing import Any, cast
 import platform
 import threading
 import time
@@ -7,17 +8,20 @@ import multiprocessing
 
 from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject
 from PySide6.QtGui import QCloseEvent, QIcon
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QDialog, QTextBrowser, QPushButton
 
+from src.deep.jobs import DeepJob, pending_jobs
+from src.deep.settings import load_settings
 from src.gui.icons import AppIcons
 from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker, ConversionWorkerResult
+from src.gui.workers import ConversionWorker, ConversionWorkerResult, DeepConversionWorker
 from src.gui.panels.path_panel import PathPanel
 from src.gui.panels.action_panel import ActionPanel
 from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
 from src.gui.panels.progress_panel import ProgressPanel
 from src.gui.panels.info_bar import InfoBar
 from src.gui.dialogs.settings_dialog import SettingsDialog
+from src.gui.dialogs.deep_resume_dialog import DeepResumeDialog
 from src.gui.dialogs.about_dialog import AboutDialog
 from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
 from src.gui.dialogs.language_dialog import LanguageDialog
@@ -60,8 +64,12 @@ class MainWindow(QMainWindow):
         self._conversion_running = threading.Event()
         self._conversion_thread: QThread | None = None
         self._worker: ConversionWorker | None = None
+        self._deep_conversion = SettingValue(False)
+        self._deep_thread: QThread | None = None
+        self._deep_worker: DeepConversionWorker | None = None
+        self._deep_execute = False
+        self._deep_job: DeepJob | None = None
         self._update_thread: QThread | None = None
-        self._update_worker: UpdateCheckWorker | None = None
         self._close_pending = False
         self._timer_running = False
         self._start_time = 0
@@ -80,6 +88,7 @@ class MainWindow(QMainWindow):
         self._close_retry_timer = QTimer(self)
         self._close_retry_timer.setInterval(100)
         self._close_retry_timer.timeout.connect(self._retry_pending_close)
+        QTimer.singleShot(0, self._offer_deep_resume)
 
     def _setup_conversion_settings(self) -> None:
         all_keys = [key for keys in CONVERSION_CATEGORIES.values() for key in keys]
@@ -134,6 +143,8 @@ class MainWindow(QMainWindow):
 
     def _create_menu(self) -> None:
         menu_bar = self.menuBar()
+        deep_menu = menu_bar.addMenu("Deep")
+        deep_menu.addAction("Resume saved job…", self._offer_deep_resume)
         help_menu = menu_bar.addMenu("Help")
         help_menu.addAction("About GM2Godot", self._show_about)
         help_menu.addSeparator()
@@ -189,13 +200,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "GM2Godot", get_localized("Update_UpToDate"))
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(
-            self._conversion_settings,
-            self._compact_logging,
-            self._gm_platform,
-            self._max_workers,
-            parent=self,
-        )
+        dialog = SettingsDialog(self._conversion_settings, self._compact_logging, self._deep_conversion, self._gm_platform, self._max_workers, parent=self)
         if dialog.exec():
             self._gm_platform = dialog.selected_platform()
             self._max_workers = dialog.selected_max_workers()
@@ -352,6 +357,10 @@ class MainWindow(QMainWindow):
         self._console.append_log(get_localized("Console_ConversionStart"))
 
     def _stop_conversion(self) -> None:
+        if self._deep_worker is not None:
+            self._deep_worker.pause()
+            self._console.append_log("Pausing Deep conversion; progress is saved.")
+            return
         if self._conversion_running.is_set():
             self._conversion_running.clear()
             self._console.append_log(get_localized("Console_ConversionStopping"))
@@ -363,13 +372,13 @@ class MainWindow(QMainWindow):
             self._present_conversion_result(result)
         finally:
             self._finish_conversion_lifecycle()
+        if result.error_message is None and result.outcome is not None and result.outcome.state in {"success", "partial"} and self._deep_conversion.get() and not self._close_pending:
+            self._start_deep_conversion()
 
     def _present_conversion_result(self, result: ConversionWorkerResult) -> None:
         outcome = result.outcome
         if result.error_message is not None:
-            failure_message = get_localized("Console_ConversionFailed").format(
-                error=result.error_message
-            )
+            failure_message = get_localized("Console_ConversionFailed").format(error=result.error_message)
             self._progress.set_terminal_status(failure_message, "failed")
             self._console.append_log(failure_message, "error")
             if outcome is not None:
@@ -411,6 +420,7 @@ class MainWindow(QMainWindow):
             stopped_message = get_localized("Console_ConversionStopped")
             self._progress.set_terminal_status(stopped_message, "cancelled")
             self._console.append_log(stopped_message, "cancelled")
+
             self._append_resource_counts(outcome, "cancelled")
 
     def _finish_conversion_lifecycle(self) -> None:
@@ -427,6 +437,122 @@ class MainWindow(QMainWindow):
         finally:
             self._conversion_thread = None
             self._worker = None
+
+
+    def _offer_deep_resume(self) -> None:
+        if self._deep_thread is not None or self._conversion_running.is_set():
+            return
+        jobs = pending_jobs()
+        if not jobs or self._close_pending:
+            return
+        job = jobs[-1]
+        answer = QMessageBox.question(self, "Resume Deep conversion", f"Saved job for {job.source} ({job.phase}). Resume without repeating baseline conversion?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer == QMessageBox.StandardButton.Yes:
+            self._deep_job = job
+            if job.phase == "review":
+                self._review_deep_plan({})
+            else:
+                settings_dialog = DeepResumeDialog(job.settings, self)
+                if settings_dialog.exec():
+                    job.settings = settings_dialog.settings()
+                    job.save()
+                    self._launch_deep("resume")
+
+    def _start_deep_conversion(self, *, execute: bool = False) -> None:
+        if self._deep_thread is not None:
+            return
+        try:
+            if not execute:
+                settings = load_settings()
+                recipient = f"{settings.runtime} / {settings.provider} / {settings.model}"
+                message = f"Research will send project source to {recipient}. Read the provider's data-use terms in Deep setup. Start research?"
+                if settings.runtime == "mock":
+                    message = "Run a simulated research job? Mock results do not establish conversion correctness."
+                answer = QMessageBox.question(self, "Start Deep research", message, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
+                settings.allowRemoteSourceUpload = True
+                self._deep_job = DeepJob.create(self._path_panel.gamemaker_path(), self._path_panel.godot_path(), settings)
+            self._launch_deep("convert" if execute else "research")
+        except Exception as error:
+            QMessageBox.warning(self, "Deep conversion", str(error))
+
+    def _launch_deep(self, method: str) -> None:
+        if self._deep_job is None:
+            return
+        self._deep_execute = method == "convert"
+        self._deep_worker = DeepConversionWorker(self._deep_job, method=method)
+        self._deep_thread = QThread()
+        self._deep_worker.moveToThread(self._deep_thread)
+        self._deep_worker.log_message.connect(self._console.append_log)
+        self._deep_worker.event_received.connect(self._deep_event)
+        self._deep_worker.finished.connect(self._deep_finished)
+        self._deep_thread.started.connect(self._deep_worker.run)
+        self._action_panel.convert_button.setEnabled(False)
+        self._action_panel.stop_button.setEnabled(True)
+        self._action_panel.settings_button.setEnabled(False)
+        self._deep_thread.start()
+
+    @Slot(object)
+    def _deep_event(self, raw: object) -> None:
+        if not isinstance(raw, dict):
+            return
+        event = cast(dict[str, Any], raw)
+        result = event.get("result", {})
+        phase = str(result.get("phase", event.get("type", "Research"))).capitalize()
+        message = result.get("message")
+        if message:
+            self._console.append_log(f"Deep: {message}")
+        elif result.get("taskId"):
+            self._console.append_log(f"Deep {result.get('role', 'agent')}: {result['taskId']} — {result.get('state', '')}")
+        status = [phase]
+        active = result.get("activeAgents")
+        if isinstance(active, int):
+            status.append(f"{active} active agents")
+        completed, total = result.get("completed"), result.get("total")
+        if isinstance(completed, int) and isinstance(total, int) and total > 0:
+            status.append(f"{completed}/{total} research units")
+            self._progress.progress_bar.set_progress(int(100 * completed / total))
+        blocked = result.get("blocked")
+        if isinstance(blocked, int) and blocked:
+            status.append(f"{blocked} blocked")
+        self._progress.set_running_status(" · ".join(status))
+
+    @Slot(bool, str)
+    def _deep_finished(self, success: bool, message: str) -> None:
+        result: dict[str, Any] = self._deep_worker.result.get("result", {}) if self._deep_worker else {}
+        self._console.append_log("Deep conversion: " + message, "success" if success else "error")
+        if self._deep_thread:
+            self._deep_thread.quit()
+            self._deep_thread.wait()
+        self._deep_thread = None
+        self._deep_worker = None
+        self._action_panel.convert_button.setEnabled(True)
+        self._action_panel.stop_button.setEnabled(False)
+        self._action_panel.settings_button.setEnabled(True)
+        if success and self._deep_job and self._deep_job.phase == "review" and not self._close_pending:
+            self._review_deep_plan(result)
+
+    def _review_deep_plan(self, result: dict[str, Any]) -> None:
+        if self._deep_job is None:
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Review Deep conversion plan")
+        dialog.resize(850, 650)
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        report = ""
+        reports = sorted(self._deep_job.root.rglob("*.md"))
+        for path in reports:
+            if "plan" in path.name.lower() or "research" in path.name.lower():
+                report += f"\n\n## {path.name}\n" + path.read_text(encoding="utf-8")
+        browser.setMarkdown(report or f"Review job artifacts in {self._deep_job.root}")
+        layout.addWidget(browser)
+        convert = QPushButton("Start conversion into a separate Godot project")
+        convert.clicked.connect(dialog.accept)
+        layout.addWidget(convert)
+        if dialog.exec():
+            self._start_deep_conversion(execute=True)
 
     def _append_resource_counts(
         self,
@@ -481,6 +607,8 @@ class MainWindow(QMainWindow):
 
     def _request_worker_thread_shutdown(self) -> None:
         self._conversion_running.clear()
+        if self._deep_worker is not None:
+            self._deep_worker.pause()
         for thread in (self._conversion_thread, self._update_thread):
             if thread is not None and thread.isRunning():
                 thread.quit()
@@ -488,7 +616,7 @@ class MainWindow(QMainWindow):
     def _worker_threads_running(self) -> bool:
         return any(
             thread is not None and thread.isRunning()
-            for thread in (self._conversion_thread, self._update_thread)
+            for thread in (self._conversion_thread, self._update_thread, self._deep_thread)
         )
 
     def _retry_pending_close(self) -> None:

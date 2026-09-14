@@ -54,6 +54,10 @@ def _write_gui_smoke_receipt(receipt_path: Path) -> None:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "deep":
+        from src.deep_cli import main as deep_main
+
+        sys.exit(deep_main(sys.argv[2:]))
     if len(sys.argv) > 1 and (sys.argv[1] in CLI_COMMANDS or sys.argv[1] in CLI_GLOBAL_FLAGS):
         from src.cli import main as cli_main
 

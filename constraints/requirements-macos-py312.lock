@@ -20,10 +20,22 @@ coverage==7.15.2
     # via -r requirements-tooling.txt
 idna==3.18
     # via requests
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
+keyring==25.7.0
+    # via -r requirements.txt
 macholib==1.16.4
     # via pyinstaller
 markdown2==2.5.5
     # via -r requirements.txt
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
 nodeenv==1.10.0
     # via pyright
 nodejs-wheel-binaries==24.16.0

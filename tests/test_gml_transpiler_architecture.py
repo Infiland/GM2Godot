@@ -15,7 +15,6 @@ from src.conversion.gml_transpiler_parts import expression_api as expression_pha
 from src.conversion.gml_transpiler_parts import lexical_api as lexical_phase_api
 from src.conversion.gml_transpiler_parts import statement_api as statement_phase_api
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FACADE_MODULE = "src.conversion.gml_transpiler"
 PARTS_PACKAGE = "src.conversion.gml_transpiler_parts"
@@ -503,6 +502,7 @@ src.conversion.gml_transpiler_parts.preprocessor|src.conversion.gml_transpiler_p
 """
 
 EXPECTED_PRODUCTION_IMPORT_GROUPS = """
+src.deep.host_snapshot|src.conversion.gml_transpiler|iter_gml_api_entries
 src.cli|src.conversion.gml_transpiler|generate_gml_api_compatibility_report,render_gml_manual_scope_markdown
 src.conversion.asset_registry|src.conversion.gml_transpiler|GMLTranspileError,transpile_gml_code
 src.conversion.extension_registry|src.conversion.gml_transpiler_parts.extension_functions|EXTENSION_FUNCTION_MAPPING_FILENAME,load_gml_extension_function_mappings
@@ -1639,7 +1639,7 @@ import src.conversion.gml_transpiler_parts.utils as absolute_utility_module
             ),
             4,
         )
-        self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 60)
+        self.assertEqual(len(EXPECTED_PRODUCTION_IMPORTS), 61)
         self.assertEqual(
             sum(edge.name.startswith("_") for edge in EXPECTED_PRODUCTION_IMPORTS),
             4,

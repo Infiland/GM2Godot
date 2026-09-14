@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QLabel, QCheckBox, QComboBox, QPushButton, QWidget, QSpinBox,
 )
 
+from src.gui.dialogs.deep_setup_dialog import DeepSetupDialog
 from src.gui.theme import THEME
 from src.gui.setting_value import SettingValue
 from src.conversion.converter import CONVERSION_CATEGORIES
@@ -16,6 +17,7 @@ class SettingsDialog(QDialog):
         self,
         conversion_settings: dict[str, SettingValue],
         compact_logging: SettingValue,
+        deep_conversion: SettingValue,
         platform_value: str,
         max_workers: int,
         parent: QWidget | None = None,
@@ -23,6 +25,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self._settings = conversion_settings
         self._compact_logging = compact_logging
+        self._deep_conversion = deep_conversion
         self._platform = platform_value
         self._max_workers = max_workers
         self._checkboxes: dict[str, QCheckBox] = {}
@@ -78,8 +81,15 @@ class SettingsDialog(QDialog):
             grid.addLayout(col_layout, 0, col)
 
         layout.addWidget(categories_widget, stretch=1)
+        deep_cb = QCheckBox("Deep conversion")
+        deep_cb.setChecked(self._deep_conversion.get())
+        deep_cb.toggled.connect(self._deep_conversion.set)
+        layout.addWidget(deep_cb)
 
-        # Platform section
+        deep_setup = QPushButton("Deep setup…")
+        deep_setup.clicked.connect(lambda: DeepSetupDialog(self).exec())
+        layout.addWidget(deep_setup)
+
         platform_heading = QLabel(get_localized("Settings_Platform_Heading"))
         platform_heading.setStyleSheet(
             f"font-size: {THEME['font_size_title']}pt; font-weight: bold;"

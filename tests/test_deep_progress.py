@@ -27,6 +27,25 @@ from src.gui.workers import ConversionWorker, DeepConversionWorker
 
 
 class ProgressStateTests(unittest.TestCase):
+    def test_malformed_and_control_events_are_reduced_without_phantom_rows(self) -> None:
+        model = DeepProgress()
+        self.assertFalse(model.apply({"result": "invalid"}))
+        self.assertTrue(model.apply({"type": "capabilities", "result": {"features": {"monitoring": True}}}))
+        self.assertTrue(model.features["monitoring"])
+        self.assertTrue(model.apply({"type": "snapshot", "result": {
+            "monitoring": "unavailable", "state": "paused", "message": "Saved safely"}}))
+        self.assertEqual(model.state, "paused")
+        self.assertEqual(model.message, "Saved safely")
+        self.assertTrue(model.apply({"result": {"monitoring": {
+            "tasks": [None, {"phase": "research"}],
+            "agents": [None, {"role": "analyst", "taskId": "player"}],
+        }}}))
+        self.assertEqual(model.tasks, {})
+        self.assertIn("analyst:player:1", model.agents)
+        self.assertTrue(model.apply({"type": "completed", "result": {
+            "state": "paused", "error": {}}}))
+        self.assertEqual(model.message, "Progress saved. Choose a model or adjust limits to resume.")
+
     def test_task_snapshots_merge_with_agent_updates_and_replayed_events(self) -> None:
         model = DeepProgress()
         model.apply({"result": {"phase": "plan", "tasks": 224, "agents": 3}})

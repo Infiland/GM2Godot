@@ -25,7 +25,10 @@ class DeepSession:
         self._on_event: Callable[[dict[str, Any]], None] = on_event or _ignore_event
         self._write_lock = threading.Lock()
         self._close_lock = threading.Lock()
-        self._responses: Queue[dict[str, Any]] = Queue()
+        self._routing_lock = threading.Lock()
+        self._pending: dict[str, tuple[str, Queue[dict[str, Any]]]] = {}
+        self._notifications: dict[str, str] = {}
+        self._stream_error: dict[str, Any] | None = None
         self._process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", bufsize=1, env={**os.environ, **(environment or {})},
@@ -43,13 +46,32 @@ class DeepSession:
                 if event.get("protocolVersion") != 1:
                     raise ValueError("Unsupported Deep response protocol")
                 if event.get("type") in {"result", "error", "completed"}:
-                    self._responses.put(event)
+                    self._route_response(event)
                 else:
                     self._on_event(event)
         except (ValueError, OSError) as error:
-            self._responses.put({"type": "error", "error": {"message": str(error)}})
+            self._fail_pending(str(error))
         finally:
-            self._responses.put({"type": "error", "error": {"message": "Deep process closed its output stream"}})
+            self._fail_pending("Deep process closed its output stream")
+
+    def _route_response(self, event: dict[str, Any]) -> None:
+        identifier = str(event.get("id", ""))
+        with self._routing_lock:
+            pending = self._pending.get(identifier)
+            if pending is None and event.get("id") is None:
+                pending = next((entry for entry in self._pending.values() if entry[0] in {"research", "convert", "resume"}), None)
+            method = self._notifications.pop(identifier, None)
+        if pending is not None:
+            pending[1].put(event)
+        elif method is not None:
+            self._on_event({**event, "type": "control", "method": method})
+
+    def _fail_pending(self, message: str) -> None:
+        with self._routing_lock:
+            if self._stream_error is None:
+                self._stream_error = {"type": "error", "error": {"message": message}}
+            for _method, responses in self._pending.values():
+                responses.put(self._stream_error)
 
     def _read_errors(self) -> None:
         assert self._process.stderr is not None
@@ -58,28 +80,50 @@ class DeepSession:
             pass
 
     def notify(self, method: str, params: dict[str, Any] | None = None) -> str:
+        return self._send(method, params, None)
+
+    def _send(self, method: str, params: dict[str, Any] | None, responses: Queue[dict[str, Any]] | None) -> str:
         identifier = str(uuid.uuid4())
         request = {"protocolVersion": 1, "id": identifier, "method": method, "params": params or {}}
         with self._write_lock:
             if self._process.stdin is None or self._process.poll() is not None:
                 raise RuntimeError("Deep process is not running")
-            self._process.stdin.write(json.dumps(request) + "\n")
-            self._process.stdin.flush()
+            with self._routing_lock:
+                if self._stream_error is not None:
+                    raise RuntimeError(str(self._stream_error["error"]["message"]))
+                if responses is None:
+                    self._notifications[identifier] = method
+                else:
+                    self._pending[identifier] = (method, responses)
+            try:
+                self._process.stdin.write(json.dumps(request) + "\n")
+                self._process.stdin.flush()
+            except (OSError, ValueError):
+                with self._routing_lock:
+                    self._pending.pop(identifier, None)
+                    self._notifications.pop(identifier, None)
+                raise
         return identifier
 
     def request(self, method: str, params: dict[str, Any] | None = None, timeout: float | None = None) -> dict[str, Any]:
-        identifier = self.notify(method, params)
+        responses: Queue[dict[str, Any]] = Queue()
+        identifier = self._send(method, params, responses)
+        try:
+            return self._wait_response(method, responses, timeout)
+        finally:
+            with self._routing_lock:
+                self._pending.pop(identifier, None)
+
+    def _wait_response(self, method: str, responses: Queue[dict[str, Any]], timeout: float | None) -> dict[str, Any]:
         deadline = time.monotonic() + timeout if timeout else None
         while True:
             remaining = deadline - time.monotonic() if deadline else None
             if remaining is not None and remaining <= 0:
                 raise TimeoutError(f"Deep {method} timed out")
             try:
-                response = self._responses.get(timeout=remaining)
+                response = responses.get(timeout=remaining)
             except Empty as error:
                 raise TimeoutError(f"Deep {method} timed out") from error
-            if response.get("id") not in {identifier, None}:
-                continue
             if response.get("type") == "error" or response.get("error"):
                 failure = response.get("error", {})
                 raise RuntimeError(str(failure.get("message", "Deep request failed")))

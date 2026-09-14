@@ -792,7 +792,7 @@ class FontConverter(BaseConverter):
                         self._safe_log_progress(result, processed_fonts, total_fonts)
                 else:
                     failed_font_keys.add(resource_key)
-                self._safe_progress(int(processed_fonts / total_fonts * 100))
+                self._safe_progress(processed_fonts / total_fonts * 100)
 
         for resource_key in sorted(completed_font_keys):
             self._resource_completed(resource_key)

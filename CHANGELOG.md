@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-09-14
+
+- Added a live Deep progress workspace with searchable agent, research and implementation lists, task details, saved findings and explicit attention states.
+- Added adjustable research concurrency while a job runs, graceful pause and checkpoint recovery, and model switching after rate limits without discarding completed research.
+- Replaced model ID guesswork with provider model discovery, authentication status and role-aware selection. Authenticated OpenCode Go installations prefer a discovered DeepSeek V4.1 Flash model for paid-provider jobs; free-only jobs retain verified free-model rules.
+- Kept Settings accessible during conversion and fixed active conversion time so it continues across baseline, research and implementation while excluding paused and review time.
+- Progress now retains fractional updates and displays percentages to two decimal places in ordinary and Deep conversion.
+
 ## 0.8.0 - 2026-09-14
 
 - Added optional Deep conversion with a downloadable engine and bundled Node runtime. Ordinary conversion remains independent of AI accounts and tools; users do not need a second repository, Git or npm.

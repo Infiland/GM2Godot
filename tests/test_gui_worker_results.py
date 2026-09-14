@@ -352,7 +352,8 @@ class ConversionWorkerResultTests(unittest.TestCase):
                 session.return_value.request.return_value = {"result": {"state": "review"}}
                 worker.run()
                 snapshot.assert_called_once_with("/source", str(root / "job" / "host-snapshot.json"))
-                session.return_value.request.assert_called_once_with("research", job.params(), timeout=3660)
+                session.return_value.request.assert_any_call("capabilities", {"settings": {"runtime": "mock"}}, timeout=30)
+                session.return_value.request.assert_any_call("research", job.params(), timeout=3660)
             self.assertEqual(job.phase, "review")
         self.assertEqual(len(finished), 1)
         self.assertTrue(finished[0][0])

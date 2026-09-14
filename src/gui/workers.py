@@ -72,7 +72,7 @@ def _exception_message(error: Exception) -> str:
 class ConversionWorker(QObject):
     log_message = Signal(str)
     update_log_message = Signal(str)
-    progress_updated = Signal(int)
+    progress_updated = Signal(float)
     status_updated = Signal(str)
     conversion_finished = Signal(object)
 
@@ -94,7 +94,7 @@ class ConversionWorker(QObject):
             os.path.abspath(godot_path),
             DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
         )
-        self._conversion_settings = conversion_settings
+        self._conversion_settings = {key: SettingValue(value.get()) for key, value in conversion_settings.items()}
         self._compact_logging = compact_logging
         self._conversion_running = conversion_running
         self._max_workers = max_workers
@@ -180,12 +180,23 @@ class DeepConversionWorker(QObject):
         if session is not None:
             session.close()
 
+    def configure(self, workers: int, free_workers: int) -> None:
+        if not 1 <= workers <= 32 or not 1 <= free_workers <= 32:
+            raise ValueError("Worker limits must be between 1 and 32")
+        if self.session is None or self._pause_requested.is_set():
+            raise RuntimeError("Wait for Deep to start, or resume the paused job")
+        self.session.notify("configure", {"jobRoot": str(self.job.root), "analysisWorkers": workers, "freeProviderConcurrency": free_workers})
+
     def run(self) -> None:
+        success, message = False, "Progress saved."
         try:
-            if self.method == "research":
+            operation = "research" if self.method == "resume" and not (self.job.root / "host-job.json").is_file() else self.method
+            if operation == "research":
                 write_host_snapshot(self.job.source, str(self.job.root / "host-snapshot.json"))
             if self._pause_requested.is_set():
-                self.finished.emit(False, "Paused before research")
+                self.job.phase = "paused"
+                self.job.save()
+                message = "Paused before research"
                 return
             environment = {} if self.job.settings.runtime == "mock" else credential_environment(self.job.settings.provider)
             for override in self.job.settings.roleOverrides.values():
@@ -195,17 +206,36 @@ class DeepConversionWorker(QObject):
             if binary:
                 environment["PATH"] = os.path.dirname(binary) + os.pathsep + os.environ.get("PATH", "")
             self.session = DeepSession(ExtensionManager().command(self.job.installation), self.job.root, self.event_received.emit, environment)
-            self.result = self.session.request(self.method, self.job.params(), timeout=self.job.settings.budgets.get("maxSeconds", 3600) + 60)
+            capabilities = self.session.request("capabilities", {"settings": {"runtime": "mock"}}, timeout=30)
+            self.event_received.emit({"type": "capabilities", "result": capabilities.get("result", {})})
+            if operation != "research":
+                status = self.session.request("status", {"jobRoot": str(self.job.root)}, timeout=30)
+                self.event_received.emit({"type": "snapshot", "result": status.get("result", {})})
+            if self._pause_requested.is_set():
+                self.job.phase = "paused"
+                self.job.save()
+                message = "Paused before dispatch"
+                return
+            self.result = self.session.request(operation, self.job.params(), timeout=self.job.settings.budgets.get("maxSeconds", 3600) + 60)
             result = self.result.get("result", {})
-            phase = str(result.get("state", "review" if self.method == "research" else "complete"))
+            phase = str(result.get("state", "review" if operation == "research" else "complete"))
             self.job.phase = "paused" if self._pause_requested.is_set() else phase
             self.job.save()
-            self.finished.emit(not bool(result.get("error")), json.dumps(result, indent=2))
+            success, message = not bool(result.get("error")), json.dumps(result, indent=2)
         except Exception as error:
+            message = _exception_message(error)
             self.job.phase = "paused"
-            self.job.save()
-            self.finished.emit(False, _exception_message(error))
+            try:
+                self.job.save()
+            except OSError as save_error:
+                message += f"\nUnable to save client checkpoint: {save_error}"
         finally:
-            if self.session:
-                self.session.close()
+            try:
+                if self.session:
+                    self.session.close()
+            except Exception as close_error:
+                success = False
+                message += f"\nUnable to finish closing Deep: {_exception_message(close_error)}"
+            finally:
                 self.session = None
+                self.finished.emit(success, message)

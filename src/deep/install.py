@@ -19,7 +19,7 @@ from typing import Any
 from src.deep.settings import data_directory
 from src.version import get_version
 
-DEFAULT_MANIFEST_URL = "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.0/deep-manifest.json"
+DEFAULT_MANIFEST_URL = "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json"
 
 
 def platform_key() -> str:

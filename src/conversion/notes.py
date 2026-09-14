@@ -526,7 +526,7 @@ class NoteConverter(BaseConverter):
                                 note_name=result.name
                             )
                         )
-                self._safe_progress(int((processed_notes / total_notes) * 100))
+                self._safe_progress((processed_notes / total_notes) * 100)
 
     def convert_all(self) -> None:
         self._reset_resource_outcomes()

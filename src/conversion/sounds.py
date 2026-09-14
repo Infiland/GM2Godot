@@ -689,7 +689,7 @@ class SoundConverter(BaseConverter):
                     if self.compact_logging:
                         self._safe_log_progress(result['name'], processed_sounds, total_sounds)
 
-                self._safe_progress(int(processed_sounds / total_sounds * 100))
+                self._safe_progress(processed_sounds / total_sounds * 100)
 
         if not self.conversion_running():
             self.log_callback(get_localized("Console_Convertor_Sounds_Stopped"))

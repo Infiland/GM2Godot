@@ -738,7 +738,7 @@ class ShaderConverter(BaseConverter):
         total = len(shader_plan.requested_names)
         processed = len(shader_plan.skipped_names)
         if processed:
-            self._safe_progress(int((processed / total) * 100))
+            self._safe_progress((processed / total) * 100)
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures_map: dict[Future[tuple[str, str] | None], _ShaderAsset] = {
@@ -752,7 +752,7 @@ class ShaderConverter(BaseConverter):
                         self.log_callback("Shader conversion stopped.")
                         return
                     processed += 1
-                    self._safe_progress(int((processed / total) * 100))
+                    self._safe_progress((processed / total) * 100)
                     continue
 
                 filename, output_name = result
@@ -764,6 +764,6 @@ class ShaderConverter(BaseConverter):
                     self._safe_log(get_localized("Console_Convertor_Shaders_Converted").format(
                         filename=filename, output_path=output_name))
 
-                self._safe_progress(int((processed / total) * 100))
+                self._safe_progress((processed / total) * 100)
 
         self.log_callback("Shader conversion complete.")

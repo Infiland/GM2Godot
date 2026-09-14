@@ -936,7 +936,7 @@ class RoomConverter(BaseConverter):
                             )
                         )
 
-                self._safe_progress(int(processed / total * 100))
+                self._safe_progress(processed / total * 100)
 
         self._set_startup_scene(index, generated_scene_paths)
         self.log_callback("Room conversion completed.")

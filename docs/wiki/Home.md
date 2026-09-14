@@ -1,8 +1,8 @@
 # GM2Godot Documentation
 
-> **Applies to:** GM2Godot 0.7.74 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.0 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-04
+> **Last reviewed:** 2026-09-14
 
 GM2Godot converts supported GameMaker source projects and GML into editable Godot projects. It combines asset conversion, a GML-to-GDScript transpiler, generated runtime helpers, compatibility diagnostics, and headless Godot validation. It is a migration aid, not a promise of automatic one-to-one gameplay parity.
 
@@ -21,7 +21,7 @@ Maintainers should also read [Release and Wiki Maintenance](Maintainer-Release-a
 
 This documentation set describes:
 
-- GM2Godot 0.7.74;
+- GM2Godot 0.8.0;
 - GameMaker LTS 2026 source projects in the GMS2 runtime family; and
 - Godot 4.7.2 output and validation, pinned in CI as `4.7.2.stable.official.ed1daf0bf`.
 
@@ -56,3 +56,5 @@ Generate current compatibility reports from the version of GM2Godot you are actu
 - [Report an unsupported GML API](https://github.com/Infiland/GM2Godot/issues/new?template=unsupported_gml_api.yml)
 - [Report invalid generated GDScript](https://github.com/Infiland/GM2Godot/issues/new?template=invalid_generated_gdscript.yml)
 - [Report a resource conversion mismatch](https://github.com/Infiland/GM2Godot/issues/new?template=resource_conversion_mismatch.yml)
+
+Optional [Deep conversion](https://github.com/Infiland/GM2Godot/blob/main/docs/DEEP_CONVERSION.md) adds downloadable AI research, provider selection and a reviewed conversion plan. It is disabled by default.

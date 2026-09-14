@@ -22,6 +22,7 @@ from src.conversion.conversion_outcome import (
 from src.gui.main_window import MainWindow
 from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
 from src.gui.panels.progress_panel import ProgressPanel
+from src.gui.setting_value import SettingValue
 from src.gui.workers import ConversionWorkerResult
 from src.localization import get_localized
 
@@ -41,6 +42,10 @@ class _MainWindowOutcomeHarness:
         self._conversion_running = threading.Event()
         self._conversion_thread = None
         self._worker = None
+        self._deep_conversion = SettingValue(False)
+        self._deep_worker = None
+        self._deep_thread = None
+        self._close_pending = False
         self.timer_stopped = False
 
     def _stop_timer(self) -> None:

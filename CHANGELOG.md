@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 - 2026-09-14
+
+- Added optional Deep conversion with a downloadable engine and bundled Node runtime. Ordinary conversion remains independent of AI accounts and tools; users do not need a second repository, Git or npm.
+- Added provider and model selection for API providers, Codex, Claude Code and OpenCode, optional role overrides, private OpenCode installation, and evaluated automatic free-model selection without paid fallback.
+- Added parallel project research with complete source-read receipts, dependency analysis, official GameMaker/Godot documentation citations, project contracts and actionable conversion instructions.
+- Added plan review, bounded resumable jobs, progress and usage provenance, conservative accounting after interrupted model calls, and validated candidate output in a separate sibling directory.
+- Added GUI and CLI setup, OS credential storage, versioned Python/TypeScript host contracts, checksum-verified extension installation and native Windows x64, macOS arm64 and Linux x64 bundle tests.
+- Changed source or baseline requires a new research job. Free model availability can change; native-agent usage may be unknown. Reports distinguish simulated research, file accounting, conversion, engine checks and behavioral evidence.
+
 ## 0.7.74 - 2026-09-04
 
 - Published the exact three-operation typed package-internal GML statement API: `collect_static_declarations`, `parse_gml_statements`, and `static_scope_id`. The frozen `GMLStatementRequest` names every orchestration input, the frozen `GMLStatementResult` makes emitted lines and final local, instance, scope, enum, and macro state explicit, and the frozen `ControlFlowCapture` replaces private cross-module control-flow state.

@@ -22,8 +22,20 @@ coverage==7.15.2
     # via -r requirements-tooling.txt
 idna==3.18
     # via requests
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
+keyring==25.7.0
+    # via -r requirements.txt
 markdown2==2.5.5
     # via -r requirements.txt
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
 nodeenv==1.10.0
     # via pyright
 nodejs-wheel-binaries==24.16.0
@@ -60,7 +72,9 @@ pyside6-essentials==6.11.1
     #   pyside6
     #   pyside6-addons
 pywin32-ctypes==0.2.3
-    # via pyinstaller
+    # via
+    #   keyring
+    #   pyinstaller
 requests==2.34.2
     # via -r requirements.txt
 ruff==0.15.22

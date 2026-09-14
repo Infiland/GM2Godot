@@ -896,6 +896,7 @@ jobs:
             --icon img/Logo.png \
             "${additional_hooks[@]}" \
             --hidden-import markdown2 \
+            --hidden-import keyring \
             --hidden-import PIL \
             --hidden-import PySide6.QtWidgets \
             --hidden-import PySide6.QtCore \

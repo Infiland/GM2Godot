@@ -10,16 +10,36 @@ build==1.5.0
     # via pip-tools
 certifi==2026.6.17
     # via requests
+cffi==2.1.1
+    # via cryptography
 charset-normalizer==3.4.9
     # via requests
 click==8.4.2
     # via pip-tools
 coverage==7.15.2
     # via -r requirements-tooling.txt
+cryptography==50.0.1
+    # via secretstorage
 idna==3.18
     # via requests
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
+jeepney==0.9.0
+    # via
+    #   keyring
+    #   secretstorage
+keyring==25.7.0
+    # via -r requirements.txt
 markdown2==2.5.5
     # via -r requirements.txt
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
 nodeenv==1.10.0
     # via pyright
 nodejs-wheel-binaries==24.16.0
@@ -35,6 +55,8 @@ pillow==12.3.0
     # via -r requirements.txt
 pip-tools==7.6.1
     # via -r requirements-bootstrap.txt
+pycparser==3.0
+    # via cffi
 pyinstaller==6.21.0
     # via -r requirements-tooling.txt
 pyinstaller-hooks-contrib==2026.6
@@ -57,6 +79,8 @@ requests==2.34.2
     # via -r requirements.txt
 ruff==0.15.22
     # via -r requirements-tooling.txt
+secretstorage==3.5.0
+    # via keyring
 shiboken6==6.11.1
     # via
     #   pyside6

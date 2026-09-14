@@ -16,6 +16,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from src.gui.main_window import MainWindow
+from src.gui.workers import DeepConversionWorker
 
 
 class _ControlledTimer:
@@ -51,6 +52,14 @@ class _ControlledThread:
         raise AssertionError("closeEvent must not block waiting for a live worker")
 
 
+class _ControlledDeepWorker:
+    def __init__(self) -> None:
+        self.pause_calls = 0
+
+    def pause(self) -> None:
+        self.pause_calls += 1
+
+
 class _BlockingThread(QThread):
     def __init__(self) -> None:
         super().__init__()
@@ -68,6 +77,8 @@ class _CloseLifecycleWindow(MainWindow):
         self._conversion_running = threading.Event()
         self._conversion_thread: QThread | None = None
         self._update_thread: QThread | None = None
+        self._deep_thread: QThread | None = None
+        self._deep_worker: DeepConversionWorker | None = None
         self._close_pending = False
         self.controlled_timer = _ControlledTimer()
         self._close_retry_timer = cast(QTimer, self.controlled_timer)
@@ -145,6 +156,27 @@ class MainWindowCloseLifecycleTests(unittest.TestCase):
         self.assertTrue(self.window.controlled_timer.active)
 
         update_thread.running = False
+        self.window._retry_pending_close()
+        self.assertEqual(self.window.close_calls, 1)
+        self.assertFalse(self.window.controlled_timer.active)
+
+    def test_deep_close_requests_pause_and_waits_without_stopping_event_thread(self) -> None:
+        deep_thread = _ControlledThread()
+        deep_worker = _ControlledDeepWorker()
+        self.window._deep_thread = cast(QThread, deep_thread)
+        self.window._deep_worker = cast(DeepConversionWorker, deep_worker)
+        event = QCloseEvent()
+
+        self.window.closeEvent(event)
+
+        self.assertFalse(event.isAccepted())
+        self.assertEqual(deep_worker.pause_calls, 1)
+        self.assertEqual(deep_thread.quit_calls, 0)
+        self.assertTrue(self.window._close_pending)
+        self.window._retry_pending_close()
+        self.assertEqual(self.window.close_calls, 0)
+        deep_thread.running = False
+        self.window._deep_worker = None
         self.window._retry_pending_close()
         self.assertEqual(self.window.close_calls, 1)
         self.assertFalse(self.window.controlled_timer.active)

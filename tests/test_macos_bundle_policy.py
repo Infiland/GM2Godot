@@ -30,6 +30,7 @@ EXPECTED_DATA_FILES = [
 ]
 EXPECTED_HIDDEN_IMPORTS = [
     "markdown2",
+    "keyring",
     "PIL",
     "PySide6.QtWidgets",
     "PySide6.QtCore",

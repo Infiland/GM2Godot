@@ -1,8 +1,8 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.7.74 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.0 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-04
+> **Last reviewed:** 2026-09-14
 
 Use a packaged release for the desktop interface, or run from source when you also need the headless CLI. The current packaging and dependency details live in the repository's [release workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml), [`requirements.txt`](https://github.com/Infiland/GM2Godot/blob/main/requirements.txt), and [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml).
 
@@ -46,7 +46,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.7.74`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.0`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 ## Run from source
 
@@ -148,6 +148,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.7.74`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.0`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

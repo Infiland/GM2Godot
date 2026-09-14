@@ -8,6 +8,8 @@ GM2Godot targets GameMaker LTS 2026 source projects and Godot 4.7.2 output. It c
 
 ## Features
 
+Optional [Deep conversion](docs/DEEP_CONVERSION.md) adds parallel AI research and reviewed conversion through a downloadable extension.
+
 - **Modern Dark Theme UI**: Clean project selection, settings, progress, and logs
 - **Headless CLI**: Convert, analyze, validate, and generate compatibility reports for CI workflows
 - **GML Transpilation**: Converts supported GMS2+ expressions, scripts, object events, room creation code, macros, extension stubs, and source-map metadata into GDScript
@@ -126,7 +128,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.7.74`.
+Current source version: `0.8.0`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.

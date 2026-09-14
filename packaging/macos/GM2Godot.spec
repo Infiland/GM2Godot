@@ -27,6 +27,7 @@ a = Analysis(
     ],
     hiddenimports=[
         "markdown2",
+        "keyring",
         "PIL",
         "PySide6.QtWidgets",
         "PySide6.QtCore",

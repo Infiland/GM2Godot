@@ -1,13 +1,19 @@
+import json
 import os
 import threading
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from PySide6.QtCore import QObject, Signal
 
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+from src.deep.credentials import credential_environment
+from src.deep.host_snapshot import write_host_snapshot
+from src.deep.install import ExtensionManager, opencode_path
+from src.deep.jobs import DeepJob
+from src.deep.session import DeepSession
 from src.gui.setting_value import SettingValue
 
 
@@ -142,3 +148,64 @@ class ConversionWorker(QObject):
                 ),
             )
         self.conversion_finished.emit(result)
+
+class DeepConversionWorker(QObject):
+    log_message = Signal(str)
+    event_received = Signal(object)
+    finished = Signal(bool, str)
+
+    def __init__(self, job: DeepJob, *, method: str = "research") -> None:
+        super().__init__()
+        self.job = job
+        self.method = method
+        self.session: DeepSession | None = None
+        self.result: dict[str, Any] = {}
+        self._pause_requested = threading.Event()
+
+    def pause(self) -> None:
+        if self._pause_requested.is_set():
+            return
+        self._pause_requested.set()
+        if self.session:
+            try:
+                self.session.notify("pause", {"jobRoot": str(self.job.root)})
+            except (OSError, RuntimeError):
+                pass
+        fallback = threading.Timer(10, self._finish_pause)
+        fallback.daemon = True
+        fallback.start()
+
+    def _finish_pause(self) -> None:
+        session = self.session
+        if session is not None:
+            session.close()
+
+    def run(self) -> None:
+        try:
+            if self.method == "research":
+                write_host_snapshot(self.job.source, str(self.job.root / "host-snapshot.json"))
+            if self._pause_requested.is_set():
+                self.finished.emit(False, "Paused before research")
+                return
+            environment = {} if self.job.settings.runtime == "mock" else credential_environment(self.job.settings.provider)
+            for override in self.job.settings.roleOverrides.values():
+                if "provider" in override:
+                    environment.update(credential_environment(override["provider"]))
+            binary = opencode_path()
+            if binary:
+                environment["PATH"] = os.path.dirname(binary) + os.pathsep + os.environ.get("PATH", "")
+            self.session = DeepSession(ExtensionManager().command(self.job.installation), self.job.root, self.event_received.emit, environment)
+            self.result = self.session.request(self.method, self.job.params(), timeout=self.job.settings.budgets.get("maxSeconds", 3600) + 60)
+            result = self.result.get("result", {})
+            phase = str(result.get("state", "review" if self.method == "research" else "complete"))
+            self.job.phase = "paused" if self._pause_requested.is_set() else phase
+            self.job.save()
+            self.finished.emit(not bool(result.get("error")), json.dumps(result, indent=2))
+        except Exception as error:
+            self.job.phase = "paused"
+            self.job.save()
+            self.finished.emit(False, _exception_message(error))
+        finally:
+            if self.session:
+                self.session.close()
+                self.session = None

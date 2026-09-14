@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import tempfile
 import threading
-from typing import cast
 import unittest
+from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -26,8 +26,10 @@ from src.conversion.conversion_outcome import (
     ConversionStepLedger,
 )
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
+from src.deep.jobs import DeepJob
+from src.deep.settings import DeepSettings
 from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker, ConversionWorkerResult
+from src.gui.workers import ConversionWorker, ConversionWorkerResult, DeepConversionWorker
 
 
 class _FakeConverter:
@@ -335,6 +337,25 @@ class ConversionWorkerResultTests(unittest.TestCase):
         self.assertEqual(result.diagnostic_report_path, expected_report)
         assert result.diagnostic_report_path is not None
         self.assertTrue(os.path.isabs(result.diagnostic_report_path))
+
+    def test_deep_worker_uses_installed_engine_and_current_job(self) -> None:
+        finished: list[tuple[bool, str]] = []
+        def record(success: bool, message: str) -> None:
+            finished.append((success, message))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            job = DeepJob(root / "job", "/source", "/baseline", root / "installed", DeepSettings())
+            job.save()
+            worker = DeepConversionWorker(job)
+            worker.finished.connect(record)
+            with patch("src.gui.workers.write_host_snapshot") as snapshot, patch("src.gui.workers.ExtensionManager.command", return_value=["bundled-node", "host.js"]), patch("src.gui.workers.credential_environment", return_value={}), patch("src.gui.workers.DeepSession") as session:
+                session.return_value.request.return_value = {"result": {"state": "review"}}
+                worker.run()
+                snapshot.assert_called_once_with("/source", str(root / "job" / "host-snapshot.json"))
+                session.return_value.request.assert_called_once_with("research", job.params(), timeout=3660)
+            self.assertEqual(job.phase, "review")
+        self.assertEqual(len(finished), 1)
+        self.assertTrue(finished[0][0])
 
     def test_result_crosses_a_queued_qthread_connection_once(self) -> None:
         partial_outcome = _outcomes()["partial"]

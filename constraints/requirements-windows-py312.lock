@@ -72,7 +72,9 @@ pyside6-essentials==6.11.1
     #   pyside6
     #   pyside6-addons
 pywin32-ctypes==0.2.3
-    # via pyinstaller
+    # via
+    #   keyring
+    #   pyinstaller
 requests==2.34.2
     # via -r requirements.txt
 ruff==0.15.22
@@ -88,7 +90,6 @@ urllib3==2.7.0
     # via requests
 wheel==0.47.0
     # via pip-tools
-
 
 # The following packages are considered to be unsafe in a requirements file:
 pip==26.2.1

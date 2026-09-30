@@ -15,7 +15,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   September 14 Deep conversion work requires reconciliation at final integration.
   Twenty-six completed worktrees were removed with branches and evidence retained
   (25 campaign worktrees and one completed release worktree). Main, the campaign
-  and R14 are the three active worktrees.
+  and R14 remain active; R15 uses a managed isolated worktree. R14 is retained
+  until its successor source/proof bindings permit cleanup.
 - Approved environment: native CPython 3.12.10 arm64 and exact Godot
   `4.7.2.stable.official.ed1daf0bf`.
 - Merge the fully verified campaign into current `main`, preserving its newer
@@ -31,8 +32,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   native host passed. The actual-parent baseline shrank from 1034 to 1033.
   Original conversion timing was 11.544% slower; its cause remains unassigned.
   The accepted source-work assessment does not claim equal latency or a speedup.
-- R15's revised sound-model design is approved; executable characterization
-  awaits a fresh parent-bound entry. Implementation follows accepted old results.
+- R15's refreshed sound-model design is independently and upper-agent approved.
+  `resume_main_reconciliation` owns its managed `codex/080-sound-model` checkout.
+  The tracked entry authorizes external old-package preparation only after exact
+  root parent/worktree binding; execution and implementation remain gated.
 
 ## Ownership and progress
 
@@ -58,6 +61,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | R13 authoritative font model | verified | PR #892 merged `ae57bee` | Independent/root local, combined and exact CI APPROVE | PR33996106216/merge33998320814; all retained native/CLI/runtime/artifact/coverage/strict-parent proofs passed; R13/final-verification.json |
 | I03 Included Files Windows operations | verified | PR #893 merged `74688c8` | Independent/root local, combined and exact CI APPROVE | PR34047439957/merge34049393947; Windows34/0 skips, all six retained CI verifiers and five parser controls accepted; I03/final-verification.json |
 | R14 authoritative script model and source selection | verified | PR #897 merged `b453992` | Independent/root source, local, composition and exact CI APPROVE | PR36717618562/merge36761317593; 73/73/73 selected successes and 4 exact Godot cases; full/parity, qualified performance, retained native/CLI/artifact/coverage gates and strict1033; R14/final-verification.json |
+| R15 authoritative sound model | planned | resume_main_reconciliation, managed codex/080-sound-model | Independent/root refreshed design APPROVE; literal old-package review pending | R15/source-refresh-M-b453992; R15-sound-contract.md; eight paths, 24 retained IDs and 12 old methods/49 arms; preparation only after bound entry |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -319,3 +323,13 @@ R14 bounded implementation review: shared script fixtures and source probes belo
   `153626479d515bad5387bc0d55a7702f79ce5de653b91168bd3861830365ac99`.
   Verified campaign progress is 19/54 (35.2%). R15 requires a fresh parent-bound
   entry and accepted old characterization before implementation.
+
+- R15 refreshed design is independently and upper-agent accepted at verified R14
+  M and documented D. Exact scope is eight implementation paths, ten canonical
+  fields, eight worker settings, eleven ordered strict values, 24 retained IDs,
+  twelve old methods/49 fixed arms and two later candidate authority methods.
+  Root assigns `resume_main_reconciliation` sole ownership in the managed
+  `codex/080-sound-model` worktree. `R15-sound-contract.md` permits only external
+  old-package preparation after root exact-entry/source/runtime binding; literal
+  pre-use review precedes old execution; accepted old results precede implementation.
+  Root owns baseline/workflow/campaign metadata. No R15 completion credit.

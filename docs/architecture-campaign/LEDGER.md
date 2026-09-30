@@ -13,10 +13,10 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   as completion.
 - Resumed main is clean at `cba7f52bb9aa6b68776e0342955d45d7c4fd803c`. Its
   September 14 Deep conversion work requires reconciliation at final integration.
-  Twenty-six completed worktrees were removed with branches and evidence retained
-  (25 campaign worktrees and one completed release worktree). Main, the campaign
-  and R14 remain active; R15 uses a managed isolated worktree. R14 is retained
-  until its successor source/proof bindings permit cleanup.
+  Twenty-seven completed worktrees were removed with branches and evidence retained
+  (26 campaign worktrees and one completed release worktree). Main and the campaign
+  remain in Github; R15 and G02 use managed isolated worktrees. R14 was removed
+  after its current source/proof bindings and complete archive were accepted.
 - Approved environment: native CPython 3.12.10 arm64 and exact Godot
   `4.7.2.stable.official.ed1daf0bf`.
 - Merge the fully verified campaign into current `main`, preserving its newer
@@ -36,6 +36,12 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   `resume_main_reconciliation` owns its managed `codex/080-sound-model` checkout.
   The tracked entry authorizes external old-package preparation only after exact
   root parent/worktree binding; execution and implementation remain gated.
+- G02's concrete control/declaration contract and C source refresh are independently
+  and upper-agent approved. `r14_broad_binding` owns managed
+  `codex/080-statement-control`; `r14_native_review` is the independent reviewer.
+  `G02-statement-control-contract.md` permits external literal preparation only
+  after exact root entry/source/runtime/fixture binding. Accepted old results
+  precede production edits. G02 earns no verification credit at this entry.
 
 ## Ownership and progress
 
@@ -62,6 +68,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | I03 Included Files Windows operations | verified | PR #893 merged `74688c8` | Independent/root local, combined and exact CI APPROVE | PR34047439957/merge34049393947; Windows34/0 skips, all six retained CI verifiers and five parser controls accepted; I03/final-verification.json |
 | R14 authoritative script model and source selection | verified | PR #897 merged `b453992` | Independent/root source, local, composition and exact CI APPROVE | PR36717618562/merge36761317593; 73/73/73 selected successes and 4 exact Godot cases; full/parity, qualified performance, retained native/CLI/artifact/coverage gates and strict1033; R14/final-verification.json |
 | R15 authoritative sound model | planned | resume_main_reconciliation, managed codex/080-sound-model | Independent/root refreshed design APPROVE; literal old-package review pending | R15/source-refresh-M-b453992; R15-sound-contract.md; eight paths, 24 retained IDs and 12 old methods/49 arms; preparation only after bound entry |
+| G02 control transfer and declarations | planned | r14_broad_binding, managed codex/080-statement-control | Independent/root cap-800 design and C refresh APPROVE; literal old-package review pending | G02/source-refresh-C-7612e92; G02-statement-control-contract.md; eleven paths (ten owner),17 planned methods/41 cells plus90 retained IDs; preparation only after exact entry binding |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -333,3 +340,14 @@ R14 bounded implementation review: shared script fixtures and source probes belo
   old-package preparation after root exact-entry/source/runtime binding; literal
   pre-use review precedes old execution; accepted old results precede implementation.
   Root owns baseline/workflow/campaign metadata. No R15 completion credit.
+
+- G02 source design is independently and upper-agent accepted at documented C
+  `7612e928a5faec56b91cb2c54e56744449e122b4`. All 619 C source records, 615
+  nonmetadata M-equal files and the archived 618-file R14 checkout authenticate.
+  The tracked contract assigns one owner and ten editable paths; root owns the
+  architecture cohort's two names, baseline and campaign/verification metadata.
+  The actual old executable parent, native runtime/five fixtures and literal
+  bodies still need binding and pre-use approval. Successful independently/root
+  accepted old observations precede any production implementation. The G02
+  lowerer cap is C110/1090 physical/1850 structural; the final C15/150 dispatcher
+  is G05 after G03/G04. No G02 completion credit; verified progress stays 19/54.

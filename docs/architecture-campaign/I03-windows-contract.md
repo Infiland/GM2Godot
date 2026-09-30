@@ -1,5 +1,7 @@
 # I03 Windows operations and validation streams
 
+Status: VERIFIED at campaign merge `74688c86cb58c5e22592f9e868eba828ed064381` after PR #893 and exact PR/merge CI34047439957/34049393947. Final evidence is `I03/final-verification.json`, SHA256 `23a2c70d35980b927b58e908003a2dae697416f3e397d86c74d0671ebc282c2c`. The sections below preserve the accepted implementation contract and historical entry references.
+
 Root accepts the previously reviewed I03 / #798 ownership contract against
 verified campaign parent `5faa683a07a913c96d5283d06b8e2cb1b44e5b30`, tree
 `610510164786071400b095901b21f0182b118fc7`. The Included Files coordinator,

@@ -1192,6 +1192,18 @@
         "root_review_sha256": "8fe61bb3ad11e702e1140ce52ff28f5a50c408ddbb10a16fdf763215054c6872",
         "independent_review_sha256": "3a2e63dac1e6d5934663539a1422718fc660b8e85902ae8d60493d0c627a6188",
         "remaining": "Final I03 composition/source/baseline binding; full, five-project parity and same-ref, SNAP timing, exact native PR and merged CI."
+      },
+      "combined_proof": {
+        "prepared_merge": "a4f55de800308e1a64d2dc1adfd69cc4e9159fa2",
+        "actual_parent": "74688c86cb58c5e22592f9e868eba828ed064381",
+        "source_files": 618,
+        "python_files": 416,
+        "baseline_entries": 1033,
+        "root_review_sha256": "2d37d3c2b6c717e6d844c5cbbbeca021e3ac3d33b70caa550fa69e50ae941894",
+        "independent_review_sha256": "90bfcff0af66cf7c6d75e3e964ac5a369b8d54a457d2f8da29aa5e325c92ec06",
+        "static_result_sha256": "ba04d92b23b28a0c25a1dc1dbcee95dd0e7a22ca28516c5688eaf19790a7016f",
+        "checks": "Pyright0errors/0warnings, both Ruff over416 inputs, actionlint, strict1033 against actual746 and diff passed. All618 source hashes unchanged.",
+        "remaining": "Final documentation/source binding, full and public parity/same-ref, SNAP performance, native PR and merged CI; not verified."
       }
     },
     {
@@ -1840,7 +1852,7 @@
       "task_id": "I03",
       "issue": 798,
       "title": "Included Files Windows operations",
-      "state": "reviewing",
+      "state": "verified",
       "problem_and_evidence": "Actual verified5faa coordinator has11139 physical/15473 structural lines. Win32 ABI/calls, parent HANDLE ownership and the validation-stream transfer operation have concrete independent leaf boundaries; accepted before tests and43-site binding observations precede extraction.",
       "expected_benefit": "One owner for Windows calls, parent binding lifecycle and validation streams, without aliases or reverse imports. Coordinator shrinks419 physical/704 structural; coordinator plus three leaves adds117 physical lines and removes2 structural units.",
       "current_owner": "src/conversion/included_files.py",
@@ -1903,7 +1915,76 @@
         "native_windows_verified": false,
         "final_full_verified": false,
         "baseline_proposed_sha256": "5106bf61ad52078dcabef71425012ca752a7a272980bf34b9f8a5f6116a11cb4"
-      }
+      },
+      "final_verification": {
+        "pr": 893,
+        "pr_head": "7175c34813580c12abec7a8d29687cbafc3532cd",
+        "pr_ci": 34047439957,
+        "merge": "74688c86cb58c5e22592f9e868eba828ed064381",
+        "merge_ci": 34049393947,
+        "tree": "55e181a673058159cabfdda563922eb8be716cc6",
+        "actual_parent": "ae57bee3b4ea05d2efa5e9206f2514b9dc68a292",
+        "proof_sha256": "23a2c70d35980b927b58e908003a2dae697416f3e397d86c74d0671ebc282c2c",
+        "source_files": 612,
+        "python_files": 411,
+        "metrics": {
+          "coordinator_physical": [
+            11139,
+            10720
+          ],
+          "coordinator_structural": [
+            15473,
+            14769
+          ],
+          "new_filesystem_physical_structural": [
+            84,
+            107
+          ],
+          "new_windows_bindings_physical_structural": [
+            237,
+            280
+          ],
+          "new_windows_operations_physical_structural": [
+            215,
+            315
+          ],
+          "combined_production_delta_physical": 117,
+          "combined_production_delta_structural": -2,
+          "baseline_entries": [
+            1041,
+            1034
+          ],
+          "removed_allowances": 7,
+          "lowered_allowances": 6,
+          "added_or_grown_allowances": 0,
+          "claim": "Clear Windows/file-lifecycle ownership and coordinator reduction; combined production physical lines increase."
+        },
+        "local_proof": {
+          "full_tests": 3206,
+          "full_successes": 3148,
+          "exact_host_skips": 58,
+          "required_external_fixtures_successful": 5,
+          "public_parity": {
+            "cases": 10,
+            "complete_fields_per_case": 8,
+            "candidate_equals_base_and_same_ref": true
+          },
+          "earlier_characterization": "18 successes;242 cohort225 successes17 exact skips;39 observer35 successes4 exact Windows skips,77pairs97generations;6 correctedbindings successes. Source identities/failed attempts preserved in indexed receipts.",
+          "static": "Pyright zero errors/warnings, both Ruff, actionlint, diff and strict actual-parent debt passed."
+        },
+        "native_proof": {
+          "standalone_run": 34045630159,
+          "transport_head": "cccfbba0d083e68bbd3ea490ca784a8d9d28cba5",
+          "positive_windows_tests": 34,
+          "positive_skips": 0,
+          "standalone_controls": 11,
+          "normal_PR_and_merge": "Both exact runs25jobs/24successes/soledependency-submission skip; all6saved-data selectors/10receipts accepted, Windows34/zero selected skips on each.",
+          "saved_log_controls": 5,
+          "controls_rerun_for_merge": false,
+          "retained_obligations": "L02/R13/I02/I01/R12/T01, actualCLI/converter/crash/forcedLinuxbind/preflight guards, exactGodot, sixN01 artifacts withZIPAPIdigests, native modes6/6/2 and unchanged coverage93.06/85.62 atfloors92.89/84.93."
+        }
+      },
+      "completion_evidence": "I03/final-verification.json; independent and upper reviews accept exact PR and merged campaign evidence. Main integration and one final campaign release remain campaign-level work; v0.8.0/v0.8.1 were published separately while paused."
     },
     {
       "task_id": "I04",

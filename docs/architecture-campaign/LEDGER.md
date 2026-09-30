@@ -7,21 +7,29 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through verified R13
-  PR #892 at `ae57bee3b4ea05d2efa5e9206f2514b9dc68a292`.
-- Verified progress: 17 of 54 tasks (31.5%). Pending validation does not count
+- Integration branch: `dev/080-architecture-campaign`, through verified I03
+  PR #893 at `74688c86cb58c5e22592f9e868eba828ed064381`.
+- Verified progress: 18 of 54 tasks (33.3%). Pending validation does not count
   as completion.
-- Main's 11 dirty policy files remain preserved. Twenty-four completed
-  worktrees were removed with their branches and evidence retained. Main,
-  the campaign, I03 and R14 are the four active worktrees.
+- Resumed main is clean at `cba7f52bb9aa6b68776e0342955d45d7c4fd803c`. Its
+  September 14 Deep conversion work requires reconciliation at final integration.
+  Twenty-six completed worktrees were removed with branches and evidence retained
+  (25 campaign worktrees and one completed release worktree). Main, the campaign
+  and R14 are the three active worktrees.
 - Approved environment: native CPython 3.12.10 arm64 and exact Godot
-  `4.7.2.stable.official.ed1daf0bf`. Python 3.14 is not proof.
-- Merge the fully verified campaign into `main`, then publish the single final
-  v0.8.0 release, as confirmed by the user.
-- I03's implementation and local focused results are independently/root
-  approved. It is being combined with verified R13 before final full/parity,
-  native Windows and exact PR/merge verification. R14's separate source-policy
-  characterization is in preparation; its production implementation has not begun.
+  `4.7.2.stable.official.ed1daf0bf`.
+- Merge the fully verified campaign into current `main`, preserving its newer
+  work, then publish one final campaign release. v0.8.0 and v0.8.1 were published
+  separately while the campaign was paused; their tags remain immutable. The
+  final campaign release version is awaiting the user's updated preference.
+- I03 has passed local full/public parity, genuine Windows proof and both exact
+  PR/merge CI runs, including all retained native/runtime/CLI/artifact gates.
+- R14 implementation and 73 focused tests are independently and upper-agent
+  approved. Its prepared merge with verified I03 passes all static checks and
+  reduces the current-parent baseline from 1034 to 1033 allowances. Full,
+  five-project parity, performance and exact PR/merge CI remain pending.
+- R15's revised sound-model design is approved; executable characterization
+  and implementation await verified R14 and a bound entry contract.
 
 ## Ownership and progress
 
@@ -45,7 +53,8 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | I02 Included Files POSIX operations | verified | audit_transactions_cli; PR #890 merged4787f4b | Independent/root source, local, combined and exact CI APPROVE | PR33968388651/merge33971661125;50new+31retained native/runtime, R12/T01/CLI/artifacts/modes/coverage,strict1045actualb9; I02/final-verification.json |
 | L02 CLI request and session ownership | verified | PR #891 merged `5faa683` | Independent/root local, combined and exact CI APPROVE | PR33978428787/merge33980543144; all six native/CLI/runtime/artifact/coverage/strict-parent verifiers passed; L02/final-verification.json |
 | R13 authoritative font model | verified | PR #892 merged `ae57bee` | Independent/root local, combined and exact CI APPROVE | PR33996106216/merge33998320814; all retained native/CLI/runtime/artifact/coverage/strict-parent proofs passed; R13/final-verification.json |
-| I03 Included Files Windows operations | reviewing | Source checkpoint `774b561`; combined parent `ae57bee` | Independent/root implementation and focused proof APPROVE | Final combined full/parity/native/PR/merge verification pending; original18/242/39 and corrected6 retain their source identities |
+| I03 Included Files Windows operations | verified | PR #893 merged `74688c8` | Independent/root local, combined and exact CI APPROVE | PR34047439957/merge34049393947; Windows34/0 skips, all six retained CI verifiers and five parser controls accepted; I03/final-verification.json |
+| R14 authoritative script model and source selection | reviewing | Prepared merge `a4f55de` with verified I03 | Independent/root implementation and combined static APPROVE | 73 focused successes/0 skips; strict1033; full/parity/performance and exact native PR/merge proof pending |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -279,3 +288,10 @@ R14 bounded implementation review: shared script fixtures and source probes belo
   Pyright0/0 and both Ruff checks pass. Baseline1044 to1037 removes7 entries and
   lowers6 without additions/growth. Root is composing verified R13 before final
   full/parity/native proof; I03 remains reviewing and is not counted as verified.
+
+- I03 is verified at campaign merge `74688c86cb58c5e22592f9e868eba828ed064381`
+  after PR #893 and CI34047439957/34049393947. The exact merged tree matches the
+  approved source; all local, native and retained proof obligations passed.
+  Final receipt `I03/final-verification.json` has SHA256
+  `23a2c70d35980b927b58e908003a2dae697416f3e397d86c74d0671ebc282c2c`.
+  Verified campaign progress is 18/54 (33.3%).

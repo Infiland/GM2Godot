@@ -56,11 +56,12 @@ from src.conversion.project_manifest import (
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
-    is_safe_project_source_component,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
 from src.conversion.script_functions import modern_script_function_names
+from src.conversion.script_model import ScriptModel
+from src.conversion.script_sources import registry_script_source
 from src.conversion.sequence_assets import normalize_sequence_asset, render_sequence_resource
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
@@ -2338,8 +2339,9 @@ class AssetRegistryConverter(BaseConverter):
             )
             entries.append(entry)
             if resource.kind == "scripts":
-                for function_name in self._script_function_names(resource):
-                    if function_name == resource.name:
+                script_model, function_names = self._script_model_and_function_names(resource)
+                for function_name in function_names:
+                    if function_name == script_model.name:
                         continue
                     entries.append(
                         AssetRegistryEntry(
@@ -2348,14 +2350,14 @@ class AssetRegistryConverter(BaseConverter):
                             kind=resource.kind,
                             asset_type=asset_type,
                             type_name=self.TYPE_NAME_BY_KIND[resource.kind],
-                            source_path=resource.source_path,
+                            source_path=script_model.yyp_path,
                             godot_path=entry.godot_path,
                             legacy_id=f"{self._legacy_id(resource)}#function:{function_name}",
                             tags=self._extract_tags(resource.raw_data),
                             metadata={
                                 "script_function": True,
-                                "script_asset": resource.name,
-                                "script_source_path": resource.source_path,
+                                "script_asset": script_model.name,
+                                "script_source_path": script_model.yyp_path,
                             },
                         )
                     )
@@ -2751,110 +2753,35 @@ class AssetRegistryConverter(BaseConverter):
                 )
         return tuple(resources)
 
-    def _script_source_gml_path(self, resource: _ProjectResource) -> str | None:
-        yy_source = self._resolve_project_source(
-            resource.source_path,
-            resource=resource.name,
-            resource_type="script",
-            field="script .yy",
+    def _script_model_and_function_names(
+        self, resource: _ProjectResource,
+    ) -> tuple[ScriptModel, tuple[str, ...]]:
+        model = registry_script_source(
+            ScriptModel(
+                name=resource.name, kind="scripts", resource_type="GMScript",
+                yy_path=resource.yy_path, yyp_path=resource.source_path, order=0,
+                raw_data=resource.raw_data,
+            ),
+            resolve=lambda path, owner, field: self._resolve_project_source(
+                path, owner_source_path=owner, resource=resource.name, resource_type="script", field=field,
+            ),
+            discover=lambda path, owner, field: self._resolve_discovered_project_source(
+                path, owner_source_path=owner, resource=resource.name, resource_type="script", field=field,
+            ),
+            report=lambda path, error, owner, field: self._report_source_path_rejection(
+                path, error, owner_source_path=owner, resource=resource.name, resource_type="script", field=field,
+            ),
         )
-        if yy_source is None or not os.path.isfile(yy_source.filesystem_path):
-            return None
-
-        script_directory = self._resolve_discovered_project_source(
-            os.path.dirname(yy_source.filesystem_path),
-            owner_source_path=yy_source.source_path,
-            resource=resource.name,
-            resource_type="script",
-            field="script source directory",
-        )
-        if script_directory is None or not os.path.isdir(
-            script_directory.filesystem_path
-        ):
-            return None
-
-        preferred_filename = resource.name + ".gml"
-        excluded_filenames = {preferred_filename}
-        preferred_source = None
-        if not is_safe_project_source_component(resource.name):
-            normalized_preferred_filename = posixpath.basename(
-                posixpath.normpath(preferred_filename.replace("\\", "/"))
-            )
-            if normalized_preferred_filename:
-                excluded_filenames.add(normalized_preferred_filename)
-            self._report_source_path_rejection(
-                preferred_filename,
-                ProjectSourcePathError(
-                    "GameMaker script resource names used to derive source "
-                    "filenames must identify exactly one path component: "
-                    f"{resource.name!r}"
-                ),
-                owner_source_path=yy_source.source_path,
-                resource=resource.name,
-                resource_type="script",
-                field="preferred script source",
-            )
-        else:
-            preferred_source = self._resolve_project_source(
-                preferred_filename,
-                owner_source_path=yy_source.source_path,
-                resource=resource.name,
-                resource_type="script",
-                field="preferred script source",
-            )
-        if preferred_source is not None:
-            owner_directory = posixpath.dirname(yy_source.source_path)
-            preferred_directory = posixpath.dirname(preferred_source.source_path)
-            if preferred_directory != owner_directory:
-                self._report_source_path_rejection(
-                    preferred_filename,
-                    ProjectSourcePathError(
-                        "GameMaker script source derived from the resource name "
-                        "must be next to its script .yy owner: "
-                        f"{preferred_filename!r}"
-                    ),
-                    owner_source_path=yy_source.source_path,
-                    resource=resource.name,
-                    resource_type="script",
-                    field="preferred script source",
-                )
-                preferred_source = None
-            elif os.path.isfile(preferred_source.filesystem_path):
-                return preferred_source.filesystem_path
-
+        if model.gml_path is None:
+            return model, ()
         try:
-            filenames = sorted(os.listdir(script_directory.filesystem_path))
-        except OSError:
-            return None
-        for filename in filenames:
-            if not filename.endswith(".gml") or filename in excluded_filenames:
-                continue
-            discovered_source = self._resolve_discovered_project_source(
-                os.path.join(script_directory.filesystem_path, filename),
-                owner_source_path=yy_source.source_path,
-                resource=resource.name,
-                resource_type="script",
-                field="discovered script source",
-            )
-            if discovered_source is None or not os.path.isfile(
-                discovered_source.filesystem_path
-            ):
-                continue
-            return discovered_source.filesystem_path
-        return None
-
-    def _script_function_names(self, resource: _ProjectResource) -> tuple[str, ...]:
-        source_path = self._script_source_gml_path(resource)
-        if source_path is None:
-            return ()
-        try:
-            with open(source_path, "r", encoding="utf-8") as source_file:
-                return modern_script_function_names(
+            with open(model.gml_path, "r", encoding="utf-8") as source_file:
+                return model, modern_script_function_names(
                     source_file.read(),
                     macro_configuration=self.macro_configuration,
                 )
         except (OSError, GMLTranspileError):
-            return ()
+            return model, ()
 
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
         datafiles_source = self._resolve_discovered_project_source(

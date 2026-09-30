@@ -136,7 +136,6 @@
     "application|function_structure|src/conversion/asset_registry.py::AssetRegistryConverter._resources_from_yyp": 164,
     "application|function_structure|src/conversion/asset_registry.py::AssetRegistryConverter._revalidate_included_file_output_at": 240,
     "application|function_structure|src/conversion/asset_registry.py::AssetRegistryConverter._revalidate_included_file_output_fallback": 217,
-    "application|function_structure|src/conversion/asset_registry.py::AssetRegistryConverter._script_source_gml_path": 160,
     "application|function_structure|src/conversion/asset_registry.py::AssetRegistryConverter.convert_all": 207,
     "application|function_structure|src/conversion/atomic_generated_text.py::_atomic_write_asset_text_fallback": 213,
     "application|function_structure|src/conversion/atomic_generated_text.py::_publish_bound_windows_readonly_asset_transaction": 235,
@@ -224,7 +223,7 @@
     "application|function_structure|src/conversion/particle_assets.py::_normalize_particle_type": 270,
     "application|function_structure|src/conversion/project_settings.py::ProjectSettingsConverter.generate_audio_bus_layout": 163,
     "application|function_structure|src/conversion/resource_index.py::GameMakerResourceIndex._index_disk_resources": 191,
-    "application|function_structure|src/conversion/resource_models.py::_parse_resource_model": 255,
+    "application|function_structure|src/conversion/resource_models.py::_parse_resource_model": 253,
     "application|function_structure|src/conversion/room_layers.py::_camera_node_lines": 254,
     "application|function_structure|src/conversion/room_layers.py::_instance_scene_lines": 239,
     "application|function_structure|src/conversion/room_layers.py::_layer_node_lines": 277,
@@ -300,7 +299,7 @@
     "application|module_lines.declarative|src/conversion/gml_transpiler_parts/gml_api_manifest.py::<module>": 8139,
     "application|module_lines.executable|src/cli.py::<module>": 932,
     "application|module_lines.executable|src/conversion/anchored_artifacts.py::<module>": 3485,
-    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4117,
+    "application|module_lines.executable|src/conversion/asset_registry.py::<module>": 4054,
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": 1602,
     "application|module_lines.executable|src/conversion/conversion_artifact_generation.py::<module>": 2006,
     "application|module_lines.executable|src/conversion/conversion_manifest.py::<module>": 812,
@@ -322,7 +321,7 @@
     "application|module_lines.executable|src/conversion/resource_index.py::<module>": 864,
     "application|module_lines.executable|src/conversion/room_layers.py::<module>": 1431,
     "application|module_lines.executable|src/conversion/rooms.py::<module>": 952,
-    "application|module_lines.executable|src/conversion/scripts.py::<module>": 1104,
+    "application|module_lines.executable|src/conversion/scripts.py::<module>": 1004,
     "application|module_lines.executable|src/conversion/sequence_assets.py::<module>": 1196,
     "application|module_lines.executable|src/conversion/shader_translation.py::<module>": 1717,
     "application|module_lines.executable|src/conversion/sprites.py::<module>": 1688,
@@ -332,7 +331,7 @@
     "application|module_structure.executable|src/cli.py::<module>": 1343,
     "application|module_structure.executable|src/conversion/anchored_artifacts.py::<module>": 5906,
     "application|module_structure.executable|src/conversion/architecture_policy.py::<module>": 931,
-    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6845,
+    "application|module_structure.executable|src/conversion/asset_registry.py::<module>": 6739,
     "application|module_structure.executable|src/conversion/atomic_generated_text.py::<module>": 2371,
     "application|module_structure.executable|src/conversion/conversion_artifact_generation.py::<module>": 3094,
     "application|module_structure.executable|src/conversion/conversion_manifest.py::<module>": 1085,
@@ -361,11 +360,11 @@
     "application|module_structure.executable|src/conversion/project_manifest.py::<module>": 1716,
     "application|module_structure.executable|src/conversion/project_settings.py::<module>": 1464,
     "application|module_structure.executable|src/conversion/resource_index.py::<module>": 1550,
-    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 968,
+    "application|module_structure.executable|src/conversion/resource_models.py::<module>": 965,
     "application|module_structure.executable|src/conversion/room_layers.py::<module>": 2949,
     "application|module_structure.executable|src/conversion/rooms.py::<module>": 1582,
     "application|module_structure.executable|src/conversion/script_generator.py::<module>": 1195,
-    "application|module_structure.executable|src/conversion/scripts.py::<module>": 1775,
+    "application|module_structure.executable|src/conversion/scripts.py::<module>": 1614,
     "application|module_structure.executable|src/conversion/sequence_assets.py::<module>": 1865,
     "application|module_structure.executable|src/conversion/shader_translation.py::<module>": 2876,
     "application|module_structure.executable|src/conversion/shaders.py::<module>": 1286,
@@ -1353,9 +1352,9 @@
       "structure": 5906
     },
     "application|module_lines.executable|src/conversion/asset_registry.py::<module>": {
-      "ast_sha256": "862d1de1c14da935a4abbdc6c220c9d7c291650a995c5ddc92344b5ffecedbf1",
-      "lines": 4109,
-      "structure": 6845
+      "ast_sha256": "c23709aa0fdb79912d6701f888d372288ba0990a915326db654c8637bbcafa60",
+      "lines": 4036,
+      "structure": 6739
     },
     "application|module_lines.executable|src/conversion/atomic_generated_text.py::<module>": {
       "ast_sha256": "438eaa4d91db5d3b556ea12361d83514dd6a8754fd5845b578d5dd357aac174e",
@@ -1463,9 +1462,9 @@
       "structure": 1582
     },
     "application|module_lines.executable|src/conversion/scripts.py::<module>": {
-      "ast_sha256": "789e9cc21b823d28d6a657ef9ba95b57b15430520ccf5e2ac9ee29d481d08a15",
-      "lines": 1100,
-      "structure": 1775
+      "ast_sha256": "71ab420362fe19c129c6d39d7424aba61f5d8c08bcc9649663ff584f63ffc714",
+      "lines": 986,
+      "structure": 1614
     },
     "application|module_lines.executable|src/conversion/sequence_assets.py::<module>": {
       "ast_sha256": "bb592e4b3bedbcdfa71b368c3df861a7237236383bf28da8a790d7f23168a262",
@@ -1623,8 +1622,8 @@
       "structure": 2893
     },
     "tests|module_lines.executable|tests/test_asset_registry.py::<module>": {
-      "ast_sha256": "0d4222013127f9e960bad86d2262335911d38e763aafd751d19771ca22cba704",
-      "lines": 5543,
+      "ast_sha256": "6d0ededcee4c454d9f8eced450c9ae6f7b95db60b925abae21b44f0bb27fd01b",
+      "lines": 5541,
       "structure": 9989
     },
     "tests|module_lines.executable|tests/test_ci_workflows.py::<module>": {

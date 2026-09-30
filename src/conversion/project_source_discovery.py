@@ -20,6 +20,8 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
+from src.conversion.script_model import ScriptModel
+from src.conversion.script_sources import dependency_script_source
 from src.conversion.type_defs import StrPath
 
 _GML_RESOURCE_KINDS = frozenset({"scripts", "objects", "rooms"})
@@ -92,12 +94,12 @@ def _resource_gml_candidates(
 ) -> tuple[str, ...]:
     kind = resource.kind.casefold()
     if kind == "scripts":
-        candidate = _script_gml_candidate(
-            project_root,
-            resource,
-            resolved_resource,
-            resource_data,
+        model = ScriptModel(
+            name=resource.name, kind=resource.kind, resource_type=resource.resource_type,
+            yy_path=resolved_resource.filesystem_path, yyp_path=resolved_resource.source_path,
+            order=resource.order, raw_data=resource_data,
         )
+        candidate = dependency_script_source(project_root, model, resolved_resource)
         return (candidate,) if candidate else ()
     if kind == "objects":
         return _object_gml_candidates(
@@ -112,38 +114,6 @@ def _resource_gml_candidates(
             resource_data,
         )
     return ()
-
-
-def _script_gml_candidate(
-    project_root: str,
-    resource: ProjectResourceReference,
-    resolved_resource: ResolvedProjectSourcePath,
-    resource_data: JsonObject,
-) -> str:
-    resource_directory = posixpath.dirname(resolved_resource.source_path)
-    names: list[str] = [resource.name]
-    for key in ("%Name", "name"):
-        value = resource_data.get(key)
-        if isinstance(value, str) and value:
-            names.append(value)
-    names.append(posixpath.splitext(posixpath.basename(resolved_resource.source_path))[0])
-    for name in names:
-        if not is_safe_project_source_component(name):
-            continue
-        try:
-            resolved_candidate = resolve_project_sidecar_source_path(
-                project_root,
-                resolved_resource.source_path,
-                f"{name}.gml",
-            )
-        except ProjectSourcePathError:
-            continue
-        if (
-            posixpath.dirname(resolved_candidate.source_path) == resource_directory
-            and os.path.isfile(resolved_candidate.filesystem_path)
-        ):
-            return resolved_candidate.source_path
-    return ""
 
 
 def _object_gml_candidates(

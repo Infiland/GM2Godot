@@ -1,6 +1,6 @@
 # R14 canonical script model and source ownership contract
 
-Status: REVIEWING. Implementation, static checks and 73 focused tests with zero skips are independently and upper-agent approved at the source indexed by `R14/implementation-81561810/source-final.json`. Original characterization remains bound to ae57 and entry81561810. Broader proof, composition with verified I03, native CI and final integration are pending. The implementation owner has fourteen allowed source/test paths.
+Status: VERIFIED at campaign merge `b45399259c2af24a914fdfefc161ba20c44348ba`, PR #897. Independent and upper-agent reviews accept the actual source, composition, local full/parity, qualified performance and exact PR/merge CI evidence. The immutable external receipt `R14/final-verification.json` has SHA256 `153626479d515bad5387bc0d55a7702f79ce5de653b91168bd3861830365ac99`. The design and earlier execution entries below retain their historical source bindings and fourteen-path implementation scope.
 
 ## Concrete benefit and authority
 
@@ -222,4 +222,51 @@ Root authorizes only the following workflow amendment: append the exact 73 selec
 
 The accepted broader plan is indexed by `R14/broader-proof-plan-81561810/review-files.json`. It requires full discovery with five external fixtures, R01 base/candidate and same-ref parity, and twelve fresh SNAP workers (two excluded warmups, five alternating measured pairs). Each worker calls real dependency discovery and `ScriptConverter.convert_all`; compare all outputs and scoped real-open records. Preserve the production registry callback wiring, including its existing silence. Report measured intervals with observation overhead and whole-process macOS RSS bytes. Final source, runtime, input and executable packages require review before use.
 
-The actual preceding campaign parent is now verified I03 merge `74688c86cb58c5e22592f9e868eba828ed064381`. Prepared R14 merge `a4f55de` preserves all independent implementation paths and the reviewed metadata composition: 618 files, 416 Python files, strict 1033 allowances with one removal and six reductions from this parent. Independent/root combined review and all static checks pass. The final documentation-only checkpoint precedes executable proof binding; R14 remains reviewing.
+The actual preceding campaign parent is verified I03 merge `74688c86cb58c5e22592f9e868eba828ed064381`. Prepared R14 merge `a4f55de` preserved all independent implementation paths and the reviewed metadata composition: 618 files, 416 Python files, strict 1033 allowances with one removal and six reductions from this parent. Independent/root combined review and all static checks passed. That documentation-only checkpoint preceded executable proof binding; R14 remained reviewing at that checkpoint.
+
+## Final verified evidence
+
+PR #897 merged candidate `fb03dbebfbf7ebf30920f0ed562bf8d3b9afcb95` with the
+verified I03 parent into `b45399259c2af24a914fdfefc161ba20c44348ba`. The merged
+tree is `71715a8db27ad3cbd4407c0e23e6cdc676dd1f26`, identical to the approved
+candidate. Exact PR/merge CI runs 36717618562/36761317593 passed: 24 successful
+jobs and the sole permitted dependency-graph submission skip. Six once-only
+merge selectors, ten outputs and 27 raw profiles are accepted after independent
+and upper-agent review. All 73 selected methods passed on each native host,
+including all required symlink cases; four required exact Godot cases passed.
+Retained CLI/native/transaction/runtime/artifact and coverage gates passed with
+only their explicitly declared host skips.
+
+Full discovery ran 3220 tests with 3162 successes and 58 classified prior host
+skips. All five external project and five script-symlink obligations passed.
+Five-project/fourteen-field base/candidate and same-reference comparisons
+matched under the unchanged R01 normalization. ResourceMatrix retains two
+pre-existing compatibility warnings and failed status on both sides; exact
+parity and successful import/boot do not establish warning-free output or every
+semantic. No additional normalization was introduced.
+
+The final actual-parent baseline is 1033, down from 1034 with one removal and six
+reductions, zero additions or growth. The measured production totals remain
+6031→6015 physical lines and 9995→10020 structural units. The ownership benefit
+does not imply a total structural-size reduction. New production owners measure
+35/52 and 167/286 physical/structural; fresh test owners measure 192/461,
+147/581 and 404/1378. All 64 fresh functions meet complexity ≤15, nesting ≤4,
+parameters ≤8 and physical/structural size ≤150.
+
+The original twelve observations remain final: conversion medians 2.336327625s
+and 2.606033375s, an increase of 0.26970575s (11.544%), with four of five measured
+pairs slower. Its cause is unassigned. Accepted source-bound profiles show the
+small explicit metadata/helper work and unchanged dominant computation/I/O,
+resolving the missing material-source-work attribution. The two instrumented
+CPU pairs differ in sign; event/timer overhead, generated-label collisions and
+opaque native labels remain explicit. These profiles do not replace the original
+latency, bound unprofiled incremental cost or prove equal host load. Native
+macOS whole-process high-water memory includes guards/imports/mocks/observers;
+it is not a production-worker or per-model memory bound. No speedup or precise
+latency-equality claim is made.
+
+The canonical class's defining-module/inheritance change remains an explicit
+internal exception; unknown external `isinstance` or pickle compatibility is
+not established. Earlier failure/review records and their reviewed corrections
+remain immutable. Campaign completion is 19/54 (35.2%); this task grants no
+final-main or release completion credit.

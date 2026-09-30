@@ -7,9 +7,9 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 ## Current checkpoint
 
 - Campaign baseline: main `38b364855f06e971d2676b921fd300e1f40f076a`.
-- Integration branch: `dev/080-architecture-campaign`, through verified I03
-  PR #893 at `74688c86cb58c5e22592f9e868eba828ed064381`.
-- Verified progress: 18 of 54 tasks (33.3%). Pending validation does not count
+- Integration branch: `dev/080-architecture-campaign`, through verified R14
+  PR #897 at `b45399259c2af24a914fdfefc161ba20c44348ba`.
+- Verified progress: 19 of 54 tasks (35.2%). Pending validation does not count
   as completion.
 - Resumed main is clean at `cba7f52bb9aa6b68776e0342955d45d7c4fd803c`. Its
   September 14 Deep conversion work requires reconciliation at final integration.
@@ -24,12 +24,15 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
   final campaign release version is awaiting the user's updated preference.
 - I03 has passed local full/public parity, genuine Windows proof and both exact
   PR/merge CI runs, including all retained native/runtime/CLI/artifact gates.
-- R14 implementation and 73 focused tests are independently and upper-agent
-  approved. Its prepared merge with verified I03 passes all static checks and
-  reduces the current-parent baseline from 1034 to 1033 allowances. Full,
-  five-project parity, performance and exact PR/merge CI remain pending.
+- R14 is verified after independent and upper-agent actual-source/result review.
+  Full discovery passed with 3162 successes and 58 classified host skips; all
+  five-project/fourteen-field and same-reference parity comparisons matched.
+  Exact PR/merge CI, all six retained selectors and 73 selected successes per
+  native host passed. The actual-parent baseline shrank from 1034 to 1033.
+  Original conversion timing was 11.544% slower; its cause remains unassigned.
+  The accepted source-work assessment does not claim equal latency or a speedup.
 - R15's revised sound-model design is approved; executable characterization
-  and implementation await verified R14 and a bound entry contract.
+  awaits a fresh parent-bound entry. Implementation follows accepted old results.
 
 ## Ownership and progress
 
@@ -54,7 +57,7 @@ verified, blocked. The [plan](PLAN.md) and [contracts](contracts.json) bound the
 | L02 CLI request and session ownership | verified | PR #891 merged `5faa683` | Independent/root local, combined and exact CI APPROVE | PR33978428787/merge33980543144; all six native/CLI/runtime/artifact/coverage/strict-parent verifiers passed; L02/final-verification.json |
 | R13 authoritative font model | verified | PR #892 merged `ae57bee` | Independent/root local, combined and exact CI APPROVE | PR33996106216/merge33998320814; all retained native/CLI/runtime/artifact/coverage/strict-parent proofs passed; R13/final-verification.json |
 | I03 Included Files Windows operations | verified | PR #893 merged `74688c8` | Independent/root local, combined and exact CI APPROVE | PR34047439957/merge34049393947; Windows34/0 skips, all six retained CI verifiers and five parser controls accepted; I03/final-verification.json |
-| R14 authoritative script model and source selection | reviewing | Prepared merge `a4f55de` with verified I03 | Independent/root implementation and combined static APPROVE | 73 focused successes/0 skips; strict1033; full/parity/performance and exact native PR/merge proof pending |
+| R14 authoritative script model and source selection | verified | PR #897 merged `b453992` | Independent/root source, local, composition and exact CI APPROVE | PR36717618562/merge36761317593; 73/73/73 selected successes and 4 exact Godot cases; full/parity, qualified performance, retained native/CLI/artifact/coverage gates and strict1033; R14/final-verification.json |
 | Other rows | planned | Assigned after contract acceptance | Independent reviewer, then root | `contracts.json` |
 
 Raw evidence is retained outside the worktrees at
@@ -295,3 +298,24 @@ R14 bounded implementation review: shared script fixtures and source probes belo
   Final receipt `I03/final-verification.json` has SHA256
   `23a2c70d35980b927b58e908003a2dae697416f3e397d86c74d0671ebc282c2c`.
   Verified campaign progress is 18/54 (33.3%).
+
+- R14 is verified at campaign merge `b45399259c2af24a914fdfefc161ba20c44348ba`
+  after PR #897 and CI36717618562/36761317593. The merge has ordered I03/candidate
+  parents and the exact approved candidate tree. Full discovery had 3220 tests,
+  3162 successes and 58 prior host skips; required fixture/symlink and native
+  selected methods had zero skips. All five-project/fourteen-field and same-ref
+  comparisons matched under the unchanged R01 normalization. ResourceMatrix's
+  two pre-existing compatibility warnings remain on both sides; this is parity,
+  not warning-free or complete semantic proof. Six once-only merge selectors,
+  ten receipts and 27 profiles were independently and upper-agent reviewed.
+  The original conversion median rose by 0.26970575s (11.544%), with four of
+  five measured pairs slower. Its cause remains unassigned. The finite profile
+  assessment resolves missing source-work attribution; instrumented CPU/RSS
+  does not replace the original timing or establish a general performance bound.
+  Production physical lines fell 6031 to 6015 while structural size rose 9995
+  to 10020. All 64 fresh functions meet their caps; the actual-parent ratchet
+  removes one allowance and lowers six, with none added or grown (1034 to 1033).
+  Final receipt `R14/final-verification.json` has SHA256
+  `153626479d515bad5387bc0d55a7702f79ce5de653b91168bd3861830365ac99`.
+  Verified campaign progress is 19/54 (35.2%). R15 requires a fresh parent-bound
+  entry and accepted old characterization before implementation.

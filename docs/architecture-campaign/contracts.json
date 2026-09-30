@@ -1119,7 +1119,7 @@
       "task_id": "R14",
       "issue": 797,
       "title": "Authoritative scripts resource model",
-      "state": "reviewing",
+      "state": "verified",
       "problem_and_evidence": "Converter scripts.py:405-492 and registry asset_registry.py:2754-2844 duplicate preferred/fallback sidecar selection. The aggregate ScriptModel is descriptive; script_functions already owns lexical parsing. There is no renderer YY dictionary parser to remove. Verified at ae57bee3b4ea05d2efa5e9206f2514b9dc68a292.",
       "expected_benefit": "One script sidecar search owner for conversion/registry and one dependency-name query; canonical nine-field ScriptModel actually used for registry source reads and alias identity, dependency discovery and aggregate output.",
       "current_owner": "scripts.py, asset_registry.py, project_source_discovery.py, resource_models.py; script_functions lexical ownership is preserved.",
@@ -1191,7 +1191,7 @@
         "index_sha256": "ff57025e1b023a84ee4ee7d2891975eb9d22187c7bdbfa7bc11796912e177706",
         "root_review_sha256": "8fe61bb3ad11e702e1140ce52ff28f5a50c408ddbb10a16fdf763215054c6872",
         "independent_review_sha256": "3a2e63dac1e6d5934663539a1422718fc660b8e85902ae8d60493d0c627a6188",
-        "remaining": "Final I03 composition/source/baseline binding; full, five-project parity and same-ref, SNAP timing, exact native PR and merged CI."
+        "remaining": "None for R14 verification. All original proof gates passed; the original measured slowdown remains unassigned and the accepted finite source-work/memory qualifications are retained in final_verification."
       },
       "combined_proof": {
         "prepared_merge": "a4f55de800308e1a64d2dc1adfd69cc4e9159fa2",
@@ -1203,7 +1203,188 @@
         "independent_review_sha256": "90bfcff0af66cf7c6d75e3e964ac5a369b8d54a457d2f8da29aa5e325c92ec06",
         "static_result_sha256": "ba04d92b23b28a0c25a1dc1dbcee95dd0e7a22ca28516c5688eaf19790a7016f",
         "checks": "Pyright0errors/0warnings, both Ruff over416 inputs, actionlint, strict1033 against actual746 and diff passed. All618 source hashes unchanged.",
-        "remaining": "Final documentation/source binding, full and public parity/same-ref, SNAP performance, native PR and merged CI; not verified."
+        "remaining": "None for R14 verification. Exact M ordered parents/tree, merge CI, captured artifacts and six once-only selectors are independently and upper-agent accepted."
+      },
+      "final_verification": {
+        "receipt": "R14/final-verification.json",
+        "receipt_sha256": "153626479d515bad5387bc0d55a7702f79ce5de653b91168bd3861830365ac99",
+        "state": "verified",
+        "verdict": "APPROVE",
+        "pr": 897,
+        "pr_url": "https://github.com/Infiland/GM2Godot/pull/897",
+        "merged_head": "b45399259c2af24a914fdfefc161ba20c44348ba",
+        "merged_tree": "71715a8db27ad3cbd4407c0e23e6cdc676dd1f26",
+        "actual_parent": "74688c86cb58c5e22592f9e868eba828ed064381",
+        "candidate": "fb03dbebfbf7ebf30920f0ed562bf8d3b9afcb95",
+        "ordered_parents": [
+          "74688c86cb58c5e22592f9e868eba828ed064381",
+          "fb03dbebfbf7ebf30920f0ed562bf8d3b9afcb95"
+        ],
+        "PR_CI": 36717618562,
+        "merge_CI": 36761317593,
+        "merge_CI_attempt": 1,
+        "source_files": 618,
+        "python_files": 416,
+        "checks": {
+          "Pyright_errors": 0,
+          "Pyright_warnings": 0,
+          "Ruff_ordinary_and_tracked": "PASS",
+          "actionlint": "PASS",
+          "git_diff_check": "PASS",
+          "maintainability_actual_parent": "74688c86cb58c5e22592f9e868eba828ed064381",
+          "parent_allowances": 1034,
+          "final_allowances": 1033,
+          "removed": 1,
+          "lowered": 6,
+          "added": 0,
+          "grown": 0
+        },
+        "full": {
+          "tests": 3220,
+          "successes": 3162,
+          "prior_host_skips": 58,
+          "required_fixture_and_symlink_successes": 10
+        },
+        "parity": {
+          "five_projects": 5,
+          "fields_per_project": 14,
+          "base_candidate": "MATCH",
+          "same_reference": "MATCH",
+          "normalization": "Only the existing R01 ten explicitly enumerated transaction-volatile fields; all thirteen other raw oracle fields byte-equal. No new normalization.",
+          "runtime_limit": "ResourceMatrix reports failed status on both sides due to two pre-existing compatibility warnings; exact parity and successful boot/import do not prove warning-free output or every supported semantic."
+        },
+        "native": {
+          "R14_per_host": [
+            73,
+            73,
+            73
+          ],
+          "R14_required_skips": 0,
+          "R14_exact_Godot": 4,
+          "exact_Godot": "4.7.2.stable.official.ed1daf0bf",
+          "retained_cohorts": "L02/R13/I02/I03/I01/R12/T01, CLI/converter/crash/mount/binding, native modes, N01 and coverage authenticated by all six selectors and root/independent actual reviews.",
+          "CLI_successes": [
+            77,
+            77,
+            74
+          ],
+          "CLI_declared_host_skips": [
+            1,
+            1,
+            4
+          ],
+          "native_modes": [
+            6,
+            6,
+            2
+          ],
+          "N01_per_host": [
+            10,
+            13,
+            16
+          ],
+          "N01_distinct_authenticated_origins": 6,
+          "overlap_qualification": "Repeated selected IDs and duplicate dependency/test artifact members do not represent additional distinct executions."
+        },
+        "actual_metrics": {
+          "all_six_production_modules_total": {
+            "new_physical": 6015,
+            "new_structural": 10020,
+            "old_physical": 6031,
+            "old_structural": 9995
+          },
+          "complexity_cap": 15,
+          "fresh_functions": 64,
+          "interpretation": "Physical total falls16; structural total rises25 because canonical model construction and explicit consumer/callback bindings replace the duplicate loops. The accepted benefit is concrete shared source ownership and authoritative model use; no aggregate structural-total reduction is claimed. The sole retired debt entry is registry search structure160; no new/growing debt.",
+          "max_fresh": {
+            "nesting": 4,
+            "parameters": 6,
+            "physical": 39,
+            "structural": 141
+          },
+          "new_production_modules_physical_structural": {
+            "script_model": [
+              35,
+              52
+            ],
+            "script_sources": [
+              167,
+              286
+            ]
+          },
+          "new_test_modules_physical_structural": {
+            "script_source_support": [
+              192,
+              461
+            ],
+            "test_script_model": [
+              147,
+              581
+            ],
+            "test_script_sources": [
+              404,
+              1378
+            ]
+          },
+          "retained_production_modules_physical_structural": {
+            "asset_registry": [
+              4109,
+              6845,
+              4036,
+              6739
+            ],
+            "project_source_discovery": [
+              259,
+              407,
+              229,
+              364
+            ],
+            "resource_models": [
+              563,
+              968,
+              562,
+              965
+            ],
+            "scripts": [
+              1100,
+              1775,
+              986,
+              1614
+            ]
+          }
+        },
+        "performance": {
+          "accepted_scope": "Finite material-source-work assessment; no speedup or precise latency-equality claim.",
+          "base_conversion_median_seconds": 2.336327625,
+          "candidate_conversion_median_seconds": 2.606033375,
+          "original_delta_seconds": 0.26970575,
+          "original_delta_percent": 11.544003808113178,
+          "slower_pairs": 4,
+          "measured_pairs": 5,
+          "original_cause": "UNASSIGNED",
+          "limitations": [
+            "Original +0.26970575s/+11.544% and four slower pairs remain the final observed latency signal; its cause is not established.",
+            "Profiling adds extreme event/CPU-clock overhead; CPU and wall times are not replacement latency or a bound on unprofiled incremental cost.",
+            "Both profile order pairs differ in sign; no new medians, favorable selection, correction or averaging is used.",
+            "Source-bound unchanged count/callee equality attributes work, not equality of CPU duration or environment in every application run.",
+            "Selected external CPU snapshots have unestablished intervals and do not establish equal load, an idle host or background cause.",
+            "All getstats rows retained; generated marshal label collisions and opaque native address labels limit identity and prohibit broad normalization or invented native identities.",
+            "Separate self partitions and each nested cumulative boundary retained; no overlapping ancestor sum.",
+            "RSS remains native macOS whole-process high-water with allocator/guard/capture/profiler effects; no production-worker or operation/model-memory bound.",
+            "Assessment covers the actual fixed SNAP discovery and76-script conversion at max_workers1 on the pinned B/F/runtime source; no general performance guarantee."
+          ]
+        },
+        "root_merge_native_review_sha256": "bdbbd877a21d61c1b77c80172bac3526c63dba10dd55a5826a547d9777332473",
+        "independent_final_review_sha256": "e87cb610e0c2b3c316c016e797fd5426c6d307a2a843121391ccee6cfd5c14a6",
+        "independent_final_index_sha256": "5667585e44850879286776d4ee2c2dc99a8b1e073827d8590d2267131f5fbeea",
+        "internal_type_exception": "Canonical ScriptModel defining module changes and ResourceModel inheritance is removed; exact nine fields/defaults, frozen behavior, raw identity and aggregate class re-export remain. Unknown external isinstance/pickle callers are not proven compatible.",
+        "campaign_progress": {
+          "verified": 19,
+          "total": 54,
+          "percent": 35.2,
+          "last_verified": "R14"
+        },
+        "remaining_for_R14_verification": []
       }
     },
     {

@@ -4677,6 +4677,7 @@ class TestCIWorkflows(unittest.TestCase):
                 "pillow": PILLOW_VERSION,
                 "markdown2": "2.5.5",
                 "requests": "2.34.2",
+                "urllib3": "2.8.0",
                 "pyside6": "6.11.1",
                 "keyring": "25.7.0",
             },

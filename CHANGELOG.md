@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.4 - 2026-10-02
+
+- Pin urllib3 2.8.0 for runtime installs and refresh native dependency locks to fix the proxy TLS handling, chunked response buffering and deflate decoding vulnerabilities reported by Dependabot.
+
 ## 0.8.3 - 2026-10-02
 
 - Detect local Codex installations for Deep conversion, including desktop app and common installation locations when the GUI has a minimal PATH, and allow a custom executable in setup, saved jobs and CLI preferences.

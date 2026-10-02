@@ -184,7 +184,8 @@ echo "Verifying macOS bundle metadata..."
   --source-root "$SCRIPT_DIRECTORY" \
   --app "$SCRIPT_DIRECTORY/dist/GM2Godot.app" \
   --zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip" \
-  --dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg"
+  --dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg" \
+  --expected-architecture arm64
 
 cleanup_build_temp
 

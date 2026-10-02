@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.12 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.13 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -28,13 +28,13 @@ The release workflow is canonical at [`.github/workflows/release.yml`](https://g
 
 Pull requests that change the release workflow, create-only publisher, or dedicated smoke workflow run [`.github/workflows/release-action-smoke.yml`](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release-action-smoke.yml). The smoke is independent of the project version and remote tag state. It verifies a deterministic cross-job artifact round-trip through the exact production upload/download pins, loads the checked-out local publisher with an unusable token, and proves a guaranteed-missing local asset stops it before any API request while producing a failure receipt with zero mutation intents.
 
-## macOS bundle identity
+## macOS bundle identity and native gate
 
 The checked-in `packaging/macos/GM2Godot.spec` is the only supported macOS release build definition. It loads the strict policy in `packaging/macos/bundle_metadata.py` and stamps `GM2Godot.app` with the stable reverse-domain identifier `land.infi.gm2godot`. Both `CFBundleShortVersionString` and `CFBundleVersion` equal the exact three-component numeric release version in `src/version.py`. GM2Godot produces one production macOS build for each source release version; do not substitute a workflow run number, timestamp, or mutable counter.
 
-Before artifact upload, `scripts/verify_macos_bundle_metadata.py` checks the source app, the app embedded in `GM2Godot-macos.zip`, and the app mounted read-only from `GM2Godot-macos.dmg`. All three copies must have the exact policy values and byte-identical `Info.plist` contents. A missing key, non-string value, placeholder, unsafe app/plist archive layout, malformed plist, or inconsistent digest fails the release.
+Before artifact upload, `scripts/verify_macos_bundle_metadata.py` checks the source app, the app embedded in `GM2Godot-macos.zip`, and the app mounted read-only from `GM2Godot-macos.dmg`. All three copies must have the exact policy values and byte-identical `Info.plist` contents, including `LSMinimumSystemVersion` exactly `15.0`. The verifier reads native headers and load commands and requires a non-empty Mach-O inventory containing the main executable. Every native member must use the expected thin architecture and declare a macOS deployment target no higher than 15.0; the relative native paths, architectures, and deployment targets must agree across all three forms. Malformed or universal native members, unsafe archive paths or links, inconsistent inventories, and invalid metadata fail the release.
 
-This policy does not select the macOS architecture tracked in issue #736 and does not sign or notarize the app tracked in issue #737.
+The current macOS release invokes this gate with `--expected-architecture arm64`. The same parameter accepts `x86_64` for the Intel build lane tracked in issue #856. Developer ID signing and notarization remain tracked in issue #737.
 
 ## Linux packaged-GUI gate
 
@@ -59,7 +59,7 @@ Before merging:
 - [ ] Confirm all pull-request checks pass, including exact Godot 4.7.2 smoke and GameMaker LTS 2026 conversion gates.
 - [ ] Confirm Linux, macOS, and Windows build jobs produce non-empty artifacts.
 - [ ] Confirm the Linux build reports no unresolved shared libraries and its extracted-ZIP `qxcb` GUI smoke passes with the required Qt GUI/XCB runtime inventory and excluded TIFF plugin.
-- [ ] Confirm the macOS build verifies the exact bundle identifier and source release version in the `.app`, ZIP, and DMG before upload.
+- [ ] Confirm the macOS build verifies bundle identity, source release version, the exact macOS 15.0 minimum, and matching thin-arm64 native inventories in the `.app`, ZIP, and DMG before upload.
 - [ ] Confirm the pull request references the intended issue, uses the correct closure timing, and does not absorb unrelated work.
 
 After merging:
@@ -68,7 +68,7 @@ After merging:
 - [ ] Confirm the release is neither draft nor prerelease and has exactly five unique, non-empty assets: the four platform payloads and `SHA256SUMS`.
 - [ ] Download the run's `release-publisher-receipt` Actions artifact and confirm it ends at `verified`, contains one accepted tag claim, one accepted draft creation, five accepted asset receipts, and one accepted finalization for the same release ID.
 - [ ] Download all five assets, run `sha256sum --check --strict SHA256SUMS`, and confirm each payload digest also matches the hexadecimal value after the `sha256:` prefix in GitHub's `assets[].digest` field.
-- [ ] Inspect the downloaded macOS ZIP and read-only mounted DMG and confirm their app bundle metadata and `Info.plist` digests match each other and the release policy.
+- [ ] Inspect the downloaded macOS ZIP and read-only mounted DMG and confirm their bundle metadata, `Info.plist` digests, and native inventories match each other and the release policy.
 - [ ] Confirm post-merge tests, exact-LTS conversions, Godot smoke, and release jobs pass.
 - [ ] If `docs/wiki/` changed, publish the exact merged pages and verify the live Wiki before closing the documentation issue. Record the merged source SHA and published Wiki SHA on the issue before closing it.
 

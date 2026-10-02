@@ -5685,6 +5685,8 @@ class TestCIWorkflows(unittest.TestCase):
             '--app "$SCRIPT_DIRECTORY/dist/GM2Godot.app"',
             '--zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip"',
             '--dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg"',
+            "--expected-architecture arm64",
+            "ditto -c -k --sequesterRsrc --keepParent GM2Godot.app",
         ):
             with self.subTest(script="build_macos.sh", required=required):
                 self.assertIn(required, macos)
@@ -5812,10 +5814,19 @@ class TestCIWorkflows(unittest.TestCase):
             '--app "$GITHUB_WORKSPACE/dist/GM2Godot.app"',
             '--zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip"',
             '--dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg"',
+            '--expected-architecture "${{ matrix.expected_machine }}"',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, metadata_verification)
         self.assertEqual(release_build.count("scripts/verify_macos_bundle_metadata.py"), 1)
+        self.assertIn(
+            'if [ "${{ matrix.name }}" = "macos" ]; then\n'
+            "            7z a -snl ../GM2Godot-${{ matrix.name }}.zip .\n"
+            "          else\n"
+            "            7z a ../GM2Godot-${{ matrix.name }}.zip .\n"
+            "          fi\n",
+            release_build,
+        )
         self.assertLess(
             release_build.index("      - name: Create macOS DMG\n"),
             release_build.index("      - name: Verify macOS bundle metadata\n"),

@@ -21,6 +21,7 @@ EXPECTED_METADATA_KEYS = {
     "CFBundleIdentifier",
     "CFBundleShortVersionString",
     "CFBundleVersion",
+    "LSMinimumSystemVersion",
 }
 EXPECTED_DATA_FILES = [
     (PROJECT_ROOT / "img", "img"),
@@ -41,6 +42,7 @@ EXPECTED_HIDDEN_IMPORTS = [
 class _BundleMetadataPolicy(Protocol):
     __all__: tuple[str, ...]
     BUNDLE_IDENTIFIER: str
+    MINIMUM_SYSTEM_VERSION: str
 
     def load_release_version(self, source_root: Path) -> str: ...
 
@@ -106,9 +108,15 @@ class TestMacOSBundleMetadataPolicy(unittest.TestCase):
         metadata = POLICY.load_bundle_metadata(PROJECT_ROOT)
 
         self.assertEqual(POLICY.BUNDLE_IDENTIFIER, "land.infi.gm2godot")
+        self.assertEqual(POLICY.MINIMUM_SYSTEM_VERSION, "15.0")
         self.assertEqual(
             POLICY.__all__,
-            ("BUNDLE_IDENTIFIER", "load_release_version", "load_bundle_metadata"),
+            (
+                "BUNDLE_IDENTIFIER",
+                "MINIMUM_SYSTEM_VERSION",
+                "load_release_version",
+                "load_bundle_metadata",
+            ),
         )
         self.assertEqual(set(metadata), EXPECTED_METADATA_KEYS)
         self.assertEqual(
@@ -117,6 +125,7 @@ class TestMacOSBundleMetadataPolicy(unittest.TestCase):
                 "CFBundleIdentifier": "land.infi.gm2godot",
                 "CFBundleShortVersionString": version,
                 "CFBundleVersion": version,
+                "LSMinimumSystemVersion": "15.0",
             },
         )
         self.assertTrue(all(type(value) is str for value in metadata.values()))
@@ -337,7 +346,13 @@ class TestMacOSPyInstallerSpec(unittest.TestCase):
         )
         self.assertEqual(bundle.kwargs["bundle_identifier"], "land.infi.gm2godot")
         self.assertEqual(bundle.kwargs["version"], "9.8.7")
-        self.assertEqual(bundle.kwargs["info_plist"], {"CFBundleVersion": "9.8.7"})
+        self.assertEqual(
+            bundle.kwargs["info_plist"],
+            {
+                "CFBundleVersion": "9.8.7",
+                "LSMinimumSystemVersion": "15.0",
+            },
+        )
 
 
 if __name__ == "__main__":

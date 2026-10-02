@@ -4,17 +4,40 @@ import ast
 from collections.abc import Callable
 import inspect
 from pathlib import Path
-from typing import Final, Iterable, get_args, get_origin, get_type_hints
+from typing import Final, Iterable, get_args, get_origin, get_type_hints, cast
 import unittest
 
-import src.conversion.gml_transpiler as gml_transpiler
-from src.conversion.gml_transpiler_parts import lexical_api
+from src.conversion.gml_transpiler import preprocess_gml_source as facade_preprocess_gml_source
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    decode_gml_string_literal,
+    decode_gml_verbatim_string_literal,
+    is_plain_identifier,
+    is_verbatim_string_start,
+    preprocess_gml_source,
+    preprocess_gml_source_preserving_layout,
+    read_ordinary_string,
+    read_template_string,
+    read_verbatim_string,
+    reject_asset_identifier_name,
+    sanitize_gdscript_identifier,
+    split_template_string,
+    tokenize_gml_expression,
+    tokenize_gml_source,
+    validate_gml_identifier,
+)
 from src.conversion.gml_transpiler_parts.result_models import GMLPreprocessResult
 from src.conversion.gml_transpiler_parts.shared_models import (
     GMLTranspileError,
     ScopeContext,
     Token,
 )
+
+from tests.gml_facade_contract_support import literal_all_exports, runtime_phase_contract
+
+
+PARTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts"
+FACADE_PATH = PARTS_PATH.parent / "gml_transpiler.py"
+LEXICAL_OWNER = "src.conversion.gml_transpiler_parts.lexical_api"
 
 
 PUBLIC_NAMES = (
@@ -59,13 +82,14 @@ def _parameter_shape(
 
 class GMLLexicalAPISurfaceTests(unittest.TestCase):
     def test_exact_static_alphabetized_public_surface(self) -> None:
-        self.assertEqual(tuple(lexical_api.__all__), PUBLIC_NAMES)
-        self.assertEqual(len(lexical_api.__all__), 15)
-        self.assertEqual(tuple(sorted(lexical_api.__all__)), PUBLIC_NAMES)
-        self.assertTrue(all(not name.startswith("_") for name in lexical_api.__all__))
-        self.assertNotIn("is_float_like_number", vars(lexical_api))
+        contract = runtime_phase_contract(LEXICAL_OWNER)
+        self.assertEqual(contract.exports, PUBLIC_NAMES)
+        self.assertEqual(len(contract.exports), 15)
+        self.assertEqual(tuple(sorted(contract.exports)), PUBLIC_NAMES)
+        self.assertTrue(all(not name.startswith("_") for name in contract.exports))
+        self.assertNotIn("is_float_like_number", contract.namespace_names)
 
-        module_path = Path(lexical_api.__file__)
+        module_path = PARTS_PATH / "lexical_api.py"
         tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
         declarations = [
             node
@@ -101,7 +125,7 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
         )
         self.assertEqual(len(value.elts), len(PUBLIC_NAMES))
 
-        hints = get_type_hints(lexical_api, include_extras=True)
+        hints = contract.annotation_hints
         self.assertIs(get_origin(hints["__all__"]), Final)
         self.assertEqual(get_args(hints["__all__"]), (tuple[str, ...],))
 
@@ -119,7 +143,7 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
         for name, parameter_name in one_argument.items():
             with self.subTest(name=name):
                 self.assertEqual(
-                    _parameter_shape(getattr(lexical_api, name)),
+                    _parameter_shape(cast(Callable[..., object], runtime_phase_contract(LEXICAL_OWNER).public_values[name])),
                     (
                         (
                             parameter_name,
@@ -137,7 +161,7 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(
-                    _parameter_shape(getattr(lexical_api, name)),
+                    _parameter_shape(cast(Callable[..., object], runtime_phase_contract(LEXICAL_OWNER).public_values[name])),
                     (
                         ("source", "POSITIONAL_OR_KEYWORD", inspect.Parameter.empty),
                         (
@@ -149,7 +173,7 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
                 )
 
         self.assertEqual(
-            _parameter_shape(lexical_api.reject_asset_identifier_name),
+            _parameter_shape(reject_asset_identifier_name),
             (
                 ("name", "POSITIONAL_OR_KEYWORD", inspect.Parameter.empty),
                 ("scope_context", "POSITIONAL_OR_KEYWORD", inspect.Parameter.empty),
@@ -161,11 +185,11 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
             ("active_symbols", "KEYWORD_ONLY", None),
         )
         self.assertEqual(
-            _parameter_shape(lexical_api.preprocess_gml_source),
+            _parameter_shape(preprocess_gml_source),
             preprocess_shape,
         )
         self.assertEqual(
-            _parameter_shape(lexical_api.preprocess_gml_source_preserving_layout),
+            _parameter_shape(preprocess_gml_source_preserving_layout),
             preprocess_shape,
         )
 
@@ -217,65 +241,28 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
         self.assertEqual(set(expected_parameters), set(PUBLIC_NAMES))
         for name, expected_return in expected_returns.items():
             with self.subTest(return_type=name):
-                hints = get_type_hints(getattr(lexical_api, name))
+                hints = get_type_hints(cast(Callable[..., object], runtime_phase_contract(LEXICAL_OWNER).public_values[name]))
                 self.assertEqual(hints["return"], expected_return)
                 self.assertEqual(
                     {key: value for key, value in hints.items() if key != "return"},
                     expected_parameters[name],
                 )
 
-    def test_legacy_facade_aliases_keep_signatures_behavior_and_surface(self) -> None:
-        self.assertEqual(
-            str(inspect.signature(gml_transpiler._tokenize, eval_str=False)),
-            "(source: 'str') -> 'list[_Token]'",
-        )
-        self.assertEqual(
-            str(
-                inspect.signature(
-                    gml_transpiler._expression_tokens,
-                    eval_str=False,
-                )
-            ),
-            "(source: 'str') -> 'list[_Token]'",
-        )
-        source = "alpha\n+ beta"
-        facade_source_tokens = gml_transpiler._tokenize(source)
-        facade_expression_tokens = gml_transpiler._expression_tokens(source)
-        self.assertEqual(
-            facade_source_tokens,
-            lexical_api.tokenize_gml_source(source),
-        )
-        self.assertEqual(
-            facade_expression_tokens,
-            lexical_api.tokenize_gml_expression(source),
-        )
-        self.assertTrue(all(type(token) is Token for token in facade_source_tokens))
-        self.assertTrue(
-            all(type(token) is Token for token in facade_expression_tokens)
-        )
-        self.assertIs(
-            gml_transpiler.preprocess_gml_source,
-            lexical_api.preprocess_gml_source,
-        )
-        self.assertEqual(len(gml_transpiler.__all__), 74)
-        self.assertEqual(
-            sum(not name.startswith("_") for name in gml_transpiler.__all__),
-            44,
-        )
-        self.assertEqual(
-            sum(name.startswith("_") for name in gml_transpiler.__all__),
-            30,
-        )
+    def test_public_facade_preprocess_identity_and_internal_surface(self) -> None:
+        self.assertIs(facade_preprocess_gml_source, preprocess_gml_source)
+        facade_exports = literal_all_exports(FACADE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(len(facade_exports), 44)
+        self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         newly_internal = set(PUBLIC_NAMES) - {"preprocess_gml_source"}
-        self.assertTrue(newly_internal.isdisjoint(gml_transpiler.__all__))
+        self.assertTrue(newly_internal.isdisjoint(facade_exports))
 
 
 class GMLLexicalAPIBehaviorTests(unittest.TestCase):
     def test_source_and_expression_tokens_differ_only_by_newline_filtering(self) -> None:
         source = "alpha\r\n+\nbeta"
 
-        source_tokens = lexical_api.tokenize_gml_source(source)
-        expression_tokens = lexical_api.tokenize_gml_expression(source)
+        source_tokens = tokenize_gml_source(source)
+        expression_tokens = tokenize_gml_expression(source)
 
         self.assertTrue(all(type(token) is Token for token in source_tokens))
         self.assertTrue(all(type(token) is Token for token in expression_tokens))
@@ -298,29 +285,29 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
 
     def test_ordinary_string_read_decode_and_failures(self) -> None:
         self.assertEqual(
-            lexical_api.read_ordinary_string('xx"a\\"b"tail', 2),
+            read_ordinary_string('xx"a\\"b"tail', 2),
             '"a\\"b"',
         )
         self.assertEqual(
-            lexical_api.decode_gml_string_literal('"line\\n\\u0041\\x42\\101"'),
+            decode_gml_string_literal('"line\\n\\u0041\\x42\\101"'),
             "line\nABA",
         )
         self.assertEqual(
-            lexical_api.decode_gml_string_literal("'single\\tquote'"),
+            decode_gml_string_literal("'single\\tquote'"),
             "single\tquote",
         )
 
         failure_cases = (
             (
-                lambda: lexical_api.read_ordinary_string("plain", 0),
+                lambda: read_ordinary_string("plain", 0),
                 "String literal must start with a quote",
             ),
             (
-                lambda: lexical_api.read_ordinary_string('"unterminated', 0),
+                lambda: read_ordinary_string('"unterminated', 0),
                 "Unterminated string literal",
             ),
             (
-                lambda: lexical_api.decode_gml_string_literal('"mismatch\''),
+                lambda: decode_gml_string_literal('"mismatch\''),
                 "Invalid string literal",
             ),
         )
@@ -333,34 +320,34 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
 
     def test_verbatim_string_read_decode_predicate_and_failures(self) -> None:
         source = 'xx@"first\\\r\nsecond"tail'
-        self.assertTrue(lexical_api.is_verbatim_string_start(source, 2))
-        self.assertFalse(lexical_api.is_verbatim_string_start(source, -1))
-        self.assertFalse(lexical_api.is_verbatim_string_start(source, len(source)))
-        self.assertFalse(lexical_api.is_verbatim_string_start("@ x", 0))
+        self.assertTrue(is_verbatim_string_start(source, 2))
+        self.assertFalse(is_verbatim_string_start(source, -1))
+        self.assertFalse(is_verbatim_string_start(source, len(source)))
+        self.assertFalse(is_verbatim_string_start("@ x", 0))
         self.assertEqual(
-            lexical_api.read_verbatim_string(source, 2),
+            read_verbatim_string(source, 2),
             '@"first\\\r\nsecond"',
         )
         self.assertEqual(
-            lexical_api.decode_gml_verbatim_string_literal('@"first\\\r\nsecond"'),
+            decode_gml_verbatim_string_literal('@"first\\\r\nsecond"'),
             "first\\\r\nsecond",
         )
         self.assertEqual(
-            lexical_api.read_verbatim_string(r'@"a\" + suffix', 0),
+            read_verbatim_string(r'@"a\" + suffix', 0),
             r'@"a\"',
         )
 
         failure_cases = (
             (
-                lambda: lexical_api.read_verbatim_string('"plain"', 0),
+                lambda: read_verbatim_string('"plain"', 0),
                 "Verbatim string literal must start with @ followed by a quote",
             ),
             (
-                lambda: lexical_api.read_verbatim_string('@"unterminated', 0),
+                lambda: read_verbatim_string('@"unterminated', 0),
                 "Unterminated verbatim string literal",
             ),
             (
-                lambda: lexical_api.decode_gml_verbatim_string_literal('@"ok"tail'),
+                lambda: decode_gml_verbatim_string_literal('@"ok"tail'),
                 "Unexpected text after verbatim string literal",
             ),
         )
@@ -373,11 +360,11 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
 
     def test_template_string_read_split_and_failures(self) -> None:
         self.assertEqual(
-            lexical_api.read_template_string('xx$"hello {name}"tail', 2),
+            read_template_string('xx$"hello {name}"tail', 2),
             '$"hello {name}"',
         )
         self.assertEqual(
-            lexical_api.split_template_string('$"a\\n{name + " + "1}b"'),
+            split_template_string('$"a\\n{name + " + "1}b"'),
             (
                 ("text", "a\n"),
                 ("expression", 'name + " + "1'),
@@ -385,29 +372,29 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            lexical_api.split_template_string('$"{ {x: 1} }"'),
+            split_template_string('$"{ {x: 1} }"'),
             (("expression", " {x: 1} "),),
         )
 
         failure_cases = (
             (
-                lambda: lexical_api.read_template_string('"plain"', 0),
+                lambda: read_template_string('"plain"', 0),
                 'Template string literal must start with $"',
             ),
             (
-                lambda: lexical_api.split_template_string('$"{   }"'),
+                lambda: split_template_string('$"{   }"'),
                 "Template string interpolation cannot be empty",
             ),
             (
-                lambda: lexical_api.split_template_string('$"line\nbreak"'),
+                lambda: split_template_string('$"line\nbreak"'),
                 "Template string literal text cannot contain a newline",
             ),
             (
-                lambda: lexical_api.split_template_string('$"unterminated'),
+                lambda: split_template_string('$"unterminated'),
                 "Unterminated template string literal",
             ),
             (
-                lambda: lexical_api.split_template_string('$"ok"tail'),
+                lambda: split_template_string('$"ok"tail'),
                 "Unexpected text after template string literal",
             ),
         )
@@ -420,12 +407,12 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
 
     def test_identifier_validation_sanitization_and_asset_rejection(self) -> None:
         valid_64 = "a" * 64
-        self.assertIsNone(lexical_api.validate_gml_identifier(valid_64))
-        self.assertTrue(lexical_api.is_plain_identifier(valid_64))
-        self.assertTrue(lexical_api.is_plain_identifier("naïve_2"))
-        self.assertFalse(lexical_api.is_plain_identifier(""))
-        self.assertFalse(lexical_api.is_plain_identifier("2bad"))
-        self.assertFalse(lexical_api.is_plain_identifier("bad-name"))
+        self.assertIsNone(validate_gml_identifier(valid_64))
+        self.assertTrue(is_plain_identifier(valid_64))
+        self.assertTrue(is_plain_identifier("naïve_2"))
+        self.assertFalse(is_plain_identifier(""))
+        self.assertFalse(is_plain_identifier("2bad"))
+        self.assertFalse(is_plain_identifier("bad-name"))
 
         invalid_identifiers = (
             ("", "Expected identifier name"),
@@ -439,33 +426,33 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
         for name, message in invalid_identifiers:
             with self.subTest(name=name):
                 with self.assertRaises(GMLTranspileError) as raised:
-                    lexical_api.validate_gml_identifier(name)
+                    validate_gml_identifier(name)
                 self.assertEqual(str(raised.exception), message)
 
-        self.assertEqual(lexical_api.sanitize_gdscript_identifier("class"), "class_")
+        self.assertEqual(sanitize_gdscript_identifier("class"), "class_")
         self.assertEqual(
-            lexical_api.sanitize_gdscript_identifier("_gml_internal"),
+            sanitize_gdscript_identifier("_gml_internal"),
             "gml_user_gml_internal",
         )
         self.assertEqual(
-            lexical_api.sanitize_gdscript_identifier("bad-name"),
+            sanitize_gdscript_identifier("bad-name"),
             "bad-name",
         )
-        self.assertEqual(lexical_api.sanitize_gdscript_identifier("player"), "player")
+        self.assertEqual(sanitize_gdscript_identifier("player"), "player")
 
         scope_context = ScopeContext(asset_names=frozenset({"spr_player"}))
         self.assertIsNone(
-            lexical_api.reject_asset_identifier_name("ordinary", scope_context)
+            reject_asset_identifier_name("ordinary", scope_context)
         )
         with self.assertRaises(GMLTranspileError) as raised:
-            lexical_api.reject_asset_identifier_name("spr_player", scope_context)
+            reject_asset_identifier_name("spr_player", scope_context)
         self.assertEqual(
             str(raised.exception),
             "Unscoped identifier 'spr_player' collides with an asset name",
         )
 
         with self.assertRaises(GMLTranspileError) as raised:
-            lexical_api.tokenize_gml_source("ok\n" + "b" * 65)
+            tokenize_gml_source("ok\n" + "b" * 65)
         self.assertEqual(raised.exception.line, 2)
         self.assertEqual(raised.exception.column, 1)
         self.assertEqual(
@@ -474,7 +461,7 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
         )
 
     def test_preprocessing_models_layout_bytes_positions_and_failures(self) -> None:
-        ordinary = lexical_api.preprocess_gml_source(
+        ordinary = preprocess_gml_source(
             "#ifdef FEATURE\nactive = 1;\n#else\ninactive = 2;\n#endif\n",
             active_symbols={"FEATURE"},
         )
@@ -490,7 +477,7 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
             "#endif\r\n"
             "tail = 3;"
         )
-        result = lexical_api.preprocess_gml_source_preserving_layout(
+        result = preprocess_gml_source_preserving_layout(
             source,
             active_symbols={"FEATURE"},
         )
@@ -523,8 +510,8 @@ class GMLLexicalAPIBehaviorTests(unittest.TestCase):
         )
 
         for operation in (
-            lexical_api.preprocess_gml_source,
-            lexical_api.preprocess_gml_source_preserving_layout,
+            preprocess_gml_source,
+            preprocess_gml_source_preserving_layout,
         ):
             with self.subTest(operation=operation.__name__):
                 with self.assertRaises(GMLTranspileError) as raised:

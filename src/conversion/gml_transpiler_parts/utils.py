@@ -27,7 +27,6 @@ from .expression_models import (
 from .lexical import is_verbatim_string_start, read_verbatim_string
 from .shared_models import (
     AssignmentOperator,
-    AssignmentOperator as _AssignmentOperator,
     DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
     GMLTranspileError,
     GMLExtensionFunction,
@@ -312,18 +311,13 @@ def scope_context_with_global_names(
     )
 
 
-def _macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
+def macro_configuration_matches(configuration: str, active_configuration: str | None) -> bool:
     if active_configuration is None:
         return False
     return configuration.casefold() == active_configuration.casefold()
 
-def macro_configuration_matches(
-    configuration: str, active_configuration: str | None
-) -> bool:
-    return _macro_configuration_matches(configuration, active_configuration)
 
-
-def _strip_comments(source: str) -> str:
+def strip_comments(source: str) -> str:
     result: list[str] = []
     index = 0
     in_string: str | None = None
@@ -386,11 +380,7 @@ def _strip_comments(source: str) -> str:
     return "".join(result)
 
 
-def strip_comments(source: str) -> str:
-    return _strip_comments(source)
-
-
-def _join_macro_continuation_lines(source: str) -> str:
+def join_macro_continuation_lines(source: str) -> str:
     lines: list[str] = []
     pending_macro: str | None = None
     for line in source.splitlines():
@@ -457,7 +447,8 @@ def _split_statements(source: str) -> list[str]:  # pyright: ignore[reportUnused
         statements.append(trailing)
     return [statement for statement in statements if statement.strip()]
 
-def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | None:
+
+def split_assignment(statement: str) -> tuple[str, AssignmentOperator, str] | None:
     depth = 0
     in_string: str | None = None
     escaped = False
@@ -509,17 +500,13 @@ def _split_assignment(statement: str) -> tuple[str, _AssignmentOperator, str] | 
     return None
 
 
-def split_assignment(statement: str) -> tuple[str, AssignmentOperator, str] | None:
-    return _split_assignment(statement)
-
-
 def _is_comparison_assignment_false_positive(statement: str, index: int) -> bool:
     previous_char = statement[index - 1] if index > 0 else ""
     next_char = statement[index + 1] if index + 1 < len(statement) else ""
     return previous_char in "!<>=?" or next_char == "="
 
 
-def _split_top_level(source: str, separator: str) -> list[str]:
+def split_top_level(source: str, separator: str) -> list[str]:
     parts: list[str] = []
     start = 0
     depth = 0
@@ -566,7 +553,3 @@ def _split_top_level(source: str, separator: str) -> list[str]:
 
     parts.append(source[start:])
     return parts
-
-
-def split_top_level(source: str, separator: str) -> list[str]:
-    return _split_top_level(source, separator)

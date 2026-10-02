@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, fields, is_dataclass
 import inspect
 from pathlib import Path
@@ -12,14 +13,13 @@ from typing import (
     Mapping,
     MutableMapping,
     MutableSet,
+    cast,
     get_args,
     get_origin,
     get_type_hints,
 )
 import unittest
 
-import src.conversion.gml_transpiler as gml_transpiler
-from src.conversion.gml_transpiler_parts import statement_api, statement_models
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
     GMLExtensionFunction,
@@ -40,9 +40,17 @@ from src.conversion.gml_transpiler_parts.statement_models import (
     GMLStatementResult,
 )
 
+from tests.gml_facade_contract_support import (
+    facade_reexports_from_source,
+    literal_all_exports,
+    runtime_phase_contract,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"
+STATEMENT_OWNER = "src.conversion.gml_transpiler_parts.statement_api"
+STATEMENT_MODELS_OWNER = "src.conversion.gml_transpiler_parts.statement_models"
 
 PUBLIC_NAMES = (
     "collect_static_declarations",
@@ -143,23 +151,23 @@ EXPECTED_MODEL_SIGNATURES = {
 
 class GMLStatementAPITests(unittest.TestCase):
     def test_exact_static_alphabetized_api_and_model_surfaces(self) -> None:
-        self.assertEqual(tuple(statement_api.__all__), PUBLIC_NAMES)
-        self.assertEqual(tuple(sorted(statement_api.__all__)), PUBLIC_NAMES)
-        self.assertEqual(tuple(statement_models.__all__), MODEL_NAMES)
-        self.assertEqual(tuple(sorted(statement_models.__all__)), MODEL_NAMES)
+        api_contract = runtime_phase_contract(STATEMENT_OWNER)
+        model_contract = runtime_phase_contract(STATEMENT_MODELS_OWNER)
+        self.assertEqual(api_contract.exports, PUBLIC_NAMES)
+        self.assertEqual(tuple(sorted(api_contract.exports)), PUBLIC_NAMES)
+        self.assertEqual(model_contract.exports, MODEL_NAMES)
+        self.assertEqual(tuple(sorted(model_contract.exports)), MODEL_NAMES)
 
-        for module, expected_names in (
-            (statement_api, PUBLIC_NAMES),
-            (statement_models, MODEL_NAMES),
+        for owner, expected_names in (
+            (STATEMENT_OWNER, PUBLIC_NAMES),
+            (STATEMENT_MODELS_OWNER, MODEL_NAMES),
         ):
-            with self.subTest(module=module.__name__):
+            contract = runtime_phase_contract(owner)
+            with self.subTest(module=owner):
                 self.assertTrue(
-                    all(not name.startswith("_") for name in module.__all__)
+                    all(not name.startswith("_") for name in contract.exports)
                 )
-                module_path_value = module.__file__
-                self.assertIsNotNone(module_path_value)
-                assert module_path_value is not None
-                module_path = Path(module_path_value)
+                module_path = PARTS_PATH / (owner.rsplit(".", maxsplit=1)[-1] + ".py")
                 tree = ast.parse(
                     module_path.read_text(encoding="utf-8"),
                     filename=str(module_path),
@@ -192,7 +200,7 @@ class GMLStatementAPITests(unittest.TestCase):
                 )
                 self.assertEqual(len(value.elts), len(expected_names))
 
-                module_hints = get_type_hints(module, include_extras=True)
+                module_hints = contract.annotation_hints
                 self.assertIs(get_origin(module_hints["__all__"]), Final)
                 self.assertEqual(
                     get_args(module_hints["__all__"]),
@@ -203,7 +211,7 @@ class GMLStatementAPITests(unittest.TestCase):
         self.assertEqual(set(EXPECTED_SIGNATURES), set(PUBLIC_NAMES))
         for name, expected_signature in EXPECTED_SIGNATURES.items():
             with self.subTest(name=name):
-                operation = getattr(statement_api, name)
+                operation = cast(Callable[..., object], runtime_phase_contract(STATEMENT_OWNER).public_values[name])
                 self.assertEqual(
                     str(inspect.signature(operation, eval_str=False)),
                     expected_signature,
@@ -491,18 +499,14 @@ class GMLStatementAPITests(unittest.TestCase):
         )
 
     def test_statement_contract_remains_package_internal(self) -> None:
-        self.assertEqual(len(gml_transpiler.__all__), 74)
-        self.assertEqual(
-            sum(not name.startswith("_") for name in gml_transpiler.__all__),
-            44,
-        )
-        self.assertEqual(
-            sum(name.startswith("_") for name in gml_transpiler.__all__),
-            30,
-        )
+        facade_source = (PARTS_PATH.parent / "gml_transpiler.py").read_text(encoding="utf-8")
+        facade_exports = literal_all_exports(facade_source)
+        self.assertEqual(len(facade_exports), 44)
+        self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         package_internal_names = frozenset((*PUBLIC_NAMES, *MODEL_NAMES))
-        self.assertTrue(package_internal_names.isdisjoint(gml_transpiler.__all__))
-        self.assertTrue(package_internal_names.isdisjoint(vars(gml_transpiler)))
+        self.assertTrue(package_internal_names.isdisjoint(facade_exports))
+        facade_imports = facade_reexports_from_source(facade_source, "src.conversion.gml_transpiler")
+        self.assertTrue(package_internal_names.isdisjoint(edge.name for edge in facade_imports))
 
     def test_expression_parser_keeps_statement_api_import_cycle_safe(self) -> None:
         parser_path = PARTS_PATH / "expression_parser.py"

@@ -4,12 +4,13 @@ import ast
 from collections.abc import Sequence, Set
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Final, cast, get_args, get_origin, get_type_hints
+from types import MappingProxyType, ModuleType
+from typing import Any, Final, cast, get_args, get_origin
 import unittest
 
-from src.conversion.gml_transpiler_parts import constants
+from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.shared_models import BuiltinVariableMetadata
+from tests.gml_facade_contract_support import runtime_phase_contract
 
 
 PUBLIC_NAMES = (
@@ -113,14 +114,53 @@ FROZEN_SET_NAMES = (
 TUPLE_NAMES = ("MULTI_CHAR_OPERATORS", "ASSIGNMENT_OPERATORS")
 
 
+CONSTANTS_OWNER = "src.conversion.gml_transpiler_parts.constants"
+CONSTANTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts" / "constants.py"
+
+
 class GmlLanguageMetadataTests(unittest.TestCase):
     def test_exact_public_surface(self) -> None:
-        self.assertEqual(tuple(constants.__all__), PUBLIC_NAMES)
-        self.assertEqual(len(constants.__all__), 64)
-        self.assertTrue(all(not name.startswith("_") for name in constants.__all__))
+        contract = runtime_phase_contract(CONSTANTS_OWNER)
+        self.assertEqual(contract.exports, PUBLIC_NAMES)
+        self.assertEqual(len(contract.exports), 64)
+        self.assertTrue(all(not name.startswith("_") for name in contract.exports))
+
+    def test_runtime_phase_contract_is_bounded_and_read_only(self) -> None:
+        owners = (
+            "constants", "lexical_api", "expression_api", "statement_api",
+            "shared_models", "expression_models", "result_models", "statement_models",
+        )
+        for name in owners:
+            with self.subTest(owner=name):
+                contract = runtime_phase_contract("src.conversion.gml_transpiler_parts." + name)
+                self.assertIsInstance(contract.exports, tuple)
+                self.assertIsInstance(contract.public_values, MappingProxyType)
+                self.assertIsInstance(contract.annotation_hints, MappingProxyType)
+                self.assertIsInstance(contract.namespace_names, frozenset)
+                self.assertEqual(tuple(contract.public_values), contract.exports)
+                self.assertTrue(set(contract.exports).issubset(contract.namespace_names))
+                self.assertFalse(any(isinstance(value, ModuleType) for value in contract.public_values.values()))
+                with self.assertRaises(FrozenInstanceError):
+                    setattr(contract, "exports", ())
+                with self.assertRaises(TypeError):
+                    cast(Any, contract.public_values)["replacement"] = None
+                with self.assertRaises(TypeError):
+                    cast(Any, contract.annotation_hints)["replacement"] = None
+        self.assertIs(
+            runtime_phase_contract(CONSTANTS_OWNER).public_values["BUILTIN_VARIABLE_REGISTRY"],
+            BUILTIN_VARIABLE_REGISTRY,
+        )
+        for unsupported_owner in (
+            "constants", "src.conversion.gml_transpiler",
+            "src.conversion.gml_transpiler_parts.utils",
+            "src.conversion.gml_transpiler_parts.constants.child", "",
+        ):
+            with self.subTest(unsupported_owner=unsupported_owner):
+                with self.assertRaisesRegex(ValueError, "Unsupported runtime phase owner"):
+                    runtime_phase_contract(unsupported_owner)
 
     def test_public_declarations_are_final_and_direct_literals(self) -> None:
-        hints = get_type_hints(constants, include_extras=True)
+        hints = runtime_phase_contract(CONSTANTS_OWNER).annotation_hints
         self.assertEqual(
             {name for name in PUBLIC_NAMES if get_origin(hints.get(name)) is Final},
             set(PUBLIC_NAMES),
@@ -135,7 +175,7 @@ class GmlLanguageMetadataTests(unittest.TestCase):
                 annotation = get_args(hints[name])[0]
                 self.assertIs(get_origin(annotation), Set)
 
-        module_path = Path(constants.__file__)
+        module_path = CONSTANTS_PATH
         tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
         declarations = {
             node.target.id: node
@@ -170,45 +210,48 @@ class GmlLanguageMetadataTests(unittest.TestCase):
     def test_mapping_exports_are_read_only_mapping_proxies(self) -> None:
         for name in MAPPING_NAMES:
             with self.subTest(name=name):
-                value = getattr(constants, name)
+                value = runtime_phase_contract(CONSTANTS_OWNER).public_values[name]
                 self.assertIsInstance(value, MappingProxyType)
                 with self.assertRaises(TypeError):
-                    value["__mutation_probe__"] = "changed"
+                    cast(Any, value)["__mutation_probe__"] = "changed"
                 if value:
                     with self.assertRaises(TypeError):
-                        del value[next(iter(value))]
+                        del cast(Any, value)[next(iter(cast(Any, value)))]
 
     def test_set_exports_are_frozensets(self) -> None:
         for name in FROZEN_SET_NAMES:
             with self.subTest(name=name):
-                value = getattr(constants, name)
+                value = runtime_phase_contract(CONSTANTS_OWNER).public_values[name]
                 self.assertIsInstance(value, frozenset)
                 with self.assertRaises(AttributeError):
-                    value.add("__mutation_probe__")
+                    cast(Any, value).add("__mutation_probe__")
 
     def test_sequence_exports_remain_tuples(self) -> None:
         for name in TUPLE_NAMES:
             with self.subTest(name=name):
-                self.assertIsInstance(getattr(constants, name), tuple)
+                self.assertIsInstance(runtime_phase_contract(CONSTANTS_OWNER).public_values[name], tuple)
 
     def test_registry_values_are_frozen(self) -> None:
-        self.assertTrue(constants.BUILTIN_VARIABLE_REGISTRY)
+        self.assertTrue(BUILTIN_VARIABLE_REGISTRY)
         values: list[object] = []
-        values.extend(constants.BUILTIN_VARIABLE_REGISTRY.values())
+        values.extend(BUILTIN_VARIABLE_REGISTRY.values())
         self.assertTrue(all(isinstance(metadata, BuiltinVariableMetadata) for metadata in values))
-        metadata = constants.BUILTIN_VARIABLE_REGISTRY["x"]
+        metadata = BUILTIN_VARIABLE_REGISTRY["x"]
         with self.assertRaises(FrozenInstanceError):
             cast(Any, metadata).scope = "global"
 
-    def test_facade_compatibility_alias_preserves_registry_identity(self) -> None:
-        self.assertIs(
-            getattr(constants, "_BUILTIN_VARIABLE_REGISTRY"),
-            constants.BUILTIN_VARIABLE_REGISTRY,
-        )
+    def test_legacy_private_registry_alias_is_absent(self) -> None:
+        contract = runtime_phase_contract(CONSTANTS_OWNER)
+        self.assertNotIn("_BUILTIN_VARIABLE_REGISTRY", contract.namespace_names)
         self.assertEqual(
-            [name for name in vars(constants) if name.startswith("_") and name[1:] in PUBLIC_NAMES],
-            ["_BUILTIN_VARIABLE_REGISTRY"],
+            [name for name in contract.namespace_names if name.startswith("_") and name[1:] in PUBLIC_NAMES],
+            [],
         )
+        tree = ast.parse(CONSTANTS_PATH.read_text(encoding="utf-8"))
+        self.assertFalse(any(
+            isinstance(node, ast.Name) and node.id == "_BUILTIN_VARIABLE_REGISTRY"
+            for node in ast.walk(tree)
+        ))
 
 
 if __name__ == "__main__":

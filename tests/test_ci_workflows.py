@@ -50,6 +50,24 @@ WINDOWS_GODOT_OUTPUT_READER_TESTS = (
     "tests.test_godot_validation.TestGodotValidation."
     "test_stop_deadline_leaves_stdout_owned_by_live_reader",
 )
+MACOS_GODOT_PROCESS_TESTS = (
+    "tests.test_godot_validation.TestGodotProcessOwnership",
+    *WINDOWS_GODOT_OUTPUT_READER_TESTS,
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_command_exit_with_inherited_stdout_remains_bounded",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_detached_stdout_holder_does_not_consume_remaining_timeout",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_continuously_writing_detached_stdout_stops_at_reader_deadline",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_import_timeout_returns_bounded_partial_output",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_resource_validation_bounds_output_and_keeps_deterministic_context",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_import_validation_bounds_output_and_preserves_exit_status",
+    "tests.test_godot_validation.TestGodotValidation."
+    "test_boot_validation_bounds_combined_stdout_and_stderr",
+)
 EXTERNAL_CONVERSION_MODULES = (
     "tests.test_simple_topdown_conversion",
     "tests.test_tcc_conversion",
@@ -6283,6 +6301,32 @@ class TestCIWorkflows(unittest.TestCase):
         for selector in WINDOWS_GODOT_OUTPUT_READER_TESTS:
             with self.subTest(output_reader_selector=selector):
                 self.assertEqual(windows_job.count(selector), 1)
+
+    def test_unit_workflow_covers_native_macos_godot_process_ownership(self) -> None:
+        content = (PROJECT_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+        macos_job = content[
+            content.index("  macos-managed-output-transactions:") : content.index("  windows-artifact-transactions:")
+        ]
+        self.assertIn("runs-on: macos-26", macos_job)
+        self.assertIn("python-version: '3.12.10'", macos_job)
+        self.assertIn("architecture: arm64", macos_job)
+        step_name = "- name: Run native macOS Godot process ownership and reader tests"
+        self.assertEqual(macos_job.count(step_name), 1)
+        reader_step = macos_job[macos_job.index(step_name) :]
+        self.assertEqual(reader_step.count("python -m unittest -v"), 1)
+        self.assertEqual(
+            tuple(
+                re.findall(
+                    r"(?m)^          (tests\.test_godot_validation\."
+                    r"TestGodot(?:ProcessOwnership|Validation)(?:\.test_[a-z0-9_]+)?)$",
+                    reader_step,
+                )
+            ),
+            MACOS_GODOT_PROCESS_TESTS,
+        )
+        for selector in MACOS_GODOT_PROCESS_TESTS:
+            with self.subTest(selector=selector):
+                self.assertEqual(reader_step.count(selector), 1)
 
     def test_unit_workflow_shards_native_windows_included_files_scale_gate(
         self,

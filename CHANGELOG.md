@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.6 - 2026-10-02
+
+- Preserve captured Godot diagnostics when process-group cleanup fails, retain process ownership until signaling finishes, and bound reader shutdown and child reaping.
+
 ## 0.8.5 - 2026-10-02
 
 - Release the Included Files project lock after interrupted recovery or snapshot capture, preserving the original failure when lock release also fails.

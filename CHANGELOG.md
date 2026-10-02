@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.7 - 2026-10-02
+
+- Add particle systems, types, and emitters to conversion-mismatch issue reporting and Wiki guidance.
+
 ## 0.8.6 - 2026-10-02
 
 - Preserve captured Godot diagnostics when process-group cleanup fails, retain process ownership until signaling finishes, and bound reader shutdown and child reaping.

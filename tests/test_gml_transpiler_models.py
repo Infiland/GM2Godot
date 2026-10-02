@@ -5,9 +5,26 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 import unittest
 
-import src.conversion.gml_transpiler as gml_transpiler
-import src.conversion.gml_transpiler_parts.extension_functions as extension_functions
-import src.conversion.gml_transpiler_parts.source_map as source_map
+from src.conversion.gml_transpiler import (
+    GMLTranspileError as FacadeGMLTranspileError,
+    GMLExtensionFunction as FacadeGMLExtensionFunction,
+    GMLExtensionFunctionMapping as FacadeGMLExtensionFunctionMapping,
+    GMLPreprocessResult as FacadeGMLPreprocessResult,
+    GMLPreprocessorDiagnostic as FacadeGMLPreprocessorDiagnostic,
+    GMLSourceDiagnostic as FacadeGMLSourceDiagnostic,
+    GMLSourceMap as FacadeGMLSourceMap,
+    GMLSourceMapEntry as FacadeGMLSourceMapEntry,
+    GMLTranspileResult as FacadeGMLTranspileResult,
+)
+from src.conversion.gml_transpiler_parts.extension_functions import (
+    GMLExtensionFunction as ExtensionGMLExtensionFunction,
+    GMLExtensionFunctionMapping as ExtensionGMLExtensionFunctionMapping,
+)
+from src.conversion.gml_transpiler_parts.source_map import (
+    GMLSourceDiagnostic as SourceMapGMLSourceDiagnostic,
+    GMLSourceMap as SourceMapGMLSourceMap,
+    GMLSourceMapEntry as SourceMapGMLSourceMapEntry,
+)
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
     ArrayRefAccess,
@@ -35,7 +52,6 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     TemplateStringLiteral,
     Ternary,
     Unary,
-    __all__ as EXPRESSION_MODEL_EXPORTS,
 )
 from src.conversion.gml_transpiler_parts.result_models import (
     GMLPreprocessResult,
@@ -45,7 +61,6 @@ from src.conversion.gml_transpiler_parts.result_models import (
     GMLSourceMapEntry,
     GMLTranspileResult,
     SourceDiagnosticSeverity,
-    __all__ as RESULT_MODEL_EXPORTS,
 )
 from src.conversion.gml_transpiler_parts.shared_models import (
     AssignmentOperator,
@@ -59,14 +74,14 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     ScopeContext,
     StaticDeclaration,
     Token,
-    __all__ as SHARED_MODEL_EXPORTS,
 )
 from src.conversion.gml_transpiler_parts.statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
     GMLStatementResult,
-    __all__ as STATEMENT_MODEL_EXPORTS,
 )
+
+from tests.gml_facade_contract_support import runtime_phase_contract
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -422,26 +437,26 @@ class TestGMLTranspilerModels(unittest.TestCase):
                     setattr(value, attribute, None)
 
     def test_supported_facade_and_phase_reexports_preserve_model_identity(self) -> None:
-        self.assertIs(gml_transpiler.GMLTranspileError, GMLTranspileError)
-        self.assertIs(gml_transpiler.GMLExtensionFunction, GMLExtensionFunction)
+        self.assertIs(FacadeGMLTranspileError, GMLTranspileError)
+        self.assertIs(FacadeGMLExtensionFunction, GMLExtensionFunction)
         self.assertIs(
-            gml_transpiler.GMLExtensionFunctionMapping,
+            FacadeGMLExtensionFunctionMapping,
             GMLExtensionFunctionMapping,
         )
-        self.assertIs(extension_functions.GMLExtensionFunction, GMLExtensionFunction)
+        self.assertIs(ExtensionGMLExtensionFunction, GMLExtensionFunction)
         self.assertIs(
-            extension_functions.GMLExtensionFunctionMapping,
+            ExtensionGMLExtensionFunctionMapping,
             GMLExtensionFunctionMapping,
         )
-        self.assertIs(gml_transpiler.GMLPreprocessResult, GMLPreprocessResult)
-        self.assertIs(gml_transpiler.GMLPreprocessorDiagnostic, GMLPreprocessorDiagnostic)
-        self.assertIs(gml_transpiler.GMLSourceDiagnostic, GMLSourceDiagnostic)
-        self.assertIs(gml_transpiler.GMLSourceMap, GMLSourceMap)
-        self.assertIs(gml_transpiler.GMLSourceMapEntry, GMLSourceMapEntry)
-        self.assertIs(gml_transpiler.GMLTranspileResult, GMLTranspileResult)
-        self.assertIs(source_map.GMLSourceDiagnostic, GMLSourceDiagnostic)
-        self.assertIs(source_map.GMLSourceMap, GMLSourceMap)
-        self.assertIs(source_map.GMLSourceMapEntry, GMLSourceMapEntry)
+        self.assertIs(FacadeGMLPreprocessResult, GMLPreprocessResult)
+        self.assertIs(FacadeGMLPreprocessorDiagnostic, GMLPreprocessorDiagnostic)
+        self.assertIs(FacadeGMLSourceDiagnostic, GMLSourceDiagnostic)
+        self.assertIs(FacadeGMLSourceMap, GMLSourceMap)
+        self.assertIs(FacadeGMLSourceMapEntry, GMLSourceMapEntry)
+        self.assertIs(FacadeGMLTranspileResult, GMLTranspileResult)
+        self.assertIs(SourceMapGMLSourceDiagnostic, GMLSourceDiagnostic)
+        self.assertIs(SourceMapGMLSourceMap, GMLSourceMap)
+        self.assertIs(SourceMapGMLSourceMapEntry, GMLSourceMapEntry)
 
     def test_explicit_model_all_declarations_are_static_and_exact(self) -> None:
         expected_by_path = {
@@ -451,10 +466,10 @@ class TestGMLTranspilerModels(unittest.TestCase):
             PARTS_PATH / "statement_models.py": EXPECTED_STATEMENT_MODEL_EXPORTS,
         }
         runtime_exports = {
-            PARTS_PATH / "shared_models.py": tuple(SHARED_MODEL_EXPORTS),
-            PARTS_PATH / "expression_models.py": tuple(EXPRESSION_MODEL_EXPORTS),
-            PARTS_PATH / "result_models.py": tuple(RESULT_MODEL_EXPORTS),
-            PARTS_PATH / "statement_models.py": tuple(STATEMENT_MODEL_EXPORTS),
+            PARTS_PATH / "shared_models.py": runtime_phase_contract("src.conversion.gml_transpiler_parts.shared_models").exports,
+            PARTS_PATH / "expression_models.py": runtime_phase_contract("src.conversion.gml_transpiler_parts.expression_models").exports,
+            PARTS_PATH / "result_models.py": runtime_phase_contract("src.conversion.gml_transpiler_parts.result_models").exports,
+            PARTS_PATH / "statement_models.py": runtime_phase_contract("src.conversion.gml_transpiler_parts.statement_models").exports,
         }
 
         for path, expected in expected_by_path.items():
@@ -492,12 +507,12 @@ class TestGMLTranspilerModels(unittest.TestCase):
                 self.assertTrue(all(not name.startswith("_") for name in expected))
 
     def test_model_modules_are_dependency_only(self) -> None:
+        self.assertFalse((PARTS_PATH / "model.py").exists())
         model_paths = (
             PARTS_PATH / "shared_models.py",
             PARTS_PATH / "expression_models.py",
             PARTS_PATH / "result_models.py",
             PARTS_PATH / "statement_models.py",
-            PARTS_PATH / "model.py",
         )
         allowed_absolute_roots = frozenset({"__future__", "dataclasses", "typing"})
         allowed_relative_modules = frozenset(

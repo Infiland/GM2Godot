@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.8 - 2026-10-02
+
+- Preserve the supported GML transpiler facade while enforcing explicit phase boundaries and removing legacy private exports.
+
 ## 0.8.7 - 2026-10-02
 
 - Add particle systems, types, and emitters to conversion-mismatch issue reporting and Wiki guidance.

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, fields, is_dataclass
 import inspect
 from pathlib import Path
-from typing import Final, Iterable, get_args, get_origin, get_type_hints
+from typing import Final, Iterable, get_args, get_origin, get_type_hints, cast
 import unittest
 
-import src.conversion.gml_transpiler as gml_transpiler
-from src.conversion.gml_transpiler_parts import expression_api, expression_models
+from src.conversion.gml_transpiler import (
+    transpile_gml_condition as facade_transpile_gml_condition,
+    transpile_gml_expression as facade_transpile_gml_expression,
+)
 from src.conversion.gml_transpiler_parts.expression_api import (
     emit_constructor_inheritance_line,
     emit_gml_expression,
@@ -23,12 +26,16 @@ from src.conversion.gml_transpiler_parts.expression_api import (
     reject_enum_assignment_target,
     reject_enum_mutation_expression,
     reject_readonly_builtin_assignment_target,
+    transpile_gml_condition,
+    transpile_gml_expression,
     uses_direct_builtin_instance_members,
     uses_direct_member_access,
 )
 from src.conversion.gml_transpiler_parts.expression_models import (
     Binary,
     EnumMember,
+    Expression,
+    GMLExpression,
     GMLExpressionEmission,
     Member,
     Name,
@@ -41,6 +48,13 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     StaticDeclaration,
     Token,
 )
+
+from tests.gml_facade_contract_support import literal_all_exports, runtime_phase_contract
+
+
+PARTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts"
+FACADE_PATH = PARTS_PATH.parent / "gml_transpiler.py"
+EXPRESSION_OWNER = "src.conversion.gml_transpiler_parts.expression_api"
 
 
 PUBLIC_NAMES = (
@@ -167,15 +181,13 @@ EXPRESSION_VARIANT_NAMES = (
 
 class GMLExpressionAPITests(unittest.TestCase):
     def test_exact_static_alphabetized_public_surface(self) -> None:
-        self.assertEqual(tuple(expression_api.__all__), PUBLIC_NAMES)
-        self.assertEqual(len(expression_api.__all__), 17)
-        self.assertEqual(tuple(sorted(expression_api.__all__)), PUBLIC_NAMES)
-        self.assertTrue(all(not name.startswith("_") for name in expression_api.__all__))
+        contract = runtime_phase_contract(EXPRESSION_OWNER)
+        self.assertEqual(contract.exports, PUBLIC_NAMES)
+        self.assertEqual(len(contract.exports), 17)
+        self.assertEqual(tuple(sorted(contract.exports)), PUBLIC_NAMES)
+        self.assertTrue(all(not name.startswith("_") for name in contract.exports))
 
-        module_path_value = expression_api.__file__
-        self.assertIsNotNone(module_path_value)
-        assert module_path_value is not None
-        module_path = Path(module_path_value)
+        module_path = PARTS_PATH / "expression_api.py"
         tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
         declarations = [
             node
@@ -210,7 +222,7 @@ class GMLExpressionAPITests(unittest.TestCase):
         )
         self.assertEqual(len(value.elts), len(PUBLIC_NAMES))
 
-        module_hints = get_type_hints(expression_api, include_extras=True)
+        module_hints = contract.annotation_hints
         self.assertIs(get_origin(module_hints["__all__"]), Final)
         self.assertEqual(get_args(module_hints["__all__"]), (tuple[str, ...],))
 
@@ -218,13 +230,13 @@ class GMLExpressionAPITests(unittest.TestCase):
         self.assertEqual(set(EXPECTED_SIGNATURES), set(PUBLIC_NAMES))
         for name, expected_signature in EXPECTED_SIGNATURES.items():
             with self.subTest(name=name):
-                operation = getattr(expression_api, name)
+                operation = cast(Callable[..., object], runtime_phase_contract(EXPRESSION_OWNER).public_values[name])
                 self.assertEqual(
                     str(inspect.signature(operation, eval_str=False)),
                     expected_signature,
                 )
 
-        expression_type = vars(expression_models)["GMLExpression"]
+        expression_type = GMLExpression
         expression_parameters = {
             "emit_constructor_inheritance_line": "parent_constructor",
             "emit_gml_expression": "expr",
@@ -237,7 +249,7 @@ class GMLExpressionAPITests(unittest.TestCase):
         for name, parameter in expression_parameters.items():
             with self.subTest(name=name, parameter=parameter):
                 self.assertIs(
-                    get_type_hints(getattr(expression_api, name))[parameter],
+                    get_type_hints(cast(Callable[..., object], runtime_phase_contract(EXPRESSION_OWNER).public_values[name]))[parameter],
                     expression_type,
                 )
 
@@ -284,13 +296,13 @@ class GMLExpressionAPITests(unittest.TestCase):
         for name, expected_return in expected_returns.items():
             with self.subTest(name=name):
                 self.assertEqual(
-                    get_type_hints(getattr(expression_api, name))["return"],
+                    get_type_hints(cast(Callable[..., object], runtime_phase_contract(EXPRESSION_OWNER).public_values[name]))["return"],
                     expected_return,
                 )
 
     def test_canonical_expression_alias_and_frozen_emission_model(self) -> None:
-        expression_type = vars(expression_models)["Expression"]
-        gml_expression_type = vars(expression_models)["GMLExpression"]
+        expression_type = Expression
+        gml_expression_type = GMLExpression
         self.assertIs(gml_expression_type, expression_type)
         self.assertEqual(
             tuple(member.__name__ for member in get_args(gml_expression_type)),
@@ -562,38 +574,32 @@ class GMLExpressionAPITests(unittest.TestCase):
         self.assertEqual((error.line, error.column), (2, 3))
         self.assertEqual(str(error), "Expected expression, got: ) at line 2, column 3")
 
-        self.assertEqual(len(gml_transpiler.__all__), 74)
-        self.assertEqual(
-            sum(not name.startswith("_") for name in gml_transpiler.__all__),
-            44,
-        )
-        self.assertEqual(
-            sum(name.startswith("_") for name in gml_transpiler.__all__),
-            30,
-        )
+        facade_exports = literal_all_exports(FACADE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(len(facade_exports), 44)
+        self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         package_internal_only: set[str] = {str(name) for name in PUBLIC_NAMES}
         package_internal_only.difference_update(
             {"transpile_gml_condition", "transpile_gml_expression"}
         )
         package_internal_only.update({"GMLExpression", "GMLExpressionEmission"})
-        self.assertTrue(package_internal_only.isdisjoint(gml_transpiler.__all__))
+        self.assertTrue(package_internal_only.isdisjoint(facade_exports))
 
         facade_scope_annotation = "scope_context: '_ScopeContext | None' = None"
         self.assertIn(
             facade_scope_annotation,
-            str(inspect.signature(gml_transpiler.transpile_gml_expression, eval_str=False)),
+            str(inspect.signature(facade_transpile_gml_expression, eval_str=False)),
         )
         self.assertIn(
             facade_scope_annotation,
-            str(inspect.signature(gml_transpiler.transpile_gml_condition, eval_str=False)),
+            str(inspect.signature(facade_transpile_gml_condition, eval_str=False)),
         )
         self.assertEqual(
-            expression_api.transpile_gml_expression("score + 1", local_names={"score"}),
-            gml_transpiler.transpile_gml_expression("score + 1", local_names={"score"}),
+            transpile_gml_expression("score + 1", local_names={"score"}),
+            facade_transpile_gml_expression("score + 1", local_names={"score"}),
         )
         self.assertEqual(
-            expression_api.transpile_gml_condition("score", local_names={"score"}),
-            gml_transpiler.transpile_gml_condition("score", local_names={"score"}),
+            transpile_gml_condition("score", local_names={"score"}),
+            facade_transpile_gml_condition("score", local_names={"score"}),
         )
 
 

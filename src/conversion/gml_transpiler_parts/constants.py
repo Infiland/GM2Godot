@@ -1930,6 +1930,3 @@ __all__: Final[tuple[str, ...]] = (
     "PLATFORM_SERVICE_RUNTIME_FUNCTIONS",
     "DRAW_RUNTIME_FUNCTIONS",
 )
-
-# Temporary compatibility alias; the top-level facade migrates in #820.
-_BUILTIN_VARIABLE_REGISTRY = BUILTIN_VARIABLE_REGISTRY

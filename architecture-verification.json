@@ -155,7 +155,11 @@
             "project_relative_path": "ResourceMatrix.yyp",
             "sha256": "f3326f6db31a99ec36c53476b1ae405094b2e7efd925fcc534b582c996aea957",
             "only": [],
-            "expected_exit": 0
+            "expected_exit": 0,
+            "expected_runtime_warnings": [
+              "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
+              "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters."
+            ]
           },
           {
             "id": "snap-lts",

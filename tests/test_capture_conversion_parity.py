@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import io
 import json
@@ -154,6 +155,10 @@ class TestCaptureConversionParity(unittest.TestCase):
                     "part2-resource-matrix", "tests/fixtures/part2/projects/resource_matrix", None,
                     "ResourceMatrix.yyp", "f3326f6db31a99ec36c53476b1ae405094b2e7efd925fcc534b582c996aea957",
                     (), 0, None, None, None,
+                    expected_runtime_warnings=(
+                        "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
+                        "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
+                    ),
                 ),
                 contract.FixtureDefinition(
                     "snap-lts", None, "SNAP_PROJECT_PATH", "snap.yyp",
@@ -397,14 +402,179 @@ class TestCaptureConversionParity(unittest.TestCase):
             )
             with self.subTest(status=status, frames=frames), patch.object(
                 godot_validation, "validate_generated_godot_project", return_value=report
-            ), patch.object(sys, "argv", ["probe", "/project", str(frames)]), contextlib.redirect_stdout(io.StringIO()):
+            ), patch.object(sys, "argv", ["probe", "/project", str(frames), "[]", "false"]), contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaises(SystemExit):
                     exec(parity.RUNTIME_PROBE_CODE, {"__name__": "__main__"})
         with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess(
             [], 0, json.dumps({"status": "skipped"}), ""
         )):
-            with self.assertRaisesRegex(contract.ParityError, "did not pass"):
+            with self.assertRaisesRegex(contract.ParityError, "malformed"):
                 parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=0)
+
+    def test_warning_expectation_is_default_empty_and_exactly_fixture_bound(self) -> None:
+        document = json.loads((PROJECT_ROOT / "architecture-verification.json").read_text(encoding="utf-8"))
+        definition = contract.load_parity_definition(PROJECT_ROOT / "architecture-verification.json", "R01")
+        resource = next(fixture for fixture in definition.fixtures if fixture.identifier == "part2-resource-matrix")
+        self.assertEqual(resource.expected_runtime_warnings, contract.RESOURCE_MATRIX_RUNTIME_WARNINGS)
+        self.assertTrue(all(not fixture.expected_runtime_warnings for fixture in definition.fixtures if fixture is not resource))
+        mutations: tuple[tuple[str, object], ...] = (
+            ("id", "renamed"), ("repository_path", "another/source"), ("project_relative_path", "Another.yyp"),
+            ("sha256", "0" * 64), ("expected_runtime_warnings", list(reversed(resource.expected_runtime_warnings))),
+            ("expected_runtime_warnings", [resource.expected_runtime_warnings[0]]),
+            ("expected_runtime_warnings", [*resource.expected_runtime_warnings, "WARNING: extra"]),
+            ("expected_runtime_warnings", ["WARNING: changed", resource.expected_runtime_warnings[1]]),
+        )
+        for key, value in mutations:
+            with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temporary:
+                malformed = copy.deepcopy(document)
+                row = malformed["gates"]["R01"]["parity"]["fixtures"][1]
+                row[key] = value
+                path = Path(temporary) / "manifest.json"
+                path.write_text(json.dumps(malformed), encoding="utf-8")
+                with self.assertRaises(contract.ParityError):
+                    contract.load_parity_definition(path, "R01")
+        with tempfile.TemporaryDirectory() as temporary:
+            malformed = copy.deepcopy(document)
+            malformed["gates"]["R01"]["parity"]["fixtures"][0]["expected_runtime_warnings"] = list(resource.expected_runtime_warnings)
+            path = Path(temporary) / "manifest.json"
+            path.write_text(json.dumps(malformed), encoding="utf-8")
+            with self.assertRaisesRegex(contract.ParityError, "pinned resource-matrix"):
+                contract.load_parity_definition(path, "R01")
+
+    def test_declared_warning_probe_preserves_failed_status_and_actual_output(self) -> None:
+        fixture = self._warning_fixture()
+        boot_output = "Godot boot\n" + "\n".join(fixture.expected_runtime_warnings) + "\n"
+        output = "Godot import\nGodot resource validation\n" + boot_output
+        report = godot_validation.GodotValidationReport(
+            status="failed", godot_binary="fake", project_path="/project", resource_paths=(),
+            returncode=0, import_returncode=0, boot_returncode=0, boot_frames=2, output=output,
+            boot_output=boot_output, output_issues=tuple(
+                godot_validation.GodotOutputIssue("warning", line) for line in fixture.expected_runtime_warnings
+            ),
+        )
+        with patch.object(godot_validation, "validate_generated_godot_project", return_value=report), patch.object(
+            sys, "argv", ["probe", "/project", "2", json.dumps(fixture.expected_runtime_warnings), "true"]
+        ), contextlib.redirect_stdout(io.StringIO()) as captured:
+            exec(parity.RUNTIME_PROBE_CODE, {"__name__": "__main__"})
+        markers = cast(dict[str, object], json.loads(captured.getvalue()))
+        self.assertEqual(markers["status"], "failed")
+        self.assertIs(markers["probe_accepted"], True)
+        self.assertEqual(markers["output"], output)
+        self.assertEqual(markers["boot_output"], boot_output)
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            (destination / "asset.png").write_bytes(b"fixture")
+            with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(markers), "")) as probe:
+                self.assertEqual(parity.runtime_marker_snapshot(PROJECT_ROOT, destination, boot_frames=2, fixture=fixture), markers)
+            argv = probe.call_args.args[0]
+            self.assertEqual(json.loads(argv[-2]), list(fixture.expected_runtime_warnings))
+            self.assertIs(json.loads(argv[-1]), True)
+
+    def test_parity_receipt_declares_the_exact_fixture_warning_policy(self) -> None:
+        definition = contract.load_parity_definition(PROJECT_ROOT / "architecture-verification.json", "R01")
+        sources = {fixture.identifier: Path("/fixtures") / fixture.identifier for fixture in definition.fixtures}
+        with patch.multiple(
+            parity,
+            resolve_commit_ref=Mock(side_effect=["a" * 40, "b" * 40]),
+            validate_parity_inputs=Mock(return_value=sources),
+            export_ref=Mock(side_effect=[Path("/base"), Path("/head")]),
+            validate_hash_requirements=Mock(),
+            capture_facade_contract=Mock(return_value={"public_exports": [], "bindings": []}),
+            capture_fixture_receipts=Mock(return_value=[]),
+        ):
+            receipt = parity.capture_parity(definition, base_ref="base", head_ref="head", root=PROJECT_ROOT)
+        saved_contract = cast(dict[str, object], receipt["contract"])
+        saved_fixtures = cast(list[dict[str, object]], saved_contract["fixtures"])
+        self.assertEqual(
+            {row["id"]: row["expected_runtime_warnings"] for row in saved_fixtures},
+            {fixture.identifier: list(fixture.expected_runtime_warnings) for fixture in definition.fixtures},
+        )
+
+    def test_warning_probe_rejects_missing_extra_reordered_errors_and_nonzero_stages(self) -> None:
+        fixture = self._warning_fixture()
+        good = self._runtime_markers(warnings=True)
+        variants: list[dict[str, object]] = []
+        for key in ("returncode", "import_returncode", "boot_returncode"):
+            for value in (None, False, 0.0, 1):
+                variants.append({**good, key: value})
+        for key, value in (("status", "passed"), ("status", "skipped"), ("boot_frames", 0),
+                           ("boot_frames", True), ("boot_frames", 2.0), ("probe_accepted", 1),
+                           ("import_required", 1), ("boot_output", "different boot\n"),
+                           ("operations", ["Adding: Performed invented"]), ("unexpected", True)):
+            variants.append({**good, key: value})
+        issue_rows = cast(list[dict[str, object]], good["output_issues"])
+        for rows in ([], list(reversed(issue_rows)), [*issue_rows, {"severity": "warning", "line": "WARNING: extra"}],
+                     [{"severity": "error", "line": issue_rows[0]["line"]}, issue_rows[1]],
+                     [{"severity": "warning", "line": "WARNING: changed"}, issue_rows[1]]):
+            variants.append({**good, "output_issues": rows})
+        missing = dict(good)
+        del missing["output"]
+        variants.append(missing)
+        for index, markers in enumerate(variants):
+            with self.subTest(index=index), patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(markers), "")):
+                with self.assertRaises(contract.ParityError):
+                    parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=2, fixture=fixture)
+        for severity, lines in (("warning", tuple(reversed(fixture.expected_runtime_warnings))),
+                                ("warning", fixture.expected_runtime_warnings[:1]),
+                                ("error", fixture.expected_runtime_warnings)):
+            report = godot_validation.GodotValidationReport(
+                status="failed", godot_binary="fake", project_path="/project", resource_paths=(),
+                returncode=0, import_returncode=0, boot_returncode=0, boot_frames=2,
+                output_issues=tuple(godot_validation.GodotOutputIssue(cast(godot_validation.GodotOutputIssueSeverity, severity), line) for line in lines),
+            )
+            with self.subTest(severity=severity, lines=lines), patch.object(
+                godot_validation, "validate_generated_godot_project", return_value=report
+            ), patch.object(sys, "argv", ["probe", "/project", "2", json.dumps(fixture.expected_runtime_warnings), "true"]):
+                with self.assertRaises(SystemExit):
+                    exec(parity.RUNTIME_PROBE_CODE, {"__name__": "__main__"})
+
+    def test_runtime_defaults_reject_undeclared_warnings_and_optional_import_mismatch(self) -> None:
+        warnings = self._runtime_markers(warnings=True)
+        with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(warnings), "")):
+            with self.assertRaisesRegex(contract.ParityError, "undeclared"):
+                parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=2)
+        clean = self._runtime_markers(warnings=False)
+        with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(clean), "")):
+            self.assertEqual(parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=0), clean)
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            (destination / "texture.png").write_bytes(b"fixture")
+            clean["import_required"] = True
+            with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(clean), "")):
+                with self.assertRaisesRegex(contract.ParityError, "required stage"):
+                    parity.runtime_marker_snapshot(PROJECT_ROOT, destination, boot_frames=0)
+        clean["import_required"] = False
+        clean["boot_output"] = "unexpected boot"
+        with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(clean), "")):
+            with self.assertRaisesRegex(contract.ParityError, "inconsistent boot output"):
+                parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=0)
+
+    def test_raw_colored_errors_and_duplicate_probe_fields_are_rejected(self) -> None:
+        fixture = self._warning_fixture()
+        markers = self._runtime_markers(warnings=True)
+        markers["output"] = "\x1b[31mERROR: hidden\x1b[0m\n" + cast(str, markers["output"])
+        with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(markers), "")):
+            with self.assertRaisesRegex(contract.ParityError, "undeclared"):
+                parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=2, fixture=fixture)
+        duplicate = '{"status":"skipped",' + json.dumps(self._runtime_markers(warnings=False))[1:]
+        with patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, duplicate, "")):
+            with self.assertRaisesRegex(contract.ParityError, "duplicate"):
+                parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=0)
+
+    @staticmethod
+    def _warning_fixture() -> contract.FixtureDefinition:
+        definition = contract.load_parity_definition(PROJECT_ROOT / "architecture-verification.json", "R01")
+        return next(fixture for fixture in definition.fixtures if fixture.identifier == "part2-resource-matrix")
+
+    @classmethod
+    def _runtime_markers(cls, *, warnings: bool) -> dict[str, object]:
+        lines = cls._warning_fixture().expected_runtime_warnings if warnings else ()
+        boot_output = "\n".join(lines) + "\n" if warnings else ""
+        return {"probe_accepted": True, "status": "failed" if warnings else "passed", "import_required": False,
+                "returncode": 0, "import_returncode": 0 if warnings else None, "boot_returncode": 0 if warnings else None,
+                "boot_frames": 2 if warnings else 0, "output": "Godot validation\n" + boot_output,
+                "boot_output": boot_output, "operations": [],
+                "output_issues": [{"severity": "warning", "line": line} for line in lines]}
 
     def test_observer_preserves_original_hook_order_exception_and_restoration(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

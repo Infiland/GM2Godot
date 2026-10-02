@@ -50,6 +50,37 @@ class FixtureDefinition:
     max_unsupported: int | None
     expected_outcome_state: str | None = None
     expected_skipped_resources: int | None = None
+    expected_runtime_warnings: tuple[str, ...] = ()
+
+
+RESOURCE_MATRIX_RUNTIME_WARNINGS = (
+    "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
+    "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
+)
+
+
+def validate_runtime_warning_expectation(fixture: FixtureDefinition) -> None:
+    """Only the exact frozen resource-matrix input may declare known warnings."""
+    if type(fixture.expected_runtime_warnings) is not tuple:
+        raise ParityError("Runtime warning expectation must be a tuple")
+    if not fixture.expected_runtime_warnings:
+        return
+    if (
+        fixture.identifier,
+        fixture.repository_path,
+        fixture.environment,
+        fixture.project_relative_path,
+        fixture.sha256,
+        fixture.expected_runtime_warnings,
+    ) != (
+        "part2-resource-matrix",
+        "tests/fixtures/part2/projects/resource_matrix",
+        None,
+        "ResourceMatrix.yyp",
+        "f3326f6db31a99ec36c53476b1ae405094b2e7efd925fcc534b582c996aea957",
+        RESOURCE_MATRIX_RUNTIME_WARNINGS,
+    ):
+        raise ParityError("Runtime warning expectation is not the exact pinned resource-matrix policy")
 
 
 @dataclass(frozen=True)
@@ -175,11 +206,18 @@ def _parse_fixtures(value: object) -> tuple[FixtureDefinition, ...]:
                     fixture.get("expected_skipped_resources"),
                     "expected_skipped_resources",
                 ),
+                expected_runtime_warnings=_string_tuple(
+                    fixture.get("expected_runtime_warnings", []),
+                    "expected_runtime_warnings",
+                    allow_empty=True,
+                ),
             )
         )
     identifiers = [fixture.identifier for fixture in fixtures]
     if not fixtures or len(identifiers) != len(set(identifiers)):
         raise ParityError("Parity fixtures must be non-empty with unique IDs")
+    for fixture_definition in fixtures:
+        validate_runtime_warning_expectation(fixture_definition)
     return tuple(fixtures)
 
 

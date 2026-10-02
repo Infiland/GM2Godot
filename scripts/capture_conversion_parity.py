@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -11,13 +12,16 @@ import tarfile
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from scripts.conversion_parity_contract import (
     DestinationDefinition,
     FixtureDefinition,
     ParityDefinition,
     ParityError,
+    RESOURCE_MATRIX_RUNTIME_WARNINGS,
     load_parity_definition,
+    validate_runtime_warning_expectation,
     value_sha256,
 )
 from scripts.conversion_parity_inputs import (
@@ -233,6 +237,7 @@ def run_fixture(
         code_tree,
         destination,
         boot_frames=_runtime_boot_frames(destination),
+        fixture=fixture,
     )
     return FixtureRun(destination=str(destination), files=files, snapshot=snapshot)
 
@@ -249,10 +254,17 @@ def runtime_marker_snapshot(
     destination: Path,
     *,
     boot_frames: int,
+    fixture: FixtureDefinition | None = None,
 ) -> dict[str, object]:
     """Run post-snapshot validation and retain ordered runtime operations."""
+    expected_warnings: tuple[str, ...] = ()
+    if fixture is not None:
+        validate_runtime_warning_expectation(fixture)
+        expected_warnings = fixture.expected_runtime_warnings
+    import_required = _runtime_import_required(destination)
     completed = subprocess.run(
-        [sys.executable, "-c", RUNTIME_PROBE_CODE, str(destination), str(boot_frames)],
+        [sys.executable, "-c", RUNTIME_PROBE_CODE, str(destination), str(boot_frames),
+         json.dumps(expected_warnings), json.dumps(import_required)],
         cwd=code_tree,
         check=False,
         capture_output=True,
@@ -264,11 +276,89 @@ def runtime_marker_snapshot(
             f"Runtime marker probe failed in {code_tree}: {completed.stderr or completed.stdout}"
         )
     try:
-        result = snapshot_object(json.loads(completed.stdout), "runtime marker probe")
+        result = snapshot_object(json.loads(completed.stdout, object_pairs_hook=_unique_runtime_fields), "runtime marker probe")
     except json.JSONDecodeError as error:
         raise ParityError(f"Runtime marker probe emitted invalid JSON in {code_tree}") from error
-    if result.get("status") != "passed":
-        raise ParityError(f"Runtime marker probe did not pass in {code_tree}: {result.get('status')!r}")
+    validate_runtime_markers(result, boot_frames=boot_frames, expected_warnings=expected_warnings,
+                             import_required=import_required)
+    return result
+
+
+def _runtime_import_required(destination: Path) -> bool:
+    suffixes = {".bmp", ".dds", ".exr", ".hdr", ".jpg", ".jpeg", ".ktx", ".ktx2", ".mp3",
+                ".ogg", ".otf", ".png", ".svg", ".tga", ".ttf", ".wav", ".webp", ".woff", ".woff2"}
+    return any(path.is_file() and ".godot" not in path.relative_to(destination).parts
+               and path.suffix.lower() in suffixes for path in destination.rglob("*"))
+
+
+def validate_runtime_markers(
+    result: Mapping[str, object], *, boot_frames: int, expected_warnings: tuple[str, ...], import_required: bool,
+) -> None:
+    """Independently reject malformed or undeclared subprocess acceptance claims."""
+    if type(import_required) is not bool or type(expected_warnings) is not tuple or expected_warnings not in ((), RESOURCE_MATRIX_RUNTIME_WARNINGS):
+        raise ParityError("Runtime marker probe has invalid fixture warning or import policy")
+    if set(result) != {"probe_accepted", "status", "returncode", "import_returncode", "boot_returncode",
+                         "boot_frames", "import_required", "output_issues", "output", "boot_output", "operations"}:
+        raise ParityError("Runtime marker probe emitted malformed fields")
+    if result["probe_accepted"] is not True or result["import_required"] is not import_required:
+        raise ParityError("Runtime marker probe did not accept the required stages")
+    if type(boot_frames) is not int or boot_frames not in {0, 2} or type(result["boot_frames"]) is not int or result["boot_frames"] != boot_frames:
+        raise ParityError("Runtime marker probe has incomplete or malformed boot frames")
+    output, boot_output = result["output"], result["boot_output"]
+    issues, operations = result["output_issues"], result["operations"]
+    if not isinstance(output, str) or not isinstance(boot_output, str) or not isinstance(issues, list) or not isinstance(operations, list):
+        raise ParityError("Runtime marker probe emitted malformed output")
+    if (not boot_frames and boot_output) or (boot_frames and not output.endswith(boot_output)):
+        raise ParityError("Runtime marker probe has inconsistent boot output")
+    pairs: list[tuple[str, str]] = []
+    for raw_issue in cast(list[object], issues):
+        issue = snapshot_object(raw_issue, "runtime output issue")
+        severity, line = issue.get("severity"), issue.get("line")
+        if issue.keys() != {"severity", "line"} or not isinstance(severity, str) or severity not in {"warning", "error"} or not isinstance(line, str):
+            raise ParityError("Runtime marker probe emitted malformed issue")
+        pairs.append((severity, line))
+    expected_pairs = [("warning", line) for line in expected_warnings]
+    actual_pairs: list[tuple[str, str]] = []
+    for line in output.splitlines():
+        stripped = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+        if stripped.startswith(("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")):
+            actual_pairs.append(("warning", stripped))
+        elif stripped.startswith(("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")):
+            actual_pairs.append(("error", stripped))
+    if pairs != expected_pairs or actual_pairs != expected_pairs:
+        raise ParityError("Runtime marker probe has undeclared or inconsistent output issues")
+    boot_pairs: list[tuple[str, str]] = []
+    for line in boot_output.splitlines():
+        stripped = re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+        if stripped.startswith(("WARNING:", "SCRIPT WARNING:", "SHADER WARNING:")):
+            boot_pairs.append(("warning", stripped))
+        elif stripped.startswith(("ERROR:", "SCRIPT ERROR:", "SHADER ERROR:")):
+            boot_pairs.append(("error", stripped))
+    if boot_frames and boot_pairs != expected_pairs:
+        raise ParityError("Runtime marker probe has inconsistent boot issues")
+    if operations != [line for line in boot_output.splitlines() if "Adding: Performed " in line]:
+        raise ParityError("Runtime marker probe has inconsistent ordered operations")
+    if not _zero_returncode(result["returncode"]):
+        raise ParityError("Runtime marker probe has nonzero or incomplete resource validation")
+    if expected_warnings:
+        if boot_frames != 2 or result["status"] != "failed" or not all(_zero_returncode(result[key]) for key in ("import_returncode", "boot_returncode")):
+            raise ParityError("Declared runtime warnings require a completed successful import and boot with actual failed status")
+    elif result["status"] != "passed" or not (
+        _zero_returncode(result["import_returncode"]) or (not import_required and result["import_returncode"] is None)
+    ) or not (_zero_returncode(result["boot_returncode"]) if boot_frames else result["boot_returncode"] is None):
+        raise ParityError("Runtime marker probe did not pass every required stage")
+
+
+def _zero_returncode(value: object) -> bool:
+    return type(value) is int and value == 0
+
+
+def _unique_runtime_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ParityError(f"Runtime marker probe emitted duplicate field {key!r}")
+        result[key] = value
     return result
 
 
@@ -364,6 +454,7 @@ def _contract_receipt(
                 "source": str(sources[fixture.identifier]),
                 "sha256": fixture.sha256,
                 "project_relative_path": fixture.project_relative_path,
+                "expected_runtime_warnings": list(fixture.expected_runtime_warnings),
             }
             for fixture in definition.fixtures
         ],
@@ -554,15 +645,37 @@ def encode_issue(issue):
     return asdict(issue) if is_dataclass(issue) else str(issue)
 
 report = validate_generated_godot_project(sys.argv[1], boot_frames=int(sys.argv[2]))
-if (
-    report.status != "passed"
-    or report.returncode != 0
-    or report.import_returncode not in {None, 0}
-    or report.boot_returncode not in {None, 0}
-    or any(issue.severity == "error" for issue in report.output_issues)
-    or report.boot_frames != int(sys.argv[2])
-    or (int(sys.argv[2]) > 0 and report.boot_returncode != 0)
-):
+expected_warnings = json.loads(sys.argv[3])
+import_required = json.loads(sys.argv[4])
+requested_frames = int(sys.argv[2])
+known_warnings = [
+    "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
+    "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
+]
+if expected_warnings not in [[], known_warnings] or type(import_required) is not bool:
+    raise SystemExit("Invalid runtime warning or import policy")
+
+
+def zero(value):
+    return type(value) is int and value == 0
+
+
+issue_pairs = [(issue.severity, issue.line) for issue in report.output_issues]
+accepted = (
+    type(report.boot_frames) is int
+    and report.boot_frames == requested_frames
+    and requested_frames in {0, 2}
+    and zero(report.returncode)
+)
+if expected_warnings:
+    accepted = (accepted and requested_frames == 2 and report.status == "failed"
+                and issue_pairs == [("warning", line) for line in expected_warnings]
+                and zero(report.import_returncode) and zero(report.boot_returncode))
+else:
+    accepted = (accepted and report.status == "passed" and not issue_pairs
+                and (zero(report.import_returncode) or (not import_required and report.import_returncode is None))
+                and (zero(report.boot_returncode) if requested_frames else report.boot_returncode is None))
+if not accepted:
     raise SystemExit(report.message + "\n" + report.output)
 boot_output = report.boot_output
 operations = [
@@ -571,12 +684,15 @@ operations = [
     if "Adding: Performed " in line
 ]
 print(json.dumps({
+    "probe_accepted": True,
     "status": report.status,
+    "import_required": import_required,
     "import_returncode": report.import_returncode,
     "returncode": report.returncode,
     "boot_returncode": report.boot_returncode,
     "boot_frames": report.boot_frames,
     "output_issues": [encode_issue(issue) for issue in report.output_issues],
+    "output": report.output,
     "boot_output": boot_output,
     "operations": operations,
 }, sort_keys=True))

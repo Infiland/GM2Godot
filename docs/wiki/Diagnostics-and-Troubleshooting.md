@@ -1,6 +1,6 @@
 # Diagnostics and Troubleshooting
 
-> **Applies to:** GM2Godot 0.8.6 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.7 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -163,7 +163,7 @@ Use the [GitHub issue chooser](https://github.com/Infiland/GM2Godot/issues/new/c
 
 - [Unsupported GML API](https://github.com/Infiland/GM2Godot/issues/new?template=unsupported_gml_api.yml) for a missing function, variable, constant, or language feature.
 - [Invalid Generated GDScript](https://github.com/Infiland/GM2Godot/issues/new?template=invalid_generated_gdscript.yml) when Godot cannot parse or load generated code/resources.
-- [Resource Conversion Mismatch](https://github.com/Infiland/GM2Godot/issues/new?template=resource_conversion_mismatch.yml) for sprite, sound, room, object, tileset, shader, path, sequence, extension, option, or other resource differences.
+- [Resource Conversion Mismatch](https://github.com/Infiland/GM2Godot/issues/new?template=resource_conversion_mismatch.yml) for sprite, sound, room, object, tileset, shader, path, sequence, extension, option, or other resource differences, including particle system, type, or emitter mismatches.
 - [Fixture Contribution](https://github.com/Infiland/GM2Godot/issues/new?template=fixture_contribution.yml) for a minimal reproducible project or regression case.
 
 Include the smallest legal source/fixture, exact reproduction command, terminal output, `conversion_diagnostics.json`, `conversion_attempt.json`, the digest-matching manifest when applicable, `godot_validation_report.json`, and the GM2Godot/GameMaker/Godot/host/target-platform versions. Remove proprietary assets and secrets before uploading. Contributor expectations and test commands are documented in [Contributing and Testing](Contributing-and-Testing) and the repository's canonical [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md).

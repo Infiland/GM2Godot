@@ -1,5 +1,5 @@
 name: Resource Conversion Mismatch
-description: Report a converted sprite, sound, room, object, tilemap, shader, or other resource that differs from GameMaker.
+description: Report a converted sprite, sound, room, object, tilemap, particle resource, shader, or other resource that differs from GameMaker.
 title: "Resource conversion mismatch: "
 labels: ["bug"]
 body:
@@ -15,6 +15,7 @@ body:
         - Object or event
         - Room or layer
         - Tileset or tilemap
+        - Particle system, type, or emitter
         - Shader or material
         - Path, sequence, or timeline
         - Included file, extension, option, or platform setting

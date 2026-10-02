@@ -279,6 +279,41 @@ class TestDocumentationHealth(unittest.TestCase):
                 for phrase in phrases:
                     self.assertIn(phrase, content)
 
+    def test_resource_mismatch_taxonomy_covers_particles(self) -> None:
+        template = (
+            PROJECT_ROOT
+            / ".github"
+            / "ISSUE_TEMPLATE"
+            / "resource_conversion_mismatch.yml"
+        ).read_text(encoding="utf-8")
+        diagnostics = (
+            WIKI_SOURCE_DIR / "Diagnostics-and-Troubleshooting.md"
+        ).read_text(encoding="utf-8")
+        particle_kind = "Particle system, type, or emitter"
+
+        description = next(
+            line.removeprefix("description: ")
+            for line in template.splitlines()
+            if line.startswith("description: ")
+        )
+        self.assertIn("particle resource", description)
+        resource_dropdown = template.partition("    id: resource-kind\n")[2].partition(
+            "    validations:\n"
+        )[0]
+        self.assertEqual(
+            resource_dropdown.count(f"        - {particle_kind}\n"),
+            1,
+        )
+        self.assertEqual(resource_dropdown.count("        - Other\n"), 1)
+
+        mismatch_guidance = next(
+            line
+            for line in diagnostics.splitlines()
+            if "](" in line and "template=resource_conversion_mismatch.yml" in line
+        )
+        self.assertIn(particle_kind.lower(), mismatch_guidance.lower())
+        self.assertIn("or other resource differences", mismatch_guidance)
+
     def test_code_health_workflow_runs_complete_pyflakes_suite(self) -> None:
         workflow = (PROJECT_ROOT / ".github" / "workflows" / "code-health.yml").read_text(encoding="utf-8")
         with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject_file:

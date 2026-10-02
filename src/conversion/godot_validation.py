@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import json
 import os
 import re
+import select
 import signal
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, Protocol, TypeAlias, cast
 
 from src.conversion.type_defs import JsonDict
 
@@ -52,6 +57,44 @@ _GODOT_OUTPUT_ISSUE_PREFIX_LIMIT_BYTES = 1024
 _GODOT_OUTPUT_READER_POLL_SECONDS = 0.01
 _GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS = 0.25
 _GODOT_OUTPUT_READER_STOP_GRACE_SECONDS = 0.25
+_GODOT_PROCESS_REAP_GRACE_SECONDS = 1.0
+_GODOT_CLEANUP_DIAGNOSTIC_LIMIT = 512
+_DARWIN_SIGINFO_BYTES = 104
+_DARWIN_SIGINFO_ALIGNMENT = 8
+
+
+class _GodotProcessEvent(Protocol):
+    @property
+    def ident(self) -> int: ...
+
+    @property
+    def filter(self) -> int: ...
+
+    @property
+    def flags(self) -> int: ...
+
+    @property
+    def fflags(self) -> int: ...
+
+    @property
+    def data(self) -> int: ...
+
+
+class _GodotProcessQueue(Protocol):
+    def control(
+        self,
+        changes: list[_GodotProcessEvent] | None,
+        max_events: int,
+        timeout: float | None = None,
+    ) -> list[_GodotProcessEvent]: ...
+
+    def close(self) -> None: ...
+
+
+class _GodotProcessEventFactory(Protocol):
+    def __call__(
+        self, ident: int, *, filter: int, flags: int, fflags: int
+    ) -> _GodotProcessEvent: ...
 
 
 class _BoundedGodotOutput:
@@ -70,8 +113,13 @@ class _BoundedGodotOutput:
         self._error_count = 0
         self._warning_count = 0
         self._finished = False
+        self._lock = threading.Lock()
 
     def append(self, chunk: bytes) -> None:
+        with self._lock:
+            self._append(chunk)
+
+    def _append(self, chunk: bytes) -> None:
         if self._finished:
             raise RuntimeError("Cannot append Godot output after capture is finished.")
         self._total_bytes += len(chunk)
@@ -101,7 +149,16 @@ class _BoundedGodotOutput:
             overflow -= len(oldest_chunk)
 
     def text(self) -> str:
-        self._finish()
+        with self._lock:
+            self._finish()
+            return self._render_text()
+
+    def snapshot(self) -> str:
+        """Render captured bytes without finalizing a still-running reader."""
+        with self._lock:
+            return self._render_text()
+
+    def _render_text(self) -> str:
         retained_bytes = len(self._head) + self._tail_bytes
         tail = b"".join(self._tail)
         if self._total_bytes <= retained_bytes:
@@ -120,8 +177,16 @@ class _BoundedGodotOutput:
         )
         retained_error_count = sum(issue.severity == "error" for issue in retained_issues)
         retained_warning_count = sum(issue.severity == "warning" for issue in retained_issues)
-        omitted_error_count = max(0, self._error_count - retained_error_count)
-        omitted_warning_count = max(0, self._warning_count - retained_warning_count)
+        error_count = self._error_count
+        warning_count = self._warning_count
+        if self._line_started:
+            pending_severity = _godot_output_issue_severity(
+                self._line_prefix.decode("utf-8", errors="replace")
+            )
+            error_count += pending_severity == "error"
+            warning_count += pending_severity == "warning"
+        omitted_error_count = max(0, error_count - retained_error_count)
+        omitted_warning_count = max(0, warning_count - retained_warning_count)
 
         marker_lines = [
             "[GM2Godot: Godot output truncated; "
@@ -590,6 +655,7 @@ def _run_godot_command(
     *,
     timeout: int,
 ) -> subprocess.CompletedProcess[str]:
+    _require_godot_process_ownership()
     output = _BoundedGodotOutput(_GODOT_OUTPUT_CAPTURE_LIMIT_BYTES)
     process: subprocess.Popen[bytes] = subprocess.Popen(
         command,
@@ -597,87 +663,397 @@ def _run_godot_command(
         stderr=subprocess.STDOUT,
         start_new_session=os.name == "posix",
     )
-    output_stream = process.stdout
-    if output_stream is None:
-        process.kill()
-        process.wait()
-        raise RuntimeError("Godot output pipe was not created.")
-
     deadline = time.monotonic() + max(0, timeout)
+    output_stream = process.stdout
     reader_errors: list[OSError] = []
     reader_stop = threading.Event()
-    output_fd = output_stream.fileno()
-    os.set_blocking(output_fd, False)
-
-    def read_output() -> None:
-        try:
-            while True:
-                # Once shutdown is observed, make one last nonblocking read.
-                # This retains bytes that arrived during the preceding poll
-                # without draining a continuously writable pipe indefinitely.
-                final_attempt = reader_stop.is_set()
-                try:
-                    chunk = os.read(output_fd, _GODOT_OUTPUT_READ_CHUNK_BYTES)
-                except BlockingIOError:
-                    if final_attempt:
-                        return
-                    reader_stop.wait(_GODOT_OUTPUT_READER_POLL_SECONDS)
-                    continue
-                except OSError as exc:
-                    reader_errors.append(exc)
-                    return
-                if not chunk:
-                    return
-                output.append(chunk)
-                if final_attempt:
-                    return
-        finally:
-            # Keep the descriptor owned by the reader until no later read can
-            # run, including when the caller reports a missed stop deadline.
-            try:
-                output_stream.close()
-            except OSError as exc:
-                reader_errors.append(exc)
-
-    output_reader = threading.Thread(
-        target=read_output,
-        name="gm2godot-godot-output-reader",
-        daemon=True,
-    )
-    output_reader.start()
+    output_reader: threading.Thread | None = None
+    reader_started = False
+    reader_start_returned = False
+    reader_drained = False
+    reader_claim_lock = threading.Lock()
+    reader_claimed = False
+    reader_abandoned = False
+    reader_finished = threading.Event()
+    owns_process = True
+    primary_error: BaseException | None = None
+    capture_error: RuntimeError | None = None
+    cleanup_errors: list[tuple[str, BaseException]] = []
+    returncode: int | None = None
 
     try:
-        returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
-    except subprocess.TimeoutExpired:
-        _kill_godot_process(process)
-        process.wait()
-        _finish_godot_output_reader(output_reader, reader_stop, reader_errors)
-        raise subprocess.TimeoutExpired(
-            command,
-            timeout,
-            output=output.text(),
-        ) from None
+        if output_stream is None:
+            raise RuntimeError("Godot output pipe was not created.")
+        output_fd = output_stream.fileno()
+        os.set_blocking(output_fd, False)
 
-    if output_reader.is_alive() or reader_errors:
-        # The direct process has exited, so an open pipe now belongs to a
-        # descendant, or output capture failed before proving otherwise. Clean
-        # up the validation process group instead of leaving either case alive.
-        _kill_godot_process(process)
-    _finish_godot_output_reader(output_reader, reader_stop, reader_errors)
+        def read_output() -> None:
+            nonlocal reader_claimed
+            with reader_claim_lock:
+                if reader_abandoned:
+                    return
+                reader_claimed = True
+            try:
+                while True:
+                    # Shutdown permits one final read, even if a detached
+                    # descendant keeps the pipe continuously writable.
+                    final_attempt = reader_stop.is_set()
+                    try:
+                        chunk = os.read(output_fd, _GODOT_OUTPUT_READ_CHUNK_BYTES)
+                    except BlockingIOError:
+                        if final_attempt:
+                            return
+                        reader_stop.wait(_GODOT_OUTPUT_READER_POLL_SECONDS)
+                        continue
+                    except OSError as exc:
+                        reader_errors.append(exc)
+                        return
+                    if not chunk:
+                        return
+                    output.append(chunk)
+                    if final_attempt:
+                        return
+            finally:
+                # A reader that misses its stop deadline retains ownership of
+                # its descriptor; the caller must never close it underneath a
+                # later read of a potentially reused descriptor number.
+                try:
+                    output_stream.close()
+                except OSError as exc:
+                    reader_errors.append(exc)
+                finally:
+                    reader_finished.set()
+
+        output_reader = threading.Thread(
+            target=read_output,
+            name="gm2godot-godot-output-reader",
+            daemon=True,
+        )
+        reader_started = True
+        output_reader.start()
+        reader_start_returned = True
+
+        if os.name == "posix":
+            _wait_godot_process_exit(process, deadline=deadline, cleanup_errors=cleanup_errors)
+            # Drain ordinary scheduling delays while the unreaped leader still
+            # reserves its PID/PGID. This also avoids signaling an empty group.
+            reader_drained = True
+            output_reader.join(timeout=_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS)
+        else:
+            returncode = process.wait(timeout=max(0.0, deadline - time.monotonic()))
+    except BaseException as exc:
+        primary_error = exc
+        if isinstance(exc, ChildProcessError):
+            # An external reaper or SIGCHLD disposition has removed ownership.
+            # A missing child is never permission to signal its former PGID.
+            owns_process = False
+
+    # Each teardown operation runs even if an earlier one failed. There is a
+    # single group-signal attempt, and all reaping starts strictly after it.
+    needs_cleanup = primary_error is not None or bool(reader_errors)
+    if output_reader is not None and reader_started:
+        needs_cleanup = needs_cleanup or output_reader.is_alive()
+    if needs_cleanup and owns_process:
+        try:
+            _kill_godot_process(process)
+        except BaseException as exc:
+            if isinstance(exc, ChildProcessError):
+                owns_process = False
+                if primary_error is None:
+                    primary_error = exc
+                else:
+                    cleanup_errors.append(("process ownership", exc))
+            elif not isinstance(exc, Exception) and primary_error is None:
+                primary_error = exc
+            else:
+                cleanup_errors.append(("process-group cleanup", exc))
+    try:
+        if owns_process and process.returncode is None:
+            _require_godot_process_ownership()
+            _prove_godot_process_ownership(process)
+    except BaseException as exc:
+        if isinstance(exc, ChildProcessError):
+            owns_process = False
+            if primary_error is None:
+                primary_error = exc
+            else:
+                cleanup_errors.append(("process ownership", exc))
+        elif not isinstance(exc, Exception) and primary_error is None:
+            primary_error = exc
+        else:
+            cleanup_errors.append(("process ownership", exc))
+    try:
+        returncode = process.wait(timeout=_GODOT_PROCESS_REAP_GRACE_SECONDS)
+    except BaseException as exc:
+        if not isinstance(exc, Exception) and primary_error is None:
+            primary_error = exc
+        else:
+            cleanup_errors.append(("process reaping", exc))
+    if output_reader is not None and reader_started:
+        try:
+            _finish_godot_output_reader(
+                output_reader,
+                reader_stop,
+                reader_errors,
+                drained=reader_drained,
+            )
+        except RuntimeError as exc:
+            capture_error = exc
+            reader_stop.set()
+        except BaseException as exc:
+            reader_stop.set()
+            if primary_error is None:
+                primary_error = exc
+            else:
+                cleanup_errors.append(("output-reader shutdown", exc))
+            try:
+                output_reader.join(timeout=_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS)
+            except BaseException as stop_error:
+                cleanup_errors.append(("output-reader shutdown", stop_error))
+        # A failed Thread.start can leave a native worker scheduled to enter
+        # later even though is_alive() is false. Atomically abandon an
+        # unclaimed target before closing; its entry then cannot touch the
+        # captured descriptor, even if that number has already been reused.
+        with reader_claim_lock:
+            close_output_pipe = reader_finished.is_set()
+            if not reader_claimed and (not reader_start_returned or not output_reader.is_alive()):
+                reader_abandoned = True
+                close_output_pipe = True
+        if close_output_pipe and output_stream is not None and not output_stream.closed:
+            try:
+                output_stream.close()
+            except OSError as close_error:
+                cleanup_errors.append(("output-pipe close", close_error))
+    elif output_stream is not None:
+        try:
+            output_stream.close()
+        except BaseException as exc:
+            cleanup_errors.append(("output-pipe close", exc))
+
+    # A snapshot remains safe even when a delayed reader is still alive.
+    captured_output = output.snapshot()
+    if capture_error is not None and (cleanup_errors or primary_error is not None):
+        cleanup_errors.append(("output capture", capture_error))
+    captured_output = _append_godot_cleanup_diagnostics(captured_output, cleanup_errors)
+    if primary_error is not None:
+        if isinstance(primary_error, subprocess.TimeoutExpired):
+            primary_error.cmd = command
+            primary_error.timeout = timeout
+            primary_error.output = captured_output
+            raise primary_error from None
+        _note_godot_command_output(primary_error, captured_output)
+        raise primary_error
+    if capture_error is not None and not cleanup_errors:
+        _note_godot_command_output(capture_error, captured_output)
+        raise capture_error
+    if returncode is None:
+        error = RuntimeError("Godot process did not stop after bounded cleanup.")
+        _note_godot_command_output(error, captured_output)
+        raise error
     return subprocess.CompletedProcess(
         command,
         returncode,
-        stdout=output.text(),
+        stdout=captured_output,
         stderr=None,
     )
+
+
+def _wait_godot_process_exit(
+    process: subprocess.Popen[bytes],
+    *,
+    deadline: float,
+    cleanup_errors: list[tuple[str, BaseException]] | None = None,
+) -> None:
+    """Observe an owned POSIX child exiting without releasing its PID."""
+    if process.returncode is not None:
+        return
+    _require_godot_process_ownership()
+    waitid = getattr(os, "waitid", None)
+    if callable(waitid) and hasattr(os, "WNOWAIT"):
+        observe_exit = cast(Callable[[int, int, int], object | None], waitid)
+        id_type = _godot_waitid_constant("P_PID")
+        options = (
+            _godot_waitid_constant("WEXITED")
+            | _godot_waitid_constant("WNOHANG")
+            | _godot_waitid_constant("WNOWAIT")
+        )
+        while True:
+            _require_godot_process_ownership()
+            result = observe_exit(id_type, process.pid, options)
+            if result is not None:
+                _require_godot_process_ownership()
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, 0)
+            time.sleep(min(_GODOT_OUTPUT_READER_POLL_SECONDS, remaining))
+    elif hasattr(select, "kqueue"):
+        create_queue = cast(Callable[[], _GodotProcessQueue], getattr(select, "kqueue"))
+        create_event = cast(_GodotProcessEventFactory, getattr(select, "kevent"))
+        queue = create_queue()
+        observer_error: BaseException | None = None
+        try:
+            filter_proc = _godot_kqueue_constant("KQ_FILTER_PROC")
+            note_exit = _godot_kqueue_constant("KQ_NOTE_EXIT")
+            error_flag = _godot_kqueue_constant("KQ_EV_ERROR")
+            event = create_event(
+                process.pid,
+                filter=filter_proc,
+                flags=_godot_kqueue_constant("KQ_EV_ADD") | _godot_kqueue_constant("KQ_EV_ONESHOT"),
+                fflags=note_exit,
+            )
+            try:
+                # No event-list capacity means registration errors raise
+                # OSError instead of masquerading as an exit notification.
+                queue.control([event], 0, 0)
+            except ProcessLookupError:
+                # Darwin can reject a child that exited before registration.
+                # Exclusive ownership still retains its unreaped PID here.
+                _require_godot_process_ownership()
+                _prove_godot_process_ownership(process)
+                return
+            while True:
+                remaining = max(0.0, deadline - time.monotonic())
+                events = queue.control(None, 1, remaining)
+                for observed in events:
+                    if observed.flags & error_flag:
+                        raise OSError(observed.data, "Godot exit observation failed.")
+                    if observed.ident == process.pid and observed.filter == filter_proc and observed.fflags & note_exit:
+                        _require_godot_process_ownership()
+                        return
+                if time.monotonic() >= deadline:
+                    raise subprocess.TimeoutExpired(process.args, 0)
+        except BaseException as exc:
+            observer_error = exc
+            raise
+        finally:
+            try:
+                queue.close()
+            except BaseException as exc:
+                if observer_error is None:
+                    raise
+                if cleanup_errors is not None:
+                    cleanup_errors.append(("exit-observer close", exc))
+                observer_error.add_note(_append_godot_cleanup_diagnostics("", [("exit-observer close", exc)]).rstrip())
+    else:
+        raise RuntimeError("Non-reaping Godot exit observation is unavailable.")
+
+
+def _godot_kqueue_constant(name: str) -> int:
+    value: object = getattr(select, name)
+    if not isinstance(value, int):
+        raise RuntimeError("Invalid Godot kqueue constant: " + name)
+    return value
+
+
+def _godot_waitid_constant(name: str) -> int:
+    value: object = getattr(os, name, None)
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError("Invalid Godot waitid constant: " + name)
+    return value
+
+
+def _require_godot_process_ownership() -> None:
+    # The private Popen child must remain exclusively owned until final reap.
+    # SIG_IGN auto-reaps children; a custom handler may reap them elsewhere.
+    # Neither disposition can safely reserve a PID for later group signaling.
+    if os.name == "posix" and signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise ChildProcessError(
+            errno.ECHILD,
+            "Godot process ownership requires default SIGCHLD handling.",
+        )
+
+
+def _prove_godot_process_ownership(process: subprocess.Popen[bytes]) -> None:
+    """Check that the private child still exists without reaping it."""
+    if os.name != "posix":
+        return
+    _require_godot_process_ownership()
+    waitid = getattr(os, "waitid", None)
+    options = (
+        _godot_waitid_constant("WEXITED")
+        | _godot_waitid_constant("WNOHANG")
+        | _godot_waitid_constant("WNOWAIT")
+    )
+    if callable(waitid):
+        observe_exit = cast(Callable[[int, int, int], object | None], waitid)
+        observe_exit(_godot_waitid_constant("P_PID"), process.pid, options)
+        return
+    if sys.platform != "darwin":
+        raise RuntimeError("Non-reaping Godot ownership verification is unavailable.")
+    _prove_darwin_godot_child(process.pid, options)
+
+
+def _prove_darwin_godot_child(pid: int, options: int) -> None:
+    # Apple's public LP64 siginfo_t ABI is 104 bytes, aligned to 8 bytes:
+    # https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/signal.h
+    # waitid(idtype_t, id_t, siginfo_t *, int) uses a 32-bit unsigned id_t:
+    # https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/wait.h
+    # This buffer stays opaque: ownership needs only the syscall result,
+    # never decoded signal/status fields or a reaping waitpid fallback.
+    storage_type = ctypes.c_uint64 * (_DARWIN_SIGINFO_BYTES // 8)
+    if (
+        sys.platform != "darwin"
+        or ctypes.sizeof(ctypes.c_void_p) != 8
+        or ctypes.sizeof(ctypes.c_long) != 8
+        or ctypes.sizeof(storage_type) != _DARWIN_SIGINFO_BYTES
+        or ctypes.alignment(storage_type) != _DARWIN_SIGINFO_ALIGNMENT
+    ):
+        raise RuntimeError("The Darwin LP64 waitid ownership ABI is unavailable.")
+    if not 0 < pid <= 0xFFFFFFFF:
+        raise ValueError("Godot process ID does not fit Darwin id_t.")
+    library = ctypes.CDLL(None, use_errno=True)
+    waitid = cast(Callable[[int, int, object, int], int], getattr(library, "waitid"))
+    setattr(
+        waitid,
+        "argtypes",
+        [ctypes.c_int, ctypes.c_uint, ctypes.POINTER(storage_type), ctypes.c_int],
+    )
+    setattr(waitid, "restype", ctypes.c_int)
+    storage = storage_type()
+    ctypes.set_errno(0)
+    result = waitid(_godot_waitid_constant("P_PID"), pid, ctypes.byref(storage), options)
+    error_number = ctypes.get_errno()
+    if result != 0:
+        raise OSError(
+            error_number or errno.EIO,
+            "Godot child ownership verification failed: " + os.strerror(error_number or errno.EIO),
+        )
+
+
+def _append_godot_cleanup_diagnostics(output: str, errors: list[tuple[str, BaseException]]) -> str:
+    if not errors:
+        return output
+    diagnostics: list[str] = []
+    for stage, error in errors:
+        details = [str(error)]
+        if error.__cause__ is not None:
+            details.append(f"Caused by {type(error.__cause__).__name__}: {error.__cause__}")
+        notes = getattr(error, "__notes__", ())
+        if isinstance(notes, (list, tuple)):
+            note_values = cast(list[object] | tuple[object, ...], notes)
+            details.extend(note for note in note_values[:3] if isinstance(note, str))
+        detail = "; ".join(
+            item.replace("\r", " ").replace("\n", " ")[:_GODOT_CLEANUP_DIAGNOSTIC_LIMIT] for item in details
+        )
+        diagnostics.append(f"ERROR: GM2Godot {stage} failed: {type(error).__name__}: " + detail)
+    return output + ("\n" if output and not output.endswith("\n") else "") + "\n".join(diagnostics) + "\n"
+
+
+def _note_godot_command_output(error: BaseException, output: str) -> None:
+    if output:
+        error.add_note("Captured Godot output:\n" + output)
 
 
 def _finish_godot_output_reader(
     output_reader: threading.Thread,
     reader_stop: threading.Event,
     reader_errors: list[OSError],
+    *,
+    drained: bool = False,
 ) -> None:
-    output_reader.join(timeout=_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS)
+    if not drained:
+        output_reader.join(timeout=_GODOT_OUTPUT_READER_DRAIN_GRACE_SECONDS)
     if output_reader.is_alive():
         reader_stop.set()
         output_reader.join(timeout=_GODOT_OUTPUT_READER_STOP_GRACE_SECONDS)
@@ -688,14 +1064,44 @@ def _finish_godot_output_reader(
 
 
 def _kill_godot_process(process: subprocess.Popen[bytes]) -> None:
+    if process.returncode is not None:
+        return
+    _require_godot_process_ownership()
     if os.name == "posix":
+        _prove_godot_process_ownership(process)
+        group_error: BaseException | None = None
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except BaseException as exc:
+            group_error = exc
+        # Popen.kill() implicitly polls/reaps on POSIX. It is safe only after
+        # the last group-signal attempt; no code below signals the PGID again.
+        try:
+            _require_godot_process_ownership()
+            if process.returncode is not None:
+                if group_error is not None:
+                    raise group_error
+                return
+            _prove_godot_process_ownership(process)
+            process.kill()
+        except ChildProcessError as exc:
+            if group_error is not None and not isinstance(group_error, Exception):
+                group_error.add_note("Direct Godot ownership was lost: " + str(exc)[:_GODOT_CLEANUP_DIAGNOSTIC_LIMIT])
+                raise group_error
+            if group_error is not None:
+                exc.add_note(_append_godot_cleanup_diagnostics("", [("process-group cleanup", group_error)]).rstrip())
+            raise
+        except BaseException as exc:
+            if group_error is None:
+                raise
+            group_error.add_note(
+                "Direct Godot process cleanup also failed: " + str(exc)[:_GODOT_CLEANUP_DIAGNOSTIC_LIMIT]
+            )
+        if group_error is not None:
+            raise group_error
     else:
-        process.kill()
-    if process.poll() is None:
         process.kill()
 
 

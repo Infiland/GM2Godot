@@ -186,6 +186,23 @@ jobs:
           tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary
           tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary
 
+      - name: Run native macOS Godot process ownership and reader tests
+        run: >-
+          python -m unittest -v
+          tests.test_godot_validation.TestGodotProcessOwnership
+          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_deferred_until_after_stop_retains_buffered_diagnostic
+          tests.test_godot_validation.TestGodotValidation.test_reader_retries_after_output_arrives_during_stop_wait
+          tests.test_godot_validation.TestGodotValidation.test_normal_completion_reader_oserror_is_capture_failure
+          tests.test_godot_validation.TestGodotValidation.test_timeout_reader_oserror_is_capture_failure
+          tests.test_godot_validation.TestGodotValidation.test_stop_deadline_leaves_stdout_owned_by_live_reader
+          tests.test_godot_validation.TestGodotValidation.test_command_exit_with_inherited_stdout_remains_bounded
+          tests.test_godot_validation.TestGodotValidation.test_detached_stdout_holder_does_not_consume_remaining_timeout
+          tests.test_godot_validation.TestGodotValidation.test_continuously_writing_detached_stdout_stops_at_reader_deadline
+          tests.test_godot_validation.TestGodotValidation.test_import_timeout_returns_bounded_partial_output
+          tests.test_godot_validation.TestGodotValidation.test_resource_validation_bounds_output_and_keeps_deterministic_context
+          tests.test_godot_validation.TestGodotValidation.test_import_validation_bounds_output_and_preserves_exit_status
+          tests.test_godot_validation.TestGodotValidation.test_boot_validation_bounds_combined_stdout_and_stderr
+
   windows-artifact-transactions:
     runs-on: windows-2025
     timeout-minutes: 20

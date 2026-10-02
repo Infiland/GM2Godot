@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.9 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.10 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -197,6 +197,36 @@ missing-line/branch summary, then commit the new baseline counts and the measure
 percentage truncated to two decimals together with the workflow-policy test.
 Do not lower a floor to bypass an untested path. The repository contributor
 guide links the official coverage.py and Python unittest references.
+
+### Native dependency-receipt gates
+
+Receipt publication changes require the exact `native-receipts` gates in `architecture-verification.json`, separately from the `conversion-parity` R01 gate. The runner rejects missing/unknown validation kinds, a switched R01 kind, changed native method IDs, nonempty skip allowances, and a different native Python/OS/machine tuple before collection. Native gates select individual methods in fixed order, then require the same positive count and exact ordered selected, started, and completed IDs, with no skips or bad outcomes. A missing test, unsupported filesystem/API, interruption, cancellation, or timeout cannot produce passing native evidence. R01 retains its complete Godot, fixture, lock, parity, and coverage prerequisites.
+
+| Gate | Exact runtime | Required methods |
+| --- | --- | --- |
+| `N01-linux` | CPython 3.12.13, `linux`, `x86_64` | Six real POSIX receipt cases and four ordinary producer cases: 10 |
+| `N01-macos` | CPython 3.12.10, `darwin`, `arm64` | Six real POSIX cases, three trusted-alias Darwin cases, and four producers: 13 |
+| `N01-windows` | CPython 3.12.10, `win32`, `AMD64`, actual NTFS | Thirteen real Windows cases, including unopened-parent junction substitution, and four producers: 17 |
+
+Run only the matching gate on its actual native host, using that verified environment's Python and an output path outside the checkout:
+
+```bash
+NATIVE_RECEIPT_PROFILE=stable python -m scripts.run_required_unittest \
+  --manifest architecture-verification.json --gate N01-linux \
+  --receipt /absolute/native-receipts/n01-linux.json
+```
+
+Use `N01-macos` or `N01-windows` and a corresponding distinct receipt path on those hosts. The `Tests` workflow requires these gates on its Ubuntu 24.04, macOS 26 arm64, and Windows 2025 jobs. `Dependency Locks` requires them inside each committed generator with `NATIVE_RECEIPT_PROFILE=native-lock-workflow`, outside the exact eight-file dependency receipt artifact. The stable producer profile verifies pip; the generator profile verifies pip and pip-tools. Both profiles execute ordinary bootstrap/environment CLIs and actual nonempty required-runner publication; the narrowly isolated parity-writer test proves receipt publication only and is not conversion-parity evidence.
+
+Ordinary unittest discovery on another Python/OS/machine tuple skips the constrained environment-producer case. That discovery result is not native acceptance: a required N01 gate checks its exact tuple before collection and rejects every skip. Incorrect package pins on a supported native tuple still fail the producer test.
+
+POSIX publication retains physical ancestors and descriptors, fsyncs file data and the relevant parent directory entries, and preserves the inode of an identical private regular single-link receipt. Windows native proof uses real NTFS junction/reparse metadata, hard links, long Unicode paths, retained ancestor sharing, existing-target and stage pinning, non-replacing native rename, cleanup, ABI/last-error behavior, and independent handle closure. Stage data is flushed through `FlushFileBuffers`; publication uses `NtSetInformationFile(FileRenameInformation)` and rechecks public file identity and bytes. This implementation provides no equivalent retained-directory fsync on Windows and does not use `MOVEFILE_WRITE_THROUGH`, cross-volume copy/delete fallback, or atomic compare-and-replace. These executed sync/namespace checks do not constitute a power-loss durability test.
+
+The receipt contract follows Microsoft's [file sharing and reparse semantics](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [file-data flush](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-flushfilebuffers), and [native non-replacing rename](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information) documentation. Unknown anchoring, filesystem metadata, or publication support fails closed; modeled Windows results and successful skipped suites cannot substitute for native evidence.
+
+Required-test and parity writers retain their existing JSON schema and native text-writer bytes, including structural CRLF on Windows. An absent receipt is published once; byte-identical reuse preserves its identity. Conflicting bytes or noncanonical paths/modes/link counts are rejected without replacing the existing receipt. Use distinct fresh artifact destinations for different runs and keep publication error codes, causes, and cleanup notes visible; do not delete a conflicting receipt or allow overwrite to make a retry pass. Before closing the native receipt work and its parent dependency issue, retain the complete native receipts and ordinary Tests, Dependency Locks, and Release producer results for the exact merged main SHA.
+
+Interrupted test execution exits nonzero without writing a new passing receipt. Interrupted receipt publication also exits nonzero, including `SystemExit(0)`, but can leave an immutable candidate or an old byte-identical receipt. The CLI never deletes or replaces either to hide the interruption; direct writer calls retain the original control-signal object and cleanup notes. Treat the nonzero process/job result as failed evidence even if a receipt file remains.
 
 Documentation-only changes do not require Pyright or the Python suite unless the change also touches tests/code or verification was explicitly requested. Link and page-source checks should still pass.
 

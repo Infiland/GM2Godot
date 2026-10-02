@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.10 - 2026-10-02
+
+- Require native receipt publication tests in the Linux, macOS and Windows test and dependency-lock jobs, with exact test coverage and runtime receipts.
+- Publish required-test and parity receipts through the anchored no-overwrite writer, preserving identical files and reporting interrupted or failed writes.
+
 ## 0.8.9 - 2026-10-02
 
 - Bind Wiki publication to the reviewed source tree and exact pushed commit with concurrent update checks.

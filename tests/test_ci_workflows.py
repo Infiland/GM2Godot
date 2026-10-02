@@ -1413,10 +1413,11 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        self.assertEqual(len(locations), 10, locations)
+        # Three test-host uploads and one generator upload add native N01 evidence.
+        self.assertEqual(len(locations), 14, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
-            2,
+            3,
             locations,
         )
 

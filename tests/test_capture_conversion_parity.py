@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, cast
 from unittest.mock import Mock, patch
 
+from scripts._anchored_output import AnchoredOutputError
 from scripts import capture_conversion_parity as parity
 from scripts import conversion_parity_contract as contract
 from scripts import conversion_parity_inputs as inputs
@@ -37,6 +38,7 @@ class TestCaptureConversionParity(unittest.TestCase):
     def test_manifest_freezes_required_gate_selection(self) -> None:
         document = json.loads((PROJECT_ROOT / "architecture-verification.json").read_text(encoding="utf-8"))
         gate = cast(dict[str, object], cast(dict[str, object], document["gates"])["R01"])
+        self.assertEqual(gate["validation_kind"], "conversion-parity")
         self.assertEqual(
             gate["unittest_ids"],
             [
@@ -230,6 +232,116 @@ class TestCaptureConversionParity(unittest.TestCase):
     def test_ordinary_test_has_no_platform_specific_godot_path(self) -> None:
         macos_applications_prefix = "/" + "Applications/"
         self.assertNotIn(macos_applications_prefix, Path(__file__).read_text(encoding="utf-8"))
+
+    def test_receipt_writer_preserves_native_text_bytes_and_identity(self) -> None:
+        payload = {"equal": True, "purpose": "receipt-publication-test-only", "text": "Ω\nvalue\r\n"}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline = root / "baseline.json"
+            with baseline.open("w", encoding="utf-8") as file:
+                file.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            receipt = root / "nested" / "receipt.json"
+            parity.write_receipt(receipt, payload)
+            self.assertEqual(receipt.read_bytes(), baseline.read_bytes())
+            identity = (receipt.stat().st_dev, receipt.stat().st_ino)
+            parity.write_receipt(receipt, payload)
+            self.assertEqual((receipt.stat().st_dev, receipt.stat().st_ino), identity)
+            with self.assertRaises(AnchoredOutputError) as error:
+                parity.write_receipt(receipt, {"different": True})
+            self.assertEqual(error.exception.code, "output-different")
+            self.assertEqual(receipt.read_bytes(), baseline.read_bytes())
+            self.assertEqual((receipt.stat().st_dev, receipt.stat().st_ino), identity)
+
+    def test_receipt_windows_newlines_are_preserved_without_platform_faking(self) -> None:
+        payload = {"purpose": "receipt-publication-test-only", "text": "escaped\nvalue"}
+        with patch.object(parity.os, "linesep", "\r\n"), patch.object(parity, "publish_identical_receipt_bytes") as publish:
+            parity.write_receipt(Path("receipt.json"), payload)
+        publish.assert_called_once_with(Path("receipt.json"), (json.dumps(payload, indent=2, sort_keys=True) + "\n").replace("\n", "\r\n").encode("utf-8"))
+
+    def test_parity_receipt_cli_reports_anchored_error_details(self) -> None:
+        payload = {"equal": True, "purpose": "receipt-publication-test-only"}
+        error = AnchoredOutputError("output-different", "existing bytes differ")
+        error.__cause__ = OSError("causal failure")
+        error.add_note("owned cleanup detail")
+        stderr = io.StringIO()
+        with patch.object(parity, "load_parity_definition", return_value=object()), patch.object(
+            parity, "capture_parity", return_value=payload
+        ), patch.object(parity, "write_receipt", side_effect=error), contextlib.redirect_stderr(stderr):
+            status = parity.main(["--manifest", "manifest.json", "--gate", "R01", "--base-ref", "base",
+                                  "--head-ref", "head", "--receipt", "receipt.json"])
+        self.assertEqual(status, 2)
+        for expected in ("output-different", "causal failure", "owned cleanup detail", "fresh receipt path"):
+            self.assertIn(expected, stderr.getvalue())
+
+    def test_receipt_controls_preserve_writer_identity_and_exit_cli_nonzero(self) -> None:
+        payload = {"equal": True, "purpose": "receipt-publication-test-only"}
+        for interruption in (KeyboardInterrupt(), SystemExit(0), SystemExit(7)):
+            with self.subTest(interruption=type(interruption).__name__), patch.object(
+                parity, "publish_identical_receipt_bytes", side_effect=interruption
+            ):
+                with self.assertRaises(type(interruption)) as caught:
+                    parity.write_receipt(Path("receipt.json"), payload)
+                self.assertIs(caught.exception, interruption)
+                stderr = io.StringIO()
+                interruption.add_note("control cleanup detail")
+                with patch.object(parity, "load_parity_definition", return_value=object()), patch.object(
+                    parity, "capture_parity", return_value=payload
+                ), contextlib.redirect_stderr(stderr), tempfile.TemporaryDirectory() as temporary:
+                    path = Path(temporary) / "receipt.json"
+                    path.write_bytes(b"prior immutable receipt")
+                    identity = (path.stat().st_dev, path.stat().st_ino)
+                    status = parity.main(["--manifest", "manifest.json", "--gate", "R01", "--base-ref", "base",
+                                          "--head-ref", "head", "--receipt", str(path)])
+                    self.assertEqual(status, 2)
+                    self.assertEqual(path.read_bytes(), b"prior immutable receipt")
+                    self.assertEqual((path.stat().st_dev, path.stat().st_ino), identity)
+                self.assertIn("publication interrupted", stderr.getvalue())
+                self.assertIn("control cleanup detail", stderr.getvalue())
+                self.assertIn("may remain", stderr.getvalue())
+
+    def test_receipt_cli_bounds_messages_and_notes_without_mutating_errors(self) -> None:
+        payload = {"equal": True, "purpose": "receipt-publication-test-only"}
+        errors = (AnchoredOutputError("output-different", "primary-" * 1000),
+                  KeyboardInterrupt("primary-" * 1000), SystemExit(0), SystemExit(7))
+        for error in errors:
+            cause = OSError("causal-" * 1000)
+            error.__cause__ = cause
+            notes = [f"note-{index:02d}-" + "detail-" * 1000 for index in range(12)]
+            for note in notes:
+                error.add_note(note)
+            original_text = str(error)
+            stderr = io.StringIO()
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "receipt.json"
+                path.write_bytes(b"prior immutable receipt")
+                identity = (path.stat().st_dev, path.stat().st_ino)
+                with patch.object(parity, "load_parity_definition", return_value=object()), patch.object(
+                    parity, "capture_parity", return_value=payload
+                ), patch.object(parity, "write_receipt", side_effect=error), contextlib.redirect_stderr(stderr):
+                    status = parity.main(["--manifest", "manifest.json", "--gate", "R01", "--base-ref", "base",
+                                          "--head-ref", "head", "--receipt", str(path)])
+                self.assertEqual(status, 2)
+                self.assertEqual(path.read_bytes(), b"prior immutable receipt")
+                self.assertEqual((path.stat().st_dev, path.stat().st_ino), identity)
+            lines = stderr.getvalue().splitlines()
+            self.assertTrue(lines[0].startswith("parity receipt publication"))
+            if len(original_text) > 512:
+                self.assertIn("primary-", lines[0])
+                self.assertTrue(lines[0].endswith("... [truncated]"))
+            self.assertTrue(lines[1].startswith("cause: OSError: causal-"))
+            self.assertTrue(lines[1].endswith("... [truncated]"))
+            self.assertLessEqual(max(len(line) for line in lines), 512)
+            self.assertLessEqual(len(stderr.getvalue()), 5400)
+            self.assertIn("An immutable candidate or prior identical receipt may remain", stderr.getvalue())
+            self.assertEqual(sum(line.startswith("note: note-") for line in lines), 8)
+            for index in range(8):
+                self.assertTrue(lines[index + 2].startswith(f"note: note-{index:02d}-detail-"))
+                self.assertTrue(lines[index + 2].endswith("... [truncated]"))
+            self.assertIn("note: additional diagnostic notes omitted [truncated]", lines)
+            self.assertNotIn("note-08-", stderr.getvalue())
+            self.assertEqual(str(error), original_text)
+            self.assertIs(error.__cause__, cause)
+            self.assertEqual(getattr(error, "__notes__"), notes)
 
     def test_fixture_hash_mismatch_fails_before_conversion(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_root:

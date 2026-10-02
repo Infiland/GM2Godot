@@ -12,8 +12,9 @@ import tarfile
 import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
+from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
 from scripts.conversion_parity_contract import (
     DestinationDefinition,
     FixtureDefinition,
@@ -43,6 +44,9 @@ from scripts.conversion_parity_snapshot import (
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_DIAGNOSTIC_TEXT_LIMIT = 512
+_DIAGNOSTIC_NOTE_LIMIT = 8
+_DIAGNOSTIC_TRUNCATION = "... [truncated]"
 
 
 def capture_parity(
@@ -113,20 +117,9 @@ def capture_parity(
 
 
 def write_receipt(path: Path, receipt: Mapping[str, object]) -> None:
-    """Atomically write a canonical parity receipt for review evidence."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Publish native text-writer bytes without replacing a different receipt."""
     payload = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w",
-        encoding="utf-8",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as temporary:
-        temporary.write(payload)
-        temporary_path = Path(temporary.name)
-    temporary_path.replace(path)
+    publish_identical_receipt_bytes(path, payload.replace("\n", os.linesep).encode("utf-8"))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -154,8 +147,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ParityError as error:
         print(f"parity capture error: {error}", file=sys.stderr)
         return 2
-    write_receipt(args.receipt, receipt)
+    try:
+        write_receipt(args.receipt, receipt)
+    except AnchoredOutputError as error:
+        _report_receipt_diagnostic(error, label=f"parity receipt publication failed [{error.code}]", stream=sys.stderr)
+        print("Use a fresh receipt path, or retain a byte-identical private single-link receipt; no existing output was replaced.", file=sys.stderr)
+        print("An immutable candidate or prior identical receipt may remain; no retry or overwrite was attempted.", file=sys.stderr)
+        return 2
+    except (SystemExit, KeyboardInterrupt) as error:
+        _report_receipt_diagnostic(error, label=f"parity receipt publication interrupted: {type(error).__name__}", stream=sys.stderr)
+        print("An immutable candidate or prior identical receipt may remain; no retry or overwrite was attempted.", file=sys.stderr)
+        return 2
     return 0 if receipt["equal"] else 1
+
+
+def _report_receipt_diagnostic(error: BaseException, *, label: str, stream: TextIO) -> None:
+    """Bound CLI rendering while leaving the primary exception and notes intact."""
+    print(_bounded_diagnostic(f"{label}: {error}"), file=stream)
+    if error.__cause__ is not None:
+        print(_bounded_diagnostic(f"cause: {type(error.__cause__).__name__}: {error.__cause__}"), file=stream)
+    for index, note in enumerate(getattr(error, "__notes__", ())):
+        if index == _DIAGNOSTIC_NOTE_LIMIT:
+            print("note: additional diagnostic notes omitted [truncated]", file=stream)
+            break
+        print(_bounded_diagnostic(f"note: {note}"), file=stream)
+
+
+def _bounded_diagnostic(message: str) -> str:
+    if len(message) <= _DIAGNOSTIC_TEXT_LIMIT:
+        return message
+    return message[:_DIAGNOSTIC_TEXT_LIMIT - len(_DIAGNOSTIC_TRUNCATION)] + _DIAGNOSTIC_TRUNCATION
 
 
 def capture_fixture_receipts(

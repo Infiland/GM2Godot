@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.8 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.9 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -86,18 +86,37 @@ Do not edit version-sensitive Wiki prose only in the browser. A browser-only cor
 
 GitHub requires the first Wiki page to be created through the repository Wiki interface before the Wiki Git repository can be cloned.
 
-1. Merge the reviewed main-repository pull request.
-2. Resolve and record the exact merged `main` SHA. Publish from that revision, not from an unmerged branch or a dirty working tree.
-3. Create the initial `Home` page in the GitHub Wiki using the exact merged `docs/wiki/Home.md` content. Keep issue #712 open.
-4. Clone `https://github.com/Infiland/GM2Godot.wiki.git` into a new temporary directory and confirm the checkout is clean.
-5. Record the checked-out branch and `git rev-parse HEAD` as the pre-publication Wiki SHA; do not assume the branch is named `main` or `master`.
-6. Copy only the canonical Markdown inventory from the merged `docs/wiki/`, including `_Sidebar.md`. Stop if the Wiki has an extra or browser-only page: reconcile it into the canonical source through review before deleting or overwriting it.
-7. Stage the Markdown changes and inspect `git diff --cached --check`, `git diff --cached --name-status`, and the full staged diff. The staged inventory and content must match the merged source exactly.
-8. Commit with the merged main-repository SHA in the message.
-9. Fetch the Wiki branch again and confirm its remote tip still equals the recorded pre-publication Wiki SHA. If it changed, stop and reconcile the concurrent update; never force-push.
-10. Push `HEAD` to the explicitly recorded Wiki branch.
+1. Merge the reviewed main-repository pull request and select its full merged source SHA. Keep issue #712 open until live verification is complete.
+2. Create the initial `Home` page in the GitHub Wiki using the exact merged `docs/wiki/Home.md` bytes. The initialization commit may contain only this reviewed page.
+3. With Git 2.54 or later, clone the canonical Wiki into a disposable directory. Inspect every live path and its bytes before replacement. Stop and reconcile extra or browser-only changes into `docs/wiki/` through a normal source pull request. Later publications require the full nine-page canonical inventory; arbitrary partial page sets are rejected.
+4. From the main-repository root, use the reviewed helper below. Choose an evidence path outside both checkouts; do not put receipts in the Wiki root.
 
-For later publications, begin by pulling the live Wiki and confirming it has no unreviewed browser-only changes. Reconcile any such changes into `docs/wiki/` through a normal pull request before overwriting them.
+```bash
+SOURCE_REPO="$PWD"
+SOURCE_SHA="PASTE_FULL_MERGED_SHA"
+WIKI_DIR="/absolute/path/to/disposable-wiki"
+EVIDENCE="/absolute/path/outside-both-checkouts/wiki-publication.json"
+git clone https://github.com/Infiland/GM2Godot.wiki.git "$WIKI_DIR"
+python scripts/wiki_publication.py stage --source-repository "$SOURCE_REPO" \
+  --source-sha "$SOURCE_SHA" --wiki-repository "$WIKI_DIR" --evidence "$EVIDENCE"
+git -C "$WIKI_DIR" diff --cached --check
+git -C "$WIKI_DIR" diff --cached --name-status
+git -C "$WIKI_DIR" diff --cached
+git -C "$WIKI_DIR" commit -m "Publish reviewed Wiki source $SOURCE_SHA"
+PUBLISHED_WIKI_SHA=$(git -C "$WIKI_DIR" rev-parse HEAD)
+python scripts/wiki_publication.py publish --wiki-repository "$WIKI_DIR" \
+  --published-sha "$PUBLISHED_WIKI_SHA" --evidence "$EVIDENCE"
+```
+
+Review the complete staged diff before the normal commit. `stage` fetches `refs/heads/main` from `https://github.com/Infiland/GM2Godot.git` into a fresh private ref and requires `SOURCE_SHA` to be a canonical-main ancestor. It resolves `SOURCE_TREE` from `SOURCE_SHA:docs/wiki`, not the full main-repository root tree. The source, staged index (`git add --all`, then `git write-tree == SOURCE_TREE`), and committed Wiki root must contain exactly nine `100644 blob` entries: `Home.md`, `Installation.md`, `Quick-Start-Conversion.md`, `Compatibility-and-Limitations.md`, `Diagnostics-and-Troubleshooting.md`, `Generated-Project-and-Runtime.md`, `Contributing-and-Testing.md`, `Maintainer-Release-and-Wiki.md`, and `_Sidebar.md`. Extra `.md`/`.textile` pages, nested or empty trees, symlinks, executable entries, gitlinks, tracked drift, and ordinary or ignored untracked files stop the process. Physical bytes are checked independently of index flags and checkout filters.
+
+The evidence records `SOURCE_SHA`, `SOURCE_TREE`, `WIKI_BRANCH`, `PRE_PUBLICATION_WIKI_SHA`, `PUBLISHED_WIKI_SHA`, `CANONICAL_MAIN_SHA`, and `SOURCE_IS_CURRENT_MAIN`. The last boolean says whether the source matched main at the recorded canonical fetch; an older merged source remains explicitly disclosed. The helper rejects URL rewrites, replacement-object interpretation, legacy history grafts, and repository/index override variables while retaining normal user configuration.
+
+Push URL checks read effective configuration and conservatively reject any applicable `pushInsteadOf` prefix, or alternate/multiple URLs on a remote named exactly as the canonical Wiki URL. Unrelated rewrite rules are allowed; no persistent remote or hook configuration is changed.
+
+`publish` requires exactly one direct parent equal to `PRE_PUBLICATION_WIKI_SHA`, an exact subtree match, and a clean checkout. It discovers the symbolic Wiki default branch instead of assuming `main` or `master`. A positive `git hook list --show-scope pre-push` check proves the fresh command-scoped guard is enabled. All configured/traditional hooks and custom `core.hooksPath` remain active. The guard requires both remote arguments to equal the canonical Wiki URL and stdin to contain exactly one literal published-SHA ref row with the recorded advertised old SHA.
+
+The ordinary push uses the immutable `PUBLISHED_WIKI_SHA`, the explicitly recorded branch, the canonical Wiki URL, and `--no-follow-tags`. Never force-push, use a `+` refspec, bypass hooks, or substitute mutable `HEAD`/`origin` in this gate. A preconnection rewind is rejected by the advertised-old-SHA guard; a concurrent change after advertisement is rejected by Git's ordinary server update. Movement away from and back to the identical SHA cannot be distinguished from no movement. If a push is interrupted, the durable evidence remains in `prepared` state: reconcile the remote, then use `verify` if that exact commit arrived. Start a new reviewed checkout and evidence file for a new publication attempt.
 
 ## Post-publication verification
 
@@ -106,9 +125,16 @@ Check more than an HTTP success code: an uninitialized Wiki redirects to the rep
 - Open `https://github.com/Infiland/GM2Godot/wiki` and confirm the final page remains under `/GM2Godot/wiki`.
 - Open every sidebar page and confirm headings, code blocks, and local navigation render.
 - Verify release, issue-template, manual, and versioned Godot-documentation links.
-- Confirm `git ls-remote https://github.com/Infiland/GM2Godot.wiki.git HEAD` succeeds.
-- Clone the Wiki into a second clean temporary directory and compare its Markdown inventory and bytes with `docs/wiki/` at the recorded merged source SHA.
-- Record the merged source SHA, published Wiki SHA, and verification result on the documentation issue; only then close it.
+- `publish` verifies that symbolic remote `HEAD` targets `WIKI_BRANCH`, and both `HEAD` and that named branch equal `PUBLISHED_WIKI_SHA`. It makes a fresh explicit-branch clone and requires the exact commit, `SOURCE_TREE`, all nine physical source blobs, and a clean checkout, then rechecks the remote.
+- Repeat the checks after any interruption with `python scripts/wiki_publication.py verify --wiki-repository "$WIKI_DIR" --evidence "$EVIDENCE"`.
+- After the live page/link review above, run the completion gate immediately before recording the result:
+
+```bash
+python scripts/wiki_publication.py complete --wiki-repository "$WIKI_DIR" \
+  --evidence "$EVIDENCE" --live-review "Reviewed all nine rendered pages, sidebar navigation, and external links"
+```
+
+`complete` performs a fresh clone and remote-state recheck again; a moved branch or retargeted symbolic `HEAD` stops completion. Record all seven binding values, the durable evidence, and the live review result on the documentation issue; only then close it. A successful HTTP response or successful `ls-remote` alone is insufficient.
 
 ## Rollback and ownership
 

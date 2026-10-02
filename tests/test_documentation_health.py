@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import stat
 import tomllib
 import unittest
 from typing import cast
@@ -107,9 +108,14 @@ class TestDocumentationHealth(unittest.TestCase):
 
     def test_reviewable_wiki_source_is_complete_and_versioned(self) -> None:
         self.assertEqual(
-            {path.name for path in WIKI_SOURCE_DIR.glob("*.md")},
+            {path.name for path in WIKI_SOURCE_DIR.iterdir()},
             WIKI_PAGES | {"_Sidebar.md"},
         )
+        for path in WIKI_SOURCE_DIR.iterdir():
+            with self.subTest(path=path.name):
+                self.assertFalse(path.is_symlink())
+                self.assertTrue(stat.S_ISREG(path.stat().st_mode))
+                self.assertEqual(path.stat().st_mode & 0o111, 0)
 
         current_version = get_version()
         applies_to_pattern = re.compile(
@@ -157,6 +163,32 @@ class TestDocumentationHealth(unittest.TestCase):
                 with self.subTest(source=source.name, target=target):
                     self.assertIn(target_filename, WIKI_PAGES | {"_Sidebar.md"})
                     self.assertTrue((WIKI_SOURCE_DIR / target_filename).is_file())
+
+    def test_wiki_publication_documents_bind_the_executable_gates(self) -> None:
+        maintenance = (PROJECT_ROOT / "docs" / "WIKI_MAINTENANCE.md").read_text(encoding="utf-8")
+        procedure = (WIKI_SOURCE_DIR / "Maintainer-Release-and-Wiki.md").read_text(encoding="utf-8")
+        self.assertTrue((PROJECT_ROOT / "scripts" / "wiki_publication.py").is_file())
+        for label, content in (("maintenance", maintenance), ("procedure", procedure)):
+            for field in ("SOURCE_SHA", "SOURCE_TREE", "WIKI_BRANCH", "PRE_PUBLICATION_WIKI_SHA",
+                          "PUBLISHED_WIKI_SHA", "CANONICAL_MAIN_SHA", "SOURCE_IS_CURRENT_MAIN"):
+                with self.subTest(document=label, field=field):
+                    self.assertIn(f"`{field}`", content)
+            for phrase in ("SOURCE_SHA:docs/wiki", "Git 2.54", "git hook list --show-scope pre-push",
+                           "core.hooksPath", "--no-follow-tags", "100644 blob", "git add --all",
+                           "git write-tree == SOURCE_TREE", "outside both checkouts", "fresh", "ordinary"):
+                with self.subTest(document=label, phrase=phrase):
+                    self.assertIn(phrase, content)
+        for command in ("stage", "publish", "verify", "complete"):
+            with self.subTest(command=command):
+                self.assertIn(f"python scripts/wiki_publication.py {command}", procedure)
+        self.assertIn("--source-sha", procedure)
+        self.assertIn("--published-sha", procedure)
+        self.assertIn("--live-review", procedure)
+        self.assertIn("prepared", procedure)
+        self.assertIn("both `HEAD` and that named branch equal `PUBLISHED_WIKI_SHA`", procedure)
+        self.assertIn("immediately before", procedure)
+        self.assertIn("only then close it", procedure)
+        self.assertNotIn("Push `HEAD`", procedure)
 
     def test_wiki_managed_output_roots_match_production(self) -> None:
         generated_project = (

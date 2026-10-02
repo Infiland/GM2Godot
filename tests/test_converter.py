@@ -405,7 +405,10 @@ class TestConverterOutcomes(unittest.TestCase):
                 raise error
 
         failing = FailingConverter("/gm", "/godot")
-        runner = lambda: self.converter._run_base_converter(failing)
+
+        def runner() -> ConversionStepResult:
+            return self.converter._run_base_converter(failing)
+
         with self._environment({"scripts": runner}) as calls:
             with self.assertRaises(RuntimeError) as raised:
                 self.converter.convert(

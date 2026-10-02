@@ -880,16 +880,18 @@ class VerifiedDirectory(AbstractContextManager["VerifiedDirectory"]):
             descriptor_chmod: Callable[[int], None] | None = None
             if callable(fchmod_candidate):
                 fchmod = cast(Callable[[int, int], None], fchmod_candidate)
-                descriptor_chmod = lambda exact_mode: fchmod(
-                    descriptor,
-                    exact_mode,
-                )
+
+                def apply_fchmod(exact_mode: int) -> None:
+                    return fchmod(descriptor, exact_mode)
+
+                descriptor_chmod = apply_fchmod
                 descriptor_chmod(mode)
             elif os.chmod in os.supports_fd:
-                descriptor_chmod = lambda exact_mode: os.chmod(
-                    descriptor,
-                    exact_mode,
-                )
+
+                def apply_fd_chmod(exact_mode: int) -> None:
+                    return os.chmod(descriptor, exact_mode)
+
+                descriptor_chmod = apply_fd_chmod
                 descriptor_chmod(mode)
             else:
                 self.verify_regular_identity(leaf, identity)

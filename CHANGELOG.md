@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.9 - 2026-10-02
+
+- Bind Wiki publication to the reviewed source tree and exact pushed commit with concurrent update checks.
+
 ## 0.8.8 - 2026-10-02
 
 - Preserve the supported GML transpiler facade while enforcing explicit phase boundaries and removing legacy private exports.

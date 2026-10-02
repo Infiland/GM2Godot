@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.2 - 2026-10-02
+
+- Reject non-object path resource rereads with a source-specific input error before writing any path output, while preserving skipped null, malformed and unreadable sources and existing conversion behavior.
+
 ## 0.8.1 - 2026-09-14
 
 - Added a live Deep progress workspace with searchable agent, research and implementation lists, task details, saved findings and explicit attention states.

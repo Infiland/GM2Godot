@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import patch
 
 from src.conversion.path_registry import (
     build_path_registry_entries,
@@ -23,6 +26,70 @@ class _AssetEntry:
 
 
 class TestPathRegistry(unittest.TestCase):
+    def test_non_object_resource_rereads_fail_before_any_output(self) -> None:
+        for root in ('[]', '"path"', 'true', 'false', '42', '1.25'):
+            with self.subTest(root=root), tempfile.TemporaryDirectory() as gm_dir, tempfile.TemporaryDirectory() as godot_dir:
+                sources = Path(gm_dir) / "paths"
+                sources.mkdir()
+                (sources / "valid.yy").write_text('{"points":[{"x":1,"y":2}]}', encoding="utf-8")
+                malformed_source = sources / "replaced.yy"
+                malformed_source.write_text(root, encoding="utf-8")
+                output = Path(godot_dir)
+                existing_registry = output / "gm2godot" / "gml_path_registry.gd"
+                existing_registry.parent.mkdir()
+                existing_registry.write_bytes(b"previous registry\n")
+                entries = (
+                    _AssetEntry(1, "valid", "paths", "paths/valid.yy", "res://paths/valid.tscn"),
+                    _AssetEntry(2, "replaced", "paths", "paths/replaced.yy", "res://paths/replaced.tscn"),
+                )
+
+                with self.assertRaises(ValueError) as raised:
+                    write_path_registry(gm_dir, godot_dir, entries)
+
+                self.assertIn(str(malformed_source), str(raised.exception))
+                self.assertIn("JSON object", str(raised.exception))
+                self.assertEqual(existing_registry.read_bytes(), b"previous registry\n")
+                self.assertEqual(tuple(output.rglob("*.tscn")), ())
+
+    def test_null_invalid_json_and_unreadable_resources_still_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as gm_dir:
+            sources = Path(gm_dir) / "paths"
+            sources.mkdir()
+            (sources / "null.yy").write_text("null", encoding="utf-8")
+            (sources / "invalid.yy").write_text("{broken", encoding="utf-8")
+            entries = tuple(
+                _AssetEntry(index, name, "paths", f"paths/{name}.yy")
+                for index, name in enumerate(("null", "invalid", "missing"))
+            )
+            self.assertEqual(build_path_registry_entries(gm_dir, entries), ())
+            with patch("src.conversion.path_registry.open", side_effect=OSError("unreadable")):
+                self.assertEqual(build_path_registry_entries(gm_dir, entries), ())
+
+    def test_non_json_reader_failures_propagate_before_output(self) -> None:
+        digit_limit = sys.get_int_max_str_digits()
+        cases: list[tuple[bytes, type[Exception]]] = [
+            (b"\xff", UnicodeDecodeError),
+        ]
+        if digit_limit:
+            cases.append((b"1" * (digit_limit + 1), ValueError))
+        for content, error_type in cases:
+            with self.subTest(error_type=error_type), tempfile.TemporaryDirectory() as gm_dir, tempfile.TemporaryDirectory() as godot_dir:
+                source = Path(gm_dir) / "path.yy"
+                source.write_bytes(content)
+                entry = _AssetEntry(1, "path", "paths", "path.yy", "res://paths/path.tscn")
+                with self.assertRaises(error_type):
+                    write_path_registry(gm_dir, godot_dir, (entry,))
+                self.assertEqual(tuple(Path(godot_dir).iterdir()), ())
+        with tempfile.TemporaryDirectory() as gm_dir, tempfile.TemporaryDirectory() as godot_dir:
+            (Path(gm_dir) / "path.yy").write_text("{}", encoding="utf-8")
+            entry = _AssetEntry(1, "path", "paths", "path.yy", "res://paths/path.tscn")
+            failure = RecursionError("decoder nesting limit")
+            with patch("src.conversion.path_registry.json.loads", side_effect=failure):
+                with self.assertRaises(RecursionError) as raised:
+                    write_path_registry(gm_dir, godot_dir, (entry,))
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(tuple(Path(godot_dir).iterdir()), ())
+
     def test_builds_path_registry_entries_from_gamemaker_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path_dir = os.path.join(tmpdir, "paths", "path_patrol")

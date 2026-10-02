@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 import stat
@@ -621,6 +622,160 @@ class TestAnchoredArtifacts(unittest.TestCase):
             )
         finally:
             target.chmod(0o600)
+
+    def test_descriptor_chmod_callbacks_preserve_provider_binding(self) -> None:
+        real_chmod = os.chmod
+        real_close = os.close
+
+        for provider in ("fchmod", "fd_chmod"):
+            with self.subTest(provider=provider):
+                target = self.artifact_directory / f"{provider}.json"
+                alias = self.root / f"{provider}-alias.json"
+                target.write_bytes(b"old\n")
+                real_chmod(target, 0o444)
+                original = target.stat()
+                identity = (original.st_dev, original.st_ino)
+                original_mode = stat.S_IMODE(original.st_mode)
+                requested_mode = original_mode | stat.S_IWUSR
+                owned_descriptor: int | None = None
+                initial_calls: list[tuple[int, int]] = []
+                restore_calls: list[tuple[int, int]] = []
+                unexpected_calls: list[tuple[int, int]] = []
+                closed_descriptors: list[int] = []
+
+                def apply_mode(
+                    descriptor: int,
+                    mode: int,
+                    calls: list[tuple[int, int]],
+                ) -> None:
+                    nonlocal owned_descriptor
+                    if owned_descriptor is None:
+                        owned_descriptor = descriptor
+                    self.assertEqual(descriptor, owned_descriptor)
+                    opened = os.fstat(descriptor)
+                    self.assertTrue(stat.S_ISREG(opened.st_mode))
+                    self.assertEqual((opened.st_dev, opened.st_ino), identity)
+                    calls.append((descriptor, mode))
+                    real_chmod(target, mode)
+                    changed = os.fstat(descriptor)
+                    self.assertEqual((changed.st_dev, changed.st_ino), identity)
+                    self.assertArtifactModeEqual(stat.S_IMODE(changed.st_mode), mode)
+
+                def restore_provider(descriptor: int, mode: int) -> None:
+                    apply_mode(descriptor, mode, restore_calls)
+
+                def unexpected_provider(descriptor: int, mode: int) -> None:
+                    unexpected_calls.append((descriptor, mode))
+                    raise AssertionError("the captured chmod provider was replaced")
+
+                def initial_provider(descriptor: int, mode: int) -> None:
+                    apply_mode(descriptor, mode, initial_calls)
+                    if len(initial_calls) == 1:
+                        os.link(target, alias)
+                        if provider == "fchmod":
+                            setattr(
+                                anchored_artifacts_module.os,
+                                "fchmod",
+                                unexpected_provider,
+                            )
+                        else:
+                            setattr(
+                                anchored_artifacts_module.os,
+                                "chmod",
+                                restore_provider,
+                            )
+
+                def record_close(descriptor: int) -> None:
+                    if descriptor == owned_descriptor:
+                        closed_descriptors.append(descriptor)
+                    real_close(descriptor)
+
+                supported_fd = set(os.supports_fd)
+                if provider == "fd_chmod":
+                    supported_fd.add(initial_provider)
+
+                try:
+                    with ByteArtifactTransaction.open(
+                        str(self.root),
+                        "gm2godot",
+                        create=False,
+                        description="test artifact directory",
+                    ) as transaction:
+                        with (
+                            patch.object(
+                                anchored_artifacts_module.os,
+                                "fchmod",
+                                initial_provider if provider == "fchmod" else None,
+                                create=True,
+                            ),
+                            patch.object(
+                                anchored_artifacts_module.os,
+                                "chmod",
+                                real_chmod if provider == "fchmod" else initial_provider,
+                            ),
+                            patch.object(
+                                anchored_artifacts_module.os,
+                                "supports_fd",
+                                supported_fd,
+                            ),
+                            patch.object(
+                                anchored_artifacts_module.os,
+                                "close",
+                                record_close,
+                            ),
+                        ):
+                            with self.assertRaisesRegex(
+                                OSError,
+                                "transaction file changed",
+                            ):
+                                transaction.directory.chmod_exact(
+                                    target.name,
+                                    identity,
+                                    requested_mode,
+                                    require_single_link=True,
+                                    expected_current_mode=original_mode,
+                                )
+                            assert owned_descriptor is not None
+                            with self.assertRaises(OSError) as closed:
+                                os.fstat(owned_descriptor)
+                            self.assertEqual(closed.exception.errno, errno.EBADF)
+                            self.assertEqual(closed_descriptors, [owned_descriptor])
+                            self.assertEqual(unexpected_calls, [])
+                            if provider == "fchmod":
+                                self.assertEqual(
+                                    initial_calls,
+                                    [
+                                        (owned_descriptor, requested_mode),
+                                        (owned_descriptor, original_mode),
+                                    ],
+                                )
+                                self.assertEqual(restore_calls, [])
+                            else:
+                                self.assertEqual(
+                                    initial_calls,
+                                    [(owned_descriptor, requested_mode)],
+                                )
+                                self.assertEqual(
+                                    restore_calls,
+                                    [(owned_descriptor, original_mode)],
+                                )
+
+                        for path in (target, alias):
+                            self.assertEqual(path.read_bytes(), b"old\n")
+                            restored = path.stat()
+                            self.assertEqual(
+                                (restored.st_dev, restored.st_ino),
+                                identity,
+                            )
+                            self.assertEqual(restored.st_nlink, 2)
+                            self.assertArtifactModeEqual(
+                                stat.S_IMODE(restored.st_mode),
+                                original_mode,
+                            )
+                finally:
+                    real_chmod(target, 0o600)
+                    alias.unlink(missing_ok=True)
+                    target.unlink(missing_ok=True)
 
     @unittest.skipUnless(
         callable(getattr(os, "fchmod", None)),

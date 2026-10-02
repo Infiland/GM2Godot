@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.12 - 2026-10-02
+
+- Enforce Ruff's complete E7 correctness family and replace assigned callbacks with typed functions while preserving provider binding and artifact mode restoration.
+
 ## 0.8.11 - 2026-10-02
 
 - Enforce Ruff's ambiguous-variable rule after correcting eight local test bindings; retain the complete Pyflakes and fatal-error checks.

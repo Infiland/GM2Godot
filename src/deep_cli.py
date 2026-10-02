@@ -27,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
     configure.add_argument("--runtime", choices=("pi", "codex", "claude", "opencode"))
     configure.add_argument("--provider")
     configure.add_argument("--model")
+    configure.add_argument("--executable", help="Codex or agent executable; leave empty to restore automatic detection")
     configure.add_argument("--workers", type=int)
     configure.add_argument("--allow-paid", action="store_true")
     configure.add_argument("--api-key-stdin", action="store_true", help="Read a key from stdin into the OS keyring")
@@ -51,10 +52,14 @@ def _parser() -> argparse.ArgumentParser:
 
 def _configure(args: argparse.Namespace) -> int:
     settings = load_settings()
+    if args.runtime is not None and args.runtime != settings.runtime:
+        settings.executable = None
     for field in ("runtime", "provider", "model"):
         value = getattr(args, field)
         if value is not None:
             setattr(settings, field, value)
+    if args.executable is not None:
+        settings.executable = args.executable.strip() or None
     if args.workers is not None:
         settings.analysisWorkers = args.workers
     if args.allow_paid:
@@ -62,6 +67,8 @@ def _configure(args: argparse.Namespace) -> int:
         settings.budgets["maxCostUsd"] = 20
     settings.validate()
     if args.api_key_stdin:
+        if settings.runtime == "codex":
+            raise ValueError("Codex uses its own sign-in; run codex login and refresh models")
         save_credential(settings.provider, sys.stdin.read().strip())
     save_settings(settings)
     print("Deep preferences saved.")

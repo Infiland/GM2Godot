@@ -32,6 +32,7 @@ class DeepSettings:
     allowRemoteSourceUpload: bool = False
     budgets: dict[str, float] = field(default_factory=lambda: {"maxTokens": 1000000, "maxCostUsd": 0, "maxSeconds": 3600})
     godotBinary: str | None = None
+    executable: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -52,6 +53,14 @@ class DeepSettings:
             raise ValueError("Budgets cannot be negative")
         if not self.model.strip():
             raise ValueError("Select a model")
+        _validate_executable(self.executable)
+
+
+def _validate_executable(executable: object) -> None:
+    if executable is not None and (
+        not isinstance(executable, str) or not executable.strip() or "\x00" in executable
+    ):
+        raise ValueError("Agent executable must be a non-empty path without null characters")
 
 
 def load_settings(root: Path | None = None) -> DeepSettings:

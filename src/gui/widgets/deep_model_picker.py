@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from src.deep.models import DiscoveredModel, ModelCatalog, discover_models, preferred_go_model
 from src.deep.settings import DeepSettings
@@ -49,6 +49,10 @@ class DeepModelPicker(QWidget):
         self.runtime.addItems(["opencode", "codex", "claude", "pi", "mock"])
         self.runtime.setCurrentText(settings.runtime)
         layout.addRow("Agent / API runtime", self.runtime)
+        self.executable = QLineEdit(settings.executable or "")
+        self.executable.setPlaceholderText("Auto-detect Codex; enter a path for a custom installation")
+        self.executable_label = QLabel("Codex executable (optional)")
+        layout.addRow(self.executable_label, self.executable)
         self.free = QCheckBox("Use free models only (OpenCode Zen)")
         self.free.setChecked(settings.freeOnly)
         self.free.setEnabled(allow_policy_change)
@@ -73,6 +77,7 @@ class DeepModelPicker(QWidget):
         layout.addRow(self.preferred_button)
         self._seed(settings.provider, settings.model)
         self.runtime.currentTextChanged.connect(self._runtime_changed)
+        self.executable.textChanged.connect(self._executable_changed)
         self.provider.currentIndexChanged.connect(self._provider_changed)
         self.model.currentIndexChanged.connect(self._model_changed)
         self.free.toggled.connect(self._free_changed)
@@ -117,6 +122,7 @@ class DeepModelPicker(QWidget):
         result.runtime = self.runtime.currentText()
         result.provider = self._provider_id()
         result.model = self._model_id()
+        result.executable = self.executable.text().strip() or None
         result.freeOnly = self.free.isChecked()
         if result.freeOnly:
             result.runtime, result.provider = "opencode", "opencode"
@@ -127,6 +133,10 @@ class DeepModelPicker(QWidget):
         busy, free = self.is_busy(), self.free.isChecked()
         busy = busy or (self._require_resume_support and not self._resume_supported)
         self.runtime.setEnabled(not busy and not free)
+        codex = self.runtime.currentText() == "codex"
+        self.executable.setVisible(codex)
+        self.executable_label.setVisible(codex)
+        self.executable.setEnabled(not busy and not free)
         self.provider.setEnabled(not busy and not free)
         self.model.setEnabled(not busy)
         self.free.setEnabled(not busy and self._allow_policy_change)
@@ -169,9 +179,16 @@ class DeepModelPicker(QWidget):
 
     def _runtime_changed(self, runtime: str) -> None:
         self._catalog = ModelCatalog((), False, None, "")
+        self.executable.clear()
         self.manual.setChecked(False)
         self._seed("openai" if runtime == "pi" else runtime, "simulation" if runtime == "mock" else "")
+        self._enabled()
         self.refresh()
+        self.selection_changed.emit()
+
+    def _executable_changed(self, _text: str) -> None:
+        self._catalog = ModelCatalog((), False, None, "")
+        self.status.setText("Codex executable changed. Refresh models to check installation and sign-in.")
         self.selection_changed.emit()
 
     def _provider_changed(self) -> None:
@@ -245,7 +262,14 @@ class DeepModelPicker(QWidget):
                 index = self.model.count() - 1
             self.model.setCurrentIndex(max(0, index))
         auth = "Signed in" if catalog.authenticated is True else "Sign-in required" if catalog.authenticated is False else "Sign-in varies by provider"
+        if self.runtime.currentText() == "codex" and catalog.authenticated is True:
+            if catalog.auth_mode == "chatgpt":
+                auth = "Signed in with ChatGPT"
+            elif catalog.auth_mode == "apiKey":
+                auth = "Using Codex API key authentication"
         description = f"{len(catalog.models)} models discovered. {auth}. {catalog.reason}"
+        if self.runtime.currentText() == "codex" and catalog.executable:
+            description += f" Codex: {catalog.executable}."
         if self.free.isChecked():
             count = sum(model.free_eligible and model.available for model in catalog.models)
             description += f" {count} verified free candidates; eligibility is checked again before use."

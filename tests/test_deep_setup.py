@@ -7,7 +7,7 @@ from typing import cast
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QSpinBox
+from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QPushButton, QSpinBox
 
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.deep.settings import DeepSettings
@@ -15,6 +15,7 @@ from src.gui.dialogs.deep_resume_dialog import DeepResumeDialog
 from src.gui.dialogs.deep_setup_dialog import DeepSetupDialog
 from src.gui.dialogs.settings_dialog import SettingsDialog
 from src.gui.setting_value import SettingValue
+from src.gui.widgets.deep_model_picker import DeepModelPicker
 
 
 class DeepSetupTests(unittest.TestCase):
@@ -61,3 +62,20 @@ class DeepSetupTests(unittest.TestCase):
         self.assertTrue(result.freeOnly)
         self.assertFalse(dialog.findChildren(QDoubleSpinBox)[0].isEnabled())
         dialog.close()
+
+    def test_codex_setup_does_not_save_an_unrelated_entered_api_key(self) -> None:
+        settings = DeepSettings(runtime="codex", provider="codex", model="discovered", freeOnly=False,
+                                executable="/custom installation/codex")
+        with patch("src.gui.dialogs.deep_setup_dialog.load_settings", return_value=settings), patch("src.gui.dialogs.deep_setup_dialog.ExtensionManager"), patch("src.gui.dialogs.deep_setup_dialog.save_settings") as save, patch("src.gui.dialogs.deep_setup_dialog.save_credential") as credential:
+            dialog = DeepSetupDialog()
+            picker = dialog.findChild(DeepModelPicker)
+            assert picker is not None
+            secret = dialog.findChildren(QLineEdit)[-1]
+            self.assertFalse(secret.isEnabled())
+            secret.setText("unrelated-provider-key")
+            picker.executable.setText("/new installation/codex")
+            dialog.settings().validate()
+            dialog.findChildren(QPushButton)[-1].click()
+            credential.assert_not_called()
+            self.assertEqual(save.call_args.args[0].executable, "/new installation/codex")
+            dialog.close()

@@ -104,7 +104,7 @@ class DeepSetupDialog(QDialog):
         self._secret.setEchoMode(QLineEdit.EchoMode.Password)
         self._secret.setPlaceholderText("Leave blank to keep existing credential / agent login")
         layout.addRow("API key (OS keyring)", self._secret)
-        note = QLabel("Source files are sent to the selected provider only after you start research. Existing Codex / Claude / OpenCode sign-in is reused. Free model availability and limits can change. Mock is a simulation.")
+        note = QLabel("Source files are sent to the selected provider only after you start research. Codex is detected locally and reuses its existing ChatGPT or API key sign-in; run codex login if sign-in is needed, then refresh models. ChatGPT account limits apply to subscription usage. Existing Claude / OpenCode sign-in is also reused. Free model availability and limits can change. Mock is a simulation.")
         note.setWordWrap(True)
         layout.addRow(note)
         terms = QLabel('<a href="https://opencode.ai/docs/zen/">OpenCode Zen availability, pricing and data use</a>')
@@ -121,6 +121,7 @@ class DeepSetupDialog(QDialog):
 
     def _sync_policy(self) -> None:
         free = self._picker.free.isChecked()
+        self._secret.setEnabled(self._picker.runtime.currentText() != "codex")
         self._cost.setEnabled(not free)
         if free:
             self._cost.setValue(0)
@@ -169,7 +170,7 @@ class DeepSetupDialog(QDialog):
             return
         try:
             settings = self.settings()
-            if self._secret.text():
+            if self._secret.isEnabled() and self._secret.text():
                 save_credential(settings.provider, self._secret.text())
             save_settings(settings)
             self.accept()
@@ -179,7 +180,7 @@ class DeepSetupDialog(QDialog):
     def _check(self) -> None:
         try:
             settings = self._picker.apply_to(self._settings)
-            if self._secret.text():
+            if self._secret.isEnabled() and self._secret.text():
                 save_credential(settings.provider, self._secret.text())
             self._picker.refresh()
         except Exception as error:

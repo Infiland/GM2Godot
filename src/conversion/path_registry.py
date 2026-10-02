@@ -184,9 +184,14 @@ def _read_json_lenient(path: str) -> JsonDict | None:
     except OSError:
         return None
     try:
-        return cast(JsonDict, json.loads(_strip_trailing_commas(content)))
+        data: object = json.loads(_strip_trailing_commas(content))
     except json.JSONDecodeError:
         return None
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"Path resource must contain a JSON object: {path}")
+    return cast(JsonDict, data)
 
 
 def _strip_trailing_commas(content: str) -> str:

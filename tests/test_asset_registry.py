@@ -4186,6 +4186,28 @@ class TestAssetRegistryConverter(unittest.TestCase):
             ),
         )
 
+    def test_non_object_path_metadata_retains_unavailable_diagnostic(self) -> None:
+        for root in ('[]', '"path"', 'true', '42', 'null'):
+            with self.subTest(root=root):
+                _write_yyp(self.gm_dir, [("paths", "path_bad")])
+                path_dir = os.path.join(self.gm_dir, "paths", "path_bad")
+                os.makedirs(path_dir, exist_ok=True)
+                _write_file(os.path.join(path_dir, "path_bad.yy"), root)
+                diagnostics = DiagnosticCollector()
+                converter = self._converter(diagnostics=diagnostics)
+
+                converter.convert_all()
+
+                self.assertFalse(any(entry.kind == "paths" for entry in converter.build_entries()))
+                unavailable = [
+                    diagnostic
+                    for diagnostic in diagnostics.diagnostics()
+                    if diagnostic.code == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+                ]
+                self.assertEqual(len(unavailable), 1, unavailable)
+                self.assertEqual(unavailable[0].resource, "path_bad")
+                self.assertEqual(unavailable[0].resource_type, "path")
+
     def test_missing_only_manifest_asset_makes_converter_outcome_partial(
         self,
     ) -> None:

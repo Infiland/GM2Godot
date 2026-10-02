@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.11 - 2026-10-02
+
+- Enforce Ruff's ambiguous-variable rule after correcting eight local test bindings; retain the complete Pyflakes and fatal-error checks.
+- Verify the locked Ruff test tool before full Linux discovery so the actual rule and bypass checks run in a clean environment.
+
 ## 0.8.10 - 2026-10-02
 
 - Require native receipt publication tests in the Linux, macOS and Windows test and dependency-lock jobs, with exact test coverage and runtime receipts.

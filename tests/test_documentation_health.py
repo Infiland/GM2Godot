@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import stat
+import subprocess
+import sys
+import tempfile
 import tomllib
 import unittest
 from typing import cast
@@ -61,7 +65,7 @@ EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E9", "F"]},
+    "lint": {"select": ["E741", "E9", "F"]},
 }
 EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff
@@ -71,7 +75,7 @@ EXPECTED_RUFF_LINT_STEPS = """\
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
             xargs -0 -- python -m ruff check --isolated --target-version py312 \\
-              --select E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+              --select E741,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
 """
 
 
@@ -359,7 +363,7 @@ class TestDocumentationHealth(unittest.TestCase):
 
     def test_contributor_docs_describe_complete_pyflakes_gate(self) -> None:
         required_guidance = (
-            "CI enforces Ruff's `E9` fatal-error checks and the complete "
+            "CI enforces Ruff's `E741` ambiguous-variable rule, `E9` fatal-error checks, and the complete "
             "Pyflakes (`F`) rule family. Do not disable `F` or individual "
             "`F`-numbered rules globally or per file."
         )
@@ -368,7 +372,67 @@ class TestDocumentationHealth(unittest.TestCase):
             WIKI_SOURCE_DIR / "Contributing-and-Testing.md",
         ):
             with self.subTest(path=path.relative_to(PROJECT_ROOT)):
-                self.assertIn(required_guidance, path.read_text(encoding="utf-8"))
+                content = path.read_text(encoding="utf-8")
+                self.assertIn(required_guidance, content)
+                self.assertIn("./venv/bin/python -m ruff check .", content)
+                self.assertIn("generated `build/`, `dist/`, and `release/` output", content)
+                self.assertIn("local `venv/` environment", content)
+                self.assertIn("Other `E4`/`E7`, `I`, `B`, and `C90` rules", content)
+
+    def test_e741_rule_is_enforced_without_tracked_input_bypasses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gm2godot-e741-") as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            ambiguous_path = temporary_path / "ambiguous.py"
+            descriptive_path = temporary_path / "descriptive.py"
+            bypass_path = temporary_path / "bypass.py"
+            ignore_config = temporary_path / "pyproject.toml"
+            ambiguous_path.write_text("l = 1\n", encoding="utf-8")
+            descriptive_path.write_text("log = 1\n", encoding="utf-8")
+            bypass_path.write_text("l = 1  # noqa: E741\n", encoding="utf-8")
+            ignore_config.write_text(
+                '[tool.ruff.lint]\nselect = ["E741", "E9", "F"]\nignore = ["E741"]\n',
+                encoding="utf-8",
+            )
+
+            def run_ruff(path: Path, flags: tuple[str, ...], expected_exit: int) -> list[dict[str, object]]:
+                result = subprocess.run(
+                    (sys.executable, "-m", "ruff", "check", "--no-cache", "--output-format", "json", *flags,
+                     "--", str(path)),
+                    cwd=temporary_path,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=10,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, expected_exit, result.stderr or result.stdout)
+                self.assertEqual(result.stderr, "")
+                self.assertLessEqual(len(result.stdout.encode("utf-8")), 8192)
+                raw_diagnostics: object = json.loads(result.stdout)
+                self.assertIsInstance(raw_diagnostics, list)
+                diagnostics: list[dict[str, object]] = []
+                for diagnostic in cast(list[object], raw_diagnostics):
+                    self.assertIsInstance(diagnostic, dict)
+                    diagnostics.append(cast(dict[str, object], diagnostic))
+                return diagnostics
+
+            project_flags = ("--config", str(PROJECT_ROOT / "pyproject.toml"))
+            project_diagnostics = run_ruff(ambiguous_path, project_flags, 1)
+            self.assertEqual([diagnostic["code"] for diagnostic in project_diagnostics], ["E741"])
+            self.assertEqual(run_ruff(descriptive_path, project_flags, 0), [])
+            self.assertEqual(run_ruff(bypass_path, ("--config", str(ignore_config)), 0), [])
+
+            tracked_flags = (
+                "--isolated", "--target-version", "py312", "--select", "E741,E9,F", "--ignore-noqa",
+                "--no-respect-gitignore", "--no-force-exclude",
+            )
+            tracked_diagnostics = run_ruff(bypass_path, tracked_flags, 1)
+            self.assertEqual([diagnostic["code"] for diagnostic in tracked_diagnostics], ["E741"])
+            for path, diagnostics in ((ambiguous_path, project_diagnostics), (bypass_path, tracked_diagnostics)):
+                diagnostic = diagnostics[0]
+                self.assertIsInstance(diagnostic["filename"], str)
+                self.assertEqual(Path(cast(str, diagnostic["filename"])).resolve(), path.resolve())
+                self.assertEqual(diagnostic["location"], {"row": 1, "column": 1})
 
     def test_dependabot_updates_actions_weekly_and_pip_security_only(self) -> None:
         dependabot = (

@@ -4212,6 +4212,7 @@ class TestCIWorkflows(unittest.TestCase):
                         (
                             f"coverage=={COVERAGE_VERSION}",
                             f"packaging=={PACKAGING_VERSION}",
+                            f"ruff=={RUFF_VERSION}",
                         ),
                     ): 1,
                     (MACOS_CONSTRAINT, ("pip",)): 1,
@@ -6077,18 +6078,31 @@ class TestCIWorkflows(unittest.TestCase):
             "            -r requirements.txt",
             linux_job,
         )
-        self.assertIn(
+        tooling_install = (
             f"python {PIP_HARDENED_INSTALL_FRAGMENT} --no-cache-dir --only-binary=:all: \\\n"
             f"            --constraint {LINUX_CONSTRAINT} \\\n"
             f"            coverage=={COVERAGE_VERSION} \\\n"
-            f"            packaging=={PACKAGING_VERSION}",
-            linux_job,
+            f"            packaging=={PACKAGING_VERSION} \\\n"
+            f"            ruff=={RUFF_VERSION}"
+        )
+        self.assertIn(tooling_install, linux_job)
+        dependency_step = linux_job[
+            linux_job.index("      - name: Install and verify test dependencies"):
+            linux_job.index("      - name: Run required native receipt gate")
+        ]
+        self.assertEqual(dependency_step.count("--require ruff"), 1)
+        dependency_verifier = "python scripts/verify_dependency_environment.py"
+        self.assertLess(dependency_step.index(tooling_install), dependency_step.index(dependency_verifier))
+        self.assertLess(
+            linux_job.index(dependency_verifier),
+            linux_job.index("python -m scripts.run_required_unittest"),
         )
         self.assertIn("--require coverage", linux_job)
         self.assertIn("--require packaging", linux_job)
         coverage_test_command = (
             "python -m coverage run -m unittest discover tests/ -v"
         )
+        self.assertLess(linux_job.index(dependency_verifier), linux_job.index(coverage_test_command))
         self.assertEqual(linux_job.count(coverage_test_command), 1)
         self.assertEqual(linux_job.count("unittest discover tests/ -v"), 1)
         self.assertIn(

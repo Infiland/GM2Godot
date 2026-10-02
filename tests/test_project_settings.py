@@ -838,7 +838,7 @@ class TestConvertIconFallback(unittest.TestCase):
 
         self.assertTrue(result)
         self.assertTrue(os.path.exists(os.path.join(self.godot_dir, 'icon.png')))
-        fallback_logs = [l for l in self.logs if 'windows' in l]
+        fallback_logs = [log for log in self.logs if 'windows' in log]
         self.assertTrue(len(fallback_logs) > 0, "Should log which platform was used as fallback")
 
     def test_uses_selected_platform_when_available(self) -> None:
@@ -848,7 +848,7 @@ class TestConvertIconFallback(unittest.TestCase):
         result = converter.convert_icon()
 
         self.assertTrue(result)
-        fallback_logs = [l for l in self.logs if 'Fallback' in l or 'instead' in l]
+        fallback_logs = [log for log in self.logs if 'Fallback' in log or 'instead' in log]
         self.assertEqual(len(fallback_logs), 0, "Should not fall back when selected platform has icons")
 
     def test_returns_false_when_no_platform_has_icons(self) -> None:

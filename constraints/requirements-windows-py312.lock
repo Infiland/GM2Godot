@@ -86,8 +86,10 @@ shiboken6==6.11.1
     #   pyside6-essentials
 typing-extensions==4.16.0
     # via pyright
-urllib3==2.7.0
-    # via requests
+urllib3==2.8.0
+    # via
+    #   -r requirements.txt
+    #   requests
 wheel==0.47.0
     # via pip-tools
 

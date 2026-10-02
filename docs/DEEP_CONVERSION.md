@@ -8,6 +8,10 @@ Open **Settings → Deep setup**, download the compatible components, and select
 
 Choose an existing Codex, Claude Code or OpenCode installation, or an API provider. The setup panel can install a pinned official OpenCode binary privately in GM2Godot's application data. Existing global installations and settings remain untouched. Application-managed API keys use the OS keyring; coding agents can use their existing sign-in.
 
+For **Codex**, Deep first checks your system PATH, then common installation locations and the CLI bundled with the ChatGPT or Codex desktop app. **Codex executable (optional)** selects a custom installation; an invalid explicit path is reported instead of silently selecting another installation. Refresh models to see the detected executable and sign-in status. If sign-in is required, run that installation's `codex login` and refresh again. Codex manages its existing ChatGPT or API key credentials and token refresh. GM2Godot does not copy them or ask for an API key for this runtime. ChatGPT plan limits apply to subscription usage; API key sign-in uses API billing. See [OpenAI's authentication guide](https://learn.chatgpt.com/docs/auth).
+
+The **Codex configured provider** choice retains the provider configured in Codex. Advanced custom provider IDs still select that provider explicitly. Deep uses a temporary working directory and disables Codex hooks, plugins and notifications. It disables the MCP servers configured when it prepares each session; Codex can reload settings, so avoid changing MCP configuration during a Deep run. Discovery sends no project files and performs no inference. Select a discovered model before starting research.
+
 **Automatic · Free models** checks current OpenCode Zen pricing and evaluates up to five eligible models against four small conversion cases. It selects the best passing result for each role on that evaluation, with no paid fallback. Free availability and data-use terms can change: see [OpenCode Zen](https://opencode.ai/docs/zen/). If pricing or credentials cannot be verified, or no candidate passes, research pauses.
 
 Research defaults to four workers, capped at one for free providers. Both limits are adjustable from 1–32. Token, time and available monetary usage limits are configurable. Native coding agents do not always report cost or support an exact response-token ceiling; reported usage and unknown usage remain distinct.
@@ -56,6 +60,16 @@ python main.py deep resume --job /path/printed/by/research --max-tokens 2000000 
 ```
 
 Research stops for review; inspect `research.md` in the printed job directory before `convert`. `--reuse-baseline` researches an existing baseline. API credentials can be read from standard input using `deep configure --api-key-stdin`; do not put secrets in command arguments or job files.
+
+To use your Codex account, first select Codex and discover models, then replace `MODEL_ID` with one of the returned model IDs:
+
+```sh
+python main.py deep configure --runtime codex --provider codex --allow-paid
+python main.py deep models
+python main.py deep configure --model MODEL_ID
+```
+
+`--allow-paid` opts out of the OpenCode-only free policy; it does not change your Codex sign-in method. Add `--executable "/path with spaces/codex"` for a custom install, or `--executable ""` to restore automatic detection. Codex API key sign-in is configured through Codex itself rather than `--api-key-stdin`.
 
 ## Development and release
 

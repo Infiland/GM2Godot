@@ -18,6 +18,31 @@ from src.deep.settings import DeepSettings, load_settings, save_settings
 
 
 class DeepClientTests(unittest.TestCase):
+    def test_custom_codex_executable_survives_settings_and_job_roundtrips(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            settings = DeepSettings(runtime="codex", provider="codex", model="discovered", freeOnly=False,
+                                    executable="/custom installation/bin/codex")
+            save_settings(settings, root)
+            self.assertEqual(load_settings(root), settings)
+            job = DeepJob(root / "jobs" / "one", "/source", "/baseline", root / "v1", settings, "paused")
+            job.save()
+            self.assertEqual(pending_jobs(root)[0].settings.executable, settings.executable)
+            self.assertEqual(settings.to_dict()["executable"], settings.executable)
+
+    def test_executable_defaults_to_detection_and_rejects_invalid_paths(self) -> None:
+        self.assertIsNone(DeepSettings().executable)
+        self.assertIsNone(DeepSettings().to_dict()["executable"])
+        for executable in ("", "   ", "codex\x00extra"):
+            with self.subTest(executable=executable):
+                with self.assertRaisesRegex(ValueError, "executable"):
+                    DeepSettings(executable=executable).validate()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "settings.json").write_text('{"executable":123}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "executable"):
+                load_settings(root)
+
     def test_default_free_settings_and_persistence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

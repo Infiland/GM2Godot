@@ -23,6 +23,36 @@ def go_catalog(*, authenticated: bool | None = True, resume: bool = True) -> Mod
 
 
 class DiscoveryTests(unittest.TestCase):
+    def test_codex_discovery_metadata_is_optional_and_type_checked(self) -> None:
+        catalog = parse_catalog({"provider": {
+            "runtime": "codex", "installed": True, "authenticated": True,
+            "executable": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+            "installationSource": "desktop", "authMode": "chatgpt", "discoveryStatus": "ready",
+            "models": [{"id": "discovered", "provider": "codex", "providerName": "Codex configured provider"}],
+        }}, "codex")
+        self.assertEqual(catalog.auth_mode, "chatgpt")
+        self.assertEqual(catalog.installation_source, "desktop")
+        self.assertEqual(catalog.discovery_status, "ready")
+        self.assertTrue(catalog.executable and catalog.executable.endswith("/codex"))
+        self.assertEqual(catalog.models[0].provider, "codex")
+        invalid = parse_catalog({"provider": {"executable": {}, "installationSource": [], "authMode": 123,
+                                               "discoveryStatus": False}}, "codex")
+        self.assertIsNone(invalid.executable)
+        self.assertIsNone(invalid.installation_source)
+        self.assertIsNone(invalid.auth_mode)
+        self.assertIsNone(invalid.discovery_status)
+
+    def test_custom_codex_discovery_forwards_path_without_project_source(self) -> None:
+        settings = DeepSettings(runtime="codex", provider="codex", model="discovered", freeOnly=False,
+                                executable="/custom installation/bin/codex")
+        with patch("src.deep.models.ExtensionManager"), patch("src.deep.models.DeepSession") as session, patch("src.deep.models.credential_environment", return_value={}), patch("src.deep.models.opencode_path", return_value=None):
+            session.return_value.request.return_value = {"result": {"provider": {"installed": True, "models": []}}}
+            discover_models(settings)
+            params = session.return_value.request.call_args.args[1]
+            self.assertEqual(set(params), {"settings"})
+            self.assertEqual(params["settings"]["executable"], settings.executable)
+            session.return_value.close.assert_called_once()
+
     def test_legacy_metadata_cannot_claim_free_or_connected(self) -> None:
         catalog = parse_catalog({"provider": {"installed": True, "models": [
             {"id": "free-example", "name": "Free example"},
@@ -84,6 +114,38 @@ class ModelPickerTests(unittest.TestCase):
         self.assertEqual((result.provider, result.model), ("opencode-go", "deepseek-v4.1-flash"))
         self.assertFalse(result.freeOnly)
         picker.close()
+
+    def test_codex_picker_keeps_custom_path_and_reports_chatgpt_signin(self) -> None:
+        settings = DeepSettings(runtime="codex", provider="codex", model="saved", freeOnly=False,
+                                executable="/custom installation/bin/codex")
+        picker = DeepModelPicker(settings, auto_discover=False)
+        picker.set_catalog(ModelCatalog(
+            (DiscoveredModel("saved", "Saved", "codex", "Codex configured provider", True),),
+            True, True, "Existing account reused", True,
+            executable=settings.executable, installation_source="explicit", auth_mode="chatgpt", discovery_status="ready",
+        ))
+        self.assertEqual(picker.apply_to(settings), settings)
+        self.assertIn("Signed in with ChatGPT", picker.status.text())
+        self.assertIn(settings.executable or "", picker.status.text())
+        self.assertEqual(picker.provider.currentText(), "Codex configured provider")
+        picker.executable.setText("/different installation/codex")
+        self.assertIn("Refresh models", picker.status.text())
+        self.assertEqual(picker.apply_to(settings).executable, "/different installation/codex")
+        self.assertEqual(settings.executable, "/custom installation/bin/codex")
+        picker.close()
+
+    def test_changing_runtime_discards_the_previous_executable(self) -> None:
+        settings = DeepSettings(runtime="codex", provider="codex", model="saved", freeOnly=False,
+                                executable="/custom installation/bin/codex")
+        def no_discovery(_picker: DeepModelPicker) -> None:
+            pass
+
+        with patch.object(DeepModelPicker, "refresh", no_discovery):
+            picker = DeepModelPicker(settings, auto_discover=False)
+            picker.runtime.setCurrentText("claude")
+            self.assertIsNone(picker.apply_to(settings).executable)
+            self.assertTrue(picker.executable.isHidden())
+            picker.close()
 
     def test_free_policy_is_not_switched_by_discovery(self) -> None:
         settings = DeepSettings()

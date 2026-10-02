@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3 - 2026-10-02
+
+- Detect local Codex installations for Deep conversion, including desktop app and common installation locations when the GUI has a minimal PATH, and allow a custom executable in setup, saved jobs and CLI preferences.
+- Reuse Codex-managed ChatGPT or API key sign-in, show detected installation and account status, preserve the configured model provider, and disable Codex hooks, plugins, notifications and saved MCP servers for Deep sessions.
+
 ## 0.8.2 - 2026-10-02
 
 - Reject non-object path resource rereads with a source-specific input error before writing any path output, while preserving skipped null, malformed and unreadable sources and existing conversion behavior.

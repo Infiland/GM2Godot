@@ -37,6 +37,26 @@ class DeepCliOutcomeTests(unittest.TestCase):
 
 
 class DeepCliSetupTests(unittest.TestCase):
+    def test_configure_custom_codex_path_then_restore_auto_detection(self) -> None:
+        settings = DeepSettings()
+        with patch("src.deep_cli.load_settings", return_value=settings), patch("src.deep_cli.save_settings") as save:
+            self.assertEqual(main(["configure", "--runtime", "codex", "--provider", "codex", "--model", "discovered",
+                                   "--allow-paid", "--executable", "/custom installation/codex"]), 0)
+            self.assertEqual(save.call_args.args[0].executable, "/custom installation/codex")
+            self.assertFalse(settings.freeOnly)
+            self.assertEqual(main(["configure", "--executable", ""]), 0)
+            self.assertIsNone(save.call_args.args[0].executable)
+            settings.executable = "/custom installation/codex"
+            self.assertEqual(main(["configure", "--runtime", "claude", "--provider", "claude"]), 0)
+            self.assertIsNone(save.call_args.args[0].executable)
+
+    def test_codex_configure_never_imports_an_api_key(self) -> None:
+        settings = DeepSettings(runtime="codex", provider="codex", model="discovered", freeOnly=False)
+        with patch("src.deep_cli.load_settings", return_value=settings), patch("src.deep_cli.save_settings") as save, patch("src.deep_cli.save_credential") as credential:
+            self.assertEqual(main(["configure", "--api-key-stdin"]), 1)
+            credential.assert_not_called()
+            save.assert_not_called()
+
     def test_discovery_uses_saved_settings_and_managed_opencode(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             manager = MagicMock()

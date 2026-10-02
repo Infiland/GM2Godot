@@ -33,6 +33,10 @@ class ModelCatalog:
     authenticated: bool | None
     reason: str
     resume_model_selection: bool = False
+    executable: str | None = None
+    installation_source: str | None = None
+    auth_mode: str | None = None
+    discovery_status: str | None = None
 
 
 def parse_catalog(result: dict[str, Any], provider: str) -> ModelCatalog:
@@ -68,8 +72,16 @@ def parse_catalog(result: dict[str, Any], provider: str) -> ModelCatalog:
             free_eligible=owner == "opencode" and raw.get("freeEligible") is True,
             available=raw.get("available") is not False and raw.get("toolcall") is not False,
         ))
-    return ModelCatalog(tuple(models), capability.get("installed") is True, authenticated, str(capability.get("reason") or ""),
-                        isinstance(result.get("features"), dict) and result["features"].get("resumeModelSelection") is True)
+    def optional_text(key: str) -> str | None:
+        value = capability.get(key)
+        return value if isinstance(value, str) and value else None
+
+    return ModelCatalog(
+        tuple(models), capability.get("installed") is True, authenticated, str(capability.get("reason") or ""),
+        isinstance(result.get("features"), dict) and result["features"].get("resumeModelSelection") is True,
+        executable=optional_text("executable"), installation_source=optional_text("installationSource"),
+        auth_mode=optional_text("authMode"), discovery_status=optional_text("discoveryStatus"),
+    )
 
 
 def preferred_go_model(catalog: ModelCatalog, free_only: bool) -> DiscoveredModel | None:

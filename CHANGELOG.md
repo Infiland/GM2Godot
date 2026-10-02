@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.13 - 2026-10-03
+
+- Verify every bundled macOS native binary and internal link across the app, ZIP, and DMG before upload; require the selected thin architecture and exact macOS 15.0 minimum policy.
+- Bound archive inspection and private DMG copying, retain physical input bindings, and synchronize the installation guide’s GUI version example.
+
 ## 0.8.12 - 2026-10-02
 
 - Enforce Ruff's complete E7 correctness family and replace assigned callbacks with typed functions while preserving provider binding and artifact mode restoration.

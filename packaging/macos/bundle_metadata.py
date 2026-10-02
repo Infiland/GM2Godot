@@ -7,9 +7,15 @@ import stat
 from typing import Final
 
 
-__all__ = ("BUNDLE_IDENTIFIER", "load_release_version", "load_bundle_metadata")
+__all__ = (
+    "BUNDLE_IDENTIFIER",
+    "MINIMUM_SYSTEM_VERSION",
+    "load_release_version",
+    "load_bundle_metadata",
+)
 
 BUNDLE_IDENTIFIER: Final = "land.infi.gm2godot"
+MINIMUM_SYSTEM_VERSION: Final = "15.0"
 
 _MAX_VERSION_SOURCE_BYTES: Final = 16 * 1024
 _RELEASE_VERSION_PATTERN: Final = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)")
@@ -161,4 +167,5 @@ def load_bundle_metadata(source_root: Path) -> dict[str, str]:
         "CFBundleIdentifier": BUNDLE_IDENTIFIER,
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
+        "LSMinimumSystemVersion": MINIMUM_SYSTEM_VERSION,
     }

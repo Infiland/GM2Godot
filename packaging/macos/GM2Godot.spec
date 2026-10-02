@@ -74,5 +74,8 @@ app = BUNDLE(
     icon=str(_SOURCE_ROOT / "img" / "Logo.png"),
     bundle_identifier=_BUNDLE_METADATA["CFBundleIdentifier"],
     version=_BUNDLE_METADATA["CFBundleShortVersionString"],
-    info_plist={"CFBundleVersion": _BUNDLE_METADATA["CFBundleVersion"]},
+    info_plist={
+        "CFBundleVersion": _BUNDLE_METADATA["CFBundleVersion"],
+        "LSMinimumSystemVersion": _BUNDLE_METADATA["LSMinimumSystemVersion"],
+    },
 )

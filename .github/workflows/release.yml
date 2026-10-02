@@ -978,7 +978,11 @@ jobs:
       - name: Zip release
         run: |
           cd release
-          7z a ../GM2Godot-${{ matrix.name }}.zip .
+          if [ "${{ matrix.name }}" = "macos" ]; then
+            7z a -snl ../GM2Godot-${{ matrix.name }}.zip .
+          else
+            7z a ../GM2Godot-${{ matrix.name }}.zip .
+          fi
 
       - name: Verify packaged Linux GUI
         if: matrix.name == 'linux'
@@ -1008,7 +1012,8 @@ jobs:
             --source-root "$GITHUB_WORKSPACE" \
             --app "$GITHUB_WORKSPACE/dist/GM2Godot.app" \
             --zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip" \
-            --dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg"
+            --dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg" \
+            --expected-architecture "${{ matrix.expected_machine }}"
 
       - name: Upload artifact
         if: matrix.name != 'macos'

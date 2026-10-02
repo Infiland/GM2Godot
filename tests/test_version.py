@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_8_12(self) -> None:
-        self.assertEqual(get_version(), "0.8.12")
+    def test_release_version_is_0_8_13(self) -> None:
+        self.assertEqual(get_version(), "0.8.13")
 
     def test_release_surfaces_match_source_version(self) -> None:
         version_source = (PROJECT_ROOT / "src" / "version.py").read_text(
@@ -100,6 +100,13 @@ class TestVersion(unittest.TestCase):
                     content.count(wiki_banner),
                     1,
                 )
+                if page_name == "Installation.md":
+                    self.assertIn(
+                        "After launch, confirm that the title bar or "
+                        "**Help → About GM2Godot** shows version "
+                        f"`{current_version}`.",
+                        content,
+                    )
         self.assertIn(
             "GM2Godot targets GameMaker LTS 2026 source projects and "
             "Godot 4.7.2 output.",

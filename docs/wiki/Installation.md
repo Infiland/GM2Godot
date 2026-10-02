@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.12 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.13 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -15,7 +15,7 @@ Download the asset for your operating system from [GitHub Releases](https://gith
 | Operating system | Release asset | Launch |
 | --- | --- | --- |
 | Windows | `GM2Godot-windows.zip` | Extract the archive, then run `GM2Godot.exe`. |
-| macOS | `GM2Godot-macos.dmg` or `GM2Godot-macos.zip` | Open the DMG and copy `GM2Godot.app` to Applications, or extract the ZIP and launch the app. |
+| macOS 15.0+ on Apple Silicon (arm64) | `GM2Godot-macos.dmg` or `GM2Godot-macos.zip` | Open the DMG and copy `GM2Godot.app` to Applications, or extract the ZIP and launch the app. |
 | Linux | `GM2Godot-linux.zip` | On the validated Ubuntu 24.04 x86_64 baseline, extract the archive and run `./GM2Godot`. If the executable bit was lost during download or extraction, run `chmod +x GM2Godot` once. |
 
 Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. PyInstaller does not bundle glibc, so glibc 2.39 is necessary; it is not by itself a portability guarantee for other distributions, which remain unverified and must also provide compatible system, OpenGL/EGL, and X11 libraries. The reviewed package manifest installs Ubuntu's `libegl1` and `libgl1` providers required by QtGui together with the XCB client libraries. The build rejects unresolved shared-library warnings and launches the executable extracted from the final ZIP through Qt's real `qxcb` platform under Xvfb before upload. A normal graphical X11 session, or XWayland when using a Wayland desktop, is still required at runtime.
@@ -46,7 +46,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.11`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.13`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 ## Run from source
 
@@ -148,6 +148,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.12`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.13`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

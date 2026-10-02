@@ -6457,6 +6457,27 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(module=module):
                 self.assertIn(module, macos_job)
 
+        for included_test in (
+            "test_project_lock_released_after_early_interruption",
+            "test_project_lock_release_failure_preserves_early_error",
+            "test_project_lock_release_is_once_for_lifecycle_returns",
+            "test_project_lock_acquisition_failure_does_not_release",
+            "test_project_lock_release_ignores_caller_exception_context",
+            "test_project_lock_released_after_stage_cleanup_interruption",
+            "test_project_lock_rejects_concurrent_included_files_transaction",
+            "test_project_lock_initialization_recovers_after_hard_exit",
+            "test_project_lock_cleanup_tombstone_recovers_after_hard_exit",
+            "test_project_lock_concurrent_initializers_publish_once",
+            "test_subprocess_interruption_recovers_every_publication_boundary",
+            "test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary",
+        ):
+            with self.subTest(included_test=included_test):
+                self.assertIn(
+                    "tests.test_included_files."
+                    "TestIncludedFilesManagedRootTransaction." + included_test,
+                    macos_job,
+                )
+
     def test_godot_workflows_pin_exact_supported_version(self) -> None:
         workflow_names = ("godot-smoke.yml", "tcc-conversion-test.yml")
 

@@ -2911,6 +2911,313 @@ IncludedFilesConverter(
             env=environment,
         )
 
+    def _assert_project_lock_can_be_reacquired(self) -> None:
+        project_identity = (
+            included_files_module._ensure_included_output_project_root(
+                self.godot_dir
+            )
+        )
+        project_lock = included_files_module._acquire_included_project_lock(
+            self.godot_dir,
+            project_identity,
+        )
+        included_files_module._release_included_project_lock(project_lock)
+
+    def _assert_early_failure_releases_project_lock(
+        self,
+        phase: str,
+        primary_error: BaseException,
+        release_error: BaseException | None = None,
+    ) -> None:
+        previous_pair = self._pair_snapshot()
+        converter = self._converter(max_workers=1)
+        diagnostics = DiagnosticCollector()
+        converter.diagnostics = diagnostics
+        original_release = included_files_module._release_included_project_lock
+
+        def release_then_fail(
+            project_lock: included_files_module._IncludedProjectLock,
+        ) -> None:
+            original_release(project_lock)
+            with self.assertRaises(OSError):
+                os.fstat(project_lock.file_descriptor)
+            if release_error is not None:
+                raise release_error
+
+        with (
+            patch.object(
+                included_files_module,
+                phase,
+                side_effect=primary_error,
+            ),
+            patch.object(
+                included_files_module,
+                "_release_included_project_lock",
+                side_effect=release_then_fail,
+            ) as release_lock,
+            patch.object(
+                included_files_module,
+                "_create_included_output_stage",
+                side_effect=AssertionError("early failure staged output"),
+            ) as create_stage,
+        ):
+            with self.assertRaises(type(primary_error)) as caught:
+                converter.convert_all()
+
+        self.assertIs(caught.exception, primary_error)
+        release_lock.assert_called_once()
+        create_stage.assert_not_called()
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self._assert_no_transaction_debris()
+        self._assert_project_lock_can_be_reacquired()
+
+        ordinary_failure = isinstance(primary_error, Exception)
+        self.assertEqual(
+            converter.conversion_step_result().resources.failed,
+            int(ordinary_failure),
+        )
+        rejections = tuple(
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-INCLUDED-FILE-OUTPUT-REJECTED"
+        )
+        expected_rejection = (
+            ordinary_failure and phase != "_recover_included_output_set"
+        )
+        self.assertEqual(len(rejections), int(expected_rejection))
+        if expected_rejection:
+            self.assertEqual(rejections[0].resource, "payload.txt")
+            self.assertIn(str(primary_error), rejections[0].message)
+        if release_error is not None:
+            self.assertIn(
+                "Included Files transaction lock release failed: "
+                + str(release_error),
+                getattr(primary_error, "__notes__", ()),
+            )
+
+    def test_project_lock_released_after_early_interruption(self) -> None:
+        self._write("payload.txt", "previous generation")
+        self._converter(max_workers=1).convert_all()
+        self._write("payload.txt", "new generation")
+        for phase in (
+            "_recover_included_output_set",
+            "_capture_included_tree",
+            "_capture_included_registry",
+        ):
+            for error_type in (KeyboardInterrupt, SystemExit, RuntimeError):
+                with self.subTest(phase=phase, error=error_type.__name__):
+                    self._assert_early_failure_releases_project_lock(
+                        phase,
+                        error_type("early interruption"),
+                    )
+
+    def test_project_lock_release_failure_preserves_early_error(self) -> None:
+        self._write("payload.txt", "previous generation")
+        self._converter(max_workers=1).convert_all()
+        self._write("payload.txt", "new generation")
+        for phase in (
+            "_recover_included_output_set",
+            "_capture_included_tree",
+            "_capture_included_registry",
+        ):
+            for primary_type in (KeyboardInterrupt, SystemExit, RuntimeError):
+                for release_type in (
+                    OSError,
+                    RuntimeError,
+                    KeyboardInterrupt,
+                    SystemExit,
+                ):
+                    with self.subTest(
+                        phase=phase,
+                        primary=primary_type.__name__,
+                        release=release_type.__name__,
+                    ):
+                        self._assert_early_failure_releases_project_lock(
+                            phase,
+                            primary_type("primary interruption"),
+                            release_type("secondary release failure"),
+                        )
+
+    def test_project_lock_release_is_once_for_lifecycle_returns(self) -> None:
+        self._write("payload.txt", "initial generation")
+        for outcome in ("success", "unchanged", "cancelled"):
+            with self.subTest(outcome=outcome):
+                self.running.set()
+                converter = self._converter(max_workers=1)
+                previous_pair = (
+                    None if outcome == "success" else self._pair_snapshot()
+                )
+                if outcome == "cancelled":
+                    self._write("payload.txt", "cancelled generation")
+                original_release = (
+                    included_files_module._release_included_project_lock
+                )
+
+                def release_and_check_closed(
+                    project_lock: included_files_module._IncludedProjectLock,
+                ) -> None:
+                    original_release(project_lock)
+                    with self.assertRaises(OSError):
+                        os.fstat(project_lock.file_descriptor)
+
+                def cancel_copy(*_arguments: object) -> None:
+                    self.running.clear()
+
+                with ExitStack() as context:
+                    release_lock = context.enter_context(
+                        patch.object(
+                            included_files_module,
+                            "_release_included_project_lock",
+                            side_effect=release_and_check_closed,
+                        )
+                    )
+                    if outcome == "cancelled":
+                        context.enter_context(
+                            patch.object(
+                                converter,
+                                "_process_file",
+                                side_effect=cancel_copy,
+                            )
+                        )
+                    converter.convert_all()
+
+                release_lock.assert_called_once()
+                if previous_pair is not None:
+                    self.assertEqual(self._pair_snapshot(), previous_pair)
+                self.assertEqual(
+                    converter.conversion_step_result().resources,
+                    ConversionCounts(
+                        requested=1,
+                        executed=int(outcome != "cancelled"),
+                        completed=int(outcome != "cancelled"),
+                        skipped=int(outcome == "cancelled"),
+                    ),
+                )
+                self._assert_no_transaction_debris()
+                self._assert_project_lock_can_be_reacquired()
+
+    def test_project_lock_acquisition_failure_does_not_release(self) -> None:
+        self._write("payload.txt", "payload")
+        for error_type in (OSError, KeyboardInterrupt, SystemExit):
+            with self.subTest(error=error_type.__name__):
+                primary_error = error_type("acquisition failed")
+                converter = self._converter(max_workers=1)
+                with (
+                    patch.object(
+                        included_files_module,
+                        "_acquire_included_project_lock",
+                        side_effect=primary_error,
+                    ),
+                    patch.object(
+                        included_files_module,
+                        "_release_included_project_lock",
+                    ) as release_lock,
+                ):
+                    with self.assertRaises(error_type) as caught:
+                        converter.convert_all()
+                self.assertIs(caught.exception, primary_error)
+                release_lock.assert_not_called()
+                self.assertEqual(
+                    converter.conversion_step_result().resources.failed,
+                    int(isinstance(primary_error, Exception)),
+                )
+
+    def test_project_lock_release_ignores_caller_exception_context(self) -> None:
+        for release_type in (OSError, RuntimeError, KeyboardInterrupt, SystemExit):
+            with self.subTest(release=release_type.__name__):
+                self._write("payload.txt", release_type.__name__)
+                converter = self._converter(max_workers=1)
+                messages: list[str] = []
+                converter.log_callback = messages.append
+                caller_error = RuntimeError("unrelated caller failure")
+                release_error = release_type("release failed after success")
+                original_release = (
+                    included_files_module._release_included_project_lock
+                )
+
+                def release_then_fail(
+                    project_lock: included_files_module._IncludedProjectLock,
+                ) -> None:
+                    original_release(project_lock)
+                    raise release_error
+
+                try:
+                    raise caller_error
+                except RuntimeError:
+                    with patch.object(
+                        included_files_module,
+                        "_release_included_project_lock",
+                        side_effect=release_then_fail,
+                    ) as release_lock:
+                        if release_type is OSError:
+                            converter.convert_all()
+                        else:
+                            with self.assertRaises(release_type) as caught:
+                                converter.convert_all()
+                            self.assertIs(caught.exception, release_error)
+
+                release_lock.assert_called_once()
+                self.assertEqual(getattr(caller_error, "__notes__", ()), ())
+                warnings = tuple(
+                    message
+                    for message in messages
+                    if message.startswith(
+                        "Warning: Included Files transaction lock release failed: "
+                    )
+                )
+                self.assertEqual(len(warnings), int(release_type is OSError))
+                self._assert_no_transaction_debris()
+                self._assert_project_lock_can_be_reacquired()
+
+    def test_project_lock_released_after_stage_cleanup_interruption(self) -> None:
+        self._write("payload.txt", "previous generation")
+        converter = self._converter(max_workers=1)
+        converter.convert_all()
+        previous_pair = self._pair_snapshot()
+        self._write("payload.txt", "new generation")
+        primary_error = SystemExit("stage cleanup interrupted")
+        release_error = KeyboardInterrupt("release interrupted")
+        original_release = included_files_module._release_included_project_lock
+        original_remove = included_files_module._remove_owned_included_tree
+
+        def cancel_copy(*_arguments: object) -> None:
+            self.running.clear()
+
+        def release_then_fail(
+            project_lock: included_files_module._IncludedProjectLock,
+        ) -> None:
+            original_release(project_lock)
+            raise release_error
+
+        with (
+            patch.object(converter, "_process_file", side_effect=cancel_copy),
+            patch.object(
+                included_files_module,
+                "_remove_owned_included_tree",
+                side_effect=primary_error,
+            ) as remove_stage,
+            patch.object(
+                included_files_module,
+                "_release_included_project_lock",
+                side_effect=release_then_fail,
+            ) as release_lock,
+        ):
+            with self.assertRaises(SystemExit) as caught:
+                converter.convert_all()
+
+        self.assertIs(caught.exception, primary_error)
+        release_lock.assert_called_once()
+        remove_stage.assert_called_once()
+        self.assertIsNone(converter._active_output_project_path)
+        self.assertEqual(self._pair_snapshot(), previous_pair)
+        self.assertIn(
+            "Included Files transaction lock release failed: " + str(release_error),
+            getattr(primary_error, "__notes__", ()),
+        )
+        original_remove(*remove_stage.call_args.args, **remove_stage.call_args.kwargs)
+        self._assert_no_transaction_debris()
+        self._assert_project_lock_can_be_reacquired()
+
     def test_project_lock_rejects_concurrent_included_files_transaction(
         self,
     ) -> None:

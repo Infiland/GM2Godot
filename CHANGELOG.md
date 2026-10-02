@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.5 - 2026-10-02
+
+- Release the Included Files project lock after interrupted recovery or snapshot capture, preserving the original failure when lock release also fails.
+
 ## 0.8.4 - 2026-10-02
 
 - Pin urllib3 2.8.0 for runtime installs and refresh native dependency locks to fix the proxy TLS handling, chunked response buffering and deflate decoding vulnerabilities reported by Dependabot.

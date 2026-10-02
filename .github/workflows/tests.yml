@@ -173,6 +173,18 @@ jobs:
           tests.test_stale_managed_output_invalidation
           tests.test_cli
           tests.test_gui_conversion_outcomes
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_released_after_early_interruption
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_release_failure_preserves_early_error
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_release_is_once_for_lifecycle_returns
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_acquisition_failure_does_not_release
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_release_ignores_caller_exception_context
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_released_after_stage_cleanup_interruption
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_rejects_concurrent_included_files_transaction
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_initialization_recovers_after_hard_exit
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_cleanup_tombstone_recovers_after_hard_exit
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_project_lock_concurrent_initializers_publish_once
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary
+          tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary
 
   windows-artifact-transactions:
     runs-on: windows-2025

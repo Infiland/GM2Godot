@@ -825,7 +825,7 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         self.assertIn("s_valid2", converted)
         self.assertNotIn("s_orphan", converted)
 
-        skipped_logs = [l for l in self.logs if "s_orphan" in l]
+        skipped_logs = [log for log in self.logs if "s_orphan" in log]
         self.assertTrue(len(skipped_logs) > 0, "Expected a log message about skipped orphan sprite")
 
     def test_converts_all_when_all_in_yyp(self):
@@ -844,7 +844,7 @@ class TestSpriteConverterFiltering(unittest.TestCase):
         self.assertIn("s_a", converted)
         self.assertIn("s_b", converted)
 
-        skipped_logs = [l for l in self.logs if "orphaned" in l.lower() and ("s_a" in l or "s_b" in l)]
+        skipped_logs = [log for log in self.logs if "orphaned" in log.lower() and ("s_a" in log or "s_b" in log)]
         self.assertEqual(len(skipped_logs), 0, "No real sprites should be skipped")
 
     def test_converts_all_when_yyp_missing(self):

@@ -236,8 +236,8 @@ class TestFontConverterSystemFont(unittest.TestCase):
     def test_logs_info_for_missing_font(self):
         converter = self._make_converter()
         converter.convert_all()
-        info_logs = [l for l in self.logs if l.startswith("Info:")]
-        warnings = [l for l in self.logs if l.startswith("Warning:")]
+        info_logs = [log for log in self.logs if log.startswith("Info:")]
+        warnings = [log for log in self.logs if log.startswith("Warning:")]
         self.assertTrue(info_logs,
                         "Expected an informational fallback log when font is not found on system")
         self.assertEqual(warnings, [])
@@ -403,8 +403,8 @@ class TestFontConverterTTFMissing(unittest.TestCase):
         with open(tres_path, "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn('PackedStringArray("NonExistentTestFont99999")', content)
-        fallback_logs = [l for l in self.logs if l.startswith("Info:")]
-        warning_logs = [l for l in self.logs if l.startswith("Warning:")]
+        fallback_logs = [log for log in self.logs if log.startswith("Info:")]
+        warning_logs = [log for log in self.logs if log.startswith("Warning:")]
         self.assertTrue(fallback_logs)
         self.assertEqual(warning_logs, [])
 

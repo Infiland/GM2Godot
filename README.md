@@ -128,12 +128,12 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.8.16`.
+Current source version: `0.8.17`.
 
-The latest published release remains `0.8.15`. Current macOS CI builds produce separate native arm64 and x86_64 ZIP/DMG artifacts; public release publication is disabled until issue #857 adds the architecture-aware release contract.
+Source `0.8.17` uses a seven-asset release contract: Linux and Windows ZIPs, separate native macOS arm64 and x86_64 ZIP/DMG pairs, and `SHA256SUMS`. Publication follows the merged `main` build and release gates. Until that release is published, the latest published release remains `0.8.15`, whose generic Mac assets support arm64 only.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
-The macOS downloads require macOS 15.0 or later on Apple Silicon (arm64).
+The new macOS pairs require macOS 15.0 or later: `GM2Godot-macos-arm64.zip` and `GM2Godot-macos-arm64.dmg` for Apple Silicon, or `GM2Godot-macos-x86_64.zip` and `GM2Godot-macos-x86_64.dmg` for Intel. Developer ID signing and notarization remain pending in issue #737; checksums and native GUI validation do not establish Gatekeeper trust.
 The packaged Linux artifact is validated on Ubuntu 24.04 x86_64. Its glibc 2.39 requirement is necessary but does not make other distributions a validated target; they must also supply compatible system, OpenGL/EGL, and X11 libraries. The reviewed Linux package manifest installs Ubuntu's `libegl1` and `libgl1` providers for QtGui together with the required XCB client libraries. The release job rejects unresolved-library warnings, extracts the final ZIP, and proves that its GUI reaches the event loop through the real `qxcb` platform under Xvfb before upload.
 
 On a minimal Ubuntu 24.04 installation, install the reviewed host libraries before launching the downloaded Linux executable:
@@ -146,8 +146,10 @@ sudo apt-get install --yes --no-install-recommends \
   libxcb-util1 libxcb-xkb1
 ```
 
-Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.
-When an exact version tag already exists, a release-workflow rerun now audits the published release, exact five-asset inventory, GitHub digests, downloaded bytes, checksum manifest, and stable tag/release receipt before accepting the run as a build-and-publication no-op.
+Releases starting with 0.7.14 include `SHA256SUMS` so downloaded bytes can be checked independently. The `0.8.17` contract has six payload rows in lexical filename order and seven uploaded assets including the manifest; the historical `0.8.15` release has four payload rows and five assets.
+When an exact version tag already exists, a release-workflow rerun audits the published release against the current seven-asset contract, GitHub digests, all downloaded bytes, checksum manifest, and stable tag/release receipt before accepting the run as a build-and-publication no-op. Preserve earlier releases and their dated verification evidence rather than changing their inventories.
+
+On macOS, the updater selects the exact arm64 ZIP for `arm64`/`aarch64` machines and the exact x86_64 ZIP for `x86_64`/`amd64` machines. An unknown machine or missing, duplicate, or invalid matching ZIP falls back to the release page; it does not select a DMG or the other architecture. This core release contract does not promise an optional Deep component build for Intel.
 
 To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_macos.sh --architecture arm64` on Apple Silicon or `bash build_macos.sh --architecture x86_64` on Intel from the project root. Each selection requires a matching native CPython 3.12.10 interpreter and rejects an architecture mismatch before bootstrap. The app is written to `dist/macos-<architecture>/GM2Godot.app`, with `GM2Godot-macos-<architecture>.zip` and `.dmg` distributables. The macOS app uses the stable bundle identifier `land.infi.gm2godot`; its short and build versions both match the three-component source version in `src/version.py`.
 
@@ -164,7 +166,7 @@ To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_
   | macOS x64 (Intel) | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
   | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.lock` |
 
-  Other Python patch versions and architectures are not the reviewed dependency baseline. The Mac architectures share a version lock after native byte-for-byte generation proof, but use separate wheel hash locks. Intel support here covers running from source; packaged Mac downloads remain arm64.
+  Other Python patch versions and architectures are not the reviewed dependency baseline. The Mac architectures share a version lock after native byte-for-byte generation proof, but use separate wheel hash locks. The `0.8.17` release contract also provides separate native Mac downloads for both architectures.
 
 ### Setup
 

@@ -31,21 +31,27 @@ LIST_RELEASES_URL = f"{API_ROOT}/releases?per_page=100&page=1"
 
 ASSET_ORDER = (
     "GM2Godot-windows.zip",
-    "GM2Godot-macos.zip",
-    "GM2Godot-macos.dmg",
+    "GM2Godot-macos-arm64.zip",
+    "GM2Godot-macos-arm64.dmg",
+    "GM2Godot-macos-x86_64.zip",
+    "GM2Godot-macos-x86_64.dmg",
     "GM2Godot-linux.zip",
     "SHA256SUMS",
 )
 PAYLOAD_ORDER = (
     "GM2Godot-linux.zip",
-    "GM2Godot-macos.dmg",
-    "GM2Godot-macos.zip",
+    "GM2Godot-macos-arm64.dmg",
+    "GM2Godot-macos-arm64.zip",
+    "GM2Godot-macos-x86_64.dmg",
+    "GM2Godot-macos-x86_64.zip",
     "GM2Godot-windows.zip",
 )
 ASSET_CONTENT_TYPES = {
     "GM2Godot-windows.zip": "application/zip",
-    "GM2Godot-macos.zip": "application/zip",
-    "GM2Godot-macos.dmg": "application/x-apple-diskimage",
+    "GM2Godot-macos-arm64.zip": "application/zip",
+    "GM2Godot-macos-arm64.dmg": "application/x-apple-diskimage",
+    "GM2Godot-macos-x86_64.zip": "application/zip",
+    "GM2Godot-macos-x86_64.dmg": "application/x-apple-diskimage",
     "GM2Godot-linux.zip": "application/zip",
     "SHA256SUMS": "application/octet-stream",
 }
@@ -220,8 +226,8 @@ def _happy_ledger() -> tuple[ExpectedCall, ...]:
             ExpectedCall("GET", LIST_RELEASES_URL, "published-release-list"),
         )
     )
-    if len(calls) != 50:
-        raise AssertionError(f"Happy-path ledger must contain 50 calls, got {len(calls)}")
+    if len(calls) != 62:
+        raise AssertionError(f"Happy-path ledger must contain 62 calls, got {len(calls)}")
     return tuple(calls)
 
 
@@ -824,14 +830,18 @@ class VisibilityScriptedTransport(ScriptedTransport):
 def _write_release_assets(root: Path) -> dict[str, bytes]:
     payloads = {
         "GM2Godot-windows.zip": b"PK\x03\x04GM2Godot Windows unit artifact\n",
-        "GM2Godot-macos.zip": b"PK\x03\x04GM2Godot macOS unit artifact\n",
-        "GM2Godot-macos.dmg": b"kolyGM2Godot macOS disk image unit artifact\n",
+        "GM2Godot-macos-arm64.zip": b"PK\x03\x04GM2Godot macOS arm64 unit artifact\n",
+        "GM2Godot-macos-arm64.dmg": b"kolyGM2Godot macOS arm64 disk image unit artifact\n",
+        "GM2Godot-macos-x86_64.zip": b"PK\x03\x04GM2Godot macOS x86_64 unit artifact\n",
+        "GM2Godot-macos-x86_64.dmg": b"kolyGM2Godot macOS x86_64 disk image unit artifact\n",
         "GM2Godot-linux.zip": b"PK\x03\x04GM2Godot Linux unit artifact\n",
     }
     locations = {
         "GM2Godot-windows.zip": root / "GM2Godot-windows/GM2Godot-windows.zip",
-        "GM2Godot-macos.zip": root / "GM2Godot-macos/GM2Godot-macos.zip",
-        "GM2Godot-macos.dmg": root / "GM2Godot-macos/GM2Godot-macos.dmg",
+        "GM2Godot-macos-arm64.zip": root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip",
+        "GM2Godot-macos-arm64.dmg": root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.dmg",
+        "GM2Godot-macos-x86_64.zip": root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.zip",
+        "GM2Godot-macos-x86_64.dmg": root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.dmg",
         "GM2Godot-linux.zip": root / "GM2Godot-linux/GM2Godot-linux.zip",
     }
     for name, path in locations.items():
@@ -842,6 +852,37 @@ def _write_release_assets(root: Path) -> dict[str, bytes]:
     )
     (root / "SHA256SUMS").write_bytes(manifest)
     return {**payloads, "SHA256SUMS": manifest}
+
+
+def _local_publisher(
+    root: Path,
+) -> tuple[publisher_module.ReleasePublisher, ScriptedTransport, MemoryReceipt]:
+    config = publisher_module.PublisherConfig(
+        repository=REPOSITORY,
+        token="unit-test-token",
+        tag=TAG,
+        release_name=RELEASE_NAME,
+        target_sha=TARGET_SHA,
+        run_id="12345",
+        run_attempt="2",
+        run_url=f"https://github.com/{REPOSITORY}/actions/runs/12345/attempts/2",
+        api_origin=API_ORIGIN,
+        upload_origin=UPLOAD_ORIGIN,
+        receipt_path=root / "receipt/publisher.json",
+        asset_root=root / "artifacts",
+        preflight_delay_seconds=0,
+        ownership_retry_delay_seconds=0,
+    )
+    transport = ScriptedTransport()
+    receipt = MemoryReceipt(config)
+    api = publisher_module.GitHubApi(
+        transport,
+        repository=REPOSITORY,
+        token=config.token,
+        api_origin=API_ORIGIN,
+        upload_origin=UPLOAD_ORIGIN,
+    )
+    return publisher_module.ReleasePublisher(config, api, receipt), transport, receipt
 
 
 class TestReleasePublisher(unittest.TestCase):
@@ -901,13 +942,13 @@ class TestReleasePublisher(unittest.TestCase):
         publisher, transport, receipt, error, payloads = self._execute()
 
         self.assertIsNone(error)
-        self.assertEqual(len(transport.calls), 50)
+        self.assertEqual(len(transport.calls), 62)
         self.assertEqual(
             [(call.method, call.url) for call in transport.calls],
             [(call.method, call.url) for call in HAPPY_LEDGER],
         )
         mutation_ordinals = [call.ordinal for call in transport.calls if call.method != "GET"]
-        self.assertEqual(mutation_ordinals, [8, 9, 15, 21, 27, 33, 39, 45])
+        self.assertEqual(mutation_ordinals, [8, 9, 15, 21, 27, 33, 39, 45, 51, 57])
         self.assertEqual(
             [call.asset_name for call in transport.calls if call.asset_name is not None],
             list(ASSET_ORDER),
@@ -915,13 +956,13 @@ class TestReleasePublisher(unittest.TestCase):
         self.assertTrue(transport.published)
         self.assertEqual(
             transport.asset_listing_segments,
-            [DRAFT_TAG_SEGMENT] * 6 + [TAG],
+            [DRAFT_TAG_SEGMENT] * 8 + [TAG],
         )
 
         self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
         self.assertEqual(
             [receipt.asset_id for receipt in publisher.uploaded],
-            list(range(8001, 8006)),
+            list(range(8001, 8008)),
         )
         self.assertTrue(
             all(
@@ -931,8 +972,8 @@ class TestReleasePublisher(unittest.TestCase):
         )
         self.assertEqual(receipt.stage, "verified")
         self.assertIsNone(receipt.failure)
-        self.assertEqual(len(receipt.expected_assets), 5)
-        self.assertEqual(len(receipt.asset_receipts), 5)
+        self.assertEqual(len(receipt.expected_assets), 7)
+        self.assertEqual(len(receipt.asset_receipts), 7)
         for asset_receipt in receipt.asset_receipts:
             asset_name = str(asset_receipt["name"])
             self.assertIn(
@@ -958,7 +999,7 @@ class TestReleasePublisher(unittest.TestCase):
         )
         self.assertEqual(
             [intent["state"] for intent in receipt.mutation_intents],
-            ["accepted"] * 8,
+            ["accepted"] * 10,
         )
         self.assertEqual(
             [observation["phase"] for observation in receipt.observations],
@@ -967,7 +1008,7 @@ class TestReleasePublisher(unittest.TestCase):
                 "late-preflight-1",
                 "late-preflight-2",
                 "late-preflight-3",
-                *(f"ownership-gate-{index}" for index in range(6)),
+                *(f"ownership-gate-{index}" for index in range(8)),
                 "final-verification",
             ],
         )
@@ -978,11 +1019,11 @@ class TestReleasePublisher(unittest.TestCase):
         ]
         self.assertEqual(
             [observation["decision"] for observation in ownership_observations],
-            ["accept-owned"] * 6,
+            ["accept-owned"] * 8,
         )
         self.assertEqual(
             [observation["snapshot_attempt"] for observation in ownership_observations],
-            [1] * 6,
+            [1] * 8,
         )
         self.assertIsNotNone(receipt.release_receipt)
         assert receipt.release_receipt is not None
@@ -1012,10 +1053,10 @@ class TestReleasePublisher(unittest.TestCase):
             )
 
         self.assertIsNone(error)
-        self.assertEqual(len(transport.calls), 55)
+        self.assertEqual(len(transport.calls), 67)
         self.assertEqual(
             [call.ordinal for call in transport.calls if call.method != "GET"],
-            [8, 9, 20, 26, 32, 38, 44, 50],
+            [8, 9, 20, 26, 32, 38, 44, 50, 56, 62],
         )
         self.assertEqual([call.args[0] for call in sleeper.call_args_list], [1.0])
         gate_observations = [
@@ -1203,13 +1244,13 @@ class TestReleasePublisher(unittest.TestCase):
         publisher, transport, receipt, error, _ = self._execute(transport=scripted)
 
         self.assertIsNone(error)
-        self.assertEqual(len(transport.calls), 55)
+        self.assertEqual(len(transport.calls), 67)
         self.assertEqual(
             [call.ordinal for call in transport.calls if call.method != "GET"],
-            [8, 9, 15, 21, 27, 38, 44, 50],
+            [8, 9, 15, 21, 27, 38, 44, 50, 56, 62],
         )
         self.assertEqual([seal.name for seal, _ in transport.uploaded], list(ASSET_ORDER))
-        self.assertEqual(len(receipt.mutation_intents), 8)
+        self.assertEqual(len(receipt.mutation_intents), 10)
         self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
 
     def test_later_persistent_missing_owned_match_preserves_uploaded_prefix(self) -> None:
@@ -1256,19 +1297,19 @@ class TestReleasePublisher(unittest.TestCase):
 
     def test_prepublish_persistent_missing_owned_match_never_patches(self) -> None:
         scripted = VisibilityScriptedTransport(
-            5,
+            7,
             ("missing-owned",) * publisher_module.OWNED_DRAFT_VISIBILITY_SNAPSHOTS,
         )
         publisher, transport, receipt, error, _ = self._execute(transport=scripted)
 
         self.assertIsNotNone(error)
         assert error is not None
-        self.assertEqual(error.phase, "ownership-gate-5")
+        self.assertEqual(error.phase, "ownership-gate-7")
         self.assertIn("visibility did not converge", str(error))
-        self.assertEqual(len(transport.calls), 74)
+        self.assertEqual(len(transport.calls), 86)
         self.assertEqual(
             [call.ordinal for call in transport.calls if call.method != "GET"],
-            [8, 9, 15, 21, 27, 33, 39],
+            [8, 9, 15, 21, 27, 33, 39, 45, 51],
         )
         self.assertEqual(
             [seal.name for seal, _ in transport.uploaded],
@@ -1285,7 +1326,7 @@ class TestReleasePublisher(unittest.TestCase):
         )
         self.assertEqual(
             [intent["state"] for intent in receipt.mutation_intents],
-            ["accepted"] * 7,
+            ["accepted"] * 9,
         )
         self.assertEqual(
             [item["name"] for item in receipt.asset_receipts],
@@ -1294,7 +1335,7 @@ class TestReleasePublisher(unittest.TestCase):
         gate_observations = [
             observation
             for observation in receipt.observations
-            if str(observation["phase"]).startswith("ownership-gate-5")
+            if str(observation["phase"]).startswith("ownership-gate-7")
         ]
         self.assertEqual(
             [observation["decision"] for observation in gate_observations],
@@ -1308,6 +1349,96 @@ class TestReleasePublisher(unittest.TestCase):
                 list(ASSET_ORDER),
             )
         self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+
+    def test_dual_architecture_manifest_rejects_ambiguous_or_partial_inventory(self) -> None:
+        for mutation in ("missing-intel", "duplicate", "generic", "cross-pair", "reordered", "crlf"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                payloads = _write_release_assets(root / "artifacts")
+                manifest = payloads["SHA256SUMS"]
+                rows = manifest.splitlines(keepends=True)
+                if mutation == "missing-intel":
+                    altered = b"".join(rows[:3] + rows[5:])
+                elif mutation == "duplicate":
+                    altered = manifest + rows[3]
+                elif mutation == "generic":
+                    altered = manifest.replace(b"GM2Godot-macos-arm64", b"GM2Godot-macos")
+                elif mutation == "cross-pair":
+                    arm_digest = hashlib.sha256(payloads["GM2Godot-macos-arm64.dmg"]).hexdigest().encode("ascii")
+                    intel_digest = hashlib.sha256(payloads["GM2Godot-macos-x86_64.dmg"]).hexdigest().encode("ascii")
+                    self.assertNotEqual(arm_digest, intel_digest)
+                    altered = manifest.replace(arm_digest, intel_digest)
+                elif mutation == "reordered":
+                    altered = b"".join(reversed(rows))
+                else:
+                    altered = manifest.replace(b"\n", b"\r\n")
+                (root / "artifacts/SHA256SUMS").write_bytes(altered)
+                publisher, transport, receipt = _local_publisher(root)
+                with self.assertRaisesRegex(publisher_module.PublishError, "exact canonical six-line manifest") as caught:
+                    publisher.run()
+                self.assertEqual(caught.exception.phase, "seal-assets")
+                self.assertEqual(transport.calls, [])
+                self.assertEqual(receipt.mutation_intents, [])
+                self.assertEqual(publisher.uploaded, [])
+                self.assertFalse(transport.published)
+                self.assertNotEqual(receipt.stage, "verified")
+
+    def test_dual_architecture_missing_or_wrong_pair_fails_before_remote_calls(self) -> None:
+        for filename, replacement in (
+            ("GM2Godot-macos-x86_64.zip", None),
+            ("GM2Godot-macos-x86_64.dmg", None),
+            ("GM2Godot-macos-arm64.zip", "GM2Godot-macos.zip"),
+            ("GM2Godot-macos-arm64.dmg", "GM2Godot-macos-x86_64.dmg"),
+            ("GM2Godot-macos-x86_64.zip", "GM2Godot-macos-arm64.zip"),
+        ):
+            with self.subTest(filename=filename, replacement=replacement), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                _write_release_assets(root / "artifacts")
+                artifact = root / "artifacts" / filename.removesuffix(".zip").removesuffix(".dmg") / filename
+                if replacement is None:
+                    artifact.unlink()
+                else:
+                    artifact.rename(artifact.with_name(replacement))
+                publisher, transport, receipt = _local_publisher(root)
+                with self.assertRaises(publisher_module.PublishError) as caught:
+                    publisher.run()
+                self.assertEqual(caught.exception.phase, "seal-assets")
+                self.assertIn(filename, str(caught.exception))
+                self.assertEqual(transport.calls, [])
+                self.assertEqual(receipt.mutation_intents, [])
+                self.assertEqual(receipt.asset_receipts, [])
+                self.assertIsNone(publisher.owned_release_id)
+
+    def test_intel_upload_failures_retain_only_validated_owned_prefix(self) -> None:
+        for ordinal, asset_name, prefix_count in (
+            (33, "GM2Godot-macos-x86_64.zip", 3),
+            (39, "GM2Godot-macos-x86_64.dmg", 4),
+        ):
+            for fault, status, ambiguous, externally_uploaded in (
+                ("upload-server-error", 500, True, False),
+                ("upload-collision", 422, False, False),
+                ("upload-transport-error", None, True, True),
+                ("invalid-upload-receipt", 201, True, True),
+                ("upload-reused-id", 201, True, True),
+                ("upload-stream-digest-mismatch", 201, True, True),
+            ):
+                with self.subTest(asset=asset_name, fault=fault):
+                    publisher, transport, receipt, error, _ = self._execute({ordinal: cast(FaultKind, fault)})
+                    self.assertIsNotNone(error)
+                    assert error is not None
+                    self.assertEqual(error.phase, f"upload-{asset_name}")
+                    self.assertEqual(error.status, status)
+                    self.assertIs(error.ambiguous, ambiguous)
+                    self.assertEqual(len(transport.calls), ordinal)
+                    self.assertEqual([seal.name for seal in publisher.assets], list(ASSET_ORDER))
+                    self.assertEqual([item.name for item in publisher.uploaded], list(ASSET_ORDER[:prefix_count]))
+                    self.assertEqual(len(transport.uploaded), prefix_count + int(externally_uploaded))
+                    self.assertEqual(publisher.owned_release_id, OWNED_RELEASE_ID)
+                    self.assertEqual(len(receipt.mutation_intents), prefix_count + 3)
+                    self.assertEqual(receipt.mutation_intents[-1]["phase"], f"upload-{asset_name}")
+                    self.assertEqual(receipt.mutation_intents[-1]["state"], "pending")
+                    self.assertFalse(transport.published)
+                    self.assertFalse(any(snapshot["stage"] == "verified" for snapshot in receipt.snapshots))
 
     def test_publisher_source_has_no_adoption_or_destructive_mutation_path(
         self,
@@ -1650,29 +1781,29 @@ class TestReleasePublisher(unittest.TestCase):
             ),
             FailureCase(
                 "foreign exact release before finalization",
-                44,
+                56,
                 "duplicate-exact-release",
-                "ownership-gate-5",
+                "ownership-gate-7",
                 None,
                 False,
                 OWNED_RELEASE_ID,
-                5,
                 7,
-                7,
+                9,
+                9,
                 "Exact-tag release identity drift before the next mutation",
             ),
             FailureCase(
                 "mid-upload server error",
                 27,
                 "upload-server-error",
-                "upload-GM2Godot-macos.dmg",
+                "upload-GM2Godot-macos-arm64.dmg",
                 500,
                 True,
                 OWNED_RELEASE_ID,
                 2,
                 5,
                 4,
-                "GitHub API returned HTTP 500 during upload-GM2Godot-macos.dmg",
+                "GitHub API returned HTTP 500 during upload-GM2Godot-macos-arm64.dmg",
             ),
             FailureCase(
                 "ambiguous first asset response loss",
@@ -1788,7 +1919,7 @@ class TestReleasePublisher(unittest.TestCase):
                 "second asset reused owned asset id",
                 21,
                 "upload-reused-id",
-                "upload-GM2Godot-macos.zip",
+                "upload-GM2Godot-macos-arm64.zip",
                 201,
                 True,
                 OWNED_RELEASE_ID,
@@ -1800,154 +1931,154 @@ class TestReleasePublisher(unittest.TestCase):
             ),
             FailureCase(
                 "ambiguous publish response loss",
-                45,
+                57,
                 "publish-transport-error",
                 "publish-owned-release",
                 None,
                 True,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "GitHub API transport failed during publish-owned-release",
                 published=True,
             ),
             FailureCase(
                 "terminal publish authorization failure",
-                45,
+                57,
                 "mutation-auth-error",
                 "publish-owned-release",
                 403,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "GitHub API returned HTTP 403 during publish-owned-release",
             ),
             FailureCase(
                 "malformed publish response",
-                45,
+                57,
                 "malformed-json",
                 "publish-owned-release",
                 200,
                 True,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "GitHub API returned malformed JSON during publish-owned-release",
                 published=True,
             ),
             FailureCase(
                 "unexpected publish success status",
-                45,
+                57,
                 "unexpected-success",
                 "publish-owned-release",
                 201,
                 True,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "GitHub API returned HTTP 201 during publish-owned-release",
                 published=True,
             ),
             FailureCase(
                 "ambiguous publish server error",
-                45,
+                57,
                 "publish-server-error",
                 "publish-owned-release",
                 500,
                 True,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "GitHub API returned HTTP 500 during publish-owned-release",
                 published=True,
             ),
             FailureCase(
                 "publish response id drift",
-                45,
+                57,
                 "publish-id-drift",
                 "publish-owned-release",
                 200,
                 True,
                 OWNED_RELEASE_ID,
-                5,
-                8,
                 7,
+                10,
+                9,
                 "Publish 200 receipt was invalid: Release identity drifted",
                 published=True,
             ),
             FailureCase(
                 "final owned endpoint id drift",
-                46,
+                58,
                 "publish-id-drift",
                 "final-verification",
                 200,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
-                8,
+                7,
+                10,
+                10,
                 "Owned release verification failed: Release identity drifted",
                 published=True,
             ),
             FailureCase(
                 "final tag lookup id drift",
-                47,
+                59,
                 "publish-id-drift",
                 "final-verification",
                 200,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
-                8,
+                7,
+                10,
+                10,
                 "Owned release verification failed: Release identity drifted",
                 published=True,
             ),
             FailureCase(
                 "final tag ref drift",
-                48,
+                60,
                 "tag-drift",
                 "final-verification",
                 200,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
-                8,
+                7,
+                10,
+                10,
                 "Reference verification failed: Git reference resolved to the wrong commit SHA",
                 published=True,
             ),
             FailureCase(
                 "final asset digest drift",
-                49,
+                61,
                 "asset-digest-drift",
                 "final-verification",
                 None,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
-                8,
+                7,
+                10,
+                10,
                 "Owned asset verification failed: Asset GM2Godot-windows.zip digest differed",
                 published=True,
             ),
             FailureCase(
                 "final duplicate exact release",
-                50,
+                62,
                 "duplicate-exact-release",
                 "final-verification",
                 None,
                 False,
                 OWNED_RELEASE_ID,
-                5,
-                8,
-                8,
+                7,
+                10,
+                10,
                 "Final exact-tag listing was not the sole owned release",
                 published=True,
             ),

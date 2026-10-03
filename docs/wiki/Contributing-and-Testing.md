@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.16 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.17 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 

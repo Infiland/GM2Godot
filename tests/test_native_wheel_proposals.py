@@ -382,8 +382,14 @@ class TestNativeWheelProposals(unittest.TestCase):
             self.assertEqual(observed, files)
             self.assertEqual(layout["linux-x64"], seed)
             (source / seed).write_bytes(files[seed] + b"# actual checkout-byte drift\n")
-            with self.assertRaisesRegex(ERROR, "physical source differs"):
+            with self.assertRaisesRegex(ERROR, "physical source differs") as drift:
                 bind(source, head, "linux-x64", "discover")
+            self.assertIn("CRLF-only difference=False", str(drift.exception))
+            self.assertIn("sha256=" + hashlib.sha256(files[seed]).hexdigest(), str(drift.exception))
+            (source / seed).write_bytes(files[seed].replace(b"\n", b"\r\n"))
+            with self.assertRaisesRegex(ERROR, "physical source differs") as newline_drift:
+                bind(source, head, "linux-x64", "discover")
+            self.assertIn("CRLF-only difference=True", str(newline_drift.exception))
             (source / seed).write_bytes(files[seed])
             with self.assertRaisesRegex(ERROR, "HEAD differs"):
                 bind(source, "0" * 40, "linux-x64", "discover")

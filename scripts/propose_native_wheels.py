@@ -702,8 +702,18 @@ def bind_source(source: Path, source_sha: str, platform_name: str, phase: str) -
     files: dict[str, bytes] = {}
     for name in sorted(names):
         content = read_regular(source / name)
-        if content != _git(source, ("cat-file", "blob", f"{source_sha}:{name}")):
-            raise ProposalError(f"physical source differs from immutable object: {name}")
+        immutable = _git(source, ("cat-file", "blob", f"{source_sha}:{name}"))
+        if content != immutable:
+            crlf = b"\r\n"
+            newline_difference_only = content.replace(crlf, b"\n") == immutable
+            raise ProposalError(
+                f"physical source differs from immutable object: {name}; "
+                f"physical bytes={len(content)}, sha256={hashlib.sha256(content).hexdigest()}, "
+                f"CRLF={content.count(crlf)}; "
+                f"immutable bytes={len(immutable)}, sha256={hashlib.sha256(immutable).hexdigest()}, "
+                f"CRLF={immutable.count(crlf)}; "
+                f"CRLF-only difference={newline_difference_only}"
+            )
         files[name] = content
     if phase == "require-committed":
         for name, host in HOSTS.items():

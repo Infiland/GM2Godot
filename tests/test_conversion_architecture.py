@@ -15,6 +15,7 @@ from unittest.mock import mock_open, patch
 
 from src.conversion import resource_models
 from src.conversion.font_metadata import GameMakerFontMetadata
+from src.conversion.sound_metadata import GameMakerSoundMetadata
 from src.conversion.conversion_plan import (
     build_conversion_plan,
     group_conversion_plan,
@@ -41,6 +42,7 @@ from src.conversion.resource_models import (
     FontModel,
     PathModel,
     ResourceModel,
+    SoundModel,
     parse_gamemaker_resource_models,
 )
 
@@ -1009,6 +1011,371 @@ class TestFontResourceModelBoundary(unittest.TestCase):
         self.assertIn('"present": false', json.dumps(reflected))
         with self.assertRaises(FrozenInstanceError):
             setattr(plain, "size", 12.0)
+
+
+class TestSoundResourceModelBoundary(unittest.TestCase):
+    @staticmethod
+    def _write_project(project: Path, names: tuple[str, ...] = ("sound_test",)) -> Path:
+        source = project / "SoundBoundary.yyp"
+        source.write_text(json.dumps({
+            "%Name": "SoundBoundary", "resourceType": "GMProject",
+            "resources": [
+                {"id": {"name": name, "path": f"sounds/{name}/{name}.yy"}, "resourceType": "GMSound"}
+                for name in names
+            ],
+        }), encoding="utf-8")
+        return source
+
+    @staticmethod
+    def _write_sound(project: Path, data: JsonObject, name: str = "sound_test") -> Path:
+        source = project / "sounds" / name / f"{name}.yy"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(json.dumps(data), encoding="utf-8")
+        return source
+
+    def test_resource_matrix_sound_uses_its_decoder_alias_and_retains_raw_identity(self) -> None:
+        self.assertIs(resource_models.decode_gamemaker_sound_json, decode_gamemaker_json)
+        documents: list[GameMakerJsonDocument] = []
+
+        def track_decode(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            document = decode_gamemaker_json(source, source_path=source_path)
+            documents.append(document)
+            return document
+
+        with patch("src.conversion.resource_models.decode_gamemaker_sound_json", side_effect=track_decode), patch(
+            "src.conversion.resource_models.decode_gamemaker_json", wraps=decode_gamemaker_json,
+        ) as path_decoder, patch(
+            "src.conversion.resource_models.decode_gamemaker_font_json", wraps=decode_gamemaker_json,
+        ) as font_decoder:
+            models = parse_gamemaker_resource_models(RESOURCE_MATRIX_PATH)
+
+        self.assertEqual((len(documents), path_decoder.call_count, font_decoder.call_count), (1, 1, 1))
+        model = models.sounds[0]
+        metadata = model.metadata
+        assert metadata is not None
+        self.assertEqual((model.name, model.sound_file, model.audio_group, model.subfolder),
+                         ("snd_click", "snd_click.wav", "audiogroup_sfx", ""))
+        self.assertIs(model.raw_data, metadata.raw_data)
+        self.assertIs(metadata.raw_data, documents[0].value)
+        self.assertEqual(metadata.source_context, model.yy_path)
+        self.assertEqual(model.yyp_path, "sounds/snd_click/snd_click.yy")
+        self.assertEqual(models.diagnostics, ())
+        self.assertFalse((Path(RESOURCE_MATRIX_PATH) / "gm2godot").exists())
+
+    def test_sound_summary_and_subfolder_are_authoritative_without_converter_projection(self) -> None:
+        raw: JsonObject = {"soundFile": "raw.wav", "audioGroupId": {"name": "raw_group"},
+                           "parent": {"path": "folders/Sounds/Raw.yy"}}
+        metadata = GameMakerSoundMetadata(
+            sound_file="model.ogg", audio_group="model_group", parent_path="folders/Sounds/From Model.yy",
+            raw_data=raw,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_sound(project, raw)
+            document = GameMakerJsonDocument(str(source), source.read_text(encoding="utf-8"), raw)
+            with patch("src.conversion.resource_models.decode_gamemaker_sound_json", return_value=document), patch(
+                "src.conversion.resource_models.parse_gamemaker_sound_metadata", return_value=metadata,
+            ) as projection, patch(
+                "src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic sound reader"),
+            ), patch("src.conversion.resource_models._base_kwargs", side_effect=AssertionError("legacy sound base")), patch(
+                "src.conversion.resource_models._subfolder_from_raw_data", side_effect=AssertionError("raw sound parent"),
+            ), patch("src.conversion.resource_models._string_value", side_effect=AssertionError("raw soundFile")), patch(
+                "src.conversion.resource_models._named_reference", side_effect=AssertionError("raw audioGroupId"),
+            ), patch("src.conversion.sound_metadata.project_sound_conversion_fields", side_effect=AssertionError("conversion projection")):
+                models = parse_gamemaker_resource_models(directory)
+
+        model = models.sounds[0]
+        self.assertIs(model.metadata, metadata)
+        self.assertIs(model.raw_data, raw)
+        self.assertEqual((model.sound_file, model.audio_group, model.subfolder), ("model.ogg", "model_group", "from_model"))
+        projection.assert_called_once_with(raw, source_context=str(source))
+
+    def test_sound_strict_strings_accept_empty_and_whitespace_without_converter_defaults(self) -> None:
+        cases: tuple[tuple[JsonObject, str, str], ...] = (
+            ({}, "", ""),
+            ({"soundFile": None, "audioGroupId": None}, "", ""),
+            ({"soundFile": [], "audioGroupId": "group"}, "", ""),
+            ({"soundFile": {}, "audioGroupId": {"name": None}}, "", ""),
+            ({"soundFile": True, "audioGroupId": {"name": 3}}, "", ""),
+            ({"soundFile": 4.5, "audioGroupId": {"name": []}}, "", ""),
+            ({"soundFile": "", "audioGroupId": {"name": ""}}, "", ""),
+            ({"soundFile": " ", "audioGroupId": {"name": " "}}, " ", " "),
+            ({"soundFile": "tone.mp3", "audioGroupId": {"name": "native"}}, "tone.mp3", "native"),
+        )
+        for data, sound_file, audio_group in cases:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                self._write_sound(project, data)
+                models = parse_gamemaker_resource_models(directory)
+                model = models.sounds[0]
+                assert model.metadata is not None
+                self.assertEqual((model.sound_file, model.audio_group), (sound_file, audio_group))
+                self.assertEqual((model.metadata.sound_file, model.metadata.audio_group), (sound_file, audio_group))
+                self.assertEqual((models.project.resource_count, models.diagnostics), (1, ()))
+
+    def test_malformed_and_nonfinite_conversion_inputs_do_not_run_aggregate_coercion(self) -> None:
+        huge = 10 ** 400
+        data: JsonObject = {
+            "name": [], "soundFile": "tone.wav", "volume": huge, "type": float("nan"),
+            "bitDepth": None, "bitRate": [], "sampleRate": {}, "compression": "bad",
+            "preload": None, "audioGroupId": ["bad root"], "duration": float("inf"),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_sound(project, data)
+            with patch("src.conversion.sound_metadata.project_sound_conversion_fields", side_effect=AssertionError("conversion")):
+                models = parse_gamemaker_resource_models(directory)
+        model = models.sounds[0]
+        metadata = model.metadata
+        assert metadata is not None
+        self.assertEqual((model.name, model.sound_file, model.audio_group, metadata.source_name),
+                         ("sound_test", "tone.wav", "", ""))
+        self.assertIs(model.raw_data, metadata.raw_data)
+        self.assertEqual(model.raw_data["volume"], huge)
+        self.assertIs(type(metadata.raw_data["volume"]), int)
+        self.assertEqual(models.diagnostics, ())
+
+    def test_actual_trailing_comma_source_uses_same_shared_decoder(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_sound(project, {})
+            text = '{"soundFile":"tone.wav","audioGroupId":{"name":"fx",},"parent":{"path":"folders/Sounds/FX.yy",},}'
+            source.write_text(text, encoding="utf-8")
+            with patch("src.conversion.resource_models.decode_gamemaker_sound_json", wraps=decode_gamemaker_json) as decoder:
+                models = parse_gamemaker_resource_models(directory)
+            decoder.assert_called_once_with(text, source_path=str(source))
+        self.assertEqual((models.sounds[0].sound_file, models.sounds[0].audio_group, models.sounds[0].subfolder),
+                         ("tone.wav", "fx", "fx"))
+        self.assertEqual(models.diagnostics, ())
+
+    def test_nonobject_decode_actual_read_failures_and_missing_sources_keep_warning_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project, ("first", "valid", "last"))
+            first = self._write_sound(project, {}, "first")
+            first.write_bytes(b"\xff")
+            self._write_sound(project, {"soundFile": "valid.wav"}, "valid")
+            last = self._write_sound(project, {}, "last")
+            last.write_text("[]", encoding="utf-8")
+            models = parse_gamemaker_resource_models(directory)
+            self.assertEqual([sound.name for sound in models.sounds], ["valid"])
+            self.assertEqual((models.sounds[0].order, models.project.resource_count), (1, 3))
+            self.assertEqual(
+                [(d.severity, d.code, d.message, d.source_path, d.resource_name, d.resource_kind) for d in models.diagnostics],
+                [("warning", "GM2GD-RESOURCE-YY-MISSING", f"Could not parse GameMaker resource .yy: {p}", str(p), name, "sounds")
+                 for p, name in ((first, "first"), (last, "last"))],
+            )
+            for root in ("null", '"sound"', "true", "false", "42", "1.25", "{broken"):
+                with self.subTest(root=root):
+                    first.write_text(root, encoding="utf-8")
+                    self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+            digit_limit = sys.get_int_max_str_digits()
+            if digit_limit:
+                first.write_text('{"unknown":' + "1" * (digit_limit + 1) + "}", encoding="utf-8")
+                self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+            first.unlink()
+            self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+
+    def test_sound_acquisition_wide_catch_and_control_exception_identity(self) -> None:
+        handled: tuple[Exception, ...] = (
+            OSError("read"), TypeError("decode type"), ValueError("decode value"),
+            json.JSONDecodeError("malformed", "{", 1), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+        )
+        unhandled: tuple[BaseException, ...] = (
+            KeyError("key"), AttributeError("attribute"), OverflowError("overflow"), RecursionError("nesting"),
+            KeyboardInterrupt("stop"), SystemExit(7),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_sound(project, {})
+            for stage in ("open", "read", "decode_gamemaker_sound_json"):
+                for failure in handled:
+                    with self.subTest(stage=stage, failure=type(failure).__name__), ExitStack() as stack:
+                        if stage == "read":
+                            opener = mock_open(read_data="{}")
+                            opener.return_value.read.side_effect = failure
+                            stack.enter_context(patch("src.conversion.resource_models.open", opener))
+                        else:
+                            stack.enter_context(patch(f"src.conversion.resource_models.{stage}", side_effect=failure))
+                        models = parse_gamemaker_resource_models(directory)
+                        self.assertEqual(models.sounds, ())
+                        self.assertEqual(len(models.diagnostics), 1)
+                        self.assertEqual((models.diagnostics[0].code, models.diagnostics[0].source_path,
+                                          models.diagnostics[0].resource_name, models.diagnostics[0].resource_kind),
+                                         ("GM2GD-RESOURCE-YY-MISSING", str(source), "sound_test", "sounds"))
+                for failure in unhandled:
+                    with self.subTest(stage=stage, failure=type(failure).__name__), ExitStack() as stack:
+                        if stage == "read":
+                            opener = mock_open(read_data="{}")
+                            opener.return_value.read.side_effect = failure
+                            stack.enter_context(patch("src.conversion.resource_models.open", opener))
+                        else:
+                            stack.enter_context(patch(f"src.conversion.resource_models.{stage}", side_effect=failure))
+                        with self.assertRaises(type(failure)) as raised:
+                            parse_gamemaker_resource_models(directory)
+                        self.assertIs(raised.exception, failure)
+
+    def test_metadata_subfolder_and_constructor_failures_are_outside_acquisition_catch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_sound(project, {})
+            for owner in ("parse_gamemaker_sound_metadata", "_sound_subfolder", "SoundModel"):
+                for failure in (OSError("projection"), TypeError("projection"), ValueError("projection"), KeyError("projection"),
+                                AttributeError("projection"), OverflowError("projection"), RecursionError("projection"),
+                                KeyboardInterrupt("stop"), SystemExit(9)):
+                    with self.subTest(owner=owner, failure=type(failure).__name__), patch(
+                        f"src.conversion.resource_models.{owner}", side_effect=failure,
+                    ), self.assertRaises(type(failure)) as raised:
+                        parse_gamemaker_resource_models(directory)
+                    self.assertIs(raised.exception, failure)
+
+    def test_invalid_unknown_decoded_graphs_map_to_existing_warning(self) -> None:
+        unsupported: dict[str, object] = {"unknown": object()}
+        nonstring: dict[int, object] = {1: "key"}
+        cyclic: JsonArray = []
+        cyclic.append(cyclic)
+        for invalid in (unsupported, nonstring, {"unknown": cyclic}, {"unknown": b"bytes"}, {"unknown": (1, 2)}):
+            def decode_invalid(source: str, *, source_path: str) -> GameMakerJsonDocument:
+                with patch("src.conversion.gamemaker_json.json.loads", return_value=invalid):
+                    return decode_gamemaker_json(source, source_path=source_path)
+
+            with self.subTest(invalid_type=type(invalid).__name__), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                source = self._write_sound(project, {})
+                with patch("src.conversion.resource_models.decode_gamemaker_sound_json", side_effect=decode_invalid):
+                    models = parse_gamemaker_resource_models(directory)
+                self.assertEqual(models.sounds, ())
+                self.assertEqual(len(models.diagnostics), 1)
+                self.assertEqual(models.diagnostics[0].message, f"Could not parse GameMaker resource .yy: {source}")
+
+    def test_deep_unknown_json_and_shared_children_preserve_identity_without_outputs(self) -> None:
+        nested: JsonArray = []
+        cursor = nested
+        for _ in range(1600):
+            child: JsonArray = []
+            cursor.append(child)
+            cursor = child
+        parent: JsonObject = {"path": "folders/Sounds/Deep.yy", "unknown": nested}
+        raw: JsonObject = {"first": 1, "soundFile": "deep.wav", "parent": parent,
+                           "unknown": nested, "shared": nested, "last": 2}
+
+        def decode_deep(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            with patch("src.conversion.gamemaker_json.json.loads", return_value=raw):
+                return decode_gamemaker_json(source, source_path=source_path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_sound(project, {})
+            before = sorted(p.relative_to(project) for p in project.rglob("*"))
+            with patch("src.conversion.resource_models.decode_gamemaker_sound_json", side_effect=decode_deep):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(sorted(p.relative_to(project) for p in project.rglob("*")), before)
+        model = models.sounds[0]
+        assert model.metadata is not None
+        self.assertIs(model.raw_data, raw)
+        self.assertIs(model.metadata.raw_data, raw)
+        self.assertIs(model.raw_data["parent"], parent)
+        self.assertIs(model.raw_data["unknown"], nested)
+        self.assertIs(model.raw_data["shared"], nested)
+        self.assertEqual(tuple(model.raw_data), ("first", "soundFile", "parent", "unknown", "shared", "last"))
+        self.assertEqual((model.sound_file, model.subfolder, models.diagnostics), ("deep.wav", "deep", ()))
+
+    def test_sound_acquisition_is_once_after_containment_and_kind_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_sound(project, {"soundFile": "once.wav"})
+            with patch("src.conversion.resource_models.open", wraps=open) as source_open, patch(
+                "src.conversion.resource_models.decode_gamemaker_sound_json", wraps=decode_gamemaker_json,
+            ) as decoder, patch("src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic reader")):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(models.sounds[0].sound_file, "once.wav")
+            source_open.assert_called_once_with(str(source), "r", encoding="utf-8")
+            decoder.assert_called_once()
+            yyp = project / "SoundBoundary.yyp"
+            for declared in ("../outside.yy", "sounds/../objects/other/other.yy"):
+                yyp.write_text(json.dumps({
+                    "%Name": "SoundBoundary", "resourceType": "GMProject",
+                    "resources": [{"id": {"name": "sound_test", "path": declared}, "resourceType": "GMSound"}],
+                }), encoding="utf-8")
+                with self.subTest(declared=declared), patch(
+                    "src.conversion.resource_models.open", side_effect=AssertionError("rejected sound opened"),
+                ):
+                    rejected = parse_gamemaker_resource_models(directory)
+                self.assertEqual(rejected.sounds, ())
+                self.assertEqual(len(rejected.diagnostics), 1)
+                self.assertEqual((rejected.diagnostics[0].code, rejected.diagnostics[0].source_path),
+                                 ("GM2GD-SOURCE-PATH-REJECTED", str(yyp)))
+
+    def test_parent_spelling_relative_nested_source_and_live_reread_remain_distinct(self) -> None:
+        cases = (
+            ("folders/Sounds.yy", ""), ("folders/Sounds/FX.yy", "fx"),
+            ("folders\\Sounds\\FX.yy", ""), ("folders/Sounds/FX\\Sub.yy", "fx/sub"),
+            ("Folders/Sounds/FX.yy", "sounds/fx"), ("folders/Sounds/FX.YY", "fx_yy"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            yyp = self._write_project(project)
+            relative = "sounds/nested/sound_test/declared.yy"
+            source = project / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            yyp.write_text(json.dumps({
+                "%Name": "SoundBoundary", "resourceType": "GMProject",
+                "resources": [{"id": {"name": "sound_test", "path": relative}, "resourceType": "GMSound"}],
+            }), encoding="utf-8")
+            for parent_path, expected in cases:
+                with self.subTest(parent_path=parent_path):
+                    source.write_text(json.dumps({"soundFile": "first.wav", "parent": {"path": parent_path}}), encoding="utf-8")
+                    first = parse_gamemaker_resource_models(directory).sounds[0]
+                    assert first.metadata is not None
+                    self.assertEqual((first.subfolder, first.yy_path, first.yyp_path), (expected, str(source), relative))
+                    self.assertEqual((first.metadata.parent_path, first.metadata.source_context), (parent_path, str(source)))
+                    source.write_text(json.dumps({"soundFile": "second.ogg", "volume": [], "audioGroupId": None,
+                                                  "parent": {"path": "folders/Sounds/New.yy"}}), encoding="utf-8")
+                    second = parse_gamemaker_resource_models(directory).sounds[0]
+                    self.assertEqual((second.sound_file, second.audio_group, second.subfolder), ("second.ogg", "", "new"))
+                    self.assertEqual((first.sound_file, first.subfolder), ("first.wav", expected))
+                    self.assertIsNot(first.raw_data, second.raw_data)
+                    self.assertIsNot(first.metadata, second.metadata)
+
+    def test_sound_carrier_keeps_ten_field_prefix_with_honest_primitive_reflection(self) -> None:
+        old_fields = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data", "sound_file", "audio_group")
+        self.assertEqual(tuple(f.name for f in fields(SoundModel)), old_fields + ("metadata",))
+        self.assertEqual(tuple(inspect.signature(SoundModel).parameters), old_fields + ("metadata",))
+        self.assertEqual(SoundModel.__match_args__, old_fields + ("metadata",))
+        self.assertEqual(SoundModel.__module__, "src.conversion.resource_models")
+        self.assertEqual(SoundModel.__bases__, (ResourceModel,))
+        plain = SoundModel("sound", "sounds", "GMSound", "/source/sound.yy", "sounds/sound.yy", 3)
+        raw: JsonObject = {}
+        metadata = GameMakerSoundMetadata(raw_data=raw, source_context="/source/sound.yy")
+        attached = SoundModel("sound", "sounds", "GMSound", "/source/sound.yy", "sounds/sound.yy", 3, "", raw, "", "", metadata)
+        self.assertIsNone(plain.metadata)
+        self.assertEqual((plain.subfolder, plain.raw_data, plain.sound_file, plain.audio_group), ("", {}, "", ""))
+        self.assertEqual(plain, attached)
+        self.assertEqual(repr(plain), repr(attached))
+        self.assertFalse(fields(SoundModel)[-1].compare)
+        self.assertFalse(fields(SoundModel)[-1].repr)
+        self.assertIsNone(fields(SoundModel)[-1].default)
+        self.assertIs(attached.metadata, metadata)
+        self.assertIs(attached.raw_data, metadata.raw_data)
+        self.assertIsNot(plain.raw_data, SoundModel("other", "sounds", "GMSound", "other.yy", "other.yy", 0).raw_data)
+        self.assertEqual(len(astuple(plain)), len(old_fields) + 1)
+        self.assertIsNone(astuple(plain)[-1])
+        self.assertIsNone(asdict(plain)["metadata"])
+        reflected = asdict(attached)
+        self.assertEqual(tuple(reflected), old_fields + ("metadata",))
+        self.assertIn('"_conversion_inputs"', json.dumps(reflected))
+        self.assertIn('"present": false', json.dumps(reflected))
+        with self.assertRaises(FrozenInstanceError):
+            setattr(plain, "sound_file", "changed.wav")
 
 
 if __name__ == "__main__":

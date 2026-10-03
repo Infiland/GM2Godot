@@ -6,13 +6,19 @@ import os
 import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import TypedDict, cast
+from typing import TypedDict
 
 # Import localization manager
 from src.localization import get_localized
 from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject
+from src.conversion.sound_metadata import (
+    parse_gamemaker_sound_metadata,
+    project_sound_conversion_fields,
+)
 from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
 from src.conversion.project_manifest import (
     ProjectManifestDiagnostic,
@@ -22,9 +28,10 @@ from src.conversion.project_godot import format_godot_string
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
+    resolve_project_filesystem_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
 class SoundData(TypedDict):
@@ -339,20 +346,43 @@ class SoundConverter(BaseConverter):
             is not None
         ]
 
-    def _parse_sound_yy(self, yy_path: str) -> SoundData | None:
-        data = self._read_yy_file(yy_path)
-        if data is None:
-            self._safe_log(get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=yy_path))
+    def _read_sound_source(self, yy_path: StrPath) -> tuple[JsonObject, str] | None:
+        """Acquire a contained sound document under the existing reader policy."""
+        try:
+            resolved = resolve_project_filesystem_source_path(
+                self.gm_project_path,
+                yy_path,
+            )
+            with open(resolved.filesystem_path, 'r', encoding='utf-8') as source_file:
+                content = source_file.read()
+            document = decode_gamemaker_json(
+                content,
+                source_path=resolved.filesystem_path,
+            )
+            if not isinstance(document.value, dict):
+                return None
+            return document.value, resolved.filesystem_path
+        except (
+            OSError,
+            ProjectSourcePathError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
             return None
 
-        raw_sound_file = data.get('soundFile')
+    def _parse_sound_yy(self, yy_path: str) -> SoundData | None:
+        source = self._read_sound_source(yy_path)
+        if source is None:
+            self._safe_log(get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=yy_path))
+            return None
+        data, source_context = source
+        metadata = parse_gamemaker_sound_metadata(data, source_context=source_context)
+
+        raw_sound_file = metadata.sound_file_value
         if not isinstance(raw_sound_file, str) or not raw_sound_file:
-            raw_name = data.get('name')
-            sound_name = (
-                raw_name
-                if isinstance(raw_name, str) and raw_name
-                else os.path.splitext(os.path.basename(yy_path))[0]
-            )
+            sound_name = metadata.source_name or os.path.splitext(os.path.basename(yy_path))[0]
             rejected_value = (
                 raw_sound_file
                 if isinstance(raw_sound_file, str)
@@ -372,22 +402,43 @@ class SoundConverter(BaseConverter):
             return None
 
         try:
+            fields = project_sound_conversion_fields(metadata, sound_file=raw_sound_file)
             return {
-                'name': str(data['name']),
-                'soundFile': raw_sound_file,
-                'volume': float(data.get('volume', 1.0)),
-                'type': int(data.get('type', 0)),
-                'bitDepth': int(data.get('bitDepth', 16)),
-                'bitRate': int(data.get('bitRate', 128)),
-                'sampleRate': int(data.get('sampleRate', 44100)),
-                'compression': int(data.get('compression', 0)),
-                'preload': bool(data.get('preload', True)),
-                'audioGroupId': str(cast(JsonDict, data.get('audioGroupId', {})).get('name', 'audiogroup_default')),
-                'duration': float(data.get('duration', 0.0)),
+                'name': fields.name,
+                'soundFile': fields.sound_file,
+                'volume': fields.volume,
+                'type': fields.sound_type,
+                'bitDepth': fields.bit_depth,
+                'bitRate': fields.bit_rate,
+                'sampleRate': fields.sample_rate,
+                'compression': fields.compression,
+                'preload': fields.preload,
+                'audioGroupId': fields.audio_group,
+                'duration': fields.duration,
             }
         except (KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=yy_path))
             return None
+
+    def _get_subfolder_from_yy(self, yy_path: StrPath) -> str:
+        """Read current sound metadata before deriving its IDE subfolder."""
+        source = self._read_sound_source(yy_path)
+        if source is None:
+            return ""
+        data, source_context = source
+        try:
+            metadata = parse_gamemaker_sound_metadata(data, source_context=source_context)
+            parent_path = metadata.parent_path
+            if parent_path.startswith('folders/'):
+                parent_path = parent_path[len('folders/'):]
+            if parent_path.endswith('.yy'):
+                parent_path = parent_path[:-len('.yy')]
+            parts = parent_path.split('/')
+            if len(parts) <= 1:
+                return ""
+            return generated_subfolder_path('/'.join(parts[1:]))
+        except (KeyError, TypeError, AttributeError):
+            return ""
 
     @staticmethod
     def _volume_to_db(volume: float) -> float:

@@ -9,6 +9,7 @@ from typing import Literal, cast
 from src.conversion.font_metadata import GameMakerFontMetadata, parse_gamemaker_font_metadata
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_font_json
+from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_sound_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject
 from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
@@ -19,6 +20,7 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
+from src.conversion.sound_metadata import GameMakerSoundMetadata, parse_gamemaker_sound_metadata
 from src.conversion.type_defs import JsonDict, JsonList
 
 
@@ -73,6 +75,7 @@ class SpriteModel(ResourceModel):
 class SoundModel(ResourceModel):
     sound_file: str = ""
     audio_group: str = ""
+    metadata: GameMakerSoundMetadata | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -334,6 +337,8 @@ def _parse_resource_model(
         return _parse_path_resource_model(reference, yy_path, resolved_yy.source_path)
     if reference.kind == "fonts":
         return _parse_font_resource_model(reference, yy_path, resolved_yy.source_path)
+    if reference.kind == "sounds":
+        return _parse_sound_resource_model(reference, yy_path, resolved_yy.source_path)
     raw_data = _read_lenient_json_file(yy_path)
     if raw_data is None:
         return None, (
@@ -360,12 +365,6 @@ def _parse_resource_model(
             width=_int_value(raw_data.get("width")),
             height=_int_value(raw_data.get("height")),
             origin=_int_value(raw_data.get("origin")),
-        ), ()
-    if kind == "sounds":
-        return SoundModel(
-            **base,
-            sound_file=_string_value(raw_data.get("soundFile")),
-            audio_group=_named_reference(raw_data.get("audioGroupId")) or "",
         ), ()
     if kind == "objects":
         return ObjectModel(
@@ -435,6 +434,60 @@ def _parse_resource_model(
             moment_count=len(_dict_list(raw_data.get("momentList"))),
         ), ()
     return ResourceModel(**base), ()
+
+
+def _parse_sound_resource_model(
+    reference: ProjectResourceReference,
+    yy_path: str,
+    source_path: str,
+) -> tuple[SoundModel | None, tuple[ResourceModelDiagnostic, ...]]:
+    raw_data = _read_sound_json_file(yy_path)
+    if raw_data is None:
+        return None, (
+            ResourceModelDiagnostic(
+                severity="warning",
+                code="GM2GD-RESOURCE-YY-MISSING",
+                message=f"Could not parse GameMaker resource .yy: {yy_path}",
+                source_path=yy_path,
+                resource_name=reference.name,
+                resource_kind=reference.kind,
+            ),
+        )
+    metadata = parse_gamemaker_sound_metadata(raw_data, source_context=yy_path)
+    return SoundModel(
+        name=reference.name,
+        kind=reference.kind,
+        resource_type=reference.resource_type,
+        yy_path=yy_path,
+        yyp_path=source_path,
+        order=reference.order,
+        subfolder=_sound_subfolder(metadata.parent_path),
+        raw_data=metadata.raw_data,
+        sound_file=metadata.sound_file,
+        audio_group=metadata.audio_group,
+        metadata=metadata,
+    ), ()
+
+
+def _read_sound_json_file(path: str) -> JsonObject | None:
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            source = file.read()
+        data = decode_gamemaker_sound_json(source, source_path=path).value
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _sound_subfolder(parent_path: str) -> str:
+    if parent_path.startswith("folders/"):
+        parent_path = parent_path[len("folders/"):]
+    if parent_path.endswith(".yy"):
+        parent_path = parent_path[:-len(".yy")]
+    parts = parent_path.split("/")
+    if len(parts) <= 1:
+        return ""
+    return generated_subfolder_path("/".join(parts[1:]))
 
 
 def _parse_font_resource_model(

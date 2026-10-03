@@ -103,7 +103,7 @@ python -m pip --isolated --disable-pip-version-check --no-input install \
 python -m pip check
 ```
 
-Use the matching companion from the table for another host, with its exact interpreter and version-lock preflight. These companions include the complete runtime, bootstrap, and development graph. Ordinary runtime source installs and existing Tests/Release installs continue using version constraints. A recorded wheel hash does not authenticate those version-only installs. Refresh version graphs and their wheel companions together through native evidence review before changing pins; neither dependency workflow auto-merges. Intel source installation is separate from the currently arm64-only packaged Mac release.
+Use the matching companion from the table for another host, with its exact interpreter and version-lock preflight. These companions include the complete runtime, bootstrap, and development graph. Ordinary runtime source installs and existing Tests/Release installs continue using version constraints. A recorded wheel hash does not authenticate those version-only installs. Refresh version graphs and their wheel companions together through native evidence review before changing pins; neither dependency workflow auto-merges. Published releases starting with 0.8.17 provide separate native arm64 and x86_64 Mac ZIP/DMG pairs. Select the download matching the host architecture; the wheel hash locks verify source dependency installs separately.
 
 ## Development Guidelines
 

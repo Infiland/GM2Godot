@@ -1,16 +1,16 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.17 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.18 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-14
+> **Last reviewed:** 2026-10-03
 
 This page documents the current maintainer path for a versioned release and for publishing the reviewed Wiki sources. It does not replace branch protection or repository settings.
 
 ## Release model
 
-`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.17` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
+`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.18` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
 
-The publisher and integrity procedure below describes the current seven-asset contract. Its checksum manifest has exactly six payload rows in lexical filename order. Before `0.8.17` is published, the latest published release remains `0.8.15`; preserve that release's dated five-asset audit evidence and generic arm64 Mac assets as history rather than relabeling them as the new contract.
+The publisher and integrity procedure below describes the current seven-asset contract. Its checksum manifest has exactly six payload rows in lexical filename order. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) published this seven-asset contract. Preserve its exact release audit and the older `0.8.15` five-asset audit as separate historical evidence; each new version needs its own main build and publication checks.
 
 Publication-capable push and manual-dispatch runs share one concurrency group across refs, covering the exact remote-tag check, builds, and publication. Pull-request validation remains independent. The active publisher is not cancelled and one additional publisher may remain pending; GitHub's default concurrency behavior can replace that pending run if a third publisher arrives, and it does not guarantee FIFO ordering. When the surviving waiter starts, it rechecks the exact remote tag. An absent tag after a clean prepublication failure lets it try the normal build and publication path. A present tag keeps builds and publication skipped, but the run succeeds only after the existing release passes the integrity audit described below.
 

@@ -595,6 +595,21 @@ NATIVE_WHEEL_PRODUCER_STEP = (
     "Prove native graph, wheels, self-hosting and two clean installs"
 )
 NATIVE_WHEEL_VALIDATOR_STEP = "Independently require all four complete proofs"
+NATIVE_WHEEL_NATIVE_ROOT_STEP = "Select fresh native proposal root"
+NATIVE_WHEEL_AGGREGATE_ROOT_STEP = "Select fresh aggregate roots"
+NATIVE_WHEEL_ROOT_READY = (
+    "${{ always() && steps.runtime-roots.outcome == 'success' }}"
+)
+# Freeze the complete finite setup programs; the runtime cases below exercise
+# their actual environment-file output and rejection before any output writes.
+NATIVE_WHEEL_ROOT_SCRIPT_SHA256 = {
+    NATIVE_WHEEL_NATIVE_ROOT_STEP: (
+        "efd10e981ca1344364c224b05eb7f352f14ff54f3c7bb0fa87e1a9a1f2a4f0b1"
+    ),
+    NATIVE_WHEEL_AGGREGATE_ROOT_STEP: (
+        "49b0f12359efb3d2fff3918b89bfb1d5611222963118873d1a548dc96602bc79"
+    ),
+}
 NATIVE_WHEEL_LF_STEP = "Materialize exact source bytes as LF"
 NATIVE_WHEEL_LF_COMMAND = (
     "git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force"
@@ -622,6 +637,19 @@ def _native_wheel_source_binding_script(content: str, step_name: str) -> str:
     binding, separator, _ = remainder.partition("\nPY_SOURCE_BINDING\n")
     if not separator or script.count(marker) != 1:
         raise AssertionError("source binding must have one complete heredoc")
+    return binding + "\n"
+
+
+def _native_wheel_runtime_root_script(content: str, step_name: str) -> str:
+    script = _workflow_run_script(content, step_name)
+    interpreter = "python" if step_name == NATIVE_WHEEL_NATIVE_ROOT_STEP else "python3"
+    marker = f"{interpreter} -I - <<'PY_RUNTIME_ROOTS'\n"
+    prefix, separator, remainder = script.partition(marker)
+    if prefix != "set -euo pipefail\n" or not separator:
+        raise AssertionError("runtime root selection must be a fatal isolated step")
+    binding, separator, tail = remainder.partition("\nPY_RUNTIME_ROOTS\n")
+    if not separator or tail or script.count(marker) != 1:
+        raise AssertionError("runtime root selection must have one bounded program")
     return binding + "\n"
 
 
@@ -667,21 +695,18 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
         "    runs-on: ${{ matrix.runner }}\n    timeout-minutes: 75\n"
         "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
         + matrix + "    env:\n      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n"
-        "      PROPOSAL_ROOT: ${{ runner.temp }}/gm2godot-native-wheel-proposal-"
-        "${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}\n"
     )
     aggregate_header = (
         "  aggregate:\n    name: require all four native proposal proofs\n"
         "    needs: native\n    if: ${{ always() }}\n    runs-on: ubuntu-24.04\n"
         "    timeout-minutes: 30\n    env:\n"
-        "      RAW_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-archives-"
-        "${{ github.run_id }}-${{ github.run_attempt }}\n"
-        "      AGGREGATE_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-aggregate-"
-        "${{ github.run_id }}-${{ github.run_attempt }}\n"
         "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n"
     )
     for job, header in ((native, native_header), (aggregate, aggregate_header)):
-        if job.partition("    steps:\n")[0] != header:
+        actual_header = job.partition("    steps:\n")[0]
+        if re.search(r"\$\{\{[^}\n]*\brunner\.", actual_header):
+            errors.append("runner context is unavailable in job-level environment values")
+        if actual_header != header:
             errors.append("native tuples, finite job budget, fresh roots or matrix result changed")
 
     checkout = (
@@ -707,7 +732,7 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
     for platform, _, _, python, label in NATIVE_WHEEL_PROPOSAL_HOSTS:
         name = f"Download exact {label} proposal archive"
         expected_steps[name] = (
-            f"      - name: {name}\n        if: ${{{{ always() }}}}\n"
+            f"      - name: {name}\n        if: {NATIVE_WHEEL_ROOT_READY}\n"
             f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_DOWNLOAD_ACTION}\n"
             "        with:\n"
             f"          name: native-wheel-proposal-{platform}-py{python}-"
@@ -729,7 +754,7 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
         ),
     ):
         expected_steps[name] = (
-            f"      - name: {name}\n        if: ${{{{ always() }}}}\n"
+            f"      - name: {name}\n        if: {NATIVE_WHEEL_ROOT_READY}\n"
             f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_UPLOAD_ACTION}\n"
             f"        with:\n          name: {artifact_name}\n          path: {path}\n"
             "          if-no-files-found: error\n          retention-days: 7\n"
@@ -744,6 +769,20 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
         ):
             errors.append(f"exact action routing and fatal inputs changed: {name}")
 
+    for name, expected_digest in NATIVE_WHEEL_ROOT_SCRIPT_SHA256.items():
+        try:
+            section, = _workflow_step_sections(content, name)
+            if section.partition("        run: |\n")[0] != (
+                f"      - name: {name}\n        id: runtime-roots\n"
+                "        timeout-minutes: 5\n        shell: bash\n"
+            ):
+                errors.append("runtime root selection must be unconditional, finite and fatal")
+            script = _native_wheel_runtime_root_script(content, name)
+            if hashlib.sha256(script.encode()).hexdigest() != expected_digest:
+                errors.append("bounded runtime root selection or qualified destinations changed")
+        except (AssertionError, ValueError) as error:
+            errors.append(str(error))
+
     native_names = re.findall(r"(?m)^      - name: (.+)$", native)
     aggregate_names = re.findall(r"(?m)^      - name: (.+)$", aggregate)
     for job, names in ((native, native_names), (aggregate, aggregate_names)):
@@ -751,9 +790,10 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
             errors.append("unnamed or custom executable steps are forbidden")
     if native_names != [
         "Check out exact source", NATIVE_WHEEL_LF_STEP, "Set up exact native Python",
-        NATIVE_WHEEL_PRODUCER_STEP, "Retain proposal evidence including failures",
+        NATIVE_WHEEL_NATIVE_ROOT_STEP, NATIVE_WHEEL_PRODUCER_STEP,
+        "Retain proposal evidence including failures",
     ] or aggregate_names != [
-        "Check out exact source", NATIVE_WHEEL_LF_STEP,
+        "Check out exact source", NATIVE_WHEEL_LF_STEP, NATIVE_WHEEL_AGGREGATE_ROOT_STEP,
         *(f"Download exact {host[4]} proposal archive" for host in NATIVE_WHEEL_PROPOSAL_HOSTS),
         NATIVE_WHEEL_VALIDATOR_STEP, "Retain aggregate decision including failures",
     ]:
@@ -769,7 +809,7 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
              '--run-attempt', '$GITHUB_RUN_ATTEMPT', '--work-root', '$PROPOSAL_ROOT'),
         ),
         (
-            NATIVE_WHEEL_VALIDATOR_STEP, 10, "        if: ${{ always() }}\n",
+            NATIVE_WHEEL_VALIDATOR_STEP, 10, f"        if: {NATIVE_WHEEL_ROOT_READY}\n",
             ('python3', '-I', 'scripts/verify_native_wheel_proposal.py',
              '--phase', '$PROOF_PHASE', '--source-root', '$GITHUB_WORKSPACE',
              '--repository', '$GITHUB_REPOSITORY', '--source-sha', '$SOURCE_SHA',
@@ -1671,6 +1711,8 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(content.count("skip-decompress: true"), 4)
         self.assertEqual(content.count("digest-mismatch: error"), 4)
         self.assertEqual(content.count(NATIVE_WHEEL_LF_COMMAND), 2)
+        self.assertNotIn("${{ runner.temp }}", content)
+        self.assertEqual(content.count(NATIVE_WHEEL_ROOT_READY), 7)
         for job_name in ("native", "aggregate"):
             with self.subTest(job=job_name):
                 job = _workflow_job_section(content, job_name)
@@ -1707,6 +1749,29 @@ class TestCIWorkflows(unittest.TestCase):
             "tests.test_native_wheel_proposal_validation\n"
         )
         mutations = {
+            "unsupported-native-job-runner-context": content.replace(
+                "      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n",
+                "      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n"
+                "      PROPOSAL_ROOT: ${{ runner.temp }}/proposal\n",
+            ),
+            "unsupported-aggregate-job-runner-context": content.replace(
+                "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n",
+                "      RAW_ROOT: ${{ runner.temp }}/archives\n"
+                "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n",
+            ),
+            "root-readiness-bypass": content.replace(
+                NATIVE_WHEEL_ROOT_READY, "${{ always() }}",
+            ),
+            "checkout-root-instead-of-runner-temp": content.replace(
+                'os.environ.get("RUNNER_TEMP", "")',
+                'os.environ.get("GITHUB_WORKSPACE", "")',
+            ),
+            "reused-runtime-roots": content.replace(
+                "and not os.path.lexists(root)", "",
+            ),
+            "unbounded-runtime-path": content.replace(
+                "0 < len(temporary) <= 4096", "len(temporary) > 0",
+            ),
             "missing-intel": content.replace(intel_row, ""),
             "duplicate-intel": content.replace(intel_row, intel_row * 2),
             "non-native-intel": content.replace("runner: macos-26-intel", "runner: macos-26"),
@@ -1749,10 +1814,99 @@ class TestCIWorkflows(unittest.TestCase):
             "      - name: Retain proposal evidence including failures\n",
             lf_step + "      - name: Retain proposal evidence including failures\n",
         )
+        native_roots = _workflow_step_sections(content, NATIVE_WHEEL_NATIVE_ROOT_STEP)[0]
+        aggregate_roots = _workflow_step_sections(content, NATIVE_WHEEL_AGGREGATE_ROOT_STEP)[0]
+        for label, setup in (("native", native_roots), ("aggregate", aggregate_roots)):
+            mutations[f"missing-{label}-root-setup"] = content.replace(setup, "")
+            mutations[f"conditional-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        id: runtime-roots\n", "        if: ${{ false }}\n        id: runtime-roots\n"),
+            )
+            mutations[f"nonfatal-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        id: runtime-roots\n", "        continue-on-error: true\n        id: runtime-roots\n"),
+            )
+            mutations[f"unbounded-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        timeout-minutes: 5\n", ""),
+            )
+        mutations["native-root-setup-after-producer"] = content.replace(native_roots, "").replace(
+            "      - name: Retain proposal evidence including failures\n",
+            native_roots + "      - name: Retain proposal evidence including failures\n",
+        )
+        mutations["aggregate-root-setup-after-downloads"] = content.replace(aggregate_roots, "").replace(
+            f"      - name: {NATIVE_WHEEL_VALIDATOR_STEP}\n",
+            aggregate_roots + f"      - name: {NATIVE_WHEEL_VALIDATOR_STEP}\n",
+        )
         for label, mutated in mutations.items():
             with self.subTest(case=label):
                 self.assertNotEqual(mutated, content)
                 self.assertTrue(_native_wheel_proposal_policy_errors(mutated))
+
+    def test_native_wheel_runtime_roots_are_bounded_fresh_and_exported_only_on_success(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        for step, native in (
+            (NATIVE_WHEEL_NATIVE_ROOT_STEP, True),
+            (NATIVE_WHEEL_AGGREGATE_ROOT_STEP, False),
+        ):
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as temporary:
+                runner_temp = Path(temporary).resolve() / "runner-temp"
+                runner_temp.mkdir()
+                export = Path(temporary) / "github-env"
+                environment = {
+                    "RUNNER_TEMP": str(runner_temp), "GITHUB_ENV": str(export),
+                    "SOURCE_SHA": "a" * 40, "GITHUB_RUN_ID": "17",
+                    "GITHUB_RUN_ATTEMPT": "2", "PROPOSAL_PLATFORM": "linux-x64",
+                }
+                expected = (
+                    {"PROPOSAL_ROOT": runner_temp / "gm2godot-native-wheel-proposal-17-2-linux-x64"}
+                    if native else {
+                        "RAW_ROOT": runner_temp / "gm2godot-native-proposal-archives-17-2",
+                        "AGGREGATE_ROOT": runner_temp / "gm2godot-native-proposal-aggregate-17-2",
+                    }
+                )
+                script = _native_wheel_runtime_root_script(content, step)
+
+                def execute(values: dict[str, str]) -> None:
+                    with mock.patch.dict(os.environ, values, clear=True):
+                        exec(compile(script, "<native-proposal-runtime-roots>", "exec"), {})
+
+                execute(environment)
+                self.assertEqual(
+                    export.read_bytes(),
+                    "".join(f"{name}={path}\n" for name, path in expected.items()).encode(),
+                )
+                self.assertTrue(all(not path.exists() for path in expected.values()))
+                sentinel = b"existing-environment-record\n"
+                cases = [
+                    ("SOURCE_SHA", "A" * 40),
+                    ("GITHUB_RUN_ID", "0"),
+                    ("GITHUB_RUN_ATTEMPT", "1" * 21),
+                    ("RUNNER_TEMP", "relative-directory"),
+                    ("RUNNER_TEMP", "x" * 4097),
+                    ("RUNNER_TEMP", str(runner_temp) + "\ninjected=value"),
+                    ("RUNNER_TEMP", str(runner_temp / "absent")),
+                ]
+                if native:
+                    cases.append(("PROPOSAL_PLATFORM", "unknown-platform"))
+                for name, value in cases:
+                    with self.subTest(step=step, field=name, value=value[:80]):
+                        export.write_bytes(sentinel)
+                        altered = dict(environment)
+                        altered[name] = value
+                        with self.assertRaises((SystemExit, OSError)):
+                            execute(altered)
+                        self.assertEqual(export.read_bytes(), sentinel)
+                for path in expected.values():
+                    with self.subTest(step=step, collision=path.name):
+                        path.mkdir()
+                        export.write_bytes(sentinel)
+                        with self.assertRaises(SystemExit):
+                            execute(environment)
+                        self.assertEqual(export.read_bytes(), sentinel)
+                        self.assertTrue(path.is_dir())
+                        path.rmdir()
 
     def test_native_wheel_source_preflight_checks_actual_event_and_literal_HEAD(
         self,

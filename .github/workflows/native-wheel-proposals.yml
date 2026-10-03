@@ -46,7 +46,6 @@ jobs:
             python_version: '3.12.10'
     env:
       PROPOSAL_PLATFORM: ${{ matrix.platform }}
-      PROPOSAL_ROOT: ${{ runner.temp }}/gm2godot-native-wheel-proposal-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,6 +63,43 @@ jobs:
         with:
           python-version: ${{ matrix.python_version }}
           architecture: ${{ matrix.architecture }}
+
+      - name: Select fresh native proposal root
+        id: runtime-roots
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I - <<'PY_RUNTIME_ROOTS'
+          import os
+          from pathlib import Path
+          import re
+
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit("Native proposal runtime roots: " + message)
+
+
+          require(re.fullmatch(r"[0-9a-f]{40}", os.environ.get("SOURCE_SHA", "")) is not None, "invalid source SHA")
+          for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+              require(re.fullmatch(r"[1-9][0-9]{0,19}", os.environ.get(name, "")) is not None, "invalid run binding")
+          temporary = os.environ.get("RUNNER_TEMP", "")
+          require(0 < len(temporary) <= 4096 and not any(character in temporary for character in "\r\n\0"), "invalid runner temporary path")
+          require(Path(temporary).is_absolute(), "runner temporary path must be absolute")
+          temporary = Path(temporary).resolve(strict=True)
+          require(temporary.is_dir(), "runner temporary path must be a directory")
+          platform = os.environ.get("PROPOSAL_PLATFORM", "")
+          require(platform in ("linux-x64", "macos-arm64", "macos-x64", "windows-x64"), "invalid native platform")
+          suffix = os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          roots = {"PROPOSAL_ROOT": temporary / ("gm2godot-native-wheel-proposal-" + suffix + "-" + platform)}
+          for root in roots.values():
+              require(len(str(root)) <= 4096 and not os.path.lexists(root), "runtime root is oversized or already exists")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8", newline="\n") as export:
+              for name, root in roots.items():
+                  export.write(name + "=" + str(root) + "\n")
+          print("Native proposal runtime roots selected")
+          PY_RUNTIME_ROOTS
 
       - name: Prove native graph, wheels, self-hosting and two clean installs
         timeout-minutes: 60
@@ -142,7 +178,7 @@ jobs:
             --work-root "$PROPOSAL_ROOT"
 
       - name: Retain proposal evidence including failures
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -161,8 +197,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      RAW_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-archives-${{ github.run_id }}-${{ github.run_attempt }}
-      AGGREGATE_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
       NATIVE_MATRIX_RESULT: ${{ needs.native.result }}
     steps:
       - name: Check out exact source
@@ -176,8 +210,46 @@ jobs:
         shell: bash
         run: git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
 
+      - name: Select fresh aggregate roots
+        id: runtime-roots
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY_RUNTIME_ROOTS'
+          import os
+          from pathlib import Path
+          import re
+
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit("Native proposal runtime roots: " + message)
+
+
+          require(re.fullmatch(r"[0-9a-f]{40}", os.environ.get("SOURCE_SHA", "")) is not None, "invalid source SHA")
+          for name in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+              require(re.fullmatch(r"[1-9][0-9]{0,19}", os.environ.get(name, "")) is not None, "invalid run binding")
+          temporary = os.environ.get("RUNNER_TEMP", "")
+          require(0 < len(temporary) <= 4096 and not any(character in temporary for character in "\r\n\0"), "invalid runner temporary path")
+          require(Path(temporary).is_absolute(), "runner temporary path must be absolute")
+          temporary = Path(temporary).resolve(strict=True)
+          require(temporary.is_dir(), "runner temporary path must be a directory")
+          suffix = os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          roots = {
+              "RAW_ROOT": temporary / ("gm2godot-native-proposal-archives-" + suffix),
+              "AGGREGATE_ROOT": temporary / ("gm2godot-native-proposal-aggregate-" + suffix),
+          }
+          for root in roots.values():
+              require(len(str(root)) <= 4096 and not os.path.lexists(root), "runtime root is oversized or already exists")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8", newline="\n") as export:
+              for name, root in roots.items():
+                  export.write(name + "=" + str(root) + "\n")
+          print("Native proposal runtime roots selected")
+          PY_RUNTIME_ROOTS
+
       - name: Download exact Linux proposal archive
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -187,7 +259,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download exact macOS arm64 proposal archive
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -197,7 +269,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download exact macOS x64 proposal archive
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -207,7 +279,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download exact Windows proposal archive
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -217,7 +289,7 @@ jobs:
           digest-mismatch: error
 
       - name: Independently require all four complete proofs
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         shell: bash
         run: |
@@ -295,7 +367,7 @@ jobs:
             --output "$AGGREGATE_ROOT/acceptance.json"
 
       - name: Retain aggregate decision including failures
-        if: ${{ always() }}
+        if: ${{ always() && steps.runtime-roots.outcome == 'success' }}
         timeout-minutes: 10
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

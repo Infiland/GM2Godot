@@ -69,11 +69,13 @@ PRODUCER_IDS = method_ids("test_native_receipt_producers", "TestNativeReceiptPro
 INVENTORIES = {
     "N01-linux": POSIX_IDS + PRODUCER_IDS,
     "N01-macos": POSIX_IDS + DARWIN_IDS + PRODUCER_IDS,
+    "N01-macos-x64": POSIX_IDS + DARWIN_IDS + PRODUCER_IDS,
     "N01-windows": WINDOWS_IDS + PRODUCER_IDS,
 }
 RUNTIMES = {
     "N01-linux": ("3.12.13", "linux", "x86_64"),
     "N01-macos": ("3.12.10", "darwin", "arm64"),
+    "N01-macos-x64": ("3.12.10", "darwin", "x86_64"),
     "N01-windows": ("3.12.10", "win32", "AMD64"),
 }
 SHARED_PATHS = (
@@ -92,6 +94,10 @@ REQUIRED_PATHS = {
         "constraints/requirements-linux-py312.lock",
     ),
     "N01-macos": SHARED_PATHS + (
+        "scripts/_anchored_receipt_posix.py", "tests/test_native_receipts_posix.py",
+        "tests/test_native_receipts_darwin.py", "constraints/requirements-macos-py312.lock",
+    ),
+    "N01-macos-x64": SHARED_PATHS + (
         "scripts/_anchored_receipt_posix.py", "tests/test_native_receipts_posix.py",
         "tests/test_native_receipts_darwin.py", "constraints/requirements-macos-py312.lock",
     ),
@@ -119,6 +125,12 @@ LOCK_ENTRIES = {
         "constraint": "requirements-macos-py312.lock", "expected_platform": "darwin",
         "expected_machine": "arm64", "venv_python": "bin/python", "pip_config_file": "/dev/null",
         "native_receipt_gate": "N01-macos",
+    },
+    "macos-x64": {
+        "runner": "macos-26-intel", "architecture": "x64", "python_version": "'3.12.10'",
+        "constraint": "requirements-macos-py312.lock", "expected_platform": "darwin",
+        "expected_machine": "x86_64", "venv_python": "bin/python", "pip_config_file": "/dev/null",
+        "native_receipt_gate": "N01-macos-x64",
     },
     "windows-x64": {
         "runner": "windows-2025", "architecture": "x64", "python_version": "'3.12.10'",
@@ -181,12 +193,31 @@ class TestNativeReceiptGatePolicy(unittest.TestCase):
         return self._load_document(document, gate)
 
     def test_exact_native_method_inventories_and_runtime(self) -> None:
-        self.assertEqual(tuple(map(len, INVENTORIES.values())), (10, 13, 17))
+        self.assertEqual(tuple(map(len, INVENTORIES.values())), (10, 13, 13, 17))
         for gate in INVENTORIES:
             with self.subTest(gate=gate):
                 self._assert_inventory(runner.load_gate(MANIFEST, gate))
                 self.assertEqual(tuple(runner.NATIVE_GATE_TEST_IDS[gate]), INVENTORIES[gate])
                 self.assertEqual(runner.NATIVE_GATE_RUNTIMES[gate], runner.load_gate(MANIFEST, gate).native_runtime)
+
+    def test_macos_receipt_gates_share_inventory_but_reject_the_other_machine_before_collection(self) -> None:
+        arm = runner.load_gate(MANIFEST, "N01-macos")
+        intel = runner.load_gate(MANIFEST, "N01-macos-x64")
+        self.assertEqual(arm.unittest_ids, intel.unittest_ids)
+        self.assertEqual(arm.required_paths, intel.required_paths)
+        self.assertEqual(arm.native_runtime, runner.NativeRuntimeRequirement("3.12.10", "darwin", "arm64"))
+        self.assertEqual(intel.native_runtime, runner.NativeRuntimeRequirement("3.12.10", "darwin", "x86_64"))
+        for definition, other_machine in ((arm, "x86_64"), (intel, "arm64")):
+            with (
+                self.subTest(gate=definition.gate),
+                patch.object(runner.platform, "python_version", return_value="3.12.10"),
+                patch.object(runner.sys, "platform", "darwin"),
+                patch.object(runner.platform, "machine", return_value=other_machine),
+                patch.object(runner, "load_suite") as collect,
+            ):
+                with self.assertRaisesRegex(runner.ManifestError, "requires native runtime"):
+                    runner.run_gate(definition, root=ROOT, stream=io.StringIO())
+                collect.assert_not_called()
 
     def test_r01_declaration_is_preserved_beside_explicit_kind(self) -> None:
         gates = cast(dict[str, dict[str, object]], self._document()["gates"])
@@ -356,7 +387,7 @@ class TestNativeReceiptGatePolicy(unittest.TestCase):
             pairs = re.findall(r"(?m)^            (\w+): ([^\n]+)$", entry)
             self.assertEqual(len(pairs), len(dict(pairs)), "Duplicate native matrix key")
             self.assertEqual(dict(pairs), expected)
-        self.assertEqual(len(re.findall(r"(?m)^          - platform:", matrix)), 3)
+        self.assertEqual(len(re.findall(r"(?m)^          - platform:", matrix)), 4)
 
     def _workflows(self) -> tuple[str, str]:
         directory = ROOT / ".github/workflows"

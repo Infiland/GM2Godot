@@ -483,7 +483,7 @@ class TestRequiredUnittestRunner(unittest.TestCase):
     def test_native_inventory_runtime_and_zero_skip_policy_are_frozen(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "manifest.json"
-            for gate in ("N01-linux", "N01-macos", "N01-windows"):
+            for gate in ("N01-linux", "N01-macos", "N01-macos-x64", "N01-windows"):
                 runtime = runner.NATIVE_GATE_RUNTIMES[gate]
                 row: dict[str, object] = {
                     "validation_kind": "native-receipts", "unittest_ids": list(runner.NATIVE_GATE_TEST_IDS[gate]),
@@ -494,7 +494,7 @@ class TestRequiredUnittestRunner(unittest.TestCase):
                 path.write_text(json.dumps({"schema_version": 1, "gates": {gate: row}}), encoding="utf-8")
                 definition = runner.load_gate(path, gate)
                 self.assertEqual(definition.native_runtime, runtime)
-                self.assertEqual(len(definition.unittest_ids), {"N01-linux": 10, "N01-macos": 13, "N01-windows": 17}[gate])
+                self.assertEqual(len(definition.unittest_ids), {"N01-linux": 10, "N01-macos": 13, "N01-macos-x64": 13, "N01-windows": 17}[gate])
                 mutations: tuple[tuple[str, object], ...] = (
                     ("unittest_ids", list(definition.unittest_ids[:-1])),
                     ("unittest_ids", list(reversed(definition.unittest_ids))),

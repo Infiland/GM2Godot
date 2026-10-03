@@ -1739,6 +1739,14 @@ class DependencySnapshotTests(unittest.TestCase):
                     "3.12.10",
                     "constraints/requirements-macos-py312.lock",
                 ),
+                "macos-x64": (
+                    "darwin",
+                    "posix",
+                    "Darwin",
+                    "x86_64",
+                    "3.12.10",
+                    "constraints/requirements-macos-py312.lock",
+                ),
                 "windows-x64": (
                     "win32",
                     "nt",
@@ -1752,7 +1760,7 @@ class DependencySnapshotTests(unittest.TestCase):
         for platform_label, policy in snapshotter.PLATFORM_POLICIES.items():
             with self.subTest(platform=platform_label, boundary="repository lock"):
                 snapshotter.load_constraint(Path(policy[-1]))
-        for platform_label in ("macos-arm64", "windows-x64"):
+        for platform_label in ("macos-arm64", "macos-x64", "windows-x64"):
             with (
                 self.subTest(platform=platform_label),
                 tempfile.TemporaryDirectory() as raw_directory,
@@ -1762,6 +1770,42 @@ class DependencySnapshotTests(unittest.TestCase):
                     platform_label=platform_label,
                 )
                 fixture.verify(platform_label)
+
+    def test_macos_snapshots_share_manifest_but_keep_native_tuple_and_job_identity_distinct(self) -> None:
+        values: dict[str, dict[str, object]] = {}
+        for label, machine, other_label in (
+            ("macos-arm64", "arm64", "macos-x64"),
+            ("macos-x64", "x86_64", "macos-arm64"),
+        ):
+            with self.subTest(platform=label), tempfile.TemporaryDirectory() as raw:
+                fixture = SnapshotFixture(Path(raw), platform_label=label)
+                self.assertEqual(fixture.inspect.environment["platform_machine"], machine)
+                snapshotter.verify_exact_sets(fixture.constraint, fixture.authored, fixture.inspect)
+                receipt_file = fixture.verify(label)
+                with self.assertRaisesRegex(snapshotter.SnapshotError, "Selected platform .* disagrees"):
+                    fixture.verify(other_label)
+                graph = snapshotter.build_dependency_graph(fixture.authored, fixture.inspect)
+                value = snapshotter.build_snapshot(
+                    constraint=fixture.constraint, receipt_file=receipt_file,
+                    authored=fixture.authored, inspect=fixture.inspect, graph=graph,
+                    platform_label=label, repository="Infiland/GM2Godot", sha=SHA,
+                    ref="refs/heads/main", run_id="12345", run_attempt="2", scanned=SCANNED,
+                )
+                self.assertEqual(cast(dict[str, object], value["job"])["id"], f"12345.2.{label}")
+                self.assertEqual(cast(dict[str, object], value["job"])["correlator"], f"gm2godot-dependency-locks-{label}")
+                self.assertEqual(cast(dict[str, object], value["metadata"])["platform"], label)
+                manifests = cast(dict[str, dict[str, object]], value["manifests"])
+                shared_manifest = "constraints/requirements-macos-py312.lock"
+                self.assertEqual(set(manifests), {shared_manifest})
+                self.assertEqual(manifests[shared_manifest]["name"], shared_manifest)
+                self.assertEqual(manifests[shared_manifest]["file"], {"source_location": shared_manifest})
+                values[label] = value
+        self.assertNotEqual(values["macos-arm64"]["job"], values["macos-x64"]["job"])
+        self.assertEqual(values["macos-arm64"]["manifests"], values["macos-x64"]["manifests"])
+        self.assertEqual(
+            cast(dict[str, object], values["macos-arm64"]["metadata"])["constraint_sha256"],
+            cast(dict[str, object], values["macos-x64"]["metadata"])["constraint_sha256"],
+        )
 
     def test_identity_timestamp_and_purl_validation_is_strict(self) -> None:
         self.assertEqual(snapshotter.package_url("Feature_Dep", "3.0+local"), "pkg:pypi/feature-dep@3.0%2Blocal")

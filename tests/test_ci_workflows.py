@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -660,7 +661,7 @@ def _native_wheel_runtime_root_script(content: str, step_name: str) -> str:
 
 
 def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
-    """Freeze the explicit discovery topology, commands and raw archive routing."""
+    """Freeze committed four-host proofs, commands and original archive routing."""
 
     errors: list[str] = []
     prelude = "\n".join(
@@ -669,14 +670,14 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
     ).strip()
     expected_prelude = (
         "name: Native Wheel Proposals\n\non:\n  push:\n"
-        "    branches: [codex/native-intel-wheel-locks]\n  pull_request:\n"
+        "    branches: [main, codex/native-intel-wheel-locks]\n  pull_request:\n"
         "    branches: [main]\n\npermissions:\n  contents: read\n\n"
         "concurrency:\n"
         "  group: native-wheel-proposals-${{ github.workflow }}-${{ github.ref }}\n"
         "  cancel-in-progress: true\n\nenv:\n"
         "  SOURCE_SHA: ${{ github.event_name == 'pull_request' && "
         "github.event.pull_request.head.sha || github.sha }}\n"
-        "  PROOF_PHASE: discover"
+        "  PROOF_PHASE: require-committed"
     )
     if prelude != expected_prelude:
         errors.append("events, read-only permissions, source or explicit phase changed")
@@ -837,6 +838,10 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
             binding = _native_wheel_source_binding_script(content, step)
             for required in (
                 'require(event_sha == source_sha, "event source SHA mismatch")',
+                'require(repository == "Infiland/GM2Godot", "noncanonical repository")',
+                'require(os.environ["GITHUB_REF"] in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks"), "unexpected push ref")',
+                'require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")',
+                'require(event.get("deleted") is False, "deleted or malformed push")',
                 'require(head.returncode == 0 and head.stdout.strip() == source_sha,',
                 '"--no-replace-objects"', 'timeout=30',
                 'event_file.read(1024 * 1024 + 1)',
@@ -860,6 +865,108 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
                 errors.append("proof command, binding arguments or fatal exit handling changed")
         except (AssertionError, ValueError) as error:
             errors.append(str(error))
+    return tuple(errors)
+
+
+DEPENDENCY_LOCK_NATIVE_HOSTS = (
+    ("linux-x64", "ubuntu-24.04", "x64", "3.12.13", "requirements-linux-py312.lock", "linux", "x86_64", "bin/python", "/dev/null", "N01-linux"),
+    ("macos-arm64", "macos-26", "arm64", "3.12.10", "requirements-macos-py312.lock", "darwin", "arm64", "bin/python", "/dev/null", "N01-macos"),
+    ("macos-x64", "macos-26-intel", "x64", "3.12.10", "requirements-macos-py312.lock", "darwin", "x86_64", "bin/python", "/dev/null", "N01-macos-x64"),
+    ("windows-x64", "windows-2025", "x64", "3.12.10", "requirements-windows-py312.lock", "win32", "AMD64", "Scripts/python.exe", "nul", "N01-windows"),
+)
+
+
+def _workflow_literal_assignment(script: str, name: str) -> object:
+    _, separator, remainder = script.partition("python3 - <<'PY'\n")
+    if not separator:
+        raise AssertionError("Expected one embedded Python program")
+    program, separator, _ = remainder.partition("\nPY\n")
+    if not separator:
+        raise AssertionError("Incomplete embedded Python program")
+    assignments = [
+        node for node in ast.parse(program).body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == name
+    ]
+    if len(assignments) != 1:
+        raise AssertionError("Required literal assignment must appear exactly once")
+    value = assignments[0].value
+    for node in ast.walk(value):
+        if isinstance(node, ast.Dict):
+            keys = [cast(object, ast.literal_eval(key)) for key in node.keys if key is not None]
+            if len(keys) != len(node.keys) or any(type(key) is not str for key in keys):
+                raise AssertionError("Platform policy keys must be literal strings")
+            if len(set(cast(list[str], keys))) != len(keys):
+                raise AssertionError("Duplicate platform policy keys are forbidden")
+    return cast(object, ast.literal_eval(value))
+
+
+def _dependency_lock_four_platform_policy_errors(content: str) -> tuple[str, ...]:
+    """Check all five identities without importing or executing workflow policy."""
+
+    errors: list[str] = []
+    try:
+        generate = _workflow_job_section(content, "generate")
+        matrix = generate.partition("        include:\n")[2].partition("    env:\n")[0]
+        expected_matrix = "".join(
+            f"          - platform: {platform}\n"
+            f"            runner: {runner}\n"
+            f"            architecture: {architecture}\n"
+            f"            python_version: '{python}'\n"
+            f"            constraint: {constraint}\n"
+            f"            expected_platform: {sys_platform}\n"
+            f"            expected_machine: {machine}\n"
+            f"            venv_python: {venv_python}\n"
+            f"            pip_config_file: {pip_config}\n"
+            f"            native_receipt_gate: {gate}\n"
+            for platform, runner, architecture, python, constraint, sys_platform, machine, venv_python, pip_config, gate
+            in DEPENDENCY_LOCK_NATIVE_HOSTS
+        )
+        if matrix != expected_matrix:
+            errors.append("exact four native Locks rows and gate identities are required")
+        fetch = _workflow_run_script(content, "Fetch authoritative native locks at exact push")
+        expected_paths = {
+            host[0]: f"constraints/{host[4]}" for host in DEPENDENCY_LOCK_NATIVE_HOSTS
+        }
+        expected_shell = "".join(f"{platform}|{path}\n" for platform, path in expected_paths.items())
+        if fetch.partition("done <<'LOCKS'\n")[2].partition("LOCKS\n")[0] != expected_shell:
+            errors.append("four distinct shell fetch identities must bind real source paths")
+        if _workflow_literal_assignment(fetch, "expected") != expected_paths:
+            errors.append("four strict API response identities must bind real source paths")
+        for required in (
+            'if verified_locks["macos-arm64"] != verified_locks["macos-x64"]:',
+            'destination = lock_root / f"{platform}.lock"',
+            'with destination.open("xb") as handle:',
+        ):
+            if required not in fetch:
+                errors.append("raw shared-Mac equality and distinct exclusive outputs are required")
+        if fetch.index('if verified_locks["macos-arm64"]') > fetch.index('with destination.open("xb")'):
+            errors.append("shared-Mac raw equality must precede every output write")
+        validator = _workflow_run_script(content, "Validate every snapshot before submission")
+        expected_snapshots = {
+            platform: {
+                "artifact": f"dependency-lock-{platform}-py{python}",
+                "constraint": f"constraints/{constraint}",
+                "candidate": f"candidate/{constraint}",
+                "authoritative": f"{platform}.lock",
+                "python": python,
+                "sys_platform": sys_platform,
+                "machine": machine,
+            }
+            for platform, _runner, _architecture, python, constraint, sys_platform, machine, _venv_python, _pip_config, _gate
+            in DEPENDENCY_LOCK_NATIVE_HOSTS
+        }
+        if _workflow_literal_assignment(validator, "expected") != expected_snapshots:
+            errors.append("four distinct snapshot, raw archive and authoritative identities are required")
+        submit = _workflow_run_script(content, "Submit validated native dependency graphs")
+        if submit.count("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do") != 1:
+            errors.append("all four graph submissions must remain distinct and ordered")
+        if 'verify_current_main "$platform"\n  gh api \\\n    --method POST' not in submit:
+            errors.append("current main must be checked immediately before every POST")
+    except (AssertionError, ValueError, SyntaxError) as error:
+        errors.append(str(error))
     return tuple(errors)
 
 
@@ -1789,7 +1896,26 @@ class TestCIWorkflows(unittest.TestCase):
             "duplicate-intel": content.replace(intel_row, intel_row * 2),
             "non-native-intel": content.replace("runner: macos-26-intel", "runner: macos-26"),
             "wrong-native-patch": content.replace("python_version: '3.12.13'", "python_version: '3.12.10'"),
-            "implicit-phase": content.replace("PROOF_PHASE: discover", "PROOF_PHASE: ${{ vars.PHASE }}"),
+            "implicit-phase": content.replace("PROOF_PHASE: require-committed", "PROOF_PHASE: ${{ vars.PHASE }}"),
+            "discovery-downgrade": content.replace("PROOF_PHASE: require-committed", "PROOF_PHASE: discover"),
+            "missing-main-push": content.replace("branches: [main, codex/native-intel-wheel-locks]", "branches: [codex/native-intel-wheel-locks]"),
+            "extra-push-ref": content.replace("branches: [main, codex/native-intel-wheel-locks]", "branches: [main, codex/native-intel-wheel-locks, other]"),
+            "main-preflight-omission": content.replace(
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks")',
+                'in ("refs/heads/codex/native-intel-wheel-locks",)',
+            ),
+            "extra-preflight-ref": content.replace(
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks")',
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks", "refs/heads/other")',
+            ),
+            "ignored-deleted-push": content.replace(
+                'require(event.get("deleted") is False, "deleted or malformed push")',
+                'require(True, "deleted or malformed push")',
+            ),
+            "ignored-event-push-ref": content.replace(
+                'require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")',
+                'require(True, "event push ref mismatch")',
+            ),
             "PR-path-omission": content.replace("    branches: [main]", "    branches: [main]\n    paths: ['constraints/**']"),
             "draft-omission": content.replace("    strategy:", "    if: ${{ !github.event.pull_request.draft }}\n    strategy:"),
             "write-permission": content.replace("contents: read", "contents: write"),
@@ -2115,6 +2241,8 @@ class TestCIWorkflows(unittest.TestCase):
             "repository": {"full_name": repository}, "ref": push_ref,
             "deleted": False, "after": sha,
         }
+        main_push = copy.deepcopy(push)
+        main_push["ref"] = "refs/heads/main"
         pull_request: dict[str, object] = {
             "repository": {"full_name": repository}, "action": "synchronize", "number": 854,
             "pull_request": {
@@ -2124,13 +2252,15 @@ class TestCIWorkflows(unittest.TestCase):
         }
         scenarios: list[tuple[str, dict[str, object], dict[str, str], str, int, bool]] = [
             ("feature-push", push, {}, sha, 0, True),
+            ("main-push", main_push, {"GITHUB_REF": "refs/heads/main"}, sha, 0, True),
             ("fork-PR", pull_request, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/854/merge"}, sha, 0, True),
             ("repository", push, {"GITHUB_REPOSITORY": "fork/GM2Godot"}, sha, 0, False),
             ("SHA-shape", push, {"SOURCE_SHA": "A" * 40}, sha, 0, False),
             ("zero-run", push, {"GITHUB_RUN_ID": "0"}, sha, 0, False),
             ("empty-attempt", push, {"GITHUB_RUN_ATTEMPT": ""}, sha, 0, False),
             ("leading-zero-attempt", push, {"GITHUB_RUN_ATTEMPT": "01"}, sha, 0, False),
-            ("wrong-push-ref", push, {"GITHUB_REF": "refs/heads/main"}, sha, 0, False),
+            ("wrong-push-ref", push, {"GITHUB_REF": "refs/heads/other"}, sha, 0, False),
+            ("main-event-ref-mismatch", main_push, {}, sha, 0, False),
             ("unsupported-event", push, {"GITHUB_EVENT_NAME": "workflow_dispatch"}, sha, 0, False),
             ("different-HEAD", push, {}, "b" * 40, 0, False),
             ("failed-Git", push, {}, sha, 1, False),
@@ -2145,6 +2275,14 @@ class TestCIWorkflows(unittest.TestCase):
             mutated = copy.deepcopy(push)
             mutated[field] = value
             scenarios.append((label, mutated, {}, sha, 0, False))
+        for label, field, value in (
+            ("main-source", "after", "b" * 40),
+            ("main-deleted", "deleted", True),
+            ("main-ref", "ref", push_ref),
+        ):
+            mutated = copy.deepcopy(main_push)
+            mutated[field] = value
+            scenarios.append((label, mutated, {"GITHUB_REF": "refs/heads/main"}, sha, 0, False))
         for label, replacement in (
             ("PR-base", {"base": {"ref": "develop", "repo": {"full_name": repository}}, "head": {"sha": sha}}),
             ("PR-base-repository", {"base": {"ref": "main", "repo": {"full_name": "fork/GM2Godot"}}, "head": {"sha": sha}}),
@@ -4546,6 +4684,16 @@ class TestCIWorkflows(unittest.TestCase):
             "            expected_platform: darwin\n"
             "            expected_machine: arm64\n"
             "            venv_python: bin/python\n",
+            "          - platform: macos-x64\n"
+            "            runner: macos-26-intel\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-macos-py312.lock\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: x86_64\n"
+            "            venv_python: bin/python\n"
+            "            pip_config_file: /dev/null\n"
+            "            native_receipt_gate: N01-macos-x64\n",
             "          - platform: windows-x64\n"
             "            runner: windows-2025\n"
             "            architecture: x64\n"
@@ -4557,7 +4705,7 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(workflow="dependency-locks.yml", native_tuple=native_tuple):
                 self.assertIn(native_tuple, dependency_locks)
-        self.assertEqual(dependency_locks.count("          - platform:"), 3)
+        self.assertEqual(dependency_locks.count("          - platform:"), 4)
         self.assertNotIn("-latest", dependency_locks)
 
     def test_native_workflow_installs_use_fresh_selected_venvs(self) -> None:
@@ -5528,8 +5676,12 @@ class TestCIWorkflows(unittest.TestCase):
             tuple(sorted(path.name for path in constraints_directory.glob("*.lock"))),
             (
                 "requirements-linux-py312.lock",
+                "requirements-linux-x64-py312.wheels.lock",
+                "requirements-macos-arm64-py312.wheels.lock",
                 "requirements-macos-py312.lock",
+                "requirements-macos-x64-py312.wheels.lock",
                 "requirements-windows-py312.lock",
+                "requirements-windows-x64-py312.wheels.lock",
             ),
         )
         self.assertFalse(tuple(constraints_directory.glob("*.txt")))
@@ -5555,6 +5707,37 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(
                     constraint_pins.get("pip-tools"),
                     bootstrap_pins["pip-tools"],
+                )
+
+        for platform, constraint_name in (
+            ("linux-x64", "requirements-linux-py312.lock"),
+            ("macos-arm64", "requirements-macos-py312.lock"),
+            ("macos-x64", "requirements-macos-py312.lock"),
+            ("windows-x64", "requirements-windows-py312.lock"),
+        ):
+            with self.subTest(companion=platform):
+                companion = constraints_directory / f"requirements-{platform}-py312.wheels.lock"
+                payload = companion.read_bytes()
+                self.assertTrue(payload.endswith(b"\n"))
+                self.assertNotIn(b"\r", payload)
+                names: list[str] = []
+                observed_pins: dict[str, str] = {}
+                for line in payload.decode("ascii").splitlines():
+                    match = re.fullmatch(
+                        r"([a-z0-9]+(?:-[a-z0-9]+)*)==([A-Za-z0-9.!+_-]+) --hash=sha256:([0-9a-f]{64})",
+                        line,
+                    )
+                    self.assertIsNotNone(match, line)
+                    if match is None:
+                        raise AssertionError("wheel companion requires one canonical SHA256 per pin")
+                    name, version, _digest = match.groups()
+                    names.append(name)
+                    self.assertNotIn(name, observed_pins)
+                    observed_pins[name] = version
+                self.assertEqual(names, sorted(set(names)))
+                self.assertEqual(
+                    observed_pins,
+                    _exact_requirement_pins(constraints_directory / constraint_name),
                 )
 
         workflow = (
@@ -5644,6 +5827,133 @@ class TestCIWorkflows(unittest.TestCase):
             "normalize_lock_newlines(candidate_bytes) != normalize_lock_newlines(",
             validator,
         )
+        self.assertEqual(_dependency_lock_four_platform_policy_errors(content), ())
+        for bound in (
+            "MAX_ARCHIVE_BYTES = 64 * 1024 * 1024",
+            "MAX_MEMBER_BYTES = 16 * 1024 * 1024",
+            "MAX_TOTAL_BYTES = 64 * 1024 * 1024",
+            "MAX_MEMBERS = 256",
+            "MAX_LOCK_BYTES = 1024 * 1024",
+        ):
+            self.assertIn(bound, validator)
+
+    def test_dependency_lock_four_platform_policy_rejects_missing_or_aliased_identities(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(_dependency_lock_four_platform_policy_errors(content), ())
+
+        def mutate_step(step: str, old: str, new: str) -> str:
+            section, = _workflow_step_sections(content, step)
+            self.assertEqual(section.count(old), 1)
+            return content.replace(section, section.replace(old, new), 1)
+
+        intel_matrix = (
+            "          - platform: macos-x64\n"
+            "            runner: macos-26-intel\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-macos-py312.lock\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: x86_64\n"
+            "            venv_python: bin/python\n"
+            "            pip_config_file: /dev/null\n"
+            "            native_receipt_gate: N01-macos-x64\n"
+        )
+        fetch_step = "Fetch authoritative native locks at exact push"
+        validator_step = "Validate every snapshot before submission"
+        shell_row = "          macos-x64|constraints/requirements-macos-py312.lock\n"
+        fetch_row = '              "macos-x64": "constraints/requirements-macos-py312.lock",\n'
+        snapshot_row = (
+            '              "macos-x64": {\n'
+            '                  "artifact": "dependency-lock-macos-x64-py3.12.10",\n'
+            '                  "constraint": "constraints/requirements-macos-py312.lock",\n'
+            '                  "candidate": "candidate/requirements-macos-py312.lock",\n'
+            '                  "authoritative": "macos-x64.lock",\n'
+            '                  "python": "3.12.10",\n'
+            '                  "sys_platform": "darwin",\n'
+            '                  "machine": "x86_64",\n'
+            '              },\n'
+        )
+        mutations = {
+            "missing-Intel-matrix": content.replace(intel_matrix, ""),
+            "duplicate-Intel-matrix": content.replace(intel_matrix, intel_matrix * 2),
+            "Intel-arm-runner": content.replace(intel_matrix, intel_matrix.replace("runner: macos-26-intel", "runner: macos-26")),
+            "Intel-arm-gate": content.replace(intel_matrix, intel_matrix.replace("N01-macos-x64", "N01-macos")),
+            "missing-Intel-shell-fetch": mutate_step(fetch_step, shell_row, ""),
+            "duplicate-Intel-shell-fetch": mutate_step(fetch_step, shell_row, shell_row * 2),
+            "wrong-Intel-shell-source": mutate_step(fetch_step, shell_row, shell_row.replace("requirements-macos-py312.lock", "requirements-macos-x64-py312.wheels.lock")),
+            "missing-Intel-response-policy": mutate_step(fetch_step, fetch_row, ""),
+            "duplicate-Intel-response-policy": mutate_step(fetch_step, fetch_row, fetch_row * 2),
+            "wrong-Intel-response-source": mutate_step(fetch_step, fetch_row, fetch_row.replace("requirements-macos-py312.lock", "requirements-macos-x64-py312.wheels.lock")),
+            "authoritative-basename-collision": mutate_step(fetch_step, 'destination = lock_root / f"{platform}.lock"', "destination = lock_root / Path(lock_path).name"),
+            "missing-raw-Mac-equality": mutate_step(fetch_step, 'if verified_locks["macos-arm64"] != verified_locks["macos-x64"]:', "if False:"),
+            "nonexclusive-authoritative-write": mutate_step(fetch_step, 'destination.open("xb")', 'destination.open("wb")'),
+            "missing-Intel-snapshot-policy": mutate_step(validator_step, snapshot_row, ""),
+            "duplicate-Intel-snapshot-policy": mutate_step(validator_step, snapshot_row, snapshot_row * 2),
+            "Intel-arm-archive": mutate_step(validator_step, snapshot_row, snapshot_row.replace("dependency-lock-macos-x64-py3.12.10", "dependency-lock-macos-arm64-py3.12.10")),
+            "Intel-arm-authoritative-file": mutate_step(validator_step, snapshot_row, snapshot_row.replace("macos-x64.lock", "macos-arm64.lock")),
+            "Intel-arm-tuple": mutate_step(validator_step, snapshot_row, snapshot_row.replace('"machine": "x86_64"', '"machine": "arm64"')),
+            "missing-Intel-submission": content.replace("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do", "for platform in linux-x64 macos-arm64 windows-x64; do"),
+            "duplicate-Intel-submission": content.replace("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do", "for platform in linux-x64 macos-arm64 macos-x64 macos-x64 windows-x64; do"),
+            "stale-main-guard-bypass": content.replace('            verify_current_main "$platform"\n', ""),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, content)
+                self.assertTrue(_dependency_lock_four_platform_policy_errors(mutated))
+
+    def test_dependency_evidence_manifest_requires_exact_eight_verified_receipts(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Write dependency evidence manifest")
+        program = script.partition("python - <<'PY'\n")[2].partition("\nPY\n")[0]
+        self.assertTrue(program)
+        receipts = (
+            "bootstrap-preflight.json", "bootstrap-probe-generator.json",
+            "bootstrap-probe-preflight.json", "candidate-generator.json",
+            "candidate-preflight.json", "current-generator.json", "fresh-1.json", "fresh-2.json",
+        )
+        for case in ("exact", "missing", "ninth", "unverified"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                receipt_root = root / "receipts"
+                receipt_root.mkdir()
+                for name in receipts:
+                    (receipt_root / name).write_text('{"status":"verified"}\n', encoding="utf-8")
+                if case == "missing":
+                    (receipt_root / "fresh-2.json").unlink()
+                elif case == "ninth":
+                    (receipt_root / "native-receipts.json").write_text('{"status":"verified"}\n', encoding="utf-8")
+                elif case == "unverified":
+                    (receipt_root / "fresh-2.json").write_text('{"status":"failed"}\n', encoding="utf-8")
+                (root / "dependency-submission.json").write_text("{}\n", encoding="utf-8")
+                environment = {
+                    "RECEIPT_DIR": str(receipt_root), "ARTIFACT_DIR": str(root),
+                    "BOOTSTRAP_SOURCE": str(PROJECT_ROOT / "requirements-bootstrap.txt"),
+                    "COMMITTED_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "CANDIDATE_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "SELFHOST_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "GITHUB_SHA": "a" * 40, "PLATFORM_LABEL": "macos-x64",
+                    "EXPECTED_PYTHON": "3.12.10", "EXPECTED_PLATFORM": "darwin",
+                    "EXPECTED_MACHINE": "x86_64", "REFRESH_MODE": "locked", "REFRESH_PACKAGE": "",
+                }
+                with mock.patch.dict(os.environ, environment):
+                    if case == "exact":
+                        exec(compile(program, "<dependency-evidence-manifest>", "exec"), {})
+                        manifest = cast(dict[str, object], json.loads((root / "manifest.json").read_text(encoding="utf-8")))
+                        self.assertEqual(manifest["schema_version"], 2)
+                        self.assertEqual(set(cast(dict[str, object], manifest["receipts"])), set(receipts))
+                        self.assertEqual(manifest["platform"], "macos-x64")
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(program, "<dependency-evidence-manifest>", "exec"), {})
+                        self.assertFalse((root / "manifest.json").exists())
 
     def test_dependency_lock_stale_candidate_fails_after_evidence_upload_step(self) -> None:
         content = (
@@ -5709,6 +6019,7 @@ class TestCIWorkflows(unittest.TestCase):
         lock_paths = {
             "linux-x64": "constraints/requirements-linux-py312.lock",
             "macos-arm64": "constraints/requirements-macos-py312.lock",
+            "macos-x64": "constraints/requirements-macos-py312.lock",
             "windows-x64": "constraints/requirements-windows-py312.lock",
         }
         expected_endpoints = {
@@ -5723,9 +6034,9 @@ class TestCIWorkflows(unittest.TestCase):
             for platform, path in lock_paths.items()
         }
 
-        def response_bytes(platform: str) -> bytes:
+        def response_bytes(platform: str, content_override: bytes | None = None) -> bytes:
             path = lock_paths[platform]
-            content = lock_bytes[platform]
+            content = lock_bytes[platform] if content_override is None else content_override
             blob_header = f"blob {len(content)}\0".encode("ascii")
             return (
                 json.dumps(
@@ -5770,14 +6081,21 @@ class TestCIWorkflows(unittest.TestCase):
                 "fi\n"
                 "endpoint=\"${!#}\"\n"
                 "printf '%s\\n' \"$endpoint\" >> \"$FAKE_GH_LOG\"\n"
-                "case \"$endpoint\" in\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                "request_number=0\n"
+                "while IFS= read -r _line; do\n"
+                "  request_number=$((request_number + 1))\n"
+                "done < \"$FAKE_GH_LOG\"\n"
+                "case \"$request_number:$endpoint\" in\n"
+                '  "1:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-linux-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/linux-x64.json\" ;;\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                '  "2:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-macos-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/macos-arm64.json\" ;;\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                '  "3:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                'requirements-macos-py312.lock?ref=$FAKE_EXPECTED_SHA") '
+                "cat \"$FAKE_RESPONSE_ROOT/macos-x64.json\" ;;\n"
+                '  "4:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-windows-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/windows-x64.json\" ;;\n"
                 "  *) exit 65 ;;\n"
@@ -5818,9 +6136,14 @@ class TestCIWorkflows(unittest.TestCase):
                 (root / "gh.log").read_text(encoding="utf-8").splitlines(),
                 list(expected_endpoints.values()),
             )
-            for platform, path in lock_paths.items():
+            self.assertEqual(
+                tuple(sorted(path.name for path in (root / "authoritative-fetch" / "locks").iterdir())),
+                tuple(sorted(f"{platform}.lock" for platform in lock_paths)),
+            )
+            self.assertEqual(list(expected_endpoints.values()).count(expected_endpoints["macos-arm64"]), 2)
+            for platform in lock_paths:
                 self.assertEqual(
-                    (root / "authoritative-fetch" / "locks" / Path(path).name).read_bytes(),
+                    (root / "authoritative-fetch" / "locks" / f"{platform}.lock").read_bytes(),
                     lock_bytes[platform],
                 )
 
@@ -5914,6 +6237,43 @@ class TestCIWorkflows(unittest.TestCase):
                 (),
             )
 
+        def intel_wrong_metadata(_platform: str, responses: dict[str, bytes]) -> None:
+            response = cast(dict[str, object], json.loads(responses["macos-x64"]))
+            response["name"] = "macos-x64.lock"
+            responses["macos-x64"] = json.dumps(response).encode("utf-8")
+
+        def intel_wrong_source(_platform: str, responses: dict[str, bytes]) -> None:
+            response = cast(dict[str, object], json.loads(responses["macos-x64"]))
+            response["path"] = "constraints/requirements-macos-x64-py312.lock"
+            responses["macos-x64"] = json.dumps(response).encode("utf-8")
+
+        def intel_missing(_platform: str, responses: dict[str, bytes]) -> None:
+            del responses["macos-x64"]
+
+        def intel_different_raw_bytes(_platform: str, responses: dict[str, bytes]) -> None:
+            responses["macos-x64"] = response_bytes(
+                "macos-x64", lock_bytes["macos-x64"] + b"# separately authenticated drift\n",
+            )
+
+        def intel_newline_only_drift(_platform: str, responses: dict[str, bytes]) -> None:
+            responses["macos-x64"] = response_bytes(
+                "macos-x64", lock_bytes["macos-x64"].replace(b"\n", b"\r\n"),
+            )
+
+        for label, mutate, expected_error in (
+            ("Intel-metadata-name", intel_wrong_metadata, "repository-contents binding is invalid"),
+            ("Intel-source-path", intel_wrong_source, "repository-contents binding is invalid"),
+            ("Intel-missing-response", intel_missing, ""),
+            ("shared-Mac-content", intel_different_raw_bytes, "differ in raw bytes"),
+            ("shared-Mac-newlines", intel_newline_only_drift, "differ in raw bytes"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_fetcher(root, mutate=mutate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "authoritative-fetch" / "locks").iterdir()), ())
+
     def test_privileged_dependency_snapshot_validator_matches_producer_contract(
         self,
     ) -> None:
@@ -5948,6 +6308,13 @@ class TestCIWorkflows(unittest.TestCase):
                 "3.12.10",
                 "darwin",
                 "arm64",
+            ),
+            "macos-x64": (
+                "dependency-lock-macos-x64-py3.12.10",
+                "constraints/requirements-macos-py312.lock",
+                "3.12.10",
+                "darwin",
+                "x86_64",
             ),
             "windows-x64": (
                 "dependency-lock-windows-x64-py3.12.10",
@@ -6121,6 +6488,7 @@ class TestCIWorkflows(unittest.TestCase):
             snapshot_attempt: str,
             candidate_kind: str = "authoritative",
             mutate: Callable[[str, dict[str, bytes]], None] | None = None,
+            mutate_roots: Callable[[Path, Path], None] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             raw_root, output_root = build_artifacts(
                 root,
@@ -6131,10 +6499,11 @@ class TestCIWorkflows(unittest.TestCase):
             authoritative_root = root / "authoritative"
             authoritative_root.mkdir()
             for platform, policy in authoritative.items():
-                constraint_path = platforms[platform][1]
-                (authoritative_root / Path(constraint_path).name).write_bytes(
+                (authoritative_root / f"{platform}.lock").write_bytes(
                     normalized_newlines(policy.file.content)
                 )
+            if mutate_roots is not None:
+                mutate_roots(raw_root, authoritative_root)
             environment = os.environ.copy()
             environment.update(
                 {
@@ -6164,7 +6533,7 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
                     tuple(sorted(path.name for path in (root / "validated").iterdir())),
-                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                    ("linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"),
                 )
 
         for candidate_kind in ("windows-crlf", "windows-lone-cr"):
@@ -6183,7 +6552,7 @@ class TestCIWorkflows(unittest.TestCase):
                     tuple(
                         sorted(path.name for path in (root / "validated").iterdir())
                     ),
-                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                    ("linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"),
                 )
 
         def drift_html_url(platform: str, members: dict[str, bytes]) -> None:
@@ -6284,6 +6653,94 @@ class TestCIWorkflows(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((Path(raw_directory) / "validated").iterdir()), ())
+
+        def intel_receipt_tuple(platform: str, members: dict[str, bytes]) -> None:
+            if platform != "macos-x64":
+                return
+            receipt = cast(dict[str, object], json.loads(members["receipts/fresh-2.json"]))
+            environment = cast(dict[str, object], receipt["expected_environment"])
+            environment["platform_machine"] = "arm64"
+            receipt_bytes = json.dumps(receipt).encode("utf-8")
+            members["receipts/fresh-2.json"] = receipt_bytes
+            snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+            metadata = cast(dict[str, object], snapshot["metadata"])
+            metadata["verification_receipt_sha256"] = hashlib.sha256(receipt_bytes).hexdigest()
+            members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_correlator(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                job = cast(dict[str, object], snapshot["job"])
+                job["correlator"] = "gm2godot-dependency-locks-macos-arm64"
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_manifest_source(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                manifests = cast(dict[str, object], snapshot["manifests"])
+                manifest = cast(dict[str, object], manifests["constraints/requirements-macos-py312.lock"])
+                file_binding = cast(dict[str, object], manifest["file"])
+                file_binding["source_location"] = "constraints/requirements-macos-x64-py312.wheels.lock"
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_source_fingerprint(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                metadata = cast(dict[str, object], snapshot["metadata"])
+                metadata["source_fingerprint"] = hashlib.sha256(b"different authored source").hexdigest()
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_missing_receipt(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                del members["receipts/fresh-2.json"]
+
+        def intel_missing_snapshot(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                del members["dependency-submission.json"]
+
+        for label, mutate, expected_error in (
+            ("Intel-arm64-receipt", intel_receipt_tuple, "native tuple is wrong"),
+            ("Intel-arm64-correlator", intel_correlator, "job binding is wrong"),
+            ("Intel-companion-source", intel_manifest_source, "manifest source binding is wrong"),
+            ("Intel-source-fingerprint", intel_source_fingerprint, "authored source fingerprint"),
+            ("Intel-missing-fresh-2", intel_missing_receipt, "evidence differs"),
+            ("Intel-missing-snapshot", intel_missing_snapshot, "evidence differs"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_validator(root, snapshot_attempt="2", mutate=mutate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "validated").iterdir()), ())
+
+        intel_artifact = platforms["macos-x64"][0]
+
+        def missing_intel_archive(raw_root: Path, _authoritative_root: Path) -> None:
+            shutil.rmtree(raw_root / intel_artifact)
+
+        def duplicate_intel_archive(raw_root: Path, _authoritative_root: Path) -> None:
+            archive_root = raw_root / intel_artifact
+            shutil.copyfile(archive_root / f"{intel_artifact}.zip", archive_root / "duplicate.zip")
+
+        def missing_intel_authoritative(_raw_root: Path, authoritative_root: Path) -> None:
+            (authoritative_root / "macos-x64.lock").unlink()
+
+        def duplicate_intel_authoritative(_raw_root: Path, authoritative_root: Path) -> None:
+            shutil.copyfile(authoritative_root / "macos-x64.lock", authoritative_root / "macos-x64-copy.lock")
+
+        for label, mutate_roots, expected_error in (
+            ("Intel-missing-archive", missing_intel_archive, "artifact inventory differs"),
+            ("Intel-duplicate-archive", duplicate_intel_archive, "unexpected entries"),
+            ("Intel-deduplicated-authoritative", missing_intel_authoritative, "lock inventory differs"),
+            ("Intel-duplicate-authoritative", duplicate_intel_authoritative, "lock inventory differs"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_validator(root, snapshot_attempt="2", mutate_roots=mutate_roots)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "validated").iterdir()), ())
 
     def test_dependency_submission_rechecks_authoritative_main_before_post(
         self,
@@ -6302,10 +6759,11 @@ class TestCIWorkflows(unittest.TestCase):
             current_main_sha: str,
             *,
             stale_after_first_post: bool = False,
+            stale_before_intel: bool = False,
         ) -> subprocess.CompletedProcess[str]:
             submission_root = root / "validated"
             submission_root.mkdir()
-            for platform in ("linux-x64", "macos-arm64", "windows-x64"):
+            for platform in ("linux-x64", "macos-arm64", "macos-x64", "windows-x64"):
                 (submission_root / f"{platform}.json").write_text(
                     "{}\n",
                     encoding="utf-8",
@@ -6321,6 +6779,15 @@ class TestCIWorkflows(unittest.TestCase):
                 "  main_sha=\"$FAKE_MAIN_SHA\"\n"
                 "  if [[ \"$FAKE_STALE_AFTER_FIRST_POST\" == 1 "
                 "&& -f \"$FAKE_POST_MARKER\" ]]; then\n"
+                "    main_sha=\"$FAKE_STALE_MAIN_SHA\"\n"
+                "  fi\n"
+                "  post_count=0\n"
+                "  while IFS= read -r call; do\n"
+                "    if [[ \" $call \" == *\" --method POST \"* ]]; then\n"
+                "      post_count=$((post_count + 1))\n"
+                "    fi\n"
+                "  done < \"$FAKE_GH_LOG\"\n"
+                "  if [[ \"$FAKE_STALE_BEFORE_INTEL\" == 1 && \"$post_count\" -ge 2 ]]; then\n"
                 "    main_sha=\"$FAKE_STALE_MAIN_SHA\"\n"
                 "  fi\n"
                 "  printf '{\"ref\":\"refs/heads/main\",\"object\":'\n"
@@ -6341,6 +6808,7 @@ class TestCIWorkflows(unittest.TestCase):
                     "FAKE_MAIN_SHA": current_main_sha,
                     "FAKE_POST_MARKER": str(root / "first-post-complete"),
                     "FAKE_STALE_AFTER_FIRST_POST": "1" if stale_after_first_post else "0",
+                    "FAKE_STALE_BEFORE_INTEL": "1" if stale_before_intel else "0",
                     "FAKE_STALE_MAIN_SHA": "f" * 40,
                     "GITHUB_REPOSITORY": "Infiland/GM2Godot",
                     "GITHUB_SHA": repository_sha,
@@ -6373,7 +6841,17 @@ class TestCIWorkflows(unittest.TestCase):
             self.assertEqual(current.returncode, 0, current.stderr)
             self.assertEqual(
                 method_sequence(root),
-                ["GET", "POST", "GET", "POST", "GET", "POST"],
+                ["GET", "POST", "GET", "POST", "GET", "POST", "GET", "POST"],
+            )
+
+            post_calls = [
+                shlex.split(call)
+                for call in (root / "gh.log").read_text(encoding="utf-8").splitlines()
+                if "--method POST" in call
+            ]
+            self.assertEqual(
+                [Path(call[call.index("--input") + 1]).name for call in post_calls],
+                ["linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"],
             )
 
         with tempfile.TemporaryDirectory() as raw_directory:
@@ -6395,6 +6873,23 @@ class TestCIWorkflows(unittest.TestCase):
             sequence = method_sequence(root)
             self.assertEqual(sequence, ["GET", "POST", "GET"])
             self.assertEqual(sequence.count("POST"), 1)
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            stale_intel = run_submit(root, repository_sha, stale_before_intel=True)
+            self.assertNotEqual(stale_intel.returncode, 0)
+            self.assertIn("Refusing stale dependency submission", stale_intel.stderr)
+            self.assertEqual(method_sequence(root), ["GET", "POST", "GET", "POST", "GET"])
+            calls = (root / "gh.log").read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("--method POST" in call and "macos-x64.json" in call for call in calls))
+            self.assertEqual(
+                tuple(sorted(path.name for path in (root / "responses").iterdir())),
+                (
+                    "linux-x64.json", "macos-arm64.json",
+                    "main-ref-before-linux-x64.json", "main-ref-before-macos-arm64.json",
+                    "main-ref-before-macos-x64.json",
+                ),
+            )
 
     def test_dependency_lock_refresh_package_requires_native_graph_membership(
         self,

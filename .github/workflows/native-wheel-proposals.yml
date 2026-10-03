@@ -1,10 +1,9 @@
-# First proof commit deliberately uses discover. Integration must change this
-# exact fixed phase to require-committed; absent companions never select a phase.
+# Require the four reviewed committed wheel companions on every supported source event.
 name: Native Wheel Proposals
 
 on:
   push:
-    branches: [codex/native-intel-wheel-locks]
+    branches: [main, codex/native-intel-wheel-locks]
   pull_request:
     branches: [main]
 
@@ -17,7 +16,7 @@ concurrency:
 
 env:
   SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-  PROOF_PHASE: discover
+  PROOF_PHASE: require-committed
 
 jobs:
   native:
@@ -145,7 +144,7 @@ jobs:
           require(event.get("repository", {}).get("full_name") == repository, "event repository mismatch")
           event_name = os.environ["GITHUB_EVENT_NAME"]
           if event_name == "push":
-              require(os.environ["GITHUB_REF"] == "refs/heads/codex/native-intel-wheel-locks", "unexpected push ref")
+              require(os.environ["GITHUB_REF"] in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks"), "unexpected push ref")
               require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")
               require(event.get("deleted") is False, "deleted or malformed push")
               event_sha = event.get("after")
@@ -337,7 +336,7 @@ jobs:
           require(event.get("repository", {}).get("full_name") == repository, "event repository mismatch")
           event_name = os.environ["GITHUB_EVENT_NAME"]
           if event_name == "push":
-              require(os.environ["GITHUB_REF"] == "refs/heads/codex/native-intel-wheel-locks", "unexpected push ref")
+              require(os.environ["GITHUB_REF"] in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks"), "unexpected push ref")
               require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")
               require(event.get("deleted") is False, "deleted or malformed push")
               event_sha = event.get("after")

@@ -79,11 +79,13 @@ PRODUCER_NATIVE_TEST_IDS = tuple(
 NATIVE_GATE_TEST_IDS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "N01-linux": POSIX_NATIVE_TEST_IDS + PRODUCER_NATIVE_TEST_IDS,
     "N01-macos": POSIX_NATIVE_TEST_IDS + DARWIN_NATIVE_TEST_IDS + PRODUCER_NATIVE_TEST_IDS,
+    "N01-macos-x64": POSIX_NATIVE_TEST_IDS + DARWIN_NATIVE_TEST_IDS + PRODUCER_NATIVE_TEST_IDS,
     "N01-windows": WINDOWS_NATIVE_TEST_IDS + PRODUCER_NATIVE_TEST_IDS,
 })
 NATIVE_GATE_RUNTIMES: Mapping[str, NativeRuntimeRequirement] = MappingProxyType({
     "N01-linux": NativeRuntimeRequirement("3.12.13", "linux", "x86_64"),
     "N01-macos": NativeRuntimeRequirement("3.12.10", "darwin", "arm64"),
+    "N01-macos-x64": NativeRuntimeRequirement("3.12.10", "darwin", "x86_64"),
     "N01-windows": NativeRuntimeRequirement("3.12.10", "win32", "AMD64"),
 })
 
@@ -170,7 +172,7 @@ def validate_gate_definition(definition: GateDefinition) -> None:
             raise ManifestError("R01 must retain conversion-parity validation")
         return
     if definition.gate not in NATIVE_GATE_TEST_IDS or definition.validation_kind != "native-receipts":
-        raise ManifestError("Only the three N01 gates may use native-receipts validation")
+        raise ManifestError("Only the four N01 gates may use native-receipts validation")
     if definition.unittest_ids != NATIVE_GATE_TEST_IDS[definition.gate]:
         raise ManifestError(f"{definition.gate} must select its exact ordered native method IDs")
     if definition.native_runtime != NATIVE_GATE_RUNTIMES[definition.gate]:

@@ -148,7 +148,7 @@ class DependencyLockWorkflowIsolationTests(unittest.TestCase):
         cls.workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
     def test_native_matrix_selects_null_pip_configuration_per_host(self) -> None:
-        self.assertEqual(self.workflow.count("pip_config_file: /dev/null"), 2)
+        self.assertEqual(self.workflow.count("pip_config_file: /dev/null"), 3)
         self.assertEqual(self.workflow.count("pip_config_file: nul"), 1)
         self.assertIn("PIP_CONFIG_FILE: ${{ matrix.pip_config_file }}", self.workflow)
         for inherited_setting in (

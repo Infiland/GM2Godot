@@ -128,7 +128,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.8.13`.
+Current source version: `0.8.14`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The macOS downloads require macOS 15.0 or later on Apple Silicon (arm64).
@@ -159,9 +159,10 @@ To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_
   | --- | --- | --- |
   | Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.lock` |
   | macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
+  | macOS x64 (Intel) | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
   | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.lock` |
 
-  Other Python patch versions and architectures are not the reviewed dependency baseline.
+  Other Python patch versions and architectures are not the reviewed dependency baseline. The Mac architectures share a version lock after native byte-for-byte generation proof, but use separate wheel hash locks. Intel support here covers running from source; packaged Mac downloads remain arm64.
 
 ### Setup
 
@@ -194,7 +195,7 @@ source venv/bin/activate
 python --version  # Python 3.12.13
 ```
 
-macOS arm64:
+macOS arm64 or x64 (Intel):
 
 ```bash
 python3.12 scripts/verify_dependency_bootstrap.py \
@@ -236,7 +237,7 @@ python -m pip --isolated --disable-pip-version-check --no-input install \
   --constraint constraints/requirements-linux-py312.lock -r requirements.txt
 ```
 
-macOS arm64:
+macOS arm64 or x64 (Intel):
 
 ```bash
 export PIP_CONFIG_FILE=/dev/null
@@ -260,7 +261,9 @@ python -m pip --isolated --disable-pip-version-check --no-input install `
   --constraint constraints/requirements-windows-py312.lock -r requirements.txt
 ```
 
-`PIP_CONFIG_FILE` points at the platform null device and `--isolated` ignores user settings, so local pip configuration cannot weaken the reviewed install policy. `requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools pair; live consumers preflight it against the selected native `.lock` and carry no separate numeric pip pin. The native workflow accepts only stable locks or one all-three-lock source transition, proves the proposed pair with a bootstrap-only install and self-host before full generation, then requires candidate/self-host equality and two identical clean-install receipts. Evidence is uploaded before a changed candidate intentionally fails committed equality; review and commit all three native artifacts, then rerun. Package refresh rejects the bootstrap tools, and dependency changes are never auto-merged. Successful main runs submit verified platform dependency graphs so transitive alerts remain available even though generated locks are not Dependabot-editable manifests. Do not generate one platform's lock from another platform. Current installs reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
+`PIP_CONFIG_FILE` points at the platform null device and `--isolated` ignores user settings, so local pip configuration cannot weaken the reviewed install policy. `requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools pair; live consumers preflight it against the selected native `.lock` and carry no separate numeric pip pin. The native workflow accepts only stable locks or one all-three-lock source transition, proves the proposed pair with a bootstrap-only install and self-host before full generation, then requires candidate/self-host equality and two identical clean-install receipts. Evidence is uploaded before a changed candidate intentionally fails committed equality; review all four native artifacts and commit the three unique version locks, then rerun. Package refresh rejects the bootstrap tools, and dependency changes are never auto-merged. Successful main runs submit verified platform dependency graphs so transitive alerts remain available even though generated locks are not Dependabot-editable manifests. Do not generate one platform's lock from another platform. Current installs reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
+
+The four architecture-specific `constraints/requirements-*-py312.wheels.lock` files record the complete reviewed wheel graph, including development tools. The native wheel workflow enforces their hashes with offline installs on each exact host. The ordinary source-install commands above use version constraints; see [the contributor guide](CONTRIBUTING.md#native-wheel-proposals) for a complete hash-enforced development install.
 
 ## Usage
 
@@ -393,7 +396,7 @@ You are setting up the GM2Godot project.
 
 Use exactly one supported native dependency baseline:
 - Linux x64: CPython 3.12.13 with constraints/requirements-linux-py312.lock
-- macOS arm64: CPython 3.12.10 with constraints/requirements-macos-py312.lock
+- macOS arm64 or x64 (Intel): CPython 3.12.10 with constraints/requirements-macos-py312.lock
 - Windows x64: CPython 3.12.10 with constraints/requirements-windows-py312.lock
 
 Before creating a virtual environment, run verify_dependency_bootstrap.py with
@@ -423,7 +426,8 @@ refresh_package, but reject pip and pip-tools in package mode. The native
 workflow proves a proposed bootstrap pair before full generation, self-hosts
 each candidate, compares two clean installs, and uploads evidence before
 intentionally failing when a changed result has not yet been committed. Review
-and commit all three native locks, then rerun. Do not auto-merge dependency work.
+all four native artifacts and commit the three unique version locks, then rerun.
+Do not auto-merge dependency work.
 
 Treat requirements-bootstrap.txt as the only reviewed pip/pip-tools source and
 review its pair plus all three native locks as one compatibility unit. Current install and compile

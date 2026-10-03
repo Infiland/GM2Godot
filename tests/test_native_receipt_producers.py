@@ -71,6 +71,7 @@ class TestNativeReceiptProducers(unittest.TestCase):
         if runtime not in {
             ("3.12.13", "linux", "x86_64"),
             ("3.12.10", "darwin", "arm64"),
+            ("3.12.10", "darwin", "x86_64"),
             ("3.12.10", "win32", "AMD64"),
         }:
             self.skipTest(f"Environment receipt requires a reviewed native baseline; executing {runtime}")

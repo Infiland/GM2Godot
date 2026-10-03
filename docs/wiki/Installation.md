@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.13 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.14 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -46,7 +46,7 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.13`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.14`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 ## Run from source
 
@@ -56,6 +56,7 @@ Use the native, reproducible baseline for your host. Git is also required for th
 | --- | --- | --- |
 | Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.lock` |
 | macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
+| macOS x64 (Intel) | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
 | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.lock` |
 
 Other Python patch versions and architectures are not the reviewed dependency baseline. Each procedure runs the bootstrap preflight before `venv` can invoke `ensurepip`; after activation, `python --version` must report the listed exact patch version before installation.
@@ -86,6 +87,8 @@ python main.py
 If the `py` launcher is unavailable, use an x64 CPython 3.12.10 executable directly. Activate the same environment again before running GM2Godot in a new terminal.
 
 ### macOS
+
+Use a native arm64 or x86_64 CPython 3.12.10 interpreter matching your host. Both native candidate graphs reproduce the same version lock; their wheel hashes remain architecture-specific. This source procedure also supports Intel Macs, while the packaged Mac downloads above remain arm64.
 
 ```bash
 git clone https://github.com/Infiland/GM2Godot.git
@@ -137,7 +140,9 @@ python -m pip --isolated --disable-pip-version-check --no-input install \
 python main.py
 ```
 
-The null config file and `--isolated` prevent machine-local pip settings from changing the reviewed install behavior. `requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools pair; preflight must match it to the selected native lock before any package installation. Requesting unversioned `pip` under that lock remains exact without another live version literal. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) accepts only a stable pair or an all-three-lock source transition, proves the proposed pair with a bootstrap-only install and self-host, then generates the complete candidate, self-host, and two clean-install receipts. A changed candidate intentionally fails the committed-equality gate after evidence upload; review and commit all three native `.lock` artifacts, then rerun. `refresh=package` rejects `pip` and `pip-tools`, and dependency changes are never auto-merged. Successful main runs submit the verified platform graphs under stable correlators so transitive security alerts remain available even though generated locks are hidden from Dependabot's pip updater. Do not generate one platform's lock from another platform. Current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
+The null config file and `--isolated` prevent machine-local pip settings from changing the reviewed install behavior. `requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools pair; preflight must match it to the selected native lock before any package installation. Requesting unversioned `pip` under that lock remains exact without another live version literal. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) accepts only a stable pair or an all-three-lock source transition, proves the proposed pair with a bootstrap-only install and self-host, then generates the complete candidate, self-host, and two clean-install receipts. A changed candidate intentionally fails the committed-equality gate after evidence upload; review all four native artifacts and commit the three unique version locks, then rerun. `refresh=package` rejects `pip` and `pip-tools`, and dependency changes are never auto-merged. Successful main runs submit the verified platform graphs under stable correlators so transitive security alerts remain available even though generated locks are hidden from Dependabot's pip updater. Do not generate one platform's lock from another platform. Current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. Any future source-build path must pass a separately reviewed `--build-constraint` for its isolated build environment.
+
+Four architecture-specific `constraints/requirements-*-py312.wheels.lock` companions capture the complete runtime and development wheel graphs. Native workflow installs enforce their hashes offline on each exact host. The source commands above remain version constrained; [Contributing and Testing](Contributing-and-Testing#native-wheel-hash-locks) explains the complete hash-enforced development install.
 
 ## Verify the source installation
 
@@ -148,6 +153,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.13`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.14`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

@@ -57,6 +57,16 @@ jobs:
             venv_python: bin/python
             pip_config_file: /dev/null
             native_receipt_gate: N01-macos
+          - platform: macos-x64
+            runner: macos-26-intel
+            architecture: x64
+            python_version: '3.12.10'
+            constraint: requirements-macos-py312.lock
+            expected_platform: darwin
+            expected_machine: x86_64
+            venv_python: bin/python
+            pip_config_file: /dev/null
+            native_receipt_gate: N01-macos-x64
           - platform: windows-x64
             runner: windows-2025
             architecture: x64
@@ -688,6 +698,7 @@ jobs:
           done <<'LOCKS'
           linux-x64|constraints/requirements-linux-py312.lock
           macos-arm64|constraints/requirements-macos-py312.lock
+          macos-x64|constraints/requirements-macos-py312.lock
           windows-x64|constraints/requirements-windows-py312.lock
           LOCKS
           python3 - <<'PY'
@@ -708,6 +719,7 @@ jobs:
           expected = {
               "linux-x64": "constraints/requirements-linux-py312.lock",
               "macos-arm64": "constraints/requirements-macos-py312.lock",
+              "macos-x64": "constraints/requirements-macos-py312.lock",
               "windows-x64": "constraints/requirements-windows-py312.lock",
           }
 
@@ -861,11 +873,13 @@ jobs:
               )
               for platform, lock_path in expected.items()
           }
-          for platform, lock_path in expected.items():
-              destination = lock_root / Path(lock_path).name
+          if verified_locks["macos-arm64"] != verified_locks["macos-x64"]:
+              raise SystemExit("Shared macOS authoritative lock responses differ in raw bytes")
+          for platform in expected:
+              destination = lock_root / f"{platform}.lock"
               with destination.open("xb") as handle:
                   handle.write(verified_locks[platform])
-          print("Fetched and verified all three authoritative native locks at the exact push SHA.")
+          print("Fetched and verified all four authoritative native locks at the exact push SHA.")
           PY
 
       - name: Validate every snapshot before submission
@@ -917,7 +931,7 @@ jobs:
                   "artifact": "dependency-lock-linux-x64-py3.12.13",
                   "constraint": "constraints/requirements-linux-py312.lock",
                   "candidate": "candidate/requirements-linux-py312.lock",
-                  "authoritative": "requirements-linux-py312.lock",
+                  "authoritative": "linux-x64.lock",
                   "python": "3.12.13",
                   "sys_platform": "linux",
                   "machine": "x86_64",
@@ -926,16 +940,25 @@ jobs:
                   "artifact": "dependency-lock-macos-arm64-py3.12.10",
                   "constraint": "constraints/requirements-macos-py312.lock",
                   "candidate": "candidate/requirements-macos-py312.lock",
-                  "authoritative": "requirements-macos-py312.lock",
+                  "authoritative": "macos-arm64.lock",
                   "python": "3.12.10",
                   "sys_platform": "darwin",
                   "machine": "arm64",
+              },
+              "macos-x64": {
+                  "artifact": "dependency-lock-macos-x64-py3.12.10",
+                  "constraint": "constraints/requirements-macos-py312.lock",
+                  "candidate": "candidate/requirements-macos-py312.lock",
+                  "authoritative": "macos-x64.lock",
+                  "python": "3.12.10",
+                  "sys_platform": "darwin",
+                  "machine": "x86_64",
               },
               "windows-x64": {
                   "artifact": "dependency-lock-windows-x64-py3.12.10",
                   "constraint": "constraints/requirements-windows-py312.lock",
                   "candidate": "candidate/requirements-windows-py312.lock",
-                  "authoritative": "requirements-windows-py312.lock",
+                  "authoritative": "windows-x64.lock",
                   "python": "3.12.10",
                   "sys_platform": "win32",
                   "machine": "AMD64",
@@ -1369,7 +1392,7 @@ jobs:
                   json.dumps(snapshot, ensure_ascii=True, allow_nan=False, indent=2, sort_keys=True) + "\n",
                   encoding="utf-8",
               )
-          print("Validated all three same-run native dependency snapshots before submission.")
+          print("Validated all four same-run native dependency snapshots before submission.")
           PY
 
       - name: Submit validated native dependency graphs
@@ -1444,7 +1467,7 @@ jobs:
               )
           PY
           }
-          for platform in linux-x64 macos-arm64 windows-x64; do
+          for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do
             snapshot="$SUBMISSION_ROOT/$platform.json"
             response="$SUBMISSION_RECEIPT_ROOT/$platform.json"
             test -f "$snapshot"

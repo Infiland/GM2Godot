@@ -64,6 +64,14 @@ PLATFORM_POLICIES: Mapping[str, tuple[str, str, str, str, str, str]] = {
         "3.12.10",
         "constraints/requirements-macos-py312.lock",
     ),
+    "macos-x64": (
+        "darwin",
+        "posix",
+        "Darwin",
+        "x86_64",
+        "3.12.10",
+        "constraints/requirements-macos-py312.lock",
+    ),
     "windows-x64": (
         "win32",
         "nt",

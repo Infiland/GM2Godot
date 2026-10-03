@@ -4,15 +4,17 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Literal, Mapping, cast
+from typing import Callable, Iterable, Literal
 
+from src.conversion.gamemaker_json import read_gamemaker_json
+from src.conversion.json_fields import MISSING, JsonFieldError, JsonMissing, field_value, required_string
+from src.conversion.json_values import JsonObject, JsonPath, JsonValue
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import JsonDict, JsonList
 
 
 ProjectManifestSeverity = Literal["info", "warning", "error"]
@@ -66,11 +68,11 @@ _KNOWN_PROJECT_FIELDS = frozenset({
     "tutorialPath",
 })
 
-_MISSING_RESOURCE_PATH = object()
+_MISSING_RESOURCE_PATH = MISSING
 
 
-def _empty_json_dict() -> JsonDict:
-    return cast(JsonDict, {})
+def _empty_json_dict() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,7 @@ class ProjectResourceReference:
 class ProjectConfigOverride:
     configuration: str
     field_path: str
-    value: object
+    value: JsonValue
     source: ProjectSourceLocation | None = None
 
 
@@ -117,14 +119,14 @@ class ProjectConfiguration:
     parent: str = ""
     overrides: tuple[ProjectConfigOverride, ...] = ()
     source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
 class ProjectOption:
     platform: str
     key: str
-    value: object
+    value: JsonValue
     source: ProjectSourceLocation | None = None
 
 
@@ -136,7 +138,7 @@ class ProjectTextureGroup:
     dynamic_path: str = ""
     targets: tuple[str, ...] = ()
     source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -144,7 +146,7 @@ class ProjectAudioGroup:
     name: str
     targets: tuple[str, ...] = ()
     source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -153,7 +155,7 @@ class ProjectIncludedFile:
     path: str
     targets: tuple[str, ...] = ()
     source: ProjectSourceLocation | None = None
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -169,7 +171,7 @@ class GameMakerProjectManifest:
     audio_groups: tuple[ProjectAudioGroup, ...] = ()
     included_files: tuple[ProjectIncludedFile, ...] = ()
     diagnostics: tuple[ProjectManifestDiagnostic, ...] = ()
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
     ide_version: str = ""
 
     def get_option(self, key: str, platform: str | None = None) -> ProjectOption | None:
@@ -264,11 +266,11 @@ def load_gamemaker_project_manifest(
         diagnostics.extend(_missing_target_option_diagnostics(options, target_platform))
 
     return GameMakerProjectManifest(
-        project_name=_string_value(raw_data.get("%Name")) or _string_value(raw_data.get("name")),
+        project_name=_string_field(raw_data, "%Name", yyp_path) or _string_field(raw_data, "name", yyp_path),
         yyp_path=yyp_path,
-        resource_type=_string_value(raw_data.get("resourceType")),
-        resource_version=_string_value(raw_data.get("resourceVersion")),
-        ide_version=_project_ide_version(raw_data),
+        resource_type=_string_field(raw_data, "resourceType", yyp_path),
+        resource_version=_string_field(raw_data, "resourceVersion", yyp_path),
+        ide_version=_project_ide_version(raw_data, yyp_path),
         resources=resources,
         configurations=configurations,
         options=options,
@@ -341,18 +343,17 @@ def _find_yyp_path(
     return None
 
 
-def _read_lenient_json_file(path: str) -> tuple[JsonDict | None, str]:
+def _read_lenient_json_file(path: str) -> tuple[JsonObject | None, str]:
     try:
-        with open(path, "r", encoding="utf-8") as file:
-            source = file.read()
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
-        return (cast(JsonDict, data), source) if isinstance(data, dict) else (None, source)
+        document = read_gamemaker_json(path)
+        data = document.value
+        return (data, document.source_text) if isinstance(data, dict) else (None, document.source_text)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None, ""
 
 
 def _parse_resources(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
     diagnostics: list[ProjectManifestDiagnostic],
@@ -362,10 +363,10 @@ def _parse_resources(
     raw_resources = yyp_data.get("resources")
     if not isinstance(raw_resources, list):
         return ()
-    for order, raw_entry in enumerate(cast(JsonList, raw_resources)):
+    for order, raw_entry in enumerate(raw_resources):
         if not isinstance(raw_entry, dict):
             continue
-        entry = cast(JsonDict, raw_entry)
+        entry = raw_entry
         raw_path, path_field = _resource_path_value(entry)
         field_path = f"resources[{order}].{path_field}"
         (
@@ -437,7 +438,7 @@ def _parse_resources(
 def _resource_field_line(
     source: str,
     field_path: str,
-    raw_value: object,
+    raw_value: JsonValue | JsonMissing,
     search_offset: int,
     *,
     fallback_needle: str,
@@ -475,19 +476,19 @@ def _resource_field_line(
     return source.count("\n", 0, match.start()) + 1, match.end()
 
 
-def _resource_path_value(entry: JsonDict) -> tuple[object, str]:
+def _resource_path_value(entry: JsonObject) -> tuple[JsonValue | JsonMissing, str]:
     """Return a raw YYP resource path and its field without coercion."""
     data = entry
     field_prefix = ""
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
         field_prefix = "Value."
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         return (
-            nested.get("path", _MISSING_RESOURCE_PATH),
+            field_value(nested, "path"),
             f"{field_prefix}id.path",
         )
     for key in ("path", "resourcePath", "resource_path"):
@@ -498,16 +499,16 @@ def _resource_path_value(entry: JsonDict) -> tuple[object, str]:
 
 
 def _resource_diagnostic_identity(
-    entry: JsonDict,
-    raw_path: object,
+    entry: JsonObject,
+    raw_path: JsonValue | JsonMissing,
 ) -> tuple[str, str, str]:
     data = entry
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         name = _string_value(nested.get("name"))
         nested_resource_type = _string_value(nested.get("resourceType"))
     else:
@@ -536,7 +537,7 @@ def _resource_diagnostic_identity(
 
 
 def _resource_reference_from_entry(
-    entry: JsonDict,
+    entry: JsonObject,
     order: int,
     yyp_path: str,
     raw_source: str,
@@ -545,11 +546,11 @@ def _resource_reference_from_entry(
     uuid = _string_value(entry.get("id")) or _string_value(entry.get("Key"))
     value = entry.get("Value")
     if isinstance(value, dict):
-        data = cast(JsonDict, value)
+        data = value
         uuid = uuid or _string_value(data.get("id"))
     nested_id = data.get("id")
     if isinstance(nested_id, dict):
-        nested = cast(JsonDict, nested_id)
+        nested = nested_id
         uuid = (
             _string_value(nested.get("id"))
             or _string_value(nested.get("uuid"))
@@ -587,7 +588,7 @@ def _resource_reference_from_entry(
 
 
 def _parse_configurations(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectConfiguration, ...]:
@@ -611,7 +612,7 @@ def _parse_configurations(
 
     config_values = yyp_data.get("ConfigValues")
     if isinstance(config_values, dict):
-        for name, raw_overrides in cast(JsonDict, config_values).items():
+        for name, raw_overrides in config_values.items():
             config_name = str(name)
             overrides = _config_overrides_from_value(
                 config_name,
@@ -638,33 +639,33 @@ def _parse_configurations(
     return tuple(configs[name] for name in sorted(configs))
 
 
-def _iter_config_nodes(raw_configs: object) -> Iterable[JsonDict]:
+def _iter_config_nodes(raw_configs: JsonValue) -> Iterable[JsonObject]:
     if isinstance(raw_configs, dict):
-        config = cast(JsonDict, raw_configs)
+        config = raw_configs
         if _string_value(config.get("name")) or _string_value(config.get("%Name")):
             yield config
         for key in ("children", "configs", "Configs"):
             for child in _iter_config_nodes(config.get(key)):
                 yield child
     elif isinstance(raw_configs, list):
-        for item in cast(JsonList, raw_configs):
+        for item in raw_configs:
             if isinstance(item, dict):
-                yield from _iter_config_nodes(cast(JsonDict, item))
+                yield from _iter_config_nodes(item)
 
 
-def _config_parent_name(node: JsonDict) -> str:
+def _config_parent_name(node: JsonObject) -> str:
     raw_parent = node.get("parent") or node.get("parentConfig")
     if isinstance(raw_parent, str):
         return raw_parent
     if isinstance(raw_parent, dict):
-        parent = cast(JsonDict, raw_parent)
+        parent = raw_parent
         return _string_value(parent.get("name")) or _string_value(parent.get("%Name"))
     return ""
 
 
 def _config_overrides_from_node(
     configuration: str,
-    node: JsonDict,
+    node: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectConfigOverride, ...]:
@@ -685,14 +686,14 @@ def _config_overrides_from_node(
 
 def _config_overrides_from_value(
     configuration: str,
-    value: object,
+    value: JsonValue,
     yyp_path: str,
     raw_source: str,
     field_path: str,
 ) -> tuple[ProjectConfigOverride, ...]:
     if isinstance(value, dict):
         overrides: list[ProjectConfigOverride] = []
-        for key, nested_value in cast(JsonDict, value).items():
+        for key, nested_value in value.items():
             overrides.extend(
                 _config_overrides_from_value(
                     configuration,
@@ -847,7 +848,7 @@ def _option_platform_from_path(options_root: str, path: str) -> str:
 
 
 def _parse_texture_groups(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectTextureGroup, ...]:
@@ -872,7 +873,7 @@ def _parse_texture_groups(
 
 
 def _parse_audio_groups(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectAudioGroup, ...]:
@@ -893,7 +894,7 @@ def _parse_audio_groups(
 
 
 def _parse_included_files(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectIncludedFile, ...]:
@@ -917,7 +918,7 @@ def _parse_included_files(
 
 
 def _unknown_project_field_diagnostics(
-    yyp_data: JsonDict,
+    yyp_data: JsonObject,
     yyp_path: str,
     raw_source: str,
 ) -> tuple[ProjectManifestDiagnostic, ...]:
@@ -1002,41 +1003,41 @@ def _missing_target_option_diagnostics(
     )
 
 
-def _iter_dict_items(value: object) -> Iterable[JsonDict]:
+def _iter_dict_items(value: JsonValue) -> Iterable[JsonObject]:
     if isinstance(value, list):
-        for item in cast(JsonList, value):
+        for item in value:
             if isinstance(item, dict):
-                yield cast(JsonDict, item)
+                yield item
     elif isinstance(value, dict):
-        for item in cast(JsonDict, value).values():
+        for item in value.values():
             if isinstance(item, dict):
-                yield cast(JsonDict, item)
+                yield item
 
 
-def _entry_name(data: JsonDict) -> str:
+def _entry_name(data: JsonObject) -> str:
     return _string_value(data.get("%Name")) or _string_value(data.get("name"))
 
 
-def _entry_reference_name(value: object) -> str:
+def _entry_reference_name(value: JsonValue) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, dict):
-        return _entry_name(cast(JsonDict, value))
+        return _entry_name(value)
     return ""
 
 
-def _targets_from_mapping(data: Mapping[str, object]) -> tuple[str, ...]:
+def _targets_from_mapping(data: JsonObject) -> tuple[str, ...]:
     raw_targets = data.get("targets") or data.get("copyToTargets") or data.get("platforms")
     if isinstance(raw_targets, list):
         targets: list[str] = []
-        for target in cast(JsonList, raw_targets):
+        for target in raw_targets:
             target_text = str(target)
             if target_text:
                 targets.append(target_text)
         return tuple(targets)
     if isinstance(raw_targets, dict):
         targets: list[str] = []
-        for key, value in cast(Mapping[str, object], raw_targets).items():
+        for key, value in raw_targets.items():
             if bool(value):
                 targets.append(str(key))
         return tuple(sorted(targets))
@@ -1067,18 +1068,28 @@ def _name_from_path(path: str) -> str:
     return os.path.splitext(filename)[0]
 
 
-def _string_value(value: object) -> str:
+def _string_value(value: JsonValue) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _project_ide_version(yyp_data: JsonDict) -> str:
+def _string_field(
+    data: JsonObject, key: str, source_path: str, *, field_path: JsonPath = (),
+) -> str:
+    """Keep the manifest's silent fallback for absent or malformed text fields."""
+    try:
+        return required_string(data, key, source_path=source_path, field_path=field_path)
+    except JsonFieldError:
+        return ""
+
+
+def _project_ide_version(yyp_data: JsonObject, source_path: str) -> str:
     metadata = yyp_data.get("MetaData")
     if not isinstance(metadata, dict):
         return ""
-    return _string_value(cast(JsonDict, metadata).get("IDEVersion"))
+    return _string_field(metadata, "IDEVersion", source_path, field_path=("MetaData",))
 
 
-def _int_value(value: object, default: int) -> int:
+def _int_value(value: JsonValue, default: int) -> int:
     if isinstance(value, bool):
         return default
     if not isinstance(value, (int, float, str)):
@@ -1089,10 +1100,10 @@ def _int_value(value: object, default: int) -> int:
         return default
 
 
-def _string_tuple(value: object) -> tuple[str, ...]:
+def _string_tuple(value: JsonValue) -> tuple[str, ...]:
     if not isinstance(value, list):
         return ()
-    return tuple(str(item) for item in cast(JsonList, value) if str(item))
+    return tuple(str(item) for item in value if str(item))
 
 
 def _normalize_project_path(path: str | None) -> str:

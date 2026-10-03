@@ -10,6 +10,7 @@ from typing import Literal, Optional, List, TypeAlias
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     load_gamemaker_project_manifest,
@@ -435,7 +436,7 @@ class ProjectSettingsConverter(BaseConverter):
             except OSError as error:
                 return ProjectOperationResult("failed", str(error))
             try:
-                raw_data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
+                raw_data = decode_gamemaker_json(source, source_path=candidate_path).value
             except (json.JSONDecodeError, TypeError, ValueError):
                 return ProjectOperationResult(
                     "skipped",

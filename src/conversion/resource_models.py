@@ -6,7 +6,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
+from src.conversion.font_metadata import GameMakerFontMetadata, parse_gamemaker_font_metadata
 from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_font_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject
 from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
@@ -77,6 +79,7 @@ class SoundModel(ResourceModel):
 class FontModel(ResourceModel):
     font_name: str = ""
     size: float = 0.0
+    metadata: GameMakerFontMetadata | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -329,6 +332,8 @@ def _parse_resource_model(
     yy_path = resolved_yy.filesystem_path
     if reference.kind == "paths":
         return _parse_path_resource_model(reference, yy_path, resolved_yy.source_path)
+    if reference.kind == "fonts":
+        return _parse_font_resource_model(reference, yy_path, resolved_yy.source_path)
     raw_data = _read_lenient_json_file(yy_path)
     if raw_data is None:
         return None, (
@@ -361,12 +366,6 @@ def _parse_resource_model(
             **base,
             sound_file=_string_value(raw_data.get("soundFile")),
             audio_group=_named_reference(raw_data.get("audioGroupId")) or "",
-        ), ()
-    if kind == "fonts":
-        return FontModel(
-            **base,
-            font_name=_string_value(raw_data.get("fontName")),
-            size=_float_value(raw_data.get("size")),
         ), ()
     if kind == "objects":
         return ObjectModel(
@@ -436,6 +435,60 @@ def _parse_resource_model(
             moment_count=len(_dict_list(raw_data.get("momentList"))),
         ), ()
     return ResourceModel(**base), ()
+
+
+def _parse_font_resource_model(
+    reference: ProjectResourceReference,
+    yy_path: str,
+    source_path: str,
+) -> tuple[FontModel | None, tuple[ResourceModelDiagnostic, ...]]:
+    raw_data = _read_font_json_file(yy_path)
+    if raw_data is None:
+        return None, (
+            ResourceModelDiagnostic(
+                severity="warning",
+                code="GM2GD-RESOURCE-YY-MISSING",
+                message=f"Could not parse GameMaker resource .yy: {yy_path}",
+                source_path=yy_path,
+                resource_name=reference.name,
+                resource_kind=reference.kind,
+            ),
+        )
+    metadata = parse_gamemaker_font_metadata(raw_data, source_context=yy_path)
+    return FontModel(
+        name=reference.name,
+        kind=reference.kind,
+        resource_type=reference.resource_type,
+        yy_path=yy_path,
+        yyp_path=source_path,
+        order=reference.order,
+        subfolder=_font_subfolder(metadata.parent_path),
+        raw_data=metadata.raw_data,
+        font_name=metadata.font_name,
+        size=float(metadata.size_number),
+        metadata=metadata,
+    ), ()
+
+
+def _read_font_json_file(path: str) -> JsonObject | None:
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            source = file.read()
+        data = decode_gamemaker_font_json(source, source_path=path).value
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _font_subfolder(parent_path: str) -> str:
+    if parent_path.startswith("folders/"):
+        parent_path = parent_path[len("folders/"):]
+    if parent_path.endswith(".yy"):
+        parent_path = parent_path[:-len(".yy")]
+    parts = parent_path.split("/")
+    if len(parts) <= 1:
+        return ""
+    return generated_subfolder_path("/".join(parts[1:]))
 
 
 def _parse_path_resource_model(
@@ -661,9 +714,3 @@ def _int_value(value: object) -> int:
 
 def _optional_int_value(value: object) -> int | None:
     return value if isinstance(value, int) else None
-
-
-def _float_value(value: object) -> float:
-    if isinstance(value, int | float):
-        return float(value)
-    return 0.0

@@ -71,6 +71,29 @@ nonfinite coordinate failures after a scene is opened and nonfinite speed JSON
 serialization. Numeric-finiteness policy, other resource readers and remaining
 legacy JSON aliases are still unfinished #797 work.
 
+### Font metadata boundary
+
+`font_metadata` captures the known font fields shared by the font converter and
+the font branch of `resource_models`. Both decode through `gamemaker_json` and
+retain source JSON identities. The aggregate consumes strict font-name, native
+size and parent-path summaries. The converter requests a separate ordered
+projection that preserves its required-name string conversions and missing
+size default of 12; the aggregate keeps its native-number-only size policy and
+default of 0. Its float conversion remains after base/subfolder evaluation and
+outside the acquisition catch, including existing huge and nonfinite behavior.
+The replaced raw font branch and its unused `_float_value` helper are removed;
+the other generic resource branches and helpers remain pending migration.
+
+`FontModel` keeps its original module, inheritance, field prefix, repr and
+equality, with an optional metadata carrier excluded from repr/equality.
+Dataclass reflection intentionally includes the new carrier and its private
+primitive presence/value records; missing-field sentinels are transient rather
+than stored Enum values. The owners retain their different exception policies
+and source-acquisition seams. Font output fallback rereads current parent
+metadata while registry-planned destinations retain precedence. Registry font
+planning, inherited raw aliases, other families and numeric-finiteness policy
+remain unfinished #797 work.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

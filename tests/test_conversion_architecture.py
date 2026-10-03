@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import os
 import json
+import inspect
 import math
 import shutil
 import sys
 import tempfile
 import unittest
-from dataclasses import FrozenInstanceError, fields
+from contextlib import ExitStack
+from dataclasses import FrozenInstanceError, asdict, astuple, fields
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
+from src.conversion import resource_models
+from src.conversion.font_metadata import GameMakerFontMetadata
 from src.conversion.conversion_plan import (
     build_conversion_plan,
     group_conversion_plan,
@@ -34,6 +38,7 @@ from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemake
 from src.conversion.json_values import JsonArray, JsonObject
 from src.conversion.path_metadata import GameMakerPathMetadata, PathMetadataPoint
 from src.conversion.resource_models import (
+    FontModel,
     PathModel,
     ResourceModel,
     parse_gamemaker_resource_models,
@@ -643,6 +648,367 @@ class TestPathResourceModelBoundary(unittest.TestCase):
             self.assertEqual(len(rejected.diagnostics), 1)
             self.assertEqual(rejected.diagnostics[0].code, "GM2GD-SOURCE-PATH-REJECTED")
             self.assertEqual(rejected.diagnostics[0].source_path, str(yyp))
+
+
+class TestFontResourceModelBoundary(unittest.TestCase):
+    @staticmethod
+    def _write_project(project: Path, names: tuple[str, ...] = ("font_test",)) -> Path:
+        source = project / "FontBoundary.yyp"
+        source.write_text(json.dumps({
+            "%Name": "FontBoundary", "resourceType": "GMProject",
+            "resources": [
+                {"id": {"name": name, "path": f"fonts/{name}/{name}.yy"}, "resourceType": "GMFont"}
+                for name in names
+            ],
+        }), encoding="utf-8")
+        return source
+
+    @staticmethod
+    def _write_font(project: Path, data: JsonObject, name: str = "font_test") -> Path:
+        source = project / "fonts" / name / f"{name}.yy"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(json.dumps(data), encoding="utf-8")
+        return source
+
+    def test_resource_matrix_font_uses_shared_decoder_and_metadata_without_outputs(self) -> None:
+        self.assertIs(resource_models.decode_gamemaker_font_json, decode_gamemaker_json)
+        documents: list[GameMakerJsonDocument] = []
+
+        def track_decode(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            document = decode_gamemaker_json(source, source_path=source_path)
+            documents.append(document)
+            return document
+
+        with patch("src.conversion.resource_models.decode_gamemaker_font_json", side_effect=track_decode), patch(
+            "src.conversion.resource_models.decode_gamemaker_json", wraps=decode_gamemaker_json,
+        ) as path_decoder:
+            models = parse_gamemaker_resource_models(RESOURCE_MATRIX_PATH)
+
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(path_decoder.call_count, 1)
+        self.assertEqual(len(models.fonts), 1)
+        model = models.fonts[0]
+        metadata = model.metadata
+        assert metadata is not None
+        self.assertEqual((model.name, model.font_name, model.size, model.subfolder), ("fnt_ui", "Arial", 14.0, "ui"))
+        self.assertIs(model.raw_data, metadata.raw_data)
+        self.assertIs(metadata.raw_data, documents[0].value)
+        self.assertEqual(metadata.source_context, model.yy_path)
+        self.assertEqual(model.yyp_path, "fonts/fnt_ui/fnt_ui.yy")
+        self.assertEqual(models.diagnostics, ())
+        self.assertFalse((Path(RESOURCE_MATRIX_PATH) / "gm2godot").exists())
+
+    def test_font_summary_and_subfolder_use_leaf_projection(self) -> None:
+        raw: JsonObject = {"fontName": "Raw", "size": 2, "parent": {"path": "folders/Fonts/Raw.yy"}}
+        metadata = GameMakerFontMetadata(
+            font_name="From Model", size_number=18.5,
+            parent_path="folders/Fonts/From Model.yy", raw_data=raw,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_font(project, raw)
+            document = GameMakerJsonDocument(str(source), source.read_text(encoding="utf-8"), raw)
+            with patch("src.conversion.resource_models.decode_gamemaker_font_json", return_value=document), patch(
+                "src.conversion.resource_models.parse_gamemaker_font_metadata", return_value=metadata,
+            ) as projection, patch(
+                "src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic font reader"),
+            ), patch("src.conversion.resource_models._base_kwargs", side_effect=AssertionError("legacy font base")), patch(
+                "src.conversion.resource_models._subfolder_from_raw_data", side_effect=AssertionError("raw parent read"),
+            ), patch("src.conversion.font_metadata.project_font_conversion_fields", side_effect=AssertionError("converter projection")):
+                models = parse_gamemaker_resource_models(directory)
+
+        model = models.fonts[0]
+        self.assertIs(model.metadata, metadata)
+        self.assertIs(model.raw_data, raw)
+        self.assertEqual((model.font_name, model.size, model.subfolder), ("From Model", 18.5, "from_model"))
+        projection.assert_called_once_with(raw, source_context=str(source))
+
+    def test_missing_converter_fields_and_malformed_shapes_keep_aggregate_defaults(self) -> None:
+        cases: tuple[JsonObject, ...] = (
+            {},
+            {"fontName": None, "name": None, "size": None},
+            {"fontName": [], "name": {}, "size": "12", "parent": "Fonts"},
+            {"fontName": {}, "size": [], "parent": {"path": ["Fonts"]}},
+            {"fontName": True, "size": {}, "parent": None},
+            {"fontName": 7, "size": "bad", "parent": {"path": None}},
+        )
+        for data in cases:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                self._write_font(project, data)
+                models = parse_gamemaker_resource_models(directory)
+                model = models.fonts[0]
+                assert model.metadata is not None
+                self.assertEqual((model.name, model.font_name, model.size, model.subfolder), ("font_test", "", 0.0, ""))
+                self.assertEqual((model.metadata.font_name, model.metadata.size_number, model.metadata.parent_path), ("", 0.0, ""))
+                self.assertEqual((models.project.resource_count, models.diagnostics), (1, ()))
+
+    def test_native_numbers_keep_boolean_negative_zero_and_nonfinite_provenance(self) -> None:
+        numbers: tuple[int | float, ...] = (True, False, 7, 2.25, -0.0, float("nan"), float("inf"), float("-inf"))
+        for number in numbers:
+            with self.subTest(number=number), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                self._write_font(project, {"fontName": "Native", "size": number})
+                models = parse_gamemaker_resource_models(directory)
+                model = models.fonts[0]
+                metadata = model.metadata
+                assert metadata is not None
+                self.assertIs(type(metadata.size_number), type(number))
+                if math.isnan(number):
+                    self.assertTrue(math.isnan(metadata.size_number))
+                    self.assertTrue(math.isnan(model.size))
+                else:
+                    self.assertEqual(metadata.size_number, number)
+                    self.assertEqual(model.size, float(number))
+                    self.assertEqual(math.copysign(1.0, model.size), math.copysign(1.0, number))
+                self.assertEqual(models.diagnostics, ())
+
+    def test_huge_size_conversion_follows_subfolder_evaluation_without_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_font(project, {"size": 10 ** 400, "parent": {"path": "folders/Fonts/UI.yy"}})
+            before = sorted(p.relative_to(project) for p in project.rglob("*"))
+            with patch("src.conversion.resource_models._font_subfolder", return_value="ui") as subfolder:
+                with self.assertRaises(OverflowError):
+                    parse_gamemaker_resource_models(directory)
+                subfolder.assert_called_once_with("folders/Fonts/UI.yy")
+            failure = ValueError("subfolder precedes numeric failure")
+            with patch("src.conversion.resource_models._font_subfolder", side_effect=failure), self.assertRaises(ValueError) as raised:
+                parse_gamemaker_resource_models(directory)
+            self.assertIs(raised.exception, failure)
+            self.assertEqual(sorted(p.relative_to(project) for p in project.rglob("*")), before)
+
+    def test_nonobject_malformed_and_actual_read_failures_keep_diagnostic_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project, ("first", "valid", "last"))
+            first = self._write_font(project, {}, "first")
+            first.write_bytes(b"\xff")
+            self._write_font(project, {"fontName": "Valid", "size": 17}, "valid")
+            last = self._write_font(project, {}, "last")
+            last.write_text("[]", encoding="utf-8")
+            models = parse_gamemaker_resource_models(directory)
+            self.assertEqual([model.name for model in models.fonts], ["valid"])
+            self.assertEqual((models.fonts[0].order, models.project.resource_count), (1, 3))
+            self.assertEqual(
+                [(d.severity, d.code, d.message, d.source_path, d.resource_name, d.resource_kind) for d in models.diagnostics],
+                [("warning", "GM2GD-RESOURCE-YY-MISSING", f"Could not parse GameMaker resource .yy: {p}", str(p), name, "fonts")
+                 for p, name in ((first, "first"), (last, "last"))],
+            )
+            for root in ("null", '"font"', "true", "false", "42", "1.25", "{broken"):
+                with self.subTest(root=root):
+                    first.write_text(root, encoding="utf-8")
+                    updated = parse_gamemaker_resource_models(directory)
+                    self.assertEqual([model.name for model in updated.fonts], ["valid"])
+                    self.assertEqual(updated.diagnostics, models.diagnostics)
+            digit_limit = sys.get_int_max_str_digits()
+            if digit_limit:
+                first.write_text('{"unknown":' + "1" * (digit_limit + 1) + "}", encoding="utf-8")
+                self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+            first.unlink()
+            self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+
+    def test_font_acquisition_preserves_wide_catch_and_control_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_font(project, {})
+            handled: tuple[Exception, ...] = (
+                OSError("read failure"), TypeError("decode type"), ValueError("decode value"),
+                json.JSONDecodeError("malformed", "{", 1),
+                UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+            )
+            unhandled: tuple[BaseException, ...] = (
+                KeyError("decode key"), OverflowError("decode overflow"), RecursionError("nesting"),
+                KeyboardInterrupt("stop"), SystemExit(7),
+            )
+            for stage in ("open", "read", "decode_gamemaker_font_json"):
+                for failure in handled:
+                    with self.subTest(stage=stage, failure=type(failure).__name__), ExitStack() as stack:
+                        if stage == "read":
+                            opener = mock_open(read_data="{}")
+                            opener.return_value.read.side_effect = failure
+                            stack.enter_context(patch("src.conversion.resource_models.open", opener))
+                        else:
+                            stack.enter_context(patch(f"src.conversion.resource_models.{stage}", side_effect=failure))
+                        models = parse_gamemaker_resource_models(directory)
+                        self.assertEqual(models.fonts, ())
+                        self.assertEqual(len(models.diagnostics), 1)
+                        diagnostic = models.diagnostics[0]
+                        self.assertEqual((diagnostic.code, diagnostic.source_path, diagnostic.resource_name, diagnostic.resource_kind),
+                                         ("GM2GD-RESOURCE-YY-MISSING", str(source), "font_test", "fonts"))
+                for failure in unhandled:
+                    with self.subTest(stage=stage, failure=type(failure).__name__), ExitStack() as stack:
+                        if stage == "read":
+                            opener = mock_open(read_data="{}")
+                            opener.return_value.read.side_effect = failure
+                            stack.enter_context(patch("src.conversion.resource_models.open", opener))
+                        else:
+                            stack.enter_context(patch(f"src.conversion.resource_models.{stage}", side_effect=failure))
+                        with self.assertRaises(type(failure)) as raised:
+                            parse_gamemaker_resource_models(directory)
+                        self.assertIs(raised.exception, failure)
+
+    def test_projection_subfolder_and_constructor_failures_stay_outside_acquisition_catch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_font(project, {})
+            for owner in ("parse_gamemaker_font_metadata", "_font_subfolder", "FontModel"):
+                for failure in (OSError("projection"), TypeError("projection"), ValueError("projection"), KeyError("projection"),
+                                OverflowError("projection"), RecursionError("projection"), KeyboardInterrupt("stop"), SystemExit(9)):
+                    with self.subTest(owner=owner, failure=type(failure).__name__), patch(
+                        f"src.conversion.resource_models.{owner}", side_effect=failure,
+                    ), self.assertRaises(type(failure)) as raised:
+                        parse_gamemaker_resource_models(directory)
+                    self.assertIs(raised.exception, failure)
+
+    def test_invalid_decoded_unknown_values_map_to_existing_warning(self) -> None:
+        unsupported: dict[str, object] = {"unknown": object()}
+        nonstring: dict[int, object] = {1: "key"}
+        cyclic: JsonArray = []
+        cyclic.append(cyclic)
+        for invalid in (unsupported, nonstring, {"unknown": cyclic}):
+            def decode_invalid(source: str, *, source_path: str) -> GameMakerJsonDocument:
+                with patch("src.conversion.gamemaker_json.json.loads", return_value=invalid):
+                    return decode_gamemaker_json(source, source_path=source_path)
+
+            with self.subTest(invalid_type=type(invalid).__name__), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                source = self._write_font(project, {})
+                with patch("src.conversion.resource_models.decode_gamemaker_font_json", side_effect=decode_invalid):
+                    models = parse_gamemaker_resource_models(directory)
+                self.assertEqual(models.fonts, ())
+                self.assertEqual(len(models.diagnostics), 1)
+                self.assertEqual(models.diagnostics[0].message, f"Could not parse GameMaker resource .yy: {source}")
+
+    def test_deep_unknown_json_and_shared_children_retain_raw_identity_without_outputs(self) -> None:
+        nested: JsonArray = []
+        cursor = nested
+        for _ in range(1600):
+            child: JsonArray = []
+            cursor.append(child)
+            cursor = child
+        parent: JsonObject = {"path": "folders/Fonts/Deep.yy", "unknown": nested}
+        raw: JsonObject = {"first": 1, "fontName": "Deep", "parent": parent, "unknown": nested, "shared": nested, "last": 2}
+
+        def decode_deep(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            with patch("src.conversion.gamemaker_json.json.loads", return_value=raw):
+                return decode_gamemaker_json(source, source_path=source_path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_font(project, {})
+            before = sorted(p.relative_to(project) for p in project.rglob("*"))
+            with patch("src.conversion.resource_models.decode_gamemaker_font_json", side_effect=decode_deep):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(sorted(p.relative_to(project) for p in project.rglob("*")), before)
+
+        model = models.fonts[0]
+        assert model.metadata is not None
+        self.assertIs(model.raw_data, raw)
+        self.assertIs(model.metadata.raw_data, raw)
+        self.assertIs(model.raw_data["parent"], parent)
+        self.assertIs(model.raw_data["unknown"], nested)
+        self.assertIs(model.raw_data["shared"], nested)
+        self.assertEqual(tuple(model.raw_data), ("first", "fontName", "parent", "unknown", "shared", "last"))
+        self.assertEqual((model.font_name, model.size, model.subfolder, models.diagnostics), ("Deep", 0.0, "deep", ()))
+
+    def test_font_source_is_acquired_once_after_containment_and_family_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_font(project, {"fontName": "Read Once"})
+            with patch("src.conversion.resource_models.open", wraps=open) as source_open, patch(
+                "src.conversion.resource_models.decode_gamemaker_font_json", wraps=decode_gamemaker_json,
+            ) as decoder, patch("src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic reader")):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(models.fonts[0].font_name, "Read Once")
+            source_open.assert_called_once_with(str(source), "r", encoding="utf-8")
+            decoder.assert_called_once()
+
+            yyp = project / "FontBoundary.yyp"
+            for declared in ("../outside.yy", "fonts/../objects/other/other.yy"):
+                yyp.write_text(json.dumps({
+                    "%Name": "FontBoundary", "resourceType": "GMProject",
+                    "resources": [{"id": {"name": "font_test", "path": declared}, "resourceType": "GMFont"}],
+                }), encoding="utf-8")
+                with self.subTest(declared=declared), patch(
+                    "src.conversion.resource_models.open", side_effect=AssertionError("rejected font opened"),
+                ):
+                    rejected = parse_gamemaker_resource_models(directory)
+                self.assertEqual(rejected.fonts, ())
+                self.assertEqual(len(rejected.diagnostics), 1)
+                self.assertEqual((rejected.diagnostics[0].code, rejected.diagnostics[0].source_path),
+                                 ("GM2GD-SOURCE-PATH-REJECTED", str(yyp)))
+
+    def test_subfolder_spelling_nested_source_and_live_reread_keep_provenance(self) -> None:
+        cases = (
+            ("folders/Fonts.yy", ""), ("folders/Fonts/UI.yy", "ui"),
+            ("folders\\Fonts\\UI.yy", ""), ("folders/Fonts/UI\\Sub.yy", "ui/sub"),
+            ("Folders/Fonts/UI.yy", "fonts/ui"), ("folders/Fonts/UI.YY", "ui_yy"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            yyp = self._write_project(project)
+            relative = "fonts/nested/font_test/declared_metadata.yy"
+            source = project / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            yyp.write_text(json.dumps({
+                "%Name": "FontBoundary", "resourceType": "GMProject",
+                "resources": [{"id": {"name": "font_test", "path": relative}, "resourceType": "GMFont"}],
+            }), encoding="utf-8")
+            for parent_path, expected in cases:
+                with self.subTest(parent_path=parent_path):
+                    source.write_text(json.dumps({"fontName": "Original", "size": 9, "parent": {"path": parent_path}}), encoding="utf-8")
+                    first = parse_gamemaker_resource_models(directory).fonts[0]
+                    assert first.metadata is not None
+                    self.assertEqual((first.subfolder, first.yy_path, first.yyp_path), (expected, str(source), relative))
+                    self.assertEqual((first.metadata.parent_path, first.metadata.source_context), (parent_path, str(source)))
+                    source.write_text(json.dumps({"fontName": "Replacement", "size": 21, "parent": {"path": "folders/Fonts/New.yy"}}), encoding="utf-8")
+                    second = parse_gamemaker_resource_models(directory).fonts[0]
+                    assert second.metadata is not None
+                    self.assertEqual((second.font_name, second.size, second.subfolder), ("Replacement", 21.0, "new"))
+                    self.assertEqual((first.font_name, first.size, first.subfolder), ("Original", 9.0, expected))
+                    self.assertIsNot(first.raw_data, second.raw_data)
+                    self.assertIsNot(first.metadata, second.metadata)
+
+    def test_font_carrier_preserves_model_prefix_and_json_compatible_reflection(self) -> None:
+        old_fields = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data", "font_name", "size")
+        self.assertEqual(tuple(f.name for f in fields(FontModel)), old_fields + ("metadata",))
+        self.assertEqual(tuple(inspect.signature(FontModel).parameters), old_fields + ("metadata",))
+        self.assertEqual(FontModel.__match_args__, old_fields + ("metadata",))
+        self.assertEqual(FontModel.__module__, "src.conversion.resource_models")
+        self.assertEqual(FontModel.__bases__, (ResourceModel,))
+        plain = FontModel("font", "fonts", "GMFont", "/source/font.yy", "fonts/font.yy", 3)
+        data: JsonObject = {}
+        metadata = GameMakerFontMetadata(raw_data=data, source_context="/source/font.yy")
+        attached = FontModel("font", "fonts", "GMFont", "/source/font.yy", "fonts/font.yy", 3, "", data, "", 0.0, metadata)
+        self.assertIsNone(plain.metadata)
+        self.assertEqual((plain.subfolder, plain.raw_data, plain.font_name, plain.size), ("", {}, "", 0.0))
+        self.assertEqual(plain, attached)
+        self.assertEqual(repr(plain), repr(attached))
+        self.assertFalse(fields(FontModel)[-1].compare)
+        self.assertFalse(fields(FontModel)[-1].repr)
+        self.assertIsNone(fields(FontModel)[-1].default)
+        self.assertIs(attached.metadata, metadata)
+        self.assertIs(attached.raw_data, metadata.raw_data)
+        self.assertIsNot(plain.raw_data, FontModel("other", "fonts", "GMFont", "other.yy", "other.yy", 0).raw_data)
+        self.assertEqual(len(astuple(plain)), len(old_fields) + 1)
+        self.assertIsNone(astuple(plain)[-1])
+        self.assertIsNone(asdict(plain)["metadata"])
+        reflected = asdict(attached)
+        self.assertEqual(tuple(reflected), old_fields + ("metadata",))
+        self.assertIn('"_conversion_inputs"', json.dumps(reflected))
+        self.assertIn('"present": false', json.dumps(reflected))
+        with self.assertRaises(FrozenInstanceError):
+            setattr(plain, "size", 12.0)
 
 
 if __name__ == "__main__":

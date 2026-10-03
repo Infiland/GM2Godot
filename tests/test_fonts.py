@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 
 import json
+import math
 import os
 import sys
 import shutil
@@ -14,7 +15,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.fonts import FontConverter, _find_system_font
+from src.conversion.fonts import FontConverter, FontData, _find_system_font
+from src.conversion.font_metadata import (
+    FontConversionFields,
+    parse_gamemaker_font_metadata,
+)
+from src.conversion.json_values import JsonObject, JsonValue, JsonValueError
+from src.localization import get_localized
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
@@ -1451,6 +1458,259 @@ class TestFontConverterSubfolders(unittest.TestCase):
         expected = os.path.join(self.godot_dir, "fonts", "fnt_root.tres")
         self.assertTrue(os.path.isfile(expected),
                         "Root-level font should stay in fonts/")
+
+
+class TestFontTypedMetadataBoundary(unittest.TestCase):
+    """Keep converter coercion and fresh-source policies at their owners."""
+
+    def setUp(self) -> None:
+        workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.gm_dir = os.path.join(workspace.name, "game")
+        self.godot_dir = os.path.join(workspace.name, "godot")
+        os.makedirs(self.gm_dir)
+        os.makedirs(self.godot_dir)
+        self.yy_path = _make_font_yy(self.gm_dir, "fnt_bound")
+        self.logs: list[str] = []
+        self.converter = FontConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+        )
+
+    def _write(self, data: JsonObject) -> None:
+        self._write_text(json.dumps(data))
+
+    def _write_text(self, text: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as source_file:
+            source_file.write(text)
+
+    def _assert_parse_failure(self) -> None:
+        self.assertIsNone(self.converter._parse_font_yy(self.yy_path))
+        self.assertEqual(
+            self.logs,
+            [get_localized("Console_Convertor_Fonts_ParseError").format(yy_path=self.yy_path)],
+        )
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_original_font_data_keys_and_missing_defaults(self) -> None:
+        self._write({"fontName": "Family", "name": "Font"})
+        result = self.converter._parse_font_yy(self.yy_path)
+        self.assertEqual(result, {
+            "fontName": "Family", "name": "Font", "size": 12.0,
+            "bold": False, "italic": False, "AntiAlias": 0,
+            "includeTTF": False, "TTFName": "",
+        })
+        assert result is not None
+        self.assertEqual(tuple(result), tuple(FontData.__annotations__))
+        self.assertEqual(self.logs, [])
+
+    def test_required_names_keep_python_repr_and_present_null_spelling(self) -> None:
+        self._write({
+            "fontName": {"z": None, "a": True}, "name": [None, True, "Name"],
+            "TTFName": None,
+        })
+        result = self.converter._parse_font_yy(self.yy_path)
+        assert result is not None
+        self.assertEqual(result["fontName"], "{'z': None, 'a': True}")
+        self.assertEqual(result["name"], "[None, True, 'Name']")
+        self.assertEqual(result["TTFName"], "None")
+        self._write({"fontName": None, "name": None})
+        null_result = self.converter._parse_font_yy(self.yy_path)
+        assert null_result is not None
+        self.assertEqual(null_result["fontName"], "None")
+        self.assertEqual(null_result["name"], "None")
+
+    def test_converter_numeric_strings_and_json_truthiness_remain_accepted(self) -> None:
+        self._write({
+            "fontName": "Family", "name": "Font", "size": " 1.25e1 ",
+            "AntiAlias": " 2 ", "bold": [], "italic": {"enabled": False},
+            "includeTTF": "false", "TTFName": "font.ttf",
+        })
+        self.assertEqual(self.converter._parse_font_yy(self.yy_path), {
+            "fontName": "Family", "name": "Font", "size": 12.5,
+            "bold": False, "italic": True, "AntiAlias": 2,
+            "includeTTF": True, "TTFName": "font.ttf",
+        })
+
+    def test_projection_is_authoritative_for_all_eight_converter_fields(self) -> None:
+        view = FontConversionFields(
+            font_name="Projected family", name="Projected font", size=9.5,
+            bold=True, italic=True, anti_alias=2, include_ttf=True,
+            ttf_name="projected.ttf",
+        )
+        with patch("src.conversion.fonts.project_font_conversion_fields", return_value=view) as projection:
+            result = self.converter._parse_font_yy(self.yy_path)
+        self.assertEqual(result, {
+            "fontName": "Projected family", "name": "Projected font", "size": 9.5,
+            "bold": True, "italic": True, "AntiAlias": 2,
+            "includeTTF": True, "TTFName": "projected.ttf",
+        })
+        projection.assert_called_once()
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_shared_decoder_keeps_original_trailing_comma_rewrite(self) -> None:
+        self._write_text('{"fontName":"Family,}","name":"Font",}')
+        result = self.converter._parse_font_yy(self.yy_path)
+        assert result is not None
+        self.assertEqual(result["fontName"], "Family}")
+        self.assertEqual(result["name"], "Font")
+
+    def test_nonobject_malformed_missing_and_null_numeric_inputs_keep_parse_log(self) -> None:
+        cases = ['null', '[]', '"font"', 'true', '12', '{',
+                 '{"name":"Font"}', '{"fontName":"Family"}',
+                 '{"fontName":"Family","name":"Font","size":null}',
+                 '{"fontName":"Family","name":"Font","AntiAlias":[]}']
+        for source in cases:
+            with self.subTest(source=source):
+                self.logs.clear()
+                self._write_text(source)
+                self._assert_parse_failure()
+
+    def test_missing_required_name_wins_before_later_numeric_failure(self) -> None:
+        self._write({"name": "Font", "size": "invalid", "AntiAlias": float("nan")})
+        self._assert_parse_failure()
+
+    def test_reader_and_projection_caught_errors_keep_original_log(self) -> None:
+        for error in [OSError("read"), json.JSONDecodeError("decode", "{", 0),
+                      KeyError("fontName"), TypeError("numeric")]:
+            with self.subTest(error=type(error).__name__):
+                self.logs.clear()
+                with patch("src.conversion.fonts.decode_gamemaker_json", side_effect=error):
+                    self._assert_parse_failure()
+        with patch("src.conversion.fonts.project_font_conversion_fields", side_effect=TypeError("view")):
+            self.logs.clear()
+            self._assert_parse_failure()
+
+    def test_decoder_and_projection_unhandled_errors_keep_exception_identity(self) -> None:
+        errors: list[BaseException] = [
+            ValueError("numeric"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+            OverflowError("huge"), RecursionError("deep"), KeyboardInterrupt(), SystemExit(7),
+        ]
+        for seam in ["decode_gamemaker_json", "project_font_conversion_fields"]:
+            for error in errors:
+                with self.subTest(seam=seam, error=type(error).__name__):
+                    with patch("src.conversion.fonts." + seam, side_effect=error):
+                        with self.assertRaises(type(error)) as raised:
+                            self.converter._parse_font_yy(self.yy_path)
+                    self.assertIs(raised.exception, error)
+        self.assertEqual(self.logs, [])
+
+    def test_actual_numeric_value_overflow_and_nonfinite_policies(self) -> None:
+        cases: list[tuple[JsonObject, type[Exception]]] = [
+            ({"size": "invalid"}, ValueError),
+            ({"size": 10 ** 400}, OverflowError),
+            ({"AntiAlias": float("nan")}, ValueError),
+            ({"AntiAlias": float("inf")}, OverflowError),
+        ]
+        for fields, error_type in cases:
+            with self.subTest(fields=fields):
+                self._write({"fontName": "Family", "name": "Font", **fields})
+                with self.assertRaises(error_type):
+                    self.converter._parse_font_yy(self.yy_path)
+        for size in [float("nan"), float("inf"), -0.0, True]:
+            with self.subTest(size=size):
+                self._write({"fontName": "Family", "name": "Font", "size": size})
+                result = self.converter._parse_font_yy(self.yy_path)
+                assert result is not None
+                if math.isnan(float(size)):
+                    self.assertTrue(math.isnan(result["size"]))
+                else:
+                    self.assertEqual(result["size"], float(size))
+                    self.assertEqual(math.copysign(1, result["size"]), math.copysign(1, float(size)))
+        self.assertEqual(self.logs, [])
+
+    def test_invalid_utf8_and_integer_decoder_limit_propagate_without_parse_log(self) -> None:
+        with open(self.yy_path, "wb") as source_file:
+            source_file.write(b"\xff")
+        with self.assertRaises(UnicodeDecodeError):
+            self.converter._parse_font_yy(self.yy_path)
+        limit = sys.get_int_max_str_digits()
+        if limit:
+            self._write_text('{"fontName":"Family","name":"Font","size":' + "1" * (limit + 1) + '}')
+            with self.assertRaises(ValueError):
+                self.converter._parse_font_yy(self.yy_path)
+        self.assertEqual(self.logs, [])
+
+    def test_unknown_validated_graph_reaches_leaf_with_identity_and_order(self) -> None:
+        nested: JsonValue = "terminal"
+        for _ in range(1600):
+            nested = {"next": nested}
+        shared: JsonObject = {"z": None, "a": [True, 1]}
+        raw: JsonObject = {"fontName": "Family", "name": "Font", "unknown": nested,
+                           "first": shared, "second": shared}
+        with patch("src.conversion.fonts.json.loads", return_value=raw):
+            with patch("src.conversion.fonts.parse_gamemaker_font_metadata",
+                       wraps=parse_gamemaker_font_metadata) as capture:
+                result = self.converter._parse_font_yy(self.yy_path)
+        assert result is not None
+        self.assertEqual(result["fontName"], "Family")
+        self.assertIs(capture.call_args.args[0], raw)
+        self.assertEqual(capture.call_args.kwargs, {"source_context": self.yy_path})
+        self.assertIs(raw["first"], raw["second"])
+        self.assertIs(raw["unknown"], nested)
+        self.assertEqual(tuple(raw), ("fontName", "name", "unknown", "first", "second"))
+
+    def test_illegal_unknown_json_graph_propagates_boundary_error(self) -> None:
+        raw = {"fontName": "Family", "name": "Font", "unknown": {1, 2}}
+        with patch("src.conversion.fonts.json.loads", return_value=raw):
+            with self.assertRaises(JsonValueError) as raised:
+                self.converter._parse_font_yy(self.yy_path)
+        self.assertEqual(raised.exception.source_path, self.yy_path)
+        self.assertEqual(raised.exception.field_path, ("unknown",))
+        self.assertEqual(raised.exception.reason, "unsupported-type")
+        self.assertEqual(self.logs, [])
+
+    def test_font_folder_policy_keeps_literal_case_slashes_and_suffix_order(self) -> None:
+        cases = [
+            ("folders/Fonts/UI.yy", "ui"),
+            ("folders/Fonts/Game/Abilities.yy", "game/abilities"),
+            ("Folders/Fonts/UI.yy", "fonts/ui"),
+            ("folders/Fonts/UI.YY", "ui_yy"),
+            ("folders/Fonts/Game\\Abilities.yy", "game/abilities"),
+            ("folders\\Fonts\\UI.yy", ""),
+            ("folders/Fonts.yy", ""),
+        ]
+        for path, expected in cases:
+            with self.subTest(path=path):
+                self._write({"parent": {"path": path}})
+                self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), expected)
+
+    def test_folder_lookup_freshly_rereads_after_earlier_font_parse(self) -> None:
+        self._write({"fontName": "Family", "name": "Font", "parent": {"path": "folders/Fonts/Old.yy"}})
+        self.assertIsNotNone(self.converter._parse_font_yy(self.yy_path))
+        self._write({"parent": {"path": "folders/Fonts/New.yy"}})
+        self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "new")
+        os.unlink(self.yy_path)
+        self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "")
+
+    def test_folder_containment_rejection_precedes_open(self) -> None:
+        outside = os.path.join(os.path.dirname(self.gm_dir), "outside.yy")
+        with open(outside, "w", encoding="utf-8") as source_file:
+            source_file.write('{"parent":{"path":"folders/Fonts/Unsafe.yy"}}')
+        with patch("src.conversion.fonts.open", create=True) as source_open:
+            self.assertEqual(self.converter._get_subfolder_from_yy(outside), "")
+        source_open.assert_not_called()
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_folder_reader_and_extraction_keep_separate_error_policies(self) -> None:
+        for error in [OSError("read"), json.JSONDecodeError("decode", "{", 0),
+                      KeyError("field"), TypeError("root"), ValueError("limit")]:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.fonts.decode_gamemaker_json", side_effect=error):
+                    self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "")
+        error = ValueError("projection")
+        with patch("src.conversion.fonts.parse_gamemaker_font_metadata", side_effect=error):
+            with self.assertRaises(ValueError) as raised:
+                self.converter._get_subfolder_from_yy(self.yy_path)
+        self.assertIs(raised.exception, error)
+        self.assertEqual(self.logs, [])
+
+    def test_planned_output_path_wins_without_folder_reread(self) -> None:
+        self.converter._font_output_paths = {"fnt_bound": "res://fonts/planned/font.tres"}
+        with patch.object(self.converter, "_get_subfolder_from_yy", side_effect=AssertionError("fallback")):
+            destination = self.converter._font_output_destination(self.yy_path, "OtherName", "other.tres")
+        self.assertEqual(destination, os.path.join(self.godot_dir, "fonts", "planned", "font.tres"))
 
 
 if __name__ == "__main__":

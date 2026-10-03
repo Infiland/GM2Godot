@@ -1,6 +1,7 @@
 # pyright: reportPrivateUsage=false
 
 import json
+import math
 import os
 import sys
 import shutil
@@ -14,7 +15,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.sounds import SoundConverter
+from src.localization import get_localized
+from src.conversion.sounds import SoundConverter, SoundData
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.sound_metadata import SoundConversionFields, parse_gamemaker_sound_metadata
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
@@ -1286,6 +1290,343 @@ class TestSoundConverterEdgeCases(unittest.TestCase):
         self.assertTrue(len(self.logs) > 0,
                         "Expected at least one log message for empty sounds folder")
 
+
+class TestSoundTypedMetadataBoundary(unittest.TestCase):
+    """Preserve sound-specific coercion, source validation and reread policy."""
+
+    def setUp(self) -> None:
+        workspace = tempfile.TemporaryDirectory()
+        self.addCleanup(workspace.cleanup)
+        self.gm_dir = os.path.join(workspace.name, "game")
+        self.godot_dir = os.path.join(workspace.name, "godot")
+        os.makedirs(self.gm_dir)
+        os.makedirs(self.godot_dir)
+        self.yy_path = _make_sound_yy(self.gm_dir, "snd_bound")
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+        self.converter = SoundConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=self.logs.append, diagnostics=self.diagnostics,
+        )
+
+    def _write(self, data: JsonObject) -> None:
+        self._write_text(json.dumps(data))
+
+    def _write_text(self, text: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as source_file:
+            source_file.write(text)
+
+    def _assert_parse_failure(self) -> None:
+        self.assertIsNone(self.converter._parse_sound_yy(self.yy_path))
+        self.assertEqual(self.logs, [
+            get_localized("Console_Convertor_Sounds_ParseError").format(yy_path=self.yy_path)
+        ])
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_original_sound_data_keys_and_missing_defaults(self) -> None:
+        self._write({"name": "Sound", "soundFile": "clip.wav"})
+        result = self.converter._parse_sound_yy(self.yy_path)
+        self.assertEqual(result, {
+            "name": "Sound", "soundFile": "clip.wav", "volume": 1.0,
+            "type": 0, "bitDepth": 16, "bitRate": 128, "sampleRate": 44100,
+            "compression": 0, "preload": True,
+            "audioGroupId": "audiogroup_default", "duration": 0.0,
+        })
+        assert result is not None
+        self.assertEqual(tuple(result), tuple(SoundData.__annotations__))
+        self.assertEqual(SoundData.__module__, "src.conversion.sounds")
+        self.assertEqual(self.logs, [])
+
+    def test_conversion_retains_stringification_numeric_strings_and_truthiness(self) -> None:
+        self._write({
+            "name": [None, True, "Sound"], "soundFile": "clip.wav",
+            "volume": " 1.25e1 ", "type": True, "bitDepth": 16.9,
+            "bitRate": " 192 ", "sampleRate": "48000", "compression": False,
+            "preload": "false", "audioGroupId": {"name": None}, "duration": "2.5",
+        })
+        self.assertEqual(self.converter._parse_sound_yy(self.yy_path), {
+            "name": "[None, True, 'Sound']", "soundFile": "clip.wav", "volume": 12.5,
+            "type": 1, "bitDepth": 16, "bitRate": 192, "sampleRate": 48000,
+            "compression": 0, "preload": True, "audioGroupId": "None", "duration": 2.5,
+        })
+
+    def test_projection_is_authoritative_for_all_eleven_fields(self) -> None:
+        view = SoundConversionFields(
+            name="Projected sound", sound_file="projected.ogg", volume=0.5,
+            sound_type=1, bit_depth=8, bit_rate=256, sample_rate=22050,
+            compression=2, preload=False, audio_group="projected_group", duration=3.5,
+        )
+        with patch("src.conversion.sounds.project_sound_conversion_fields", return_value=view) as projection:
+            result = self.converter._parse_sound_yy(self.yy_path)
+        self.assertEqual(result, {
+            "name": "Projected sound", "soundFile": "projected.ogg", "volume": 0.5,
+            "type": 1, "bitDepth": 8, "bitRate": 256, "sampleRate": 22050,
+            "compression": 2, "preload": False, "audioGroupId": "projected_group", "duration": 3.5,
+        })
+        projection.assert_called_once()
+        self.assertEqual(projection.call_args.kwargs, {"sound_file": "snd_bound.wav"})
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_captured_sound_file_and_source_name_control_rejection(self) -> None:
+        metadata = parse_gamemaker_sound_metadata(
+            {"soundFile": False, "name": "Captured name"}, source_context="captured.yy"
+        )
+        metadata.raw_data.update({"soundFile": "different.wav", "name": "Different name"})
+        with patch("src.conversion.sounds.parse_gamemaker_sound_metadata", return_value=metadata):
+            with patch("src.conversion.sounds.project_sound_conversion_fields") as projection:
+                self.assertIsNone(self.converter._parse_sound_yy(self.yy_path))
+        projection.assert_not_called()
+        rejected = self.diagnostics.diagnostics()
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(rejected[0].resource, "Captured name")
+        self.assertIn("False", rejected[0].message)
+
+    def test_sound_file_validation_precedes_required_name_and_numeric_projection(self) -> None:
+        values: list[JsonValue] = [None, "", False, 7, [], {"clip": "invalid"}]
+        for value in values:
+            with self.subTest(value=value):
+                self._write({"soundFile": value, "volume": "invalid", "audioGroupId": None})
+                with patch("src.conversion.sounds.project_sound_conversion_fields") as projection:
+                    self.assertIsNone(self.converter._parse_sound_yy(self.yy_path))
+                projection.assert_not_called()
+        rejected = self.diagnostics.diagnostics()
+        self.assertEqual(len(rejected), len(values))
+        self.assertTrue(all(item.code == "GM2GD-SOURCE-PATH-REJECTED" for item in rejected))
+        self.assertTrue(all(item.resource == "snd_bound" for item in rejected))
+        self.assertTrue(all(item.resource_type == "sound" for item in rejected))
+        self.assertTrue(all(item.manifest_entry == "soundFile" for item in rejected))
+        self.assertTrue(all(item.source_path == "sounds/snd_bound/snd_bound.yy" for item in rejected))
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_nonobject_malformed_and_invalid_numeric_inputs_keep_parse_log(self) -> None:
+        sources = ["null", "[]", '"sound"', "true", "12", "{",
+                   '{"soundFile":"clip.wav"}',
+                   '{"name":"Sound","soundFile":"clip.wav","volume":null}',
+                   '{"name":"Sound","soundFile":"clip.wav","type":[]}',
+                   '{"name":"Sound","soundFile":"clip.wav","volume":"invalid"}']
+        for source in sources:
+            with self.subTest(source=source):
+                self.logs.clear()
+                self._write_text(source)
+                self._assert_parse_failure()
+
+    def test_rejected_deep_or_huge_sound_file_repr_failures_precede_projection(self) -> None:
+        deep: JsonValue = []
+        for _ in range(sys.getrecursionlimit() + 20):
+            deep = [deep]
+        limit = sys.get_int_max_str_digits()
+        huge = 10 ** ((limit or 4300) + 1)
+        for value in (deep, huge):
+            with self.subTest(value_type=type(value).__name__):
+                raw: JsonObject = {"soundFile": value, "volume": "invalid"}
+                try:
+                    repr(value)
+                except (ValueError, RecursionError) as expected:
+                    with patch("src.conversion.sounds.json.loads", return_value=raw):
+                        with patch("src.conversion.sounds.project_sound_conversion_fields") as projection:
+                            with self.assertRaises(type(expected)):
+                                self.converter._parse_sound_yy(self.yy_path)
+                    projection.assert_not_called()
+                else:
+                    with patch("src.conversion.sounds.json.loads", return_value=raw):
+                        self.assertIsNone(self.converter._parse_sound_yy(self.yy_path))
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_rejection_keeps_separate_first_repr_and_error_message_repr(self) -> None:
+        self._write({"soundFile": [], "volume": "invalid"})
+        with patch("src.conversion.sounds.repr", return_value="first representation", create=True) as first_repr:
+            with patch.object(self.converter, "_report_source_path_rejection") as report:
+                self.assertIsNone(self.converter._parse_sound_yy(self.yy_path))
+        first_repr.assert_called_once_with([])
+        report.assert_called_once()
+        self.assertEqual(report.call_args.args[0], "first representation")
+        self.assertEqual(str(report.call_args.args[1]), "GameMaker soundFile must be a non-empty string: []")
+        self.assertEqual(report.call_args.kwargs, {
+            "owner_source_path": self.yy_path, "resource": "snd_bound",
+            "resource_type": "sound", "field": "soundFile",
+        })
+
+    def test_shared_decoder_preserves_trailing_comma_rewrite(self) -> None:
+        self._write_text('{"name":"Sound,}","soundFile":"clip.wav",}')
+        result = self.converter._parse_sound_yy(self.yy_path)
+        assert result is not None
+        self.assertEqual(result["name"], "Sound}")
+        self.assertEqual(result["soundFile"], "clip.wav")
+
+    def test_audio_group_malformed_root_keeps_delayed_attribute_error(self) -> None:
+        values: list[JsonValue] = [None, [], "group", 3, False, 1.5]
+        for value in values:
+            with self.subTest(value=value):
+                self._write({"name": "Sound", "soundFile": "clip.wav", "audioGroupId": value,
+                             "duration": "invalid"})
+                with self.assertRaises(AttributeError) as raised:
+                    self.converter._parse_sound_yy(self.yy_path)
+                self.assertEqual(str(raised.exception), f"'{type(value).__name__}' object has no attribute 'get'")
+                self.assertEqual(raised.exception.name, "get")
+                self.assertEqual(raised.exception.obj, value)
+        self.assertEqual(self.logs, [])
+
+    def test_earlier_numeric_failure_is_caught_before_malformed_audio_group(self) -> None:
+        self._write({"name": "Sound", "soundFile": "clip.wav", "volume": "invalid",
+                     "audioGroupId": None, "duration": 10 ** 400})
+        self._assert_parse_failure()
+
+    def test_audio_group_nested_names_keep_legacy_string_values(self) -> None:
+        cases: list[tuple[JsonValue, str]] = [
+            ({}, "audiogroup_default"), ({"name": None}, "None"), ({"name": ""}, ""),
+            ({"name": False}, "False"), ({"name": 3}, "3"), ({"name": []}, "[]"),
+        ]
+        for group, expected in cases:
+            with self.subTest(group=group):
+                self._write({"name": "Sound", "soundFile": "clip.wav", "audioGroupId": group})
+                result = self.converter._parse_sound_yy(self.yy_path)
+                assert result is not None
+                self.assertEqual(result["audioGroupId"], expected)
+
+    def test_numeric_overflow_and_nonfinite_policy_is_preserved(self) -> None:
+        for fields in [{"volume": 10 ** 400}, {"type": float("inf")}, {"duration": 10 ** 400}]:
+            with self.subTest(fields=fields):
+                self._write({"name": "Sound", "soundFile": "clip.wav", **fields})
+                with self.assertRaises(OverflowError):
+                    self.converter._parse_sound_yy(self.yy_path)
+        for field_name in ("volume", "duration"):
+            for value in (float("nan"), float("inf"), -0.0):
+                with self.subTest(field=field_name, value=value):
+                    self._write({"name": "Sound", "soundFile": "clip.wav", field_name: value})
+                    result = self.converter._parse_sound_yy(self.yy_path)
+                    assert result is not None
+                    actual = result["volume"] if field_name == "volume" else result["duration"]
+                    if math.isnan(value):
+                        self.assertTrue(math.isnan(actual))
+                    else:
+                        self.assertEqual(actual, value)
+                        self.assertEqual(math.copysign(1, actual), math.copysign(1, value))
+        self._write({"name": "Sound", "soundFile": "clip.wav", "type": float("nan")})
+        self._assert_parse_failure()
+
+    def test_acquisition_caught_errors_keep_original_parse_log(self) -> None:
+        errors: list[Exception] = [OSError("read"), json.JSONDecodeError("decode", "{", 0),
+                                  KeyError("field"), TypeError("root"), ValueError("limit"),
+                                  UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid")]
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                self.logs.clear()
+                with patch("src.conversion.sounds.decode_gamemaker_json", side_effect=error):
+                    self._assert_parse_failure()
+
+    def test_projection_caught_errors_keep_original_parse_log(self) -> None:
+        for error in [KeyError("name"), TypeError("numeric"), ValueError("numeric")]:
+            with self.subTest(error=type(error).__name__):
+                self.logs.clear()
+                with patch("src.conversion.sounds.project_sound_conversion_fields", side_effect=error):
+                    self._assert_parse_failure()
+
+    def test_acquisition_and_projection_unhandled_errors_keep_identity(self) -> None:
+        errors: list[BaseException] = [OverflowError("huge"), RecursionError("deep"),
+                                       KeyboardInterrupt(), SystemExit(7)]
+        for seam in ("decode_gamemaker_json", "project_sound_conversion_fields"):
+            for error in errors:
+                with self.subTest(seam=seam, error=type(error).__name__):
+                    with patch("src.conversion.sounds." + seam, side_effect=error):
+                        with self.assertRaises(type(error)) as raised:
+                            self.converter._parse_sound_yy(self.yy_path)
+                    self.assertIs(raised.exception, error)
+        self.assertEqual(self.logs, [])
+
+    def test_actual_utf8_and_integer_decoder_errors_are_caught(self) -> None:
+        with open(self.yy_path, "wb") as source_file:
+            source_file.write(b"\xff")
+        self._assert_parse_failure()
+        limit = sys.get_int_max_str_digits()
+        if limit:
+            self.logs.clear()
+            self._write_text('{"name":"Sound","soundFile":"clip.wav","volume":' + "1" * (limit + 1) + '}')
+            self._assert_parse_failure()
+
+    def test_unknown_validated_graph_reaches_leaf_with_identity_and_order(self) -> None:
+        nested: JsonValue = "terminal"
+        for _ in range(1600):
+            nested = {"next": nested}
+        shared: JsonObject = {"z": None, "a": [True, 1]}
+        raw: JsonObject = {"name": "Sound", "soundFile": "clip.wav", "unknown": nested,
+                           "first": shared, "second": shared}
+        with patch("src.conversion.sounds.json.loads", return_value=raw):
+            with patch("src.conversion.sounds.parse_gamemaker_sound_metadata",
+                       wraps=parse_gamemaker_sound_metadata) as capture:
+                result = self.converter._parse_sound_yy(self.yy_path)
+        assert result is not None
+        self.assertEqual(result["name"], "Sound")
+        self.assertIs(capture.call_args.args[0], raw)
+        self.assertEqual(capture.call_args.kwargs, {"source_context": self.yy_path})
+        self.assertIs(raw["first"], raw["second"])
+        self.assertIs(raw["unknown"], nested)
+        self.assertEqual(tuple(raw), ("name", "soundFile", "unknown", "first", "second"))
+
+    def test_illegal_unknown_json_graph_is_caught_before_leaf(self) -> None:
+        raw = {"name": "Sound", "soundFile": "clip.wav", "unknown": {1, 2}}
+        with patch("src.conversion.sounds.json.loads", return_value=raw):
+            with patch("src.conversion.sounds.parse_gamemaker_sound_metadata") as capture:
+                self._assert_parse_failure()
+        capture.assert_not_called()
+
+    def test_sound_folder_preserves_literal_case_slashes_and_suffix_order(self) -> None:
+        cases = [("folders/Sounds/UI.yy", "ui"),
+                 ("folders/Sounds/Game/Abilities.yy", "game/abilities"),
+                 ("Folders/Sounds/UI.yy", "sounds/ui"),
+                 ("folders/Sounds/UI.YY", "ui_yy"),
+                 ("folders/Sounds/Game\\Abilities.yy", "game/abilities"),
+                 ("folders\\Sounds\\UI.yy", ""), ("folders/Sounds.yy", "")]
+        for path, expected in cases:
+            with self.subTest(path=path):
+                self._write({"parent": {"path": path}})
+                self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), expected)
+
+    def test_folder_rereads_replacement_without_coercing_unrelated_fields(self) -> None:
+        self._write({"name": "Sound", "soundFile": "clip.wav",
+                     "parent": {"path": "folders/Sounds/Old.yy"}})
+        self.assertIsNotNone(self.converter._parse_sound_yy(self.yy_path))
+        self._write({"soundFile": None, "volume": "invalid", "audioGroupId": None,
+                     "parent": {"path": "folders/Sounds/New.yy"}})
+        with patch("src.conversion.sounds.project_sound_conversion_fields") as projection:
+            self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "new")
+        projection.assert_not_called()
+        os.unlink(self.yy_path)
+        self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "")
+
+    def test_folder_containment_rejection_precedes_open(self) -> None:
+        outside = os.path.join(os.path.dirname(self.gm_dir), "outside.yy")
+        with open(outside, "w", encoding="utf-8") as source_file:
+            source_file.write('{"parent":{"path":"folders/Sounds/Unsafe.yy"}}')
+        with patch("src.conversion.sounds.open", create=True) as source_open:
+            self.assertEqual(self.converter._get_subfolder_from_yy(outside), "")
+        source_open.assert_not_called()
+
+    def test_folder_reader_and_extraction_retain_separate_catches(self) -> None:
+        for error in [OSError("read"), KeyError("field"), TypeError("root"), ValueError("limit")]:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.sounds.decode_gamemaker_json", side_effect=error):
+                    self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "")
+        for error in [KeyError("field"), TypeError("field"), AttributeError("field")]:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.sounds.parse_gamemaker_sound_metadata", side_effect=error):
+                    self.assertEqual(self.converter._get_subfolder_from_yy(self.yy_path), "")
+        error = ValueError("extraction")
+        with patch("src.conversion.sounds.parse_gamemaker_sound_metadata", side_effect=error):
+            with self.assertRaises(ValueError) as raised:
+                self.converter._get_subfolder_from_yy(self.yy_path)
+        self.assertIs(raised.exception, error)
+        self.assertEqual(self.logs, [])
+
+    def test_planned_output_path_wins_without_folder_reread(self) -> None:
+        self.converter._sound_output_paths = {"snd_bound": "res://sounds/planned/clip.wav"}
+        with patch.object(self.converter, "_get_subfolder_from_yy", side_effect=AssertionError("fallback")):
+            result = self.converter._process_sound(self.yy_path)
+        self.assertEqual(result, {"success": True, "name": "snd_bound", "audio_group": "audiogroup_default"})
+        destination = os.path.join(self.godot_dir, "sounds", "planned", "clip.wav")
+        with open(destination, "rb") as copied:
+            self.assertEqual(copied.read(), b"\x00" * 64)
+        with open(destination + ".import", encoding="utf-8") as imported:
+            self.assertIn('source_file="res://sounds/planned/clip.wav"', imported.read())
 
 if __name__ == "__main__":
     unittest.main()

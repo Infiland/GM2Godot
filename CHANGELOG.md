@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.22 - 2026-10-03
+
+- Share typed GameMaker sound metadata between resource summaries and audio conversion, preserving source validation, ordered coercions, audio-group errors and fresh folder reads.
+- Continue issue #797’s JSON migration; registry planning, remaining resource readers, legacy aliases and numeric-finiteness policy remain follow-up work.
+
 ## 0.8.21 - 2026-10-03
 
 - Share typed GameMaker font metadata between aggregate parsing and font conversion, retaining unknown source fields, ordered converter coercions and fresh folder reads.

@@ -94,6 +94,25 @@ metadata while registry-planned destinations retain precedence. Registry font
 planning, inherited raw aliases, other families and numeric-finiteness policy
 remain unfinished #797 work.
 
+### Sound metadata boundary
+
+`sound_metadata` captures known sound inputs and preserves the decoded JSON root
+and unknown values. The aggregate consumes only strict native-string summaries
+for soundFile, audioGroupId.name and parent.path; it never requests the ordered
+converter projection or applies converter defaults/coercions. Its existing
+read/decode failure catch still produces the same missing-resource warning,
+while metadata, subfolder and model construction remain outside that catch.
+The sound converter retains its separate acquisition and projection catches,
+including source-file rejection before conversion and delayed audio-group errors.
+
+`SoundModel` retains its original ten-field prefix, module, inheritance, defaults,
+repr and equality, with an optional metadata suffix excluded from repr/equality.
+Dataclass reflection intentionally includes that suffix and the leaf's primitive
+presence/value capture. The separate sound decoder alias is the same shared
+function, preserving the path and font patch seams. Generic resource readers,
+registry sound planning, remaining legacy aliases and numeric-finiteness policy
+remain unfinished #797 work.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

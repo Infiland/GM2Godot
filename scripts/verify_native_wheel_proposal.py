@@ -175,7 +175,7 @@ def _regular_file(path: Path, maximum: int) -> Generator[tuple[BinaryIO, os.stat
     primary: BaseException | None = None
     try:
         opened = os.fstat(fd)
-        _require(_stat_key(opened) == _stat_key(before), f'{path}: file identity changed before read')
+        _require(_stat_key(opened) == _stat_key(before), f'{path}: file identity changed before read; expected={_stat_key(before)!r}; observed={_stat_key(opened)!r}')
         with os.fdopen(fd, 'rb', closefd=False) as stream:
             yield stream, opened
         _require(_stat_key(os.fstat(fd)) == _stat_key(before) and _stat_key(path.lstat()) == _stat_key(before), f'{path}: file changed during read')

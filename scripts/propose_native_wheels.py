@@ -149,7 +149,7 @@ def read_regular(path: Path, maximum: int = MAX_TEXT_BYTES) -> bytes:
     with path.open("rb") as stream:
         opened = os.fstat(stream.fileno())
         if file_binding(opened) != file_binding(before):
-            raise ProposalError(f"file changed while opening: {path}")
+            raise ProposalError(f"file changed while opening: {path}; expected={file_binding(before)!r}; observed={file_binding(opened)!r}")
         content = stream.read(maximum + 1)
         if len(content) > maximum or file_binding(os.fstat(stream.fileno())) != file_binding(before):
             raise ProposalError(f"file changed/overflowed while reading: {path}")

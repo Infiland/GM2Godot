@@ -366,10 +366,13 @@ def inspect_wheel(stream: BinaryIO, size: int, filename: str) -> dict[str, Any]:
     name, version, tags = _filename_identity(filename)
     with zipfile.ZipFile(cast(Any, _BoundedReader(stream, size))) as archive:
         members = _zip_members(archive, maximum=MAX_WHEEL_MEMBERS, total_limit=MAX_TOTAL_BYTES)
-        metadata_names = [key for key in members if key.endswith('.dist-info/METADATA')]
+        metadata_names = [key for key in members if key.endswith('.dist-info/METADATA') and key.count('/') == 1]
         _require(len(metadata_names) == 1, 'wheel requires exactly one METADATA')
+        wheel_names = [key for key in members if key.endswith('.dist-info/WHEEL') and key.count('/') == 1]
+        _require(len(wheel_names) == 1, 'wheel requires exactly one WHEEL')
         metadata_name = metadata_names[0]
         parent = metadata_name.removesuffix('/METADATA')
+        _require(wheel_names[0] == parent + '/WHEEL', 'wheel root metadata parents mismatch')
         dist_info = parent.removesuffix('.dist-info').rsplit('/', 1)[-1]
         _require('-' in dist_info, 'wheel dist-info identity missing')
         distribution, metadata_version = dist_info.rsplit('-', 1)

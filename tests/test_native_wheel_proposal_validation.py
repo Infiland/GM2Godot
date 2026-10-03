@@ -456,6 +456,34 @@ class TestNativeWheelProposalValidation(unittest.TestCase):
         result = V.inspect_wheel(io.BytesIO(universal), len(universal), 'urllib3-2.8.0-py2.py3-none-any.whl')
         self.assertEqual(result['tags'], ['py2-none-any', 'py3-none-any'])
 
+    def test_wheel_root_metadata_pair_allows_nested_vendor_payload_without_ambiguity(self) -> None:
+        root = 'setuptools-83.0.0.dist-info'
+        vendor = 'setuptools/_vendor/packaging-26.0.dist-info'
+        filename = 'setuptools-83.0.0-py3-none-any.whl'
+        content = wheel_bytes('setuptools', '83.0.0', extras={
+            vendor + '/METADATA': b'Metadata-Version: 2.1\nName: packaging\nVersion: 26.0\n\n',
+            vendor + '/WHEEL': b'Wheel-Version: 1.0\nTag: cp39-none-vendor\n\n',
+            'setuptools/_vendor/wheel-0.46.3.dist-info/METADATA': b'Metadata-Version: 2.1\nName: wheel\nVersion: 0.46.3\n\n',
+        })
+        self.assertEqual(V.inspect_wheel(io.BytesIO(content), len(content), filename), {
+            'name': 'setuptools', 'version': '83.0.0', 'tags': ['py3-none-any'],
+        })
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            files = {info.filename: archive.read(info) for info in archive.infolist()}
+        metadata_name, wheel_name = root + '/METADATA', root + '/WHEEL'
+        cases: tuple[tuple[str, dict[str, bytes], str], ...] = (
+            ('missing root METADATA', {key: value for key, value in files.items() if key != metadata_name}, 'exactly one METADATA'),
+            ('missing root WHEEL', {key: value for key, value in files.items() if key != wheel_name}, 'exactly one WHEEL'),
+            ('nested-only pair', {key: value for key, value in files.items() if key not in (metadata_name, wheel_name)}, 'exactly one METADATA'),
+            ('second root METADATA', {**files, 'other-1.dist-info/METADATA': files[metadata_name]}, 'exactly one METADATA'),
+            ('second root WHEEL', {**files, 'other-1.dist-info/WHEEL': files[wheel_name]}, 'exactly one WHEEL'),
+            ('different root parents', {**{key: value for key, value in files.items() if key != wheel_name}, 'other-1.dist-info/WHEEL': files[wheel_name]}, 'root metadata parents mismatch'),
+        )
+        for label, members, expression in cases:
+            rejected = zip_bytes(members)
+            with self.subTest(label=label), self.assertRaisesRegex(V.ProposalError, expression):
+                V.inspect_wheel(io.BytesIO(rejected), len(rejected), filename)
+
     def test_selected_packaging_bytes_and_native_tag_observation_are_bound(self) -> None:
         self.fixture.mutate_json('proposal.json', lambda item: item['tag_observation'].update(packaging_tags_sha256='b' * 64))
         self.assert_rejected('inventory provenance mismatch')

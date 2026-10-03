@@ -20,6 +20,7 @@ import zipfile
 import zlib
 from pathlib import Path
 from typing import cast
+from unittest import mock
 from urllib.parse import quote
 
 from scripts import build_dependency_snapshot as dependency_snapshot
@@ -582,6 +583,235 @@ def _workflow_job_section(content: str, job_name: str) -> str:
     next_job = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", remainder)
     end = len(content) if next_job is None else start + len(marker) + next_job.start()
     return content[start:end]
+
+
+NATIVE_WHEEL_PROPOSAL_HOSTS = (
+    ("linux-x64", "ubuntu-24.04", "x64", "3.12.13", "Linux"),
+    ("macos-arm64", "macos-26", "arm64", "3.12.10", "macOS arm64"),
+    ("macos-x64", "macos-26-intel", "x64", "3.12.10", "macOS x64"),
+    ("windows-x64", "windows-2025", "x64", "3.12.10", "Windows"),
+)
+NATIVE_WHEEL_PRODUCER_STEP = (
+    "Prove native graph, wheels, self-hosting and two clean installs"
+)
+NATIVE_WHEEL_VALIDATOR_STEP = "Independently require all four complete proofs"
+NATIVE_WHEEL_LF_STEP = "Materialize exact source bytes as LF"
+NATIVE_WHEEL_LF_COMMAND = (
+    "git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force"
+)
+NATIVE_WHEEL_CHECKOUT_ACTION = (
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
+)
+NATIVE_WHEEL_SETUP_ACTION = (
+    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
+)
+NATIVE_WHEEL_UPLOAD_ACTION = (
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+)
+NATIVE_WHEEL_DOWNLOAD_ACTION = (
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+)
+
+
+def _native_wheel_source_binding_script(content: str, step_name: str) -> str:
+    script = _workflow_run_script(content, step_name)
+    marker = "python -I - <<'PY_SOURCE_BINDING'\n"
+    prefix, separator, remainder = script.partition(marker)
+    if prefix != "set -euo pipefail\n" or not separator:
+        raise AssertionError("source binding must be the first fatal command")
+    binding, separator, _ = remainder.partition("\nPY_SOURCE_BINDING\n")
+    if not separator or script.count(marker) != 1:
+        raise AssertionError("source binding must have one complete heredoc")
+    return binding + "\n"
+
+
+def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
+    """Freeze the explicit discovery topology, commands and raw archive routing."""
+
+    errors: list[str] = []
+    prelude = "\n".join(
+        line for line in content.partition("jobs:\n")[0].splitlines()
+        if not line.startswith("#")
+    ).strip()
+    expected_prelude = (
+        "name: Native Wheel Proposals\n\non:\n  push:\n"
+        "    branches: [codex/native-intel-wheel-locks]\n  pull_request:\n"
+        "    branches: [main]\n\npermissions:\n  contents: read\n\n"
+        "concurrency:\n"
+        "  group: native-wheel-proposals-${{ github.workflow }}-${{ github.ref }}\n"
+        "  cancel-in-progress: true\n\nenv:\n"
+        "  SOURCE_SHA: ${{ github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.sha || github.sha }}\n"
+        "  PROOF_PHASE: discover"
+    )
+    if prelude != expected_prelude:
+        errors.append("events, read-only permissions, source or explicit phase changed")
+    if re.findall(r"(?m)^  ([A-Za-z0-9_-]+):$", content.partition("jobs:\n")[2]) != [
+        "native", "aggregate",
+    ]:
+        errors.append("exactly the native matrix and all-four aggregate are required")
+    try:
+        native = _workflow_job_section(content, "native")
+        aggregate = _workflow_job_section(content, "aggregate")
+    except AssertionError as error:
+        return (*errors, str(error))
+
+    matrix = "".join(
+        f"          - platform: {platform}\n            runner: {runner}\n"
+        f"            architecture: {architecture}\n            python_version: '{python}'\n"
+        for platform, runner, architecture, python, _ in NATIVE_WHEEL_PROPOSAL_HOSTS
+    )
+    native_header = (
+        "  native:\n"
+        "    name: proposal / ${{ matrix.platform }} / Python ${{ matrix.python_version }}\n"
+        "    runs-on: ${{ matrix.runner }}\n    timeout-minutes: 75\n"
+        "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
+        + matrix + "    env:\n      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n"
+        "      PROPOSAL_ROOT: ${{ runner.temp }}/gm2godot-native-wheel-proposal-"
+        "${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.platform }}\n"
+    )
+    aggregate_header = (
+        "  aggregate:\n    name: require all four native proposal proofs\n"
+        "    needs: native\n    if: ${{ always() }}\n    runs-on: ubuntu-24.04\n"
+        "    timeout-minutes: 30\n    env:\n"
+        "      RAW_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-archives-"
+        "${{ github.run_id }}-${{ github.run_attempt }}\n"
+        "      AGGREGATE_ROOT: ${{ runner.temp }}/gm2godot-native-proposal-aggregate-"
+        "${{ github.run_id }}-${{ github.run_attempt }}\n"
+        "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n"
+    )
+    for job, header in ((native, native_header), (aggregate, aggregate_header)):
+        if job.partition("    steps:\n")[0] != header:
+            errors.append("native tuples, finite job budget, fresh roots or matrix result changed")
+
+    checkout = (
+        "      - name: Check out exact source\n"
+        f"        uses: {NATIVE_WHEEL_CHECKOUT_ACTION}\n        with:\n"
+        "          ref: ${{ env.SOURCE_SHA }}\n          persist-credentials: false"
+    )
+    setup = (
+        "      - name: Set up exact native Python\n"
+        f"        uses: {NATIVE_WHEEL_SETUP_ACTION}\n        with:\n"
+        "          python-version: ${{ matrix.python_version }}\n"
+        "          architecture: ${{ matrix.architecture }}"
+    )
+    expected_steps: dict[str, str] = {
+        "Check out exact source": checkout,
+        "Set up exact native Python": setup,
+        NATIVE_WHEEL_LF_STEP: (
+            f"      - name: {NATIVE_WHEEL_LF_STEP}\n"
+            "        timeout-minutes: 5\n        shell: bash\n"
+            f"        run: {NATIVE_WHEEL_LF_COMMAND}"
+        ),
+    }
+    for platform, _, _, python, label in NATIVE_WHEEL_PROPOSAL_HOSTS:
+        name = f"Download exact {label} proposal archive"
+        expected_steps[name] = (
+            f"      - name: {name}\n        if: ${{{{ always() }}}}\n"
+            f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_DOWNLOAD_ACTION}\n"
+            "        with:\n"
+            f"          name: native-wheel-proposal-{platform}-py{python}-"
+            "${{ github.run_id }}-${{ github.run_attempt }}\n"
+            f"          path: ${{{{ env.RAW_ROOT }}}}/{platform}\n"
+            "          skip-decompress: true\n          digest-mismatch: error"
+        )
+    for name, artifact_name, path in (
+        (
+            "Retain proposal evidence including failures",
+            "native-wheel-proposal-${{ matrix.platform }}-py${{ matrix.python_version }}-"
+            "${{ github.run_id }}-${{ github.run_attempt }}",
+            "${{ env.PROPOSAL_ROOT }}/artifact/",
+        ),
+        (
+            "Retain aggregate decision including failures",
+            "native-wheel-proposal-aggregate-${{ github.run_id }}-${{ github.run_attempt }}",
+            "${{ env.AGGREGATE_ROOT }}/",
+        ),
+    ):
+        expected_steps[name] = (
+            f"      - name: {name}\n        if: ${{{{ always() }}}}\n"
+            f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_UPLOAD_ACTION}\n"
+            f"        with:\n          name: {artifact_name}\n          path: {path}\n"
+            "          if-no-files-found: error\n          retention-days: 7\n"
+            "          archive: true\n          include-hidden-files: false\n"
+            "          overwrite: false"
+        )
+    for name, expected in expected_steps.items():
+        sections = _workflow_step_sections(content, name)
+        expected_count = 2 if name in ("Check out exact source", NATIVE_WHEEL_LF_STEP) else 1
+        if len(sections) != expected_count or any(
+            section.rstrip() != expected for section in sections
+        ):
+            errors.append(f"exact action routing and fatal inputs changed: {name}")
+
+    native_names = re.findall(r"(?m)^      - name: (.+)$", native)
+    aggregate_names = re.findall(r"(?m)^      - name: (.+)$", aggregate)
+    for job, names in ((native, native_names), (aggregate, aggregate_names)):
+        if re.findall(r"(?m)^      - (.+)$", job) != [f"name: {name}" for name in names]:
+            errors.append("unnamed or custom executable steps are forbidden")
+    if native_names != [
+        "Check out exact source", NATIVE_WHEEL_LF_STEP, "Set up exact native Python",
+        NATIVE_WHEEL_PRODUCER_STEP, "Retain proposal evidence including failures",
+    ] or aggregate_names != [
+        "Check out exact source", NATIVE_WHEEL_LF_STEP,
+        *(f"Download exact {host[4]} proposal archive" for host in NATIVE_WHEEL_PROPOSAL_HOSTS),
+        NATIVE_WHEEL_VALIDATOR_STEP, "Retain aggregate decision including failures",
+    ]:
+        errors.append("missing, duplicate or extra executable workflow steps")
+
+    for step, timeout, conditional, command in (
+        (
+            NATIVE_WHEEL_PRODUCER_STEP, 60, "",
+            ('python', '-I', 'scripts/propose_native_wheels.py',
+             '--phase', '$PROOF_PHASE', '--platform', '$PROPOSAL_PLATFORM',
+             '--source-root', '$GITHUB_WORKSPACE', '--repository', '$GITHUB_REPOSITORY',
+             '--source-sha', '$SOURCE_SHA', '--run-id', '$GITHUB_RUN_ID',
+             '--run-attempt', '$GITHUB_RUN_ATTEMPT', '--work-root', '$PROPOSAL_ROOT'),
+        ),
+        (
+            NATIVE_WHEEL_VALIDATOR_STEP, 10, "        if: ${{ always() }}\n",
+            ('python3', '-I', 'scripts/verify_native_wheel_proposal.py',
+             '--phase', '$PROOF_PHASE', '--source-root', '$GITHUB_WORKSPACE',
+             '--repository', '$GITHUB_REPOSITORY', '--source-sha', '$SOURCE_SHA',
+             '--run-id', '$GITHUB_RUN_ID', '--run-attempt', '$GITHUB_RUN_ATTEMPT',
+             '--native-jobs-result', '$NATIVE_MATRIX_RESULT', '--artifact-root', '$RAW_ROOT',
+             '--output', '$AGGREGATE_ROOT/acceptance.json'),
+        ),
+    ):
+        try:
+            section, = _workflow_step_sections(content, step)
+            if section.partition("        run: |\n")[0] != (
+                f"      - name: {step}\n{conditional}"
+                f"        timeout-minutes: {timeout}\n        shell: bash\n"
+            ):
+                errors.append("proof execution is conditional, unbounded or non-fatal")
+            binding = _native_wheel_source_binding_script(content, step)
+            for required in (
+                'require(event_sha == source_sha, "event source SHA mismatch")',
+                'require(head.returncode == 0 and head.stdout.strip() == source_sha,',
+                '"--no-replace-objects"', 'timeout=30',
+                'event_file.read(1024 * 1024 + 1)',
+            ):
+                if required not in binding:
+                    errors.append("bounded event and literal HEAD preflight is missing")
+            tail = _workflow_run_script(content, step).partition("\nPY_SOURCE_BINDING\n")[2]
+            if step == NATIVE_WHEEL_PRODUCER_STEP:
+                fixture_command = (
+                    "python -m unittest tests.test_native_wheel_proposals "
+                    "tests.test_native_wheel_proposal_validation\n"
+                )
+                if not tail.startswith(fixture_command):
+                    errors.append("both stdlib mechanism test modules must run fatally before producer")
+                tail = tail.partition("\n")[2]
+            else:
+                if not tail.startswith('mkdir "$AGGREGATE_ROOT"\n'):
+                    errors.append("aggregate receipt parent must be fresh")
+                tail = tail.partition("\n")[2]
+            if tuple(shlex.split(tail.replace("\\\n", " "))) != command:
+                errors.append("proof command, binding arguments or fatal exit handling changed")
+        except (AssertionError, ValueError) as error:
+            errors.append(str(error))
+    return tuple(errors)
 
 
 def _run_git(
@@ -1413,13 +1643,224 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        # Three test-host uploads and one generator upload add native N01 evidence.
-        self.assertEqual(len(locations), 14, locations)
+        # The four-host proposal matrix and its aggregate add two source upload blocks.
+        self.assertEqual(len(locations), 16, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             3,
             locations,
         )
+        self.assertEqual(
+            sum(location.startswith("native-wheel-proposals.yml:") for location in locations),
+            2,
+            locations,
+        )
+
+    def test_native_wheel_proposals_bind_four_native_hosts_and_original_archives(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(_native_wheel_proposal_policy_errors(content), ())
+        self.assertEqual(
+            _native_wheel_source_binding_script(content, NATIVE_WHEEL_PRODUCER_STEP),
+            _native_wheel_source_binding_script(content, NATIVE_WHEEL_VALIDATOR_STEP),
+        )
+        self.assertEqual(content.count("actions/download-artifact@"), 4)
+        self.assertEqual(content.count("skip-decompress: true"), 4)
+        self.assertEqual(content.count("digest-mismatch: error"), 4)
+        self.assertEqual(content.count(NATIVE_WHEEL_LF_COMMAND), 2)
+        for job_name in ("native", "aggregate"):
+            with self.subTest(job=job_name):
+                job = _workflow_job_section(content, job_name)
+                names = re.findall(r"(?m)^      - name: (.+)$", job)
+                self.assertEqual(names[:2], ["Check out exact source", NATIVE_WHEEL_LF_STEP])
+        producer = _workflow_run_script(content, NATIVE_WHEEL_PRODUCER_STEP)
+        fixture_command = (
+            "python -m unittest tests.test_native_wheel_proposals "
+            "tests.test_native_wheel_proposal_validation"
+        )
+        self.assertEqual(producer.count(fixture_command), 1)
+        self.assertLess(producer.index("\nPY_SOURCE_BINDING\n"), producer.index(fixture_command))
+        self.assertLess(producer.index(fixture_command), producer.index("python -I scripts/propose_native_wheels.py"))
+        for forbidden in (
+            "unzip", "extractall", "merge-multiple", "pattern:", "pip install",
+            "-m pip", "secrets.", "pull_request_target", "workflow_dispatch",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, content)
+
+    def test_native_wheel_proposal_policy_rejects_missing_or_bypassed_proofs(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        intel_row = (
+            "          - platform: macos-x64\n            runner: macos-26-intel\n"
+            "            architecture: x64\n            python_version: '3.12.10'\n"
+        )
+        producer_line = "          python -I scripts/propose_native_wheels.py"
+        fixture_line = (
+            "          python -m unittest tests.test_native_wheel_proposals "
+            "tests.test_native_wheel_proposal_validation\n"
+        )
+        mutations = {
+            "missing-intel": content.replace(intel_row, ""),
+            "duplicate-intel": content.replace(intel_row, intel_row * 2),
+            "non-native-intel": content.replace("runner: macos-26-intel", "runner: macos-26"),
+            "wrong-native-patch": content.replace("python_version: '3.12.13'", "python_version: '3.12.10'"),
+            "implicit-phase": content.replace("PROOF_PHASE: discover", "PROOF_PHASE: ${{ vars.PHASE }}"),
+            "PR-path-omission": content.replace("    branches: [main]", "    branches: [main]\n    paths: ['constraints/**']"),
+            "draft-omission": content.replace("    strategy:", "    if: ${{ !github.event.pull_request.draft }}\n    strategy:"),
+            "write-permission": content.replace("contents: read", "contents: write"),
+            "matrix-fast-fail": content.replace("fail-fast: false", "fail-fast: true"),
+            "floating-source": content.replace("ref: ${{ env.SOURCE_SHA }}", "ref: main"),
+            "quoted-nonfatal": content.replace("        shell: bash", '        "continue-on-error": true\n        shell: bash', 1),
+            "producer-conditional": content.replace("        timeout-minutes: 60", "        if: ${{ false }}\n        timeout-minutes: 60"),
+            "ignored-producer-exit": content.replace('            --work-root "$PROPOSAL_ROOT"', '            --work-root "$PROPOSAL_ROOT" || true'),
+            "unknown-helper-flag": content.replace('--work-root "$PROPOSAL_ROOT"', '--output-root "$PROPOSAL_ROOT"'),
+            "private-work-upload": content.replace("${{ env.PROPOSAL_ROOT }}/artifact/", "${{ env.PROPOSAL_ROOT }}/"),
+            "missing-attempt": content.replace("-${{ github.run_attempt }}", ""),
+            "artifact-overwrite": content.replace("overwrite: false", "overwrite: true"),
+            "decompressed-input": content.replace("skip-decompress: true", "skip-decompress: false", 1),
+            "ignored-digest": content.replace("digest-mismatch: error", "digest-mismatch: warn", 1),
+            "merged-download-roots": content.replace("${{ env.RAW_ROOT }}/macos-x64", "${{ env.RAW_ROOT }}/macos-arm64"),
+            "literal-success-result": content.replace("NATIVE_MATRIX_RESULT: ${{ needs.native.result }}", "NATIVE_MATRIX_RESULT: success"),
+            "omitted-matrix-result": content.replace('            --native-jobs-result "$NATIVE_MATRIX_RESULT" \\\n', ""),
+            "unbounded-event-read": content.replace("event_file.read(1024 * 1024 + 1)", "event_file.read()"),
+            "no-HEAD-check": content.replace('require(head.returncode == 0 and head.stdout.strip() == source_sha,', 'require(True,'),
+            "unbounded-Git": content.replace("timeout=30", "timeout=None"),
+            "preflight-after-producer": content.replace(producer_line, producer_line + "\n          true"),
+            "extra-unnamed-action": content.replace("    steps:\n", "    steps:\n      - uses: actions/checkout@main\n", 1),
+            "missing-mechanism-tests": content.replace(fixture_line, ""),
+            "partial-mechanism-tests": content.replace(fixture_line, "          python -m unittest tests.test_native_wheel_proposals\n"),
+            "ignored-mechanism-test-exit": content.replace(fixture_line, fixture_line.rstrip("\n") + " || true\n"),
+            "tests-after-producer": content.replace(fixture_line, "").replace('            --work-root "$PROPOSAL_ROOT"\n', '            --work-root "$PROPOSAL_ROOT"\n' + fixture_line),
+        }
+        download = _workflow_step_sections(content, "Download exact macOS x64 proposal archive")[0]
+        mutations["missing-download"] = content.replace(download, "")
+        mutations["duplicate-download"] = content.replace(download, download * 2)
+        lf_step = _workflow_step_sections(content, NATIVE_WHEEL_LF_STEP)[0]
+        mutations["missing-LF-materialization"] = content.replace(lf_step, "", 1)
+        mutations["persistent-LF-config"] = content.replace(NATIVE_WHEEL_LF_COMMAND, "git config --global core.autocrlf false", 1)
+        mutations["LF-after-producer"] = content.replace(lf_step, "", 1).replace(
+            "      - name: Retain proposal evidence including failures\n",
+            lf_step + "      - name: Retain proposal evidence including failures\n",
+        )
+        for label, mutated in mutations.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, content)
+                self.assertTrue(_native_wheel_proposal_policy_errors(mutated))
+
+    def test_native_wheel_source_preflight_checks_actual_event_and_literal_HEAD(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        binding = _native_wheel_source_binding_script(content, NATIVE_WHEEL_PRODUCER_STEP)
+        sha = "a" * 40
+        repository = "Infiland/GM2Godot"
+        push_ref = "refs/heads/codex/native-intel-wheel-locks"
+        push: dict[str, object] = {
+            "repository": {"full_name": repository}, "ref": push_ref,
+            "deleted": False, "after": sha,
+        }
+        pull_request: dict[str, object] = {
+            "repository": {"full_name": repository}, "action": "synchronize", "number": 854,
+            "pull_request": {
+                "base": {"ref": "main", "repo": {"full_name": repository}},
+                "head": {"sha": sha, "repo": {"full_name": "contributor/GM2Godot"}},
+            },
+        }
+        scenarios: list[tuple[str, dict[str, object], dict[str, str], str, int, bool]] = [
+            ("feature-push", push, {}, sha, 0, True),
+            ("fork-PR", pull_request, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/854/merge"}, sha, 0, True),
+            ("repository", push, {"GITHUB_REPOSITORY": "fork/GM2Godot"}, sha, 0, False),
+            ("SHA-shape", push, {"SOURCE_SHA": "A" * 40}, sha, 0, False),
+            ("zero-run", push, {"GITHUB_RUN_ID": "0"}, sha, 0, False),
+            ("empty-attempt", push, {"GITHUB_RUN_ATTEMPT": ""}, sha, 0, False),
+            ("leading-zero-attempt", push, {"GITHUB_RUN_ATTEMPT": "01"}, sha, 0, False),
+            ("wrong-push-ref", push, {"GITHUB_REF": "refs/heads/main"}, sha, 0, False),
+            ("unsupported-event", push, {"GITHUB_EVENT_NAME": "workflow_dispatch"}, sha, 0, False),
+            ("different-HEAD", push, {}, "b" * 40, 0, False),
+            ("failed-Git", push, {}, sha, 1, False),
+        ]
+        for label, field, value in (
+            ("event-repository", "repository", {"full_name": "fork/GM2Godot"}),
+            ("event-source", "after", "b" * 40),
+            ("deleted", "deleted", True),
+            ("nonboolean-deleted", "deleted", 0),
+            ("event-ref", "ref", "refs/heads/main"),
+        ):
+            mutated = copy.deepcopy(push)
+            mutated[field] = value
+            scenarios.append((label, mutated, {}, sha, 0, False))
+        for label, replacement in (
+            ("PR-base", {"base": {"ref": "develop", "repo": {"full_name": repository}}, "head": {"sha": sha}}),
+            ("PR-base-repository", {"base": {"ref": "main", "repo": {"full_name": "fork/GM2Godot"}}, "head": {"sha": sha}}),
+            ("PR-source", {"base": {"ref": "main", "repo": {"full_name": repository}}, "head": {"sha": "b" * 40}}),
+        ):
+            mutated = copy.deepcopy(pull_request)
+            mutated["pull_request"] = replacement
+            scenarios.append((label, mutated, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/854/merge"}, sha, 0, False))
+
+        for label, event, updates, head_sha, returncode, accepts in scenarios:
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                event_path = root / "event.json"
+                event_path.write_text(json.dumps(event), encoding="utf-8")
+                environment = {
+                    "GITHUB_REPOSITORY": repository, "SOURCE_SHA": sha,
+                    "GITHUB_RUN_ID": "37000000001", "GITHUB_RUN_ATTEMPT": "2",
+                    "GITHUB_EVENT_PATH": str(event_path), "GITHUB_WORKSPACE": str(root),
+                    "GITHUB_EVENT_NAME": "push", "GITHUB_REF": push_ref,
+                    **updates,
+                }
+                result = subprocess.CompletedProcess(["git"], returncode, head_sha + "\n", "")
+                with (
+                    mock.patch.dict(os.environ, environment, clear=True),
+                    mock.patch("subprocess.run", return_value=result) as run,
+                    mock.patch("builtins.print"),
+                ):
+                    if accepts:
+                        exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    if accepts or label in ("different-HEAD", "failed-Git"):
+                        run.assert_called_once_with(
+                            ["git", "--no-replace-objects", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"],
+                            check=False, capture_output=True, text=True, timeout=30,
+                        )
+                    else:
+                        run.assert_not_called()
+
+    def test_native_wheel_source_preflight_rejects_duplicate_and_oversized_events(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        binding = _native_wheel_source_binding_script(content, NATIVE_WHEEL_VALIDATOR_STEP)
+        for label, payload in (
+            ("duplicate-field", b'{"repository":{},"repository":{}}'),
+            ("size-bound", b" " * (1024 * 1024 + 1)),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                event_path = Path(temporary) / "event.json"
+                event_path.write_bytes(payload)
+                environment = {
+                    "GITHUB_REPOSITORY": "Infiland/GM2Godot", "SOURCE_SHA": "a" * 40,
+                    "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_EVENT_PATH": str(event_path),
+                }
+                with mock.patch.dict(os.environ, environment, clear=True), mock.patch("subprocess.run") as run:
+                    with self.assertRaises(SystemExit):
+                        exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    run.assert_not_called()
 
     def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"

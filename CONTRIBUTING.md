@@ -73,6 +73,16 @@ Treat `pip` and `pip-tools` as one compatibility unit: review the two exact sour
 
 Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.2 validation.
 
+
+### Native wheel proposals
+
+The [native wheel proposal workflow](.github/workflows/native-wheel-proposals.yml) gathers separate Linux x64, macOS arm64, macOS x64, and Windows x64 evidence for [the Intel dependency baseline](https://github.com/Infiland/GM2Godot/issues/854). Its initial `discover` phase uses the neutral macOS constraint only as an Intel resolver seed. Discovery does not establish an Intel installation or release baseline.
+
+Push the `codex/native-intel-wheel-locks` feature branch to run all four native jobs. Review the original proposal archives from one exact source commit, workflow run, and attempt. Each successful proposal must contain two independent native wheel observations, matching hash requirements, a candidate and identical self-hosted version graph, and two additional clean offline complete installs with identical normalized dependency receipts. The aggregate checker reads the original archives without extracting or executing their contents.
+
+Choose a shared macOS version constraint only when the actual arm64 and x64 candidate bytes prove that relationship; otherwise migrate consumers to separate native constraints. Commit the reviewed architecture-specific wheel hash requirements, change the fixed workflow phase to `require-committed`, and rerun all four jobs against the final feature head before merging. Keep the existing production dependency gates until the separate Intel lane and its exact aggregation identity are integrated and verified. Existing version-only installs do not become hash-authenticated merely because a proposal has recorded wheel hashes.
+
+
 ## Development Guidelines
 
 ### Code Style

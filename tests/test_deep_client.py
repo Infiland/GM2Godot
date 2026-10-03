@@ -17,7 +17,111 @@ from src.deep.session import DeepSession
 from src.deep.settings import DeepSettings, load_settings, save_settings
 
 
+class VerifiedReleaseFixture:
+    """Two synthetic releases exercise the real verified installer without network or execution."""
+
+    def __init__(self, root: Path) -> None:
+        self.requested_urls: list[str] = []
+        self.transport_data: dict[str, bytes] = {}
+        releases = {
+            "0.2.1": (
+                "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/fixture-deep-linux-x64.zip",
+            ),
+            "0.2.2": (
+                "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/deep-manifest.json",
+                "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/fixture-deep-linux-x64.zip",
+            ),
+        }
+        for version, (manifest_url, package_url) in releases.items():
+            archive = root / f"release-{version}.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("node/bin/node", f"fixture runtime {version}\n")
+                bundle.writestr("engine/dist/host/main.js", f"fixture engine {version}\n")
+            package_bytes = archive.read_bytes()
+            manifest = {
+                "version": version,
+                "protocolVersion": 1,
+                "minClientVersion": "0.8.1",
+                "packages": {
+                    "linux-x64": {
+                        "url": package_url,
+                        "sha256": hashlib.sha256(package_bytes).hexdigest(),
+                        "runtime": "node/bin/node",
+                        "entrypoint": "engine/dist/host/main.js",
+                    },
+                },
+            }
+            self.transport_data[manifest_url] = json.dumps(manifest).encode("utf-8")
+            self.transport_data[package_url] = package_bytes
+
+    def download(self, url: str, destination: Path) -> None:
+        self.requested_urls.append(url)
+        if url not in self.transport_data:
+            raise AssertionError(f"Unexpected fixture download URL: {url}")
+        destination.write_bytes(self.transport_data[url])
+
+
 class DeepClientTests(unittest.TestCase):
+    def test_default_upgrade_preserves_explicit_legacy_install_and_saved_job_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            releases = VerifiedReleaseFixture(root)
+            manager = ExtensionManager(root / "managed")
+            source, baseline = root / "source", root / "baseline"
+            source.mkdir()
+            baseline.mkdir()
+            with patch("src.deep.install.platform_key", return_value="linux-x64"), patch(
+                "src.deep.install.download_verified_transport", side_effect=releases.download,
+            ):
+                legacy = manager.install(
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                )
+                old_job = DeepJob.create(str(source), str(baseline), DeepSettings(analysisWorkers=2), manager)
+                old_job.phase = "paused"
+                old_job.save()
+                old_saved = (old_job.root / "client.json").read_bytes()
+                old_settings = old_job.settings.to_dict()
+
+                current = manager.install()
+                self.assertNotEqual(current, legacy)
+                self.assertEqual(manager.installation(), current)
+                self.assertEqual(json.loads((current / "install.json").read_text())["manifest"]["version"], "0.2.2")
+                self.assertEqual(json.loads((legacy / "install.json").read_text())["manifest"]["version"], "0.2.1")
+                new_job = DeepJob.create(str(source), str(baseline), DeepSettings(analysisWorkers=3), manager)
+                self.assertEqual(new_job.installation, current)
+                self.assertEqual(DeepJob.load(new_job.root).installation, current)
+                restored = DeepJob.load(old_job.root)
+                self.assertEqual(restored.installation, legacy)
+                self.assertEqual(restored.phase, "paused")
+                self.assertEqual(restored.settings.to_dict(), old_settings)
+                self.assertEqual((old_job.root / "client.json").read_bytes(), old_saved)
+                self.assertEqual((legacy / "node/bin/node").read_bytes(), b"fixture runtime 0.2.1\n")
+                self.assertEqual((legacy / "engine/dist/host/main.js").read_bytes(), b"fixture engine 0.2.1\n")
+                self.assertEqual((current / "node/bin/node").read_bytes(), b"fixture runtime 0.2.2\n")
+                self.assertEqual((current / "engine/dist/host/main.js").read_bytes(), b"fixture engine 0.2.2\n")
+                old_command = [str(legacy / "node/bin/node"), str(legacy / "engine/dist/host/main.js")]
+                new_command = [str(current / "node/bin/node"), str(current / "engine/dist/host/main.js")]
+                self.assertEqual(manager.command(restored.installation), old_command)
+                self.assertEqual(manager.command(new_job.installation), new_command)
+                self.assertEqual(manager.command(), new_command)
+
+                self.assertEqual(manager.install(
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                ), legacy)
+                self.assertEqual(manager.installation(), legacy)
+                self.assertEqual(manager.command(), old_command)
+                self.assertEqual(manager.command(DeepJob.load(new_job.root).installation), new_command)
+                self.assertEqual(manager.command(DeepJob.load(old_job.root).installation), old_command)
+                self.assertEqual((old_job.root / "client.json").read_bytes(), old_saved)
+                self.assertEqual(releases.requested_urls, [
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/fixture-deep-linux-x64.zip",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/deep-manifest.json",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/fixture-deep-linux-x64.zip",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                ])
+
     def test_custom_codex_executable_survives_settings_and_job_roundtrips(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

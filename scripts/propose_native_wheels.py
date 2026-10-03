@@ -121,21 +121,35 @@ def file_binding(value: os.stat_result) -> tuple[int, ...]:
             value.st_size, value.st_mtime_ns, value.st_ctime_ns)
 
 
+def same_file_across_views(path_value: os.stat_result, descriptor_value: os.stat_result) -> bool:
+    path_key, descriptor_key = file_binding(path_value), file_binding(descriptor_value)
+    if sys.platform != "win32":
+        return path_key == descriptor_key
+    # CPython 3.12 Windows path ctime is creation time; fd ctime is change time.
+    # Birthtime has matching semantics, while each view keeps its full own seal.
+    path_birthtime: object = getattr(path_value, "st_birthtime_ns", None)
+    descriptor_birthtime: object = getattr(descriptor_value, "st_birthtime_ns", None)
+    return (path_key[:6] == descriptor_key[:6]
+            and type(path_birthtime) is int and type(descriptor_birthtime) is int
+            and path_birthtime == descriptor_birthtime)
+
+
 def hash_regular(path: Path, maximum: int) -> tuple[int, str]:
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= maximum:
         raise ProposalError(f"not a bounded private regular file: {path}")
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with io.FileIO(descriptor, "r", closefd=True) as stream:
-        if file_binding(os.fstat(stream.fileno())) != file_binding(before):
-            raise ProposalError(f"file changed while opening: {path}")
+        opened = os.fstat(stream.fileno())
+        if not same_file_across_views(before, opened):
+            raise ProposalError(f"file changed while opening: {path}; expected={file_binding(before)!r}; observed={file_binding(opened)!r}")
         digest, size = hashlib.sha256(), 0
         while block := stream.read(min(1_048_576, maximum + 1 - size)):
             size += len(block)
             if size > maximum:
                 raise ProposalError(f"file byte bound exceeded: {path}")
             digest.update(block)
-        if size != before.st_size or file_binding(os.fstat(stream.fileno())) != file_binding(before):
+        if size != before.st_size or file_binding(os.fstat(stream.fileno())) != file_binding(opened):
             raise ProposalError(f"file changed while hashing: {path}")
     if file_binding(path.lstat()) != file_binding(before):
         raise ProposalError(f"file namespace changed while hashing: {path}")
@@ -148,10 +162,10 @@ def read_regular(path: Path, maximum: int = MAX_TEXT_BYTES) -> bytes:
         raise ProposalError(f"not a bounded private regular file: {path}")
     with path.open("rb") as stream:
         opened = os.fstat(stream.fileno())
-        if file_binding(opened) != file_binding(before):
+        if not same_file_across_views(before, opened):
             raise ProposalError(f"file changed while opening: {path}; expected={file_binding(before)!r}; observed={file_binding(opened)!r}")
         content = stream.read(maximum + 1)
-        if len(content) > maximum or file_binding(os.fstat(stream.fileno())) != file_binding(before):
+        if len(content) > maximum or file_binding(os.fstat(stream.fileno())) != file_binding(opened):
             raise ProposalError(f"file changed/overflowed while reading: {path}")
     if file_binding(path.lstat()) != file_binding(before):
         raise ProposalError(f"file namespace changed while reading: {path}")
@@ -512,8 +526,9 @@ def _observe_wheel(path: Path, pins: Mapping[str, str], native_tags: frozenset[s
         raise ProposalError(f"wheel has no actual native compatible tag: {path.name}")
     descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     with WheelReader(io.FileIO(descriptor, "r", closefd=True)) as stream:
-        if file_binding(os.fstat(stream.fileno())) != file_binding(before):
-            raise ProposalError("wheel changed while opening")
+        opened = os.fstat(stream.fileno())
+        if not same_file_across_views(before, opened):
+            raise ProposalError(f"wheel changed while opening; expected={file_binding(before)!r}; observed={file_binding(opened)!r}")
         digest = hashlib.sha256()
         size = 0
         while block := stream.read(min(1_048_576, MAX_WHEEL_BYTES + 1 - size)):
@@ -557,7 +572,7 @@ def _observe_wheel(path: Path, pins: Mapping[str, str], native_tags: frozenset[s
             wheel_tags = {tag for value in wheel_metadata.get_all("Tag", []) for tag in selected.tags(str(value))}
             if wheel_metadata.get_all("Wheel-Version", []) != ["1.0"] or wheel_tags != set(tags):
                 raise ProposalError("wheel filename/WHEEL tag mismatch")
-        if size != before.st_size or file_binding(os.fstat(stream.fileno())) != file_binding(before):
+        if size != before.st_size or file_binding(os.fstat(stream.fileno())) != file_binding(opened):
             raise ProposalError("wheel changed while hashing/inspecting")
     if file_binding(path.lstat()) != file_binding(before):
         raise ProposalError("wheel namespace changed while inspecting")

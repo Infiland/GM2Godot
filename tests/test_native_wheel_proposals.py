@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import errno
 import hashlib
 import importlib.util
 import io
@@ -15,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Callable, TypedDict, cast
 import unittest
 from unittest import mock
@@ -251,6 +252,93 @@ class TestNativeWheelProposals(unittest.TestCase):
             with self.assertRaises(ERROR):
                 read(alias, 7)
             opening.assert_not_called()
+
+    def test_cross_view_stat_binding_preserves_windows_creation_identity_and_posix_ctime(self) -> None:
+        compare = cast(Callable[[os.stat_result, os.stat_result], bool],
+                       getattr(PRODUCER, "same_file_across_views"))
+        fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns")
+        common: dict[str, int] = {
+            "st_dev": 11, "st_ino": 22, "st_mode": stat.S_IFREG | 0o644,
+            "st_nlink": 1, "st_size": 7, "st_mtime_ns": 300,
+        }
+
+        def view(missing_birthtime: bool = False, /, **changes: object) -> os.stat_result:
+            # Explicit path/fd metadata model, not native Windows evidence.
+            values: dict[str, object] = {**common, "st_ctime_ns": 100, "st_birthtime_ns": 100}
+            values.update(changes)
+            if missing_birthtime:
+                values.pop("st_birthtime_ns")
+            return cast(os.stat_result, SimpleNamespace(**values))
+
+        named, opened = view(), view(st_ctime_ns=200)
+        with mock.patch.object(PRODUCER.sys, "platform", "win32"):
+            self.assertTrue(compare(named, opened))
+            for field in fields:
+                with self.subTest(field=field):
+                    self.assertFalse(compare(named, view(st_ctime_ns=200, **{field: common[field] + 1})))
+            for birthtime in (101, None, True, False, 100.0, "100"):
+                with self.subTest(birthtime=birthtime):
+                    self.assertFalse(compare(named, view(st_ctime_ns=200, st_birthtime_ns=birthtime)))
+                    self.assertFalse(compare(view(st_birthtime_ns=birthtime), opened))
+                    if type(birthtime) is not int:
+                        self.assertFalse(compare(view(st_birthtime_ns=birthtime),
+                                                 view(st_ctime_ns=200, st_birthtime_ns=birthtime)))
+            self.assertFalse(compare(named, view(True, st_ctime_ns=200)))
+            self.assertFalse(compare(view(True), opened))
+            self.assertFalse(compare(view(True),
+                                     view(True, st_ctime_ns=200)))
+        with mock.patch.object(PRODUCER.sys, "platform", "linux"):
+            self.assertFalse(compare(named, opened))
+            self.assertTrue(compare(named, view()))
+
+    def test_owned_descriptor_seals_reject_change_time_drift_after_read(self) -> None:
+        path = self.root / "retained-metadata"
+        payload = b"actual retained fixture bytes"
+        path.write_bytes(payload)
+        original = path.lstat()
+        actual_fstat = os.fstat
+        binding = cast(Callable[[os.stat_result], tuple[int, ...]], getattr(PRODUCER, "file_binding"))
+        functions: tuple[tuple[str, Callable[[Path, int], object], object], ...] = (
+            ("read", cast(Callable[[Path, int], object], getattr(PRODUCER, "read_regular")), payload),
+            ("hash", cast(Callable[[Path, int], object], getattr(PRODUCER, "hash_regular")),
+             (len(payload), hashlib.sha256(payload).hexdigest())),
+        )
+
+        def view(value: os.stat_result, ctime_ns: int) -> os.stat_result:
+            fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_size", "st_mtime_ns")
+            values: dict[str, object] = {field: getattr(value, field) for field in fields}
+            values.update(st_ctime_ns=ctime_ns, st_birthtime_ns=100)
+            return cast(os.stat_result, SimpleNamespace(**values))
+
+        for name, function, expected in functions:
+            for changed_fd in (False, True):
+                with self.subTest(function=name, changed_fd=changed_fd):
+                    descriptors: list[int] = []
+
+                    def observed_fstat(descriptor: int) -> os.stat_result:
+                        # Forward every call to the real retained descriptor;
+                        # only its reported ChangeTime is modeled after reading.
+                        observed = actual_fstat(descriptor)
+                        descriptors.append(descriptor)
+                        self.assertEqual((observed.st_dev, observed.st_ino),
+                                         (original.st_dev, original.st_ino))
+                        return view(observed, 201 if changed_fd and len(descriptors) > 1 else 200)
+
+                    with mock.patch.object(PRODUCER.sys, "platform", "win32"), \
+                         mock.patch.object(Path, "lstat", return_value=view(original, 100)), \
+                         mock.patch.object(PRODUCER.os, "fstat", side_effect=observed_fstat):
+                        if changed_fd:
+                            with self.assertRaisesRegex(ERROR, "changed.*(?:reading|hashing)"):
+                                function(path, len(payload))
+                        else:
+                            self.assertEqual(function(path, len(payload)), expected)
+                    self.assertEqual(len(descriptors), 2)
+                    self.assertEqual(descriptors[0], descriptors[1])
+                    with self.assertRaises(OSError) as closed:
+                        actual_fstat(descriptors[0])
+                    self.assertEqual(closed.exception.errno, errno.EBADF)
+                    self.assertEqual(path.read_bytes(), payload)
+                    self.assertEqual(binding(path.lstat()), binding(original))
 
     def test_actual_git_source_binding_rejects_drift_redirects_and_oversized_blobs(self) -> None:
         source = self.root / "source-checkout"

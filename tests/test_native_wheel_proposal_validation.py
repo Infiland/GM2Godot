@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 import copy
+import errno
 import hashlib
 import importlib.util
 import io
@@ -15,7 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, BinaryIO, cast
 import unittest
 from unittest.mock import patch
@@ -355,6 +356,71 @@ class TestNativeWheelProposalValidation(unittest.TestCase):
             path.unlink()
         os.link(target, path)
         self.assert_rejected('physical bounded regular')
+
+        # Literal cross-view models, never a claim about a native Windows mount.
+        def modeled_stat(**changes: object) -> os.stat_result:
+            values: dict[str, object] = {
+                'st_dev': 7, 'st_ino': 71, 'st_mode': stat.S_IFREG | 0o644,
+                'st_nlink': 1, 'st_size': 9, 'st_mtime_ns': 80,
+                'st_ctime_ns': 90, 'st_birthtime_ns': 70,
+            }
+            values.update(changes)
+            return cast(os.stat_result, SimpleNamespace(**values))
+
+        named = modeled_stat()
+        opened = modeled_stat(st_ctime_ns=91)
+        with patch.object(V.sys, 'platform', 'win32'):
+            self.assertTrue(V._same_file_views(named, opened))
+            for attribute in ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_size', 'st_mtime_ns'):
+                with self.subTest(changed_field=attribute):
+                    changed = modeled_stat(**{attribute: getattr(named, attribute) + 1})
+                    self.assertFalse(V._same_file_views(named, changed))
+            self.assertFalse(V._same_file_views(named, modeled_stat(st_birthtime_ns=71)))
+            missing_birth = modeled_stat()
+            delattr(missing_birth, 'st_birthtime_ns')
+            for invalid in (missing_birth, modeled_stat(st_birthtime_ns=True),
+                            modeled_stat(st_birthtime_ns=70.0), modeled_stat(st_birthtime_ns=None)):
+                with self.subTest(invalid_birth=getattr(invalid, 'st_birthtime_ns', 'missing')):
+                    self.assertFalse(V._same_file_views(named, invalid))
+                    self.assertFalse(V._same_file_views(invalid, named))
+                    self.assertFalse(V._same_file_views(invalid, invalid))
+        with patch.object(V.sys, 'platform', 'linux'):
+            self.assertTrue(V._same_file_views(named, named))
+            self.assertFalse(V._same_file_views(named, opened))
+
+        reader_path = self.root / 'modeled-reader.txt'
+        payload = b'actual bounded reader bytes'
+        reader_path.write_bytes(payload)
+        physical = reader_path.lstat()
+        shared = {attribute: getattr(physical, attribute) for attribute in
+                  ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_size', 'st_mtime_ns')}
+        path_view = modeled_stat(**shared, st_ctime_ns=100, st_birthtime_ns=70)
+        fd_view = modeled_stat(**shared, st_ctime_ns=200, st_birthtime_ns=70)
+        fd_changed = modeled_stat(**shared, st_ctime_ns=201, st_birthtime_ns=70)
+        actual_fstat = os.fstat
+        for final_fd_view, changed in ((fd_view, False), (fd_changed, True)):
+            with self.subTest(fd_ctime_changed=changed):
+                owned_fd: int | None = None
+                with patch.object(V.sys, 'platform', 'win32'), \
+                        patch.object(Path, 'lstat', return_value=path_view), \
+                        patch.object(V.os, 'fstat', side_effect=[fd_view, final_fd_view]) as observed:
+                    def read_actual_file() -> None:
+                        nonlocal owned_fd
+                        with V._regular_file(reader_path, len(payload)) as (stream, captured):
+                            owned_fd = stream.fileno()
+                            self.assertIs(captured, fd_view)
+                            self.assertEqual(stream.read(), payload)
+                    if changed:
+                        with self.assertRaisesRegex(V.ProposalError, 'file changed during read'):
+                            read_actual_file()
+                    else:
+                        read_actual_file()
+                    self.assertEqual(observed.call_count, 2)
+                    self.assertEqual(path_view.st_ctime_ns, 100)
+                assert owned_fd is not None
+                with self.assertRaises(OSError) as closed:
+                    actual_fstat(owned_fd)
+                self.assertEqual(closed.exception.errno, errno.EBADF)
 
     def test_full_candidate_graph_authored_pins_and_selfhost_bytes_are_bound(self) -> None:
         self.fixture.files['linux-x64']['selfhost/version.lock'] += b'# drift\n'

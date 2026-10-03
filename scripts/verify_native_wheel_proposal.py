@@ -166,6 +166,16 @@ def _stat_key(value: os.stat_result) -> tuple[int, ...]:
     return (value.st_dev, value.st_ino, value.st_mode, value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
 
 
+def _same_file_views(named: os.stat_result, opened: os.stat_result) -> bool:
+    if sys.platform != 'win32':
+        return _stat_key(named) == _stat_key(opened)
+    named_birth = getattr(named, 'st_birthtime_ns', None)
+    opened_birth = getattr(opened, 'st_birthtime_ns', None)
+    return (_stat_key(named)[:6] == _stat_key(opened)[:6]
+            and type(named_birth) is int and type(opened_birth) is int
+            and named_birth == opened_birth)
+
+
 @contextmanager
 def _regular_file(path: Path, maximum: int) -> Generator[tuple[BinaryIO, os.stat_result]]:
     before = path.lstat()
@@ -175,10 +185,10 @@ def _regular_file(path: Path, maximum: int) -> Generator[tuple[BinaryIO, os.stat
     primary: BaseException | None = None
     try:
         opened = os.fstat(fd)
-        _require(_stat_key(opened) == _stat_key(before), f'{path}: file identity changed before read; expected={_stat_key(before)!r}; observed={_stat_key(opened)!r}')
+        _require(_same_file_views(before, opened), f'{path}: file identity changed before read; expected={_stat_key(before)!r}; observed={_stat_key(opened)!r}')
         with os.fdopen(fd, 'rb', closefd=False) as stream:
             yield stream, opened
-        _require(_stat_key(os.fstat(fd)) == _stat_key(before) and _stat_key(path.lstat()) == _stat_key(before), f'{path}: file changed during read')
+        _require(_stat_key(os.fstat(fd)) == _stat_key(opened) and _stat_key(path.lstat()) == _stat_key(before), f'{path}: file changed during read')
     except BaseException as error:
         primary = error
         raise

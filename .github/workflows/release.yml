@@ -765,7 +765,7 @@ jobs:
             expected_platform: win32
             expected_machine: AMD64
           - os: macos-26
-            name: macos
+            name: macos-arm64
             ext: ""
             pyinstaller_mode: --onedir
             python_version: '3.12.10'
@@ -774,6 +774,16 @@ jobs:
             pip_config_file: /dev/null
             expected_platform: darwin
             expected_machine: arm64
+          - os: macos-26-intel
+            name: macos-x86_64
+            ext: ""
+            pyinstaller_mode: --onedir
+            python_version: '3.12.10'
+            python_architecture: x64
+            constraint: constraints/requirements-macos-py312.lock
+            pip_config_file: /dev/null
+            expected_platform: darwin
+            expected_machine: x86_64
           - os: ubuntu-24.04
             name: linux
             ext: ""
@@ -820,6 +830,14 @@ jobs:
         with:
           python-version: ${{ matrix.python_version }}
           architecture: ${{ matrix.python_architecture }}
+
+      - name: Verify native macOS build runtime
+        if: matrix.expected_platform == 'darwin'
+        timeout-minutes: 1
+        run: |
+          python -I scripts/verify_macos_gui_artifact.py \
+            --check-native-runtime \
+            --expected-architecture "${{ matrix.expected_machine }}"
 
       - name: Install and verify dependencies
         run: |
@@ -876,8 +894,16 @@ jobs:
             --bootstrap-policy stable \
             --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
 
+      - name: Verify native macOS GUI lifecycle tests
+        if: matrix.expected_platform == 'darwin'
+        timeout-minutes: 10
+        run: |
+          python -I tests/test_macos_gui_artifact_verifier.py \
+            --native-architecture "${{ matrix.expected_machine }}" \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-native-tests.json"
+
       - name: Build executable
-        if: matrix.name != 'macos'
+        if: matrix.expected_platform != 'darwin'
         run: |
           additional_hooks=()
           if [ "$RUNNER_OS" = "Windows" ]; then
@@ -920,8 +946,12 @@ jobs:
           fi
 
       - name: Build macOS app bundle
-        if: matrix.name == 'macos'
-        run: python -m PyInstaller --clean packaging/macos/GM2Godot.spec
+        if: matrix.expected_platform == 'darwin'
+        run: |
+          python -m PyInstaller --clean \
+            --workpath "build/${{ matrix.name }}" \
+            --distpath "dist/${{ matrix.name }}" \
+            packaging/macos/GM2Godot.spec
 
       - name: Verify Linux bundled Qt runtime
         if: matrix.name == 'linux'
@@ -968,8 +998,10 @@ jobs:
       - name: Package build
         run: |
           mkdir -p release
-          if [ "${{ matrix.name }}" = "macos" ]; then
-            cp -R dist/GM2Godot.app release/
+          if [ "${{ matrix.expected_platform }}" = "darwin" ]; then
+            mkdir -p "release/${{ matrix.name }}"
+            cp -R "dist/${{ matrix.name }}/GM2Godot.app" "release/${{ matrix.name }}/"
+            cp README.md "release/${{ matrix.name }}/"
           else
             cp dist/GM2Godot${{ matrix.ext }} release/
           fi
@@ -977,10 +1009,11 @@ jobs:
 
       - name: Zip release
         run: |
-          cd release
-          if [ "${{ matrix.name }}" = "macos" ]; then
-            7z a -snl ../GM2Godot-${{ matrix.name }}.zip .
+          if [ "${{ matrix.expected_platform }}" = "darwin" ]; then
+            cd "release/${{ matrix.name }}"
+            7z a -snl ../../GM2Godot-${{ matrix.name }}.zip .
           else
+            cd release
             7z a ../GM2Godot-${{ matrix.name }}.zip .
           fi
 
@@ -991,32 +1024,42 @@ jobs:
             --archive "$GITHUB_WORKSPACE/GM2Godot-linux.zip"
 
       - name: Create macOS DMG
-        if: matrix.name == 'macos'
+        if: matrix.expected_platform == 'darwin'
         run: |
-          rm -rf dmg
-          mkdir -p dmg
-          cp -R dist/GM2Godot.app dmg/
-          ln -s /Applications dmg/Applications
+          rm -rf "dmg/${{ matrix.name }}"
+          mkdir -p "dmg/${{ matrix.name }}"
+          cp -R "dist/${{ matrix.name }}/GM2Godot.app" "dmg/${{ matrix.name }}/"
+          ln -s /Applications "dmg/${{ matrix.name }}/Applications"
           hdiutil create \
             -volname "GM2Godot" \
-            -srcfolder dmg \
+            -srcfolder "dmg/${{ matrix.name }}" \
             -ov \
             -format UDZO \
-            GM2Godot-macos.dmg
+            GM2Godot-${{ matrix.name }}.dmg
 
       - name: Verify macOS bundle metadata
-        if: matrix.name == 'macos'
+        if: matrix.expected_platform == 'darwin'
         run: |
-          /usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist
+          /usr/bin/plutil -lint "dist/${{ matrix.name }}/GM2Godot.app/Contents/Info.plist"
           python -I scripts/verify_macos_bundle_metadata.py \
             --source-root "$GITHUB_WORKSPACE" \
-            --app "$GITHUB_WORKSPACE/dist/GM2Godot.app" \
-            --zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip" \
-            --dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg" \
+            --app "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app" \
+            --zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip" \
+            --dmg "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.dmg" \
             --expected-architecture "${{ matrix.expected_machine }}"
 
+      - name: Verify packaged macOS GUI
+        if: matrix.expected_platform == 'darwin'
+        timeout-minutes: 5
+        run: |
+          python -I scripts/verify_macos_gui_artifact.py \
+            --source-root "$GITHUB_WORKSPACE" \
+            --zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip" \
+            --expected-architecture "${{ matrix.expected_machine }}" \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-gui.json"
+
       - name: Upload artifact
-        if: matrix.name != 'macos'
+        if: matrix.expected_platform != 'darwin'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: GM2Godot-${{ matrix.name }}
@@ -1024,7 +1067,7 @@ jobs:
           archive: true
 
       - name: Upload macOS artifacts
-        if: matrix.name == 'macos'
+        if: matrix.expected_platform == 'darwin'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: GM2Godot-${{ matrix.name }}
@@ -1032,10 +1075,25 @@ jobs:
             GM2Godot-${{ matrix.name }}.zip
             GM2Godot-${{ matrix.name }}.dmg
           archive: true
+          if-no-files-found: error
+
+      - name: Upload macOS build proof
+        if: matrix.expected_platform == 'darwin'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GM2Godot-${{ matrix.name }}-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release-${{ matrix.name }}-bootstrap.json
+            ${{ runner.temp }}/release-${{ matrix.name }}-dependencies.json
+            ${{ runner.temp }}/release-${{ matrix.name }}-native-tests.json
+            ${{ runner.temp }}/release-${{ matrix.name }}-gui.json
+          archive: true
+          if-no-files-found: error
 
   release:
     needs: [get-version, release-state-preflight, build]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}
+    # #857 must migrate the publisher's five-asset schema before publication resumes.
+    if: ${{ false && !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

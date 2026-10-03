@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.16 - 2026-10-03
+
+- Build separate native arm64 and x86_64 macOS app, ZIP and DMG artifacts on matching runners and Python interpreters.
+- Require matching bundle metadata and native inventories plus a bounded GUI launch from a fresh extraction of the final ZIP before CI upload; keep release publication blocked until the architecture-aware release contract in issue #857 is implemented.
+
 ## 0.8.15 - 2026-10-03
 
 - Select Deep 0.2.2 for normal GUI and CLI downloads so new jobs receive the published Codex detection and account-status improvements.

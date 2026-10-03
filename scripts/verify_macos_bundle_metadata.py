@@ -144,6 +144,14 @@ class VerificationReceipt:
 
 
 @dataclass(frozen=True)
+class BundleInspection:
+    """Metadata and native/link inventory; ordinary resource bytes are excluded."""
+
+    metadata: BundleMetadata
+    inventory: BundleInventory
+
+
+@dataclass(frozen=True)
 class _MachOHeader:
     architecture: str
     minimum_macos: MacOSVersion
@@ -1870,6 +1878,45 @@ def _inspect_dmg_contents(
 def inspect_dmg(dmg_path: Path, expected: Mapping[str, str]) -> BundleMetadata:
     metadata, _inventory = _inspect_dmg_contents(dmg_path, expected, None)
     return metadata
+
+
+def load_source_policy(source_root: Path) -> dict[str, str]:
+    """Load the existing policy from its retained canonical helper."""
+    return _load_policy(source_root)
+
+
+def _complete_bundle_inspection(metadata: BundleMetadata, inventory: BundleInventory) -> BundleInspection:
+    maximum = max(item.minimum_macos for item in inventory.mach_o_files)
+    declared = _parse_macos_version_text(metadata.minimum_system_version, "LSMinimumSystemVersion")
+    if declared < maximum:
+        raise MetadataVerificationError(
+            f"LSMinimumSystemVersion {metadata.minimum_system_version} is below native "
+            f"Mach-O requirement {_format_macos_version(maximum)}"
+        )
+    return BundleInspection(metadata, inventory)
+
+
+def inspect_zip_bundle(
+    zip_path: Path, expected: Mapping[str, str], expected_architecture: str
+) -> BundleInspection:
+    """Inspect a retained ZIP using the existing complete native/link checks."""
+    metadata, inventory = _inspect_zip_contents(zip_path, expected, _require_expected_architecture(expected_architecture))
+    if inventory is None:
+        raise MetadataVerificationError("ZIP native inventory verification produced no result")
+    return _complete_bundle_inspection(metadata, inventory)
+
+
+def inspect_app_bundle(
+    app_path: Path, expected: Mapping[str, str], expected_architecture: str
+) -> BundleInspection:
+    """Inspect a physical extracted App with the existing retained walker."""
+    expected_architecture = _require_expected_architecture(expected_architecture)
+    if app_path.name != APP_PLIST_COMPONENTS[0]:
+        raise MetadataVerificationError(f"direct app must be named {APP_PLIST_COMPONENTS[0]}")
+    with _open_retained_directories(app_path, "extracted app") as owner:
+        metadata, inventory = _inspect_app_at(owner.fd, expected, expected_architecture, "extracted app")
+        _verify_directory_bindings(owner)
+        return _complete_bundle_inspection(metadata, inventory)
 
 
 def verify_artifacts(

@@ -13,6 +13,7 @@ readonly DEPENDENCY_VERIFIER=scripts/verify_dependency_environment.py
 readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec
 readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py
 readonly MACOS_METADATA_VERIFIER=scripts/verify_macos_bundle_metadata.py
+readonly MACOS_GUI_VERIFIER=scripts/verify_macos_gui_artifact.py
 export PIP_CONFIG_FILE=/dev/null
 readonly -a REPOSITORY_SENTINELS=(
   build_macos.sh
@@ -25,6 +26,7 @@ readonly -a REPOSITORY_SENTINELS=(
   "$MACOS_BUNDLE_SPEC"
   "$MACOS_METADATA_POLICY"
   "$MACOS_METADATA_VERIFIER"
+  "$MACOS_GUI_VERIFIER"
 )
 
 for repository_sentinel in "${REPOSITORY_SENTINELS[@]}"; do
@@ -34,21 +36,41 @@ for repository_sentinel in "${REPOSITORY_SENTINELS[@]}"; do
   fi
 done
 
+if [[ "$#" -ne 2 || "${1:-}" != "--architecture" ]]; then
+  echo "Usage: $0 --architecture arm64|x86_64" >&2
+  exit 1
+fi
+case "$2" in
+  arm64|x86_64) ;;
+  *)
+    echo "The native macOS architecture must be arm64 or x86_64." >&2
+    exit 1
+    ;;
+esac
+readonly MACOS_ARCHITECTURE="$2"
+readonly BUILD_NAME="macos-${MACOS_ARCHITECTURE}"
+readonly BUILD_DIRECTORY="build/${BUILD_NAME}"
+readonly DIST_DIRECTORY="dist/${BUILD_NAME}"
+readonly RELEASE_DIRECTORY="release/${BUILD_NAME}"
+readonly DMG_DIRECTORY="dmg/${BUILD_NAME}"
+readonly ZIP_ARTIFACT="GM2Godot-${BUILD_NAME}.zip"
+readonly DMG_ARTIFACT="GM2Godot-${BUILD_NAME}.dmg"
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This script must be run on macOS."
   exit 1
 fi
 
 if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
-  echo "CPython 3.12.10 for macOS arm64 is required, but python3 was not found."
+  echo "CPython 3.12.10 for macOS $MACOS_ARCHITECTURE is required, but python3 was not found."
   exit 1
 fi
 
-if ! "$PYTHON_BIN" - <<'PY'
+if ! "$PYTHON_BIN" - "$MACOS_ARCHITECTURE" <<'PY'
 import platform
 import sys
 
-expected = ("CPython", "3.12.10", "darwin", "Darwin", "arm64")
+expected = ("CPython", "3.12.10", "darwin", "Darwin", sys.argv[1])
 observed = (
     platform.python_implementation(),
     platform.python_version(),
@@ -65,9 +87,13 @@ if observed != expected:
     raise SystemExit(1)
 PY
 then
-  echo "Install CPython 3.12.10 for macOS arm64 and make it available as python3."
+  echo "Install native CPython 3.12.10 for macOS $MACOS_ARCHITECTURE and make it available as python3."
   exit 1
 fi
+
+"$PYTHON_BIN" -I "$MACOS_GUI_VERIFIER" \
+  --check-native-runtime \
+  --expected-architecture "$MACOS_ARCHITECTURE"
 
 BUILD_TEMP_PARENT="$(cd -- "${TMPDIR:-/tmp}" && pwd -P)"
 BUILD_TEMP_ROOT=""
@@ -105,10 +131,11 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-XXXXXX")"
+BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-${MACOS_ARCHITECTURE}-XXXXXX")"
 readonly BUILD_VENV="${BUILD_TEMP_ROOT}/venv"
-readonly BOOTSTRAP_RECEIPT="${BUILD_TEMP_ROOT}/dependency-bootstrap-macos.json"
-readonly BUILD_RECEIPT="${BUILD_TEMP_ROOT}/dependency-environment-macos.json"
+readonly BOOTSTRAP_RECEIPT="${BUILD_TEMP_ROOT}/dependency-bootstrap-${BUILD_NAME}.json"
+readonly BUILD_RECEIPT="${BUILD_TEMP_ROOT}/dependency-environment-${BUILD_NAME}.json"
+readonly GUI_RECEIPT="${BUILD_TEMP_ROOT}/packaged-gui-${BUILD_NAME}.json"
 readonly VENV_PYTHON="${BUILD_VENV}/bin/python"
 
 "$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER" \
@@ -144,52 +171,62 @@ echo "Verifying dependency environment..."
   --require PyInstaller \
   --expected-python 3.12.10 \
   --expected-platform darwin \
-  --expected-machine arm64 \
+  --expected-machine "$MACOS_ARCHITECTURE" \
   --bootstrap "$DEPENDENCY_BOOTSTRAP" \
   --bootstrap-policy stable \
   --output "$BUILD_RECEIPT"
 
 echo "Cleaning old build artifacts..."
-rm -rf -- build dist release dmg
-rm -f -- GM2Godot-macos.zip GM2Godot-macos.dmg GM2Godot.spec
+rm -rf -- "$BUILD_DIRECTORY" "$DIST_DIRECTORY" "$RELEASE_DIRECTORY" "$DMG_DIRECTORY"
+rm -f -- "$ZIP_ARTIFACT" "$DMG_ARTIFACT"
 
 echo "Building macOS app bundle..."
-"$VENV_PYTHON" -m PyInstaller --clean "$MACOS_BUNDLE_SPEC"
+"$VENV_PYTHON" -m PyInstaller --clean \
+  --workpath "$BUILD_DIRECTORY" \
+  --distpath "$DIST_DIRECTORY" \
+  "$MACOS_BUNDLE_SPEC"
 
 echo "Preparing release directory..."
-mkdir -p release
-cp -R dist/GM2Godot.app release/
-cp README.md release/
+mkdir -p "$RELEASE_DIRECTORY"
+cp -R "$DIST_DIRECTORY/GM2Godot.app" "$RELEASE_DIRECTORY/"
+cp README.md "$RELEASE_DIRECTORY/"
 
 echo "Creating zip archive..."
 (
-  cd release
-  ditto -c -k --sequesterRsrc --keepParent GM2Godot.app ../GM2Godot-macos.zip
+  cd "$RELEASE_DIRECTORY"
+  ditto -c -k --sequesterRsrc --keepParent GM2Godot.app "../../$ZIP_ARTIFACT"
 )
 
 echo "Creating DMG image..."
-mkdir -p dmg
-cp -R release/GM2Godot.app dmg/
-ln -s /Applications dmg/Applications
+mkdir -p "$DMG_DIRECTORY"
+cp -R "$RELEASE_DIRECTORY/GM2Godot.app" "$DMG_DIRECTORY/"
+ln -s /Applications "$DMG_DIRECTORY/Applications"
 hdiutil create \
   -volname "GM2Godot" \
-  -srcfolder dmg \
+  -srcfolder "$DMG_DIRECTORY" \
   -ov \
   -format UDZO \
-  GM2Godot-macos.dmg
+  "$DMG_ARTIFACT"
 
 echo "Verifying macOS bundle metadata..."
-/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist
+/usr/bin/plutil -lint "$DIST_DIRECTORY/GM2Godot.app/Contents/Info.plist"
 "$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER" \
   --source-root "$SCRIPT_DIRECTORY" \
-  --app "$SCRIPT_DIRECTORY/dist/GM2Godot.app" \
-  --zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip" \
-  --dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg" \
-  --expected-architecture arm64
+  --app "$SCRIPT_DIRECTORY/$DIST_DIRECTORY/GM2Godot.app" \
+  --zip "$SCRIPT_DIRECTORY/$ZIP_ARTIFACT" \
+  --dmg "$SCRIPT_DIRECTORY/$DMG_ARTIFACT" \
+  --expected-architecture "$MACOS_ARCHITECTURE"
+
+echo "Verifying the final ZIP's native macOS GUI..."
+"$VENV_PYTHON" -I "$MACOS_GUI_VERIFIER" \
+  --source-root "$SCRIPT_DIRECTORY" \
+  --zip "$SCRIPT_DIRECTORY/$ZIP_ARTIFACT" \
+  --expected-architecture "$MACOS_ARCHITECTURE" \
+  --output "$GUI_RECEIPT"
 
 cleanup_build_temp
 
 echo "Build complete."
-echo "App bundle: dist/GM2Godot.app"
-echo "Zip: GM2Godot-macos.zip"
-echo "DMG: GM2Godot-macos.dmg"
+echo "App bundle: $DIST_DIRECTORY/GM2Godot.app"
+echo "Zip: $ZIP_ARTIFACT"
+echo "DMG: $DMG_ARTIFACT"

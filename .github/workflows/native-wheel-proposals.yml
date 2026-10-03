@@ -56,7 +56,11 @@ jobs:
       - name: Materialize exact source bytes as LF
         timeout-minutes: 5
         shell: bash
-        run: git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
+        run: |
+          set -euo pipefail
+          git read-tree --empty
+          git --no-replace-objects read-tree "$SOURCE_SHA"
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
 
       - name: Set up exact native Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -208,7 +212,11 @@ jobs:
       - name: Materialize exact source bytes as LF
         timeout-minutes: 5
         shell: bash
-        run: git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
+        run: |
+          set -euo pipefail
+          git read-tree --empty
+          git --no-replace-objects read-tree "$SOURCE_SHA"
+          git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force
 
       - name: Select fresh aggregate roots
         id: runtime-roots

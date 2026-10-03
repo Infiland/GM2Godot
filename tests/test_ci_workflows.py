@@ -614,6 +614,12 @@ NATIVE_WHEEL_LF_STEP = "Materialize exact source bytes as LF"
 NATIVE_WHEEL_LF_COMMAND = (
     "git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force"
 )
+NATIVE_WHEEL_LF_SCRIPT = (
+    "set -euo pipefail\n"
+    "git read-tree --empty\n"
+    'git --no-replace-objects read-tree "$SOURCE_SHA"\n'
+    f"{NATIVE_WHEEL_LF_COMMAND}\n"
+)
 NATIVE_WHEEL_CHECKOUT_ACTION = (
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
 )
@@ -726,7 +732,10 @@ def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
         NATIVE_WHEEL_LF_STEP: (
             f"      - name: {NATIVE_WHEEL_LF_STEP}\n"
             "        timeout-minutes: 5\n        shell: bash\n"
-            f"        run: {NATIVE_WHEEL_LF_COMMAND}"
+            "        run: |\n"
+            + "\n".join(
+                f"          {line}" for line in NATIVE_WHEEL_LF_SCRIPT.splitlines()
+            )
         ),
     }
     for platform, _, _, python, label in NATIVE_WHEEL_PROPOSAL_HOSTS:
@@ -1711,6 +1720,10 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(content.count("skip-decompress: true"), 4)
         self.assertEqual(content.count("digest-mismatch: error"), 4)
         self.assertEqual(content.count(NATIVE_WHEEL_LF_COMMAND), 2)
+        self.assertEqual(
+            _workflow_run_scripts(content, NATIVE_WHEEL_LF_STEP),
+            (NATIVE_WHEEL_LF_SCRIPT, NATIVE_WHEEL_LF_SCRIPT),
+        )
         self.assertNotIn("${{ runner.temp }}", content)
         self.assertEqual(content.count(NATIVE_WHEEL_ROOT_READY), 7)
         for job_name in ("native", "aggregate"):
@@ -1810,6 +1823,35 @@ class TestCIWorkflows(unittest.TestCase):
         lf_step = _workflow_step_sections(content, NATIVE_WHEEL_LF_STEP)[0]
         mutations["missing-LF-materialization"] = content.replace(lf_step, "", 1)
         mutations["persistent-LF-config"] = content.replace(NATIVE_WHEEL_LF_COMMAND, "git config --global core.autocrlf false", 1)
+        mutations["missing-index-cache-clear"] = content.replace(
+            "          git read-tree --empty\n", "", 1,
+        )
+        mutations["missing-immutable-index-rebuild"] = content.replace(
+            '          git --no-replace-objects read-tree "$SOURCE_SHA"\n', "", 1,
+        )
+        mutations["nonfatal-index-cache-clear"] = content.replace(
+            "          git read-tree --empty\n",
+            "          git read-tree --empty || true\n", 1,
+        )
+        mutations["nonfatal-immutable-index-rebuild"] = content.replace(
+            '          git --no-replace-objects read-tree "$SOURCE_SHA"\n',
+            '          git --no-replace-objects read-tree "$SOURCE_SHA" || true\n', 1,
+        )
+        mutations["replacement-enabled-index-rebuild"] = content.replace(
+            'git --no-replace-objects read-tree "$SOURCE_SHA"',
+            'git read-tree "$SOURCE_SHA"', 1,
+        )
+        mutations["floating-index-rebuild"] = content.replace(
+            'git --no-replace-objects read-tree "$SOURCE_SHA"',
+            "git --no-replace-objects read-tree HEAD", 1,
+        )
+        mutations["nonfatal-LF-program"] = content.replace(
+            "          set -euo pipefail\n          git read-tree --empty\n",
+            "          set +e\n          git read-tree --empty\n", 1,
+        )
+        mutations["conditional-LF-materialization"] = content.replace(
+            lf_step, lf_step.replace("        timeout-minutes: 5\n", "        if: ${{ false }}\n        timeout-minutes: 5\n"), 1,
+        )
         mutations["LF-after-producer"] = content.replace(lf_step, "", 1).replace(
             "      - name: Retain proposal evidence including failures\n",
             lf_step + "      - name: Retain proposal evidence including failures\n",
@@ -1839,6 +1881,157 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(case=label):
                 self.assertNotEqual(mutated, content)
                 self.assertTrue(_native_wheel_proposal_policy_errors(mutated))
+
+    def test_native_wheel_LF_materialization_rebuilds_cached_CRLF_index_fatally(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        scripts = _workflow_run_scripts(content, NATIVE_WHEEL_LF_STEP)
+        self.assertEqual(scripts, (NATIVE_WHEEL_LF_SCRIPT, NATIVE_WHEEL_LF_SCRIPT))
+        git_executable = shutil.which("git")
+        bash_executable = shutil.which("bash")
+        if os.name == "nt" and git_executable is not None:
+            git_path = Path(git_executable).resolve()
+            for candidate in (
+                git_path.parent.parent / "bin" / "bash.exe",
+                git_path.parent.parent.parent / "bin" / "bash.exe",
+            ):
+                if candidate.is_file():
+                    bash_executable = str(candidate)
+                    break
+        self.assertIsNotNone(git_executable, "The CI fixture requires native Git")
+        self.assertIsNotNone(bash_executable, "The workflow requires native Bash")
+        git_binary = cast(str, git_executable)
+        bash_binary = cast(str, bash_executable)
+        blobs = {
+            ".github/workflows/native-wheel-proposals.yml": (
+                b"name: cached-clean fixture\njobs:\n  fixture:\n"
+                b"    runs-on: windows-2025\n"
+            ),
+            "scripts/fixture.py": b"print('immutable source fixture')\n",
+            "scripts/executable.sh": b"#!/bin/sh\nexit 0\n",
+            "fixtures/raw.bin": b"\x00\xffbinary\r\n\x00\x01",
+        }
+        modes = {name: b"100644" for name in blobs}
+        modes["scripts/executable.sh"] = b"100755"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            empty_configuration = root / "empty-git-config"
+            empty_configuration.write_bytes(b"")
+            for case in ("valid-source", "missing-source", "unavailable-source"):
+                with self.subTest(case=case):
+                    repository = root / case
+                    repository.mkdir()
+                    environment = {
+                        key: value for key, value in os.environ.items()
+                        if not key.startswith("GIT_") and key != "SOURCE_SHA"
+                    }
+                    environment.update({
+                        "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_CONFIG_GLOBAL": str(empty_configuration),
+                        "GIT_TERMINAL_PROMPT": "0",
+                    })
+
+                    def run_git(*arguments: str) -> bytes:
+                        result = subprocess.run(
+                            [git_binary, *arguments], cwd=repository,
+                            env=environment, capture_output=True, timeout=15,
+                        )
+                        self.assertLessEqual(len(result.stdout), 1024 * 1024)
+                        self.assertLessEqual(len(result.stderr), 1024 * 1024)
+                        self.assertEqual(
+                            result.returncode, 0,
+                            result.stderr.decode("utf-8", errors="replace"),
+                        )
+                        return result.stdout
+
+                    def index_modes() -> dict[str, bytes]:
+                        observed: dict[str, bytes] = {}
+                        for entry in run_git("ls-files", "--stage", "-z").split(b"\0"):
+                            if entry:
+                                header, separator, name = entry.partition(b"\t")
+                                self.assertEqual(separator, b"\t")
+                                observed[name.decode("utf-8")] = header.split()[0]
+                        return observed
+
+                    run_git("init", "--quiet")
+                    run_git("config", "user.name", "Disposable Source Fixture")
+                    run_git("config", "user.email", "fixture@example.invalid")
+                    run_git("config", "core.autocrlf", "false")
+                    for name, data in blobs.items():
+                        path = repository / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
+                    run_git("add", "--all")
+                    run_git("update-index", "--chmod=+x", "scripts/executable.sh")
+                    run_git("commit", "--quiet", "-m", "Create disposable source fixture")
+                    source_sha = run_git("rev-parse", "HEAD").decode().strip()
+                    source_tree = run_git("rev-parse", "HEAD^{tree}")
+                    for name, data in blobs.items():
+                        self.assertEqual(run_git("cat-file", "blob", f"{source_sha}:{name}"), data)
+                    self.assertEqual(index_modes(), modes)
+                    run_git("config", "core.autocrlf", "true")
+                    for name in blobs:
+                        (repository / name).unlink()
+                    run_git("checkout-index", "--all", "--force", "--index")
+                    # A past mtime avoids Git's racy-clean content reread, which
+                    # can otherwise accidentally conceal the cached CRLF defect.
+                    for name in blobs:
+                        os.utime(repository / name, ns=(946684800000000000, 946684800000000000))
+                    run_git("update-index", "--refresh")
+                    self.assertEqual(run_git("status", "--porcelain=v1"), b"")
+                    index_mtime = (repository / ".git" / "index").stat().st_mtime_ns
+                    for name in blobs:
+                        self.assertLess((repository / name).stat().st_mtime_ns, index_mtime)
+                    cached = {name: (repository / name).read_bytes() for name in blobs}
+                    for name, data in blobs.items():
+                        expected = data if name.endswith(".bin") else data.replace(b"\n", b"\r\n")
+                        self.assertEqual(cached[name], expected)
+                    run_git(*shlex.split(NATIVE_WHEEL_LF_COMMAND)[1:])
+                    self.assertEqual(
+                        {name: (repository / name).read_bytes() for name in blobs}, cached,
+                        "Force alone must reproduce the clean-index CRLF defect",
+                    )
+                    configuration = (repository / ".git" / "config").read_bytes()
+                    head = (repository / ".git" / "HEAD").read_bytes()
+                    script_environment = environment.copy()
+                    if case != "missing-source":
+                        script_environment["SOURCE_SHA"] = (
+                            source_sha if case == "valid-source" else "f" * 40
+                        )
+                    result = subprocess.run(
+                        [bash_binary, "-c", scripts[0]], cwd=repository,
+                        env=script_environment, capture_output=True, timeout=15,
+                    )
+                    self.assertLessEqual(len(result.stdout), 1024 * 1024)
+                    self.assertLessEqual(len(result.stderr), 1024 * 1024)
+                    self.assertEqual((repository / ".git" / "config").read_bytes(), configuration)
+                    self.assertEqual((repository / ".git" / "HEAD").read_bytes(), head)
+                    self.assertEqual(run_git("rev-parse", "HEAD").decode().strip(), source_sha)
+                    self.assertEqual(
+                        {
+                            path.relative_to(repository).as_posix()
+                            for path in repository.rglob("*")
+                            if path.relative_to(repository).parts[0] != ".git" and path.is_file()
+                        }, set(blobs),
+                    )
+                    if case == "valid-source":
+                        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                        self.assertEqual(index_modes(), modes)
+                        self.assertEqual(run_git("write-tree"), source_tree)
+                        for name, data in blobs.items():
+                            self.assertEqual((repository / name).read_bytes(), data)
+                        if os.name == "posix":
+                            self.assertTrue((repository / "scripts/executable.sh").stat().st_mode & stat.S_IXUSR)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(run_git("ls-files", "--stage", "-z"), b"")
+                        self.assertEqual(
+                            {name: (repository / name).read_bytes() for name in blobs}, cached,
+                            "An unbound source must stop before rematerializing files",
+                        )
 
     def test_native_wheel_runtime_roots_are_bounded_fresh_and_exported_only_on_success(
         self,

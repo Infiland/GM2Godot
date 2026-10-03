@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Iterable, Protocol, cast
+from typing import Iterable, Protocol
 
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject
+from src.conversion.path_metadata import (
+    GameMakerPathMetadata,
+    parse_gamemaker_path_metadata,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_source_path,
 )
-from src.conversion.type_defs import JsonDict
 
 PATH_REGISTRY_RELATIVE_PATH = os.path.join("gm2godot", "gml_path_registry.gd")
 PATH_REGISTRY_RESOURCE_PATH = "res://gm2godot/gml_path_registry.gd"
@@ -38,7 +43,7 @@ class PathPoint:
     y: float
     speed: float = 100.0
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {"x": self.x, "y": self.y, "speed": self.speed}
 
 
@@ -52,7 +57,7 @@ class PathRegistryEntry:
     godot_path: str
     points: tuple[PathPoint, ...]
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "id": self.id,
             "name": self.name,
@@ -79,10 +84,10 @@ def build_path_registry_entries(
             )
         except ProjectSourcePathError:
             continue
-        data = _read_json_lenient(resolved_yy.filesystem_path)
-        if data is None:
+        metadata = _read_path_metadata(resolved_yy.filesystem_path)
+        if metadata is None:
             continue
-        path_entries.append(_path_entry_from_yy(asset_entry, data))
+        path_entries.append(_path_entry_from_metadata(asset_entry, metadata))
     return tuple(path_entries)
 
 
@@ -113,27 +118,20 @@ def write_path_registry(
     return registry_path
 
 
-def _path_entry_from_yy(asset_entry: _PathAssetEntry, data: JsonDict) -> PathRegistryEntry:
-    raw_points = data.get("points")
-    points: list[PathPoint] = []
-    if isinstance(raw_points, list):
-        for raw_point in cast(list[object], raw_points):
-            if not isinstance(raw_point, dict):
-                continue
-            point = cast(JsonDict, raw_point)
-            points.append(
-                PathPoint(
-                    x=_number(point.get("x"), 0.0),
-                    y=_number(point.get("y"), 0.0),
-                    speed=_number(point.get("speed"), 100.0),
-                )
-            )
+def _path_entry_from_metadata(
+    asset_entry: _PathAssetEntry,
+    metadata: GameMakerPathMetadata,
+) -> PathRegistryEntry:
+    points = [
+        PathPoint(x=float(point.x), y=float(point.y), speed=float(point.speed))
+        for point in metadata.points
+    ]
     return PathRegistryEntry(
         id=asset_entry.id,
         name=asset_entry.name,
-        closed=bool(data.get("closed", False)),
-        kind=int(_number(data.get("kind"), 0.0)),
-        precision=int(_number(data.get("precision"), 4.0)),
+        closed=metadata.closed,
+        kind=int(float(metadata.kind)),
+        precision=int(float(metadata.precision)),
         godot_path=asset_entry.godot_path,
         points=tuple(points),
     )
@@ -177,35 +175,21 @@ def _write_path_scene(godot_project_path: str, entry: PathRegistryEntry) -> None
         f.write(render_path_scene(entry))
 
 
-def _read_json_lenient(path: str) -> JsonDict | None:
+def _read_path_metadata(path: str) -> GameMakerPathMetadata | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
     except OSError:
         return None
     try:
-        data: object = json.loads(_strip_trailing_commas(content))
+        document = decode_gamemaker_json(content, source_path=path)
     except json.JSONDecodeError:
         return None
-    if data is None:
+    if document.value is None:
         return None
-    if not isinstance(data, dict):
+    if not isinstance(document.value, dict):
         raise ValueError(f"Path resource must contain a JSON object: {path}")
-    return cast(JsonDict, data)
-
-
-def _strip_trailing_commas(content: str) -> str:
-    import re
-
-    return re.sub(r",\s*([}\]])", r"\1", content)
-
-
-def _number(value: object, default: float) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, int | float):
-        return float(value)
-    return default
+    return parse_gamemaker_path_metadata(document.value, source_path=path)
 
 
 def _format_number(value: float) -> str:

@@ -11,8 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestVersion(unittest.TestCase):
-    def test_release_version_is_0_8_19(self) -> None:
-        self.assertEqual(get_version(), "0.8.19")
+    def test_release_version_is_0_8_20(self) -> None:
+        self.assertEqual(get_version(), "0.8.20")
 
     def test_release_surfaces_match_source_version(self) -> None:
         version_source = (PROJECT_ROOT / "src" / "version.py").read_text(

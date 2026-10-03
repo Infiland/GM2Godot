@@ -27,6 +27,7 @@ AUTHORED_SEQUENCE_FIXTURE = os.path.join(
 from src.conversion.asset_registry import (
     ASSET_REGISTRY_RELATIVE_PATH,
     AssetRegistryConverter,
+    AssetRegistryEntry,
     AssetRegistryPublication,
     GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH,
     _ProjectResource,
@@ -4207,6 +4208,127 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 self.assertEqual(len(unavailable), 1, unavailable)
                 self.assertEqual(unavailable[0].resource, "path_bad")
                 self.assertEqual(unavailable[0].resource_type, "path")
+
+    def test_path_output_uses_fresh_source_after_asset_classification(self) -> None:
+        _write_yyp(self.gm_dir, [("paths", "path_changes")])
+        self._write_resource(
+            "paths", "path_changes", "GMPath", "folders/Paths/Movement.yy",
+            {"points": [{"x": 1, "y": 2}]},
+        )
+        source = os.path.join(self.gm_dir, "paths", "path_changes", "path_changes.yy")
+        converter = self._converter()
+        original_write = asset_registry_module.write_path_registry
+        observed: list[AssetRegistryEntry] = []
+
+        def replace_before_output(
+            gm_project_path: str,
+            godot_project_path: str,
+            asset_entries: Iterable[AssetRegistryEntry],
+        ) -> str:
+            entries = tuple(asset_entries)
+            observed.extend(entries)
+            _write_file(
+                source,
+                '{"closed":true,"kind":1,"precision":8,'
+                '"points":[{"x":17,"y":23,"speed":55},{"x":31,"y":47}]}',
+            )
+            return original_write(gm_project_path, godot_project_path, entries)
+
+        with patch("src.conversion.asset_registry.write_path_registry", new=replace_before_output):
+            registry_path = converter.convert_all()
+
+        self.assertEqual(len(observed), 1)
+        entry = observed[0]
+        self.assertEqual(entry.metadata, {})
+        self.assertEqual(entry.source_path, "paths/path_changes/path_changes.yy")
+        self.assertEqual(entry.godot_path, "res://paths/movement/path_changes/path_changes.tscn")
+        scene_path = os.path.join(self.godot_dir, *entry.godot_path.removeprefix("res://").split("/"))
+        with open(scene_path, encoding="utf-8") as scene_file:
+            scene = scene_file.read()
+        with open(os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH), encoding="utf-8") as path_file:
+            path_registry = path_file.read()
+        self.assertIn("point_count = 2", scene)
+        self.assertIn("PackedVector2Array(0, 0, 0, 0, 17, 23, 0, 0, 0, 0, 31, 47)", scene)
+        self.assertIn("metadata/gamemaker_path_closed = true", scene)
+        self.assertIn("metadata/gamemaker_path_precision = 8", scene)
+        self.assertIn('"speed": 55.0', path_registry)
+        self.assertIn(f'"id": {entry.id}', path_registry)
+        self.assertTrue(os.path.isfile(registry_path))
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_late_nonobject_path_failure_preserves_registry_publication_and_counts(self) -> None:
+        _write_yyp(self.gm_dir, [("paths", "path_changes")])
+        self._write_resource("paths", "path_changes", "GMPath", "folders/Paths.yy")
+        source = os.path.join(self.gm_dir, "paths", "path_changes", "path_changes.yy")
+        previous = {
+            ASSET_REGISTRY_RELATIVE_PATH: "previous asset registry\n",
+            PATH_REGISTRY_RELATIVE_PATH: "previous path registry\n",
+            os.path.join("paths", "path_changes", "path_changes.tscn"): "previous scene\n",
+        }
+        for relative_path, content in previous.items():
+            _write_file(os.path.join(self.godot_dir, relative_path), content)
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+        original_write = asset_registry_module.write_path_registry
+
+        def replace_before_output(
+            gm_project_path: str,
+            godot_project_path: str,
+            asset_entries: Iterable[AssetRegistryEntry],
+        ) -> str:
+            _write_file(source, "[]")
+            return original_write(gm_project_path, godot_project_path, asset_entries)
+
+        with patch("src.conversion.asset_registry.write_path_registry", new=replace_before_output):
+            with self.assertRaises(ValueError) as raised:
+                converter.convert_all()
+        self.assertEqual(str(raised.exception), f"Path resource must contain a JSON object: {source}")
+        for relative_path, content in previous.items():
+            with open(os.path.join(self.godot_dir, relative_path), encoding="utf-8") as previous_file:
+                self.assertEqual(previous_file.read(), content)
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
+        self.assertFalse(any(
+            diagnostic.code == "GM2GD-ASSET-REGISTRY-SOURCE-UNAVAILABLE"
+            for diagnostic in diagnostics.diagnostics()
+        ))
+
+    def test_late_null_malformed_or_missing_path_keeps_classified_asset_outcome(self) -> None:
+        original_write = asset_registry_module.write_path_registry
+        for replacement in ("null", "{malformed", None):
+            with self.subTest(replacement=replacement):
+                _write_yyp(self.gm_dir, [("paths", "path_changes")])
+                self._write_resource("paths", "path_changes", "GMPath", "folders/Paths.yy")
+                source = os.path.join(self.gm_dir, "paths", "path_changes", "path_changes.yy")
+                converter = self._converter()
+
+                def replace_before_output(
+                    gm_project_path: str,
+                    godot_project_path: str,
+                    asset_entries: Iterable[AssetRegistryEntry],
+                ) -> str:
+                    if replacement is None:
+                        os.unlink(source)
+                    else:
+                        _write_file(source, replacement)
+                    return original_write(gm_project_path, godot_project_path, asset_entries)
+
+                with patch("src.conversion.asset_registry.write_path_registry", new=replace_before_output):
+                    registry_path = converter.convert_all()
+                with open(registry_path, encoding="utf-8") as registry_file:
+                    self.assertIn('"name": "path_changes"', registry_file.read())
+                with open(os.path.join(self.godot_dir, PATH_REGISTRY_RELATIVE_PATH), encoding="utf-8") as path_file:
+                    self.assertEqual(path_file.read(), "extends RefCounted\n\nstatic func entries():\n\treturn []\n")
+                self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "paths", "path_changes", "path_changes.tscn")))
+                self.assertEqual(
+                    converter.conversion_step_result(finalize_unfinished_as=None).resources,
+                    ConversionCounts(requested=1, executed=1, completed=1),
+                )
 
     def test_missing_only_manifest_asset_makes_converter_outcome_partial(
         self,

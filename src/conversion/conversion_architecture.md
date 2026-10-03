@@ -50,6 +50,27 @@ migration under #797. This first family preserves the decoder's current nonfinit
 number behavior; numeric-finiteness policy and complete legal-JSON migration are
 unfinished work, rather than guarantees of this boundary.
 
+### Path metadata boundary
+
+`path_metadata` is the shared known-field authority for path resources. The
+path-registry producer and the path branch of `resource_models` decode through
+`gamemaker_json`, then consume the same frozen metadata and retain its raw JSON
+container identities. The aggregate derives path counts, closed state and
+subfolders from this metadata, while its existing `PathModel` keeps its original
+field prefix and adds an optional metadata carrier excluded from repr/equality.
+The inherited generic `ResourceModel.raw_data` alias remains a compatibility
+surface pending the other resource-family migrations.
+
+The consumers keep separate containment and acquisition policies. The aggregate
+still maps its existing read/decode failures to resource diagnostics; the path
+registry still rereads current source before producing path outputs. Metadata
+retains native numeric values without eager float/int conversion, so aggregate
+inspection does not acquire the producer's numeric failures. Registry numeric
+construction and coordinate rendering retain their existing ordering, including
+nonfinite coordinate failures after a scene is opened and nonfinite speed JSON
+serialization. Numeric-finiteness policy, other resource readers and remaining
+legacy JSON aliases are still unfinished #797 work.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

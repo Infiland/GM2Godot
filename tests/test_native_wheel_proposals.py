@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 from types import ModuleType, SimpleNamespace
 from typing import Callable, TypedDict, cast
@@ -606,6 +607,184 @@ class TestNativeWheelProposals(unittest.TestCase):
                 break
             self.assertLess(time.monotonic(), deadline, "owned command descendant remains running")
             time.sleep(0.05)
+
+    def test_guardian_ready_directory_requires_successful_result_publication_return(self) -> None:
+        guardian = cast(Callable[[Path], int], getattr(PRODUCER, "_guardian"))
+        encode = cast(Callable[[object], bytes], getattr(PRODUCER, "json_bytes"))
+        for publication_error in (None, OSError("modeled result publication close failure")):
+            with self.subTest(publication_error=publication_error):
+                work = self.root / ("success" if publication_error is None else "failure")
+                work.mkdir()
+                result_path = work / "result.json"
+                ready_path = work / "result.ready"
+                specification = work / "specification.json"
+                specification.write_bytes(encode({"argv": ["modeled-command"], "cwd": str(work),
+                                                   "environment": {}, "result": str(result_path)}))
+                events: list[str] = []
+
+                def publish(path: Path, payload: bytes) -> None:
+                    self.assertEqual(path, result_path)
+                    self.assertFalse(ready_path.exists())
+                    with path.open("xb") as stream:
+                        descriptor = stream.fileno()
+                        stream.write(payload)
+                        stream.flush()
+                        os.fsync(descriptor)
+                        events.append("result-visible")
+                        self.assertFalse(ready_path.exists())
+                    with self.assertRaises(OSError) as closed:
+                        os.fstat(descriptor)
+                    self.assertEqual(closed.exception.errno, errno.EBADF)
+                    events.append("result-closed")
+                    if publication_error is not None:
+                        raise publication_error
+                    events.append("publisher-returning")
+
+                with mock.patch.object(PRODUCER, "publish_bytes", side_effect=publish), \
+                     mock.patch.object(PRODUCER.subprocess, "run", return_value=subprocess.CompletedProcess(["modeled-command"], 0)), \
+                     mock.patch.object(PRODUCER, "_windows_guard_job", return_value=object()), \
+                     mock.patch.object(PRODUCER.os, "read", return_value=b""), \
+                     mock.patch.object(PRODUCER.os, "killpg", create=True) as signal_group:
+                    if publication_error is None:
+                        self.assertEqual(guardian(specification), 2)
+                        self.assertTrue(ready_path.is_dir())
+                        self.assertEqual(events, ["result-visible", "result-closed", "publisher-returning"])
+                    else:
+                        with self.assertRaises(OSError) as caught:
+                            guardian(specification)
+                        self.assertIs(caught.exception, publication_error)
+                        self.assertFalse(ready_path.exists())
+                        signal_group.assert_not_called()
+                self.assertEqual(json.loads(result_path.read_bytes()), {"returncode": 0, "error": None})
+
+    def test_actual_guardian_readiness_defers_result_reads_and_preserves_fatal_failures(self) -> None:
+        prepare = cast(Callable[..., tuple[Path, Callable[[Path, bytes], None]]], getattr(PRODUCER, "prepare_snapshot"))
+        name = "_gm2godot_native_proposal_snapshot_anchor"
+        prior_family = {key: value for key, value in sys.modules.items()
+                        if key == name or key.startswith(name + "__")}
+
+        def restore_module_family() -> None:
+            for key in tuple(sys.modules):
+                if key == name or key.startswith(name + "__"):
+                    sys.modules.pop(key, None)
+            sys.modules.update(prior_family)
+
+        self.addCleanup(restore_module_family)
+        for key in prior_family:
+            sys.modules.pop(key, None)
+        export, publisher = prepare(self.root, self._source_helpers())
+        fixture = self.root / "readiness-guardian.py"
+        fixture.write_text(textwrap.dedent(f"""
+            import importlib.util, os, sys
+            from pathlib import Path
+            source = Path({str(export / 'scripts/propose_native_wheels.py')!r})
+            specification = importlib.util.spec_from_file_location('_readiness_fixture', source)
+            if specification is None or specification.loader is None:
+                raise RuntimeError('exact fixture producer unavailable')
+            module = importlib.util.module_from_spec(specification)
+            sys.modules[specification.name] = module
+            specification.loader.exec_module(module)
+            mode = os.environ['GM2GODOT_READY_FIXTURE']
+            def publish(path, payload):
+                # A controlled publisher in a real guardian/process. This is
+                # file-visibility evidence, not native NT sharing-code evidence.
+                with path.open('xb') as stream:
+                    split = len(payload) // 2 if mode == 'partial' else len(payload)
+                    stream.write(payload[:split])
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                    path.with_name('result.visible').mkdir()
+                    if mode == 'partial':
+                        if os.read(0, 1) != b'r':
+                            raise RuntimeError('fixture release missing')
+                        stream.write(payload[split:])
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                if mode == 'withhold':
+                    os.read(0, 1)
+                    raise RuntimeError('fixture must be stopped before return')
+                if mode == 'missing':
+                    path.unlink()
+            module.publish_bytes = publish
+            raise SystemExit(module._guardian(Path(sys.argv[2])))
+        """), encoding="utf-8")
+        run = cast(Callable[..., dict[str, object]], getattr(PRODUCER, "run_command"))
+        actual_read = cast(Callable[[Path, int], bytes], getattr(PRODUCER, "read_regular"))
+        actual_popen = cast(Callable[..., subprocess.Popen[bytes]], subprocess.Popen)
+        actual_sleep = time.sleep
+        environment = cast(Callable[..., dict[str, str]], getattr(PRODUCER, "isolated_environment"))(os.environ)
+        result_size = len(cast(Callable[[object], bytes], getattr(PRODUCER, "json_bytes"))({"returncode": 0, "error": None}))
+        for mode in ("partial", "withhold", "missing"):
+            with self.subTest(mode=mode):
+                work = self.root / mode
+                work.mkdir()
+                acquired: list[subprocess.Popen[bytes]] = []
+                command_roots: list[Path] = []
+                result_reads: list[Path] = []
+                released = False
+
+                def launch(*arguments: object, **options: object) -> subprocess.Popen[bytes]:
+                    process = actual_popen(*arguments, **options)
+                    acquired.append(process)
+                    command_roots.append(Path(cast(list[str], arguments[0])[-1]).parent)
+                    return process
+
+                def progress(delay: float) -> None:
+                    nonlocal released
+                    if mode == "partial" and command_roots and not released:
+                        command_root = command_roots[0]
+                        if (command_root / "result.visible").is_dir():
+                            self.assertFalse((command_root / "result.ready").exists())
+                            self.assertEqual(result_reads, [])
+                            self.assertGreater((command_root / "result.json").stat().st_size, 0)
+                            self.assertLess((command_root / "result.json").stat().st_size, result_size)
+                            pipe = acquired[0].stdin
+                            if pipe is None:
+                                self.fail("real guardian stdin ownership missing")
+                            pipe.write(b"r")
+                            pipe.flush()
+                            released = True
+                    actual_sleep(delay)
+
+                def read(path: Path, maximum: int = 1_048_576) -> bytes:
+                    if path.name == "result.json":
+                        result_reads.append(path)
+                        self.assertTrue(path.with_name("result.ready").is_dir())
+                    return actual_read(path, maximum)
+
+                started = time.monotonic()
+                with mock.patch.object(PRODUCER.subprocess, "Popen", side_effect=launch), \
+                     mock.patch.object(PRODUCER.time, "sleep", side_effect=progress), \
+                     mock.patch.object(PRODUCER, "read_regular", side_effect=read), \
+                     mock.patch.object(PRODUCER.sys, "stdout", io.StringIO()), \
+                     mock.patch.object(PRODUCER.sys, "stderr", io.StringIO()):
+                    options = {"cwd": work, "environment": {**environment, "GM2GODOT_READY_FIXTURE": mode},
+                               "work": work, "publisher": publisher, "guardian_path": fixture}
+                    command = [sys.executable, "-I", "-c", "print('actual readiness fixture child')"]
+                    if mode == "partial":
+                        result = run(command, label="partial-before-ready", timeout=15, **options)
+                        self.assertEqual(result["returncode"], 0)
+                    elif mode == "withhold":
+                        with self.assertRaisesRegex(ERROR, "timed out"):
+                            run(command, label="result-without-ready", timeout=2, **options)
+                    else:
+                        with self.assertRaises(FileNotFoundError):
+                            run(command, label="missing-after-ready", timeout=15, **options)
+                self.assertEqual(len(acquired), 1)
+                self.assertIsNotNone(acquired[0].returncode)
+                pipe = acquired[0].stdin
+                self.assertIsNotNone(pipe)
+                if pipe is not None:
+                    self.assertTrue(pipe.closed)
+                self.assertTrue((command_roots[0] / "result.visible").is_dir())
+                self.assertEqual(len(result_reads), 0 if mode == "withhold" else 1)
+                if mode == "partial":
+                    self.assertTrue(released)
+                elif mode == "withhold":
+                    self.assertLess(time.monotonic() - started, 18)
+                    self.assertFalse((command_roots[0] / "result.ready").exists())
+                    self.assertEqual(json.loads((command_roots[0] / "result.json").read_bytes()),
+                                     {"returncode": 0, "error": None})
 
     def test_actual_offline_fixture_hash_install_rejects_tampering_and_direct_url(self) -> None:
         wheel = self._wheel()

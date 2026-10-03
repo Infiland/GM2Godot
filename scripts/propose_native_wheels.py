@@ -271,7 +271,9 @@ def _guardian(specification_path: Path) -> int:
         result = {"returncode": completed.returncode, "error": None}
     except BaseException as error:
         result = {"returncode": None, "error": f"{type(error).__name__}: {str(error)[:512]}"}
+    # The result name can precede publisher lease closure; signal only after return.
     publish_bytes(result_path, json_bytes(result))
+    result_path.with_name("result.ready").mkdir(mode=0o700)
     # Parent owns an unreaped guardian until it kills the complete group/job.
     # EOF means parent died: the guardian must close its own remaining tree.
     while os.read(0, 1):
@@ -302,6 +304,7 @@ def run_command(argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str
     command_root = Path(tempfile.mkdtemp(prefix="command-", dir=work))
     specification_path = command_root / "specification.json"
     result_path = command_root / "result.json"
+    ready_path = result_path.with_name("result.ready")
     publisher(specification_path, json_bytes({"argv": list(argv), "cwd": str(cwd),
                     "environment": dict(environment), "result": str(result_path)}))
     stdout_path, stderr_path = command_root / "stdout", command_root / "stderr"
@@ -317,7 +320,7 @@ def run_command(argv: Sequence[str], *, cwd: Path, environment: Mapping[str, str
                 start_new_session=os.name == "posix",
             )
             deadline = time.monotonic() + timeout
-            while not result_path.exists():
+            while not ready_path.is_dir():
                 if stdout_path.stat().st_size + stderr_path.stat().st_size > MAX_TEXT_BYTES:
                     raise ProposalError(f"command output bound exceeded: {label}")
                 if time.monotonic() >= deadline:

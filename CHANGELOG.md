@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.15 - 2026-10-03
+
+- Select Deep 0.2.2 for normal GUI and CLI downloads so new jobs receive the published Codex detection and account-status improvements.
+- Preserve explicit manifest overrides and saved jobs pinned to their original verified installation when updating components.
+
 ## 0.8.14 - 2026-10-03
 
 - Prove the native Intel Mac dependency graph on CPython 3.12.10 and retain the shared Mac version lock after byte-for-byte arm64/x64 reproduction.

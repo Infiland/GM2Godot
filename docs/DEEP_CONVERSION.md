@@ -4,7 +4,7 @@ Deep adds AI research and reviewed candidate conversion to GM2Godot. It is disab
 
 ## Setup
 
-Open **Settings → Deep setup**, download the compatible components, and select a provider and model. The extension includes its own Node runtime. Its source is maintained at [gm2godot-deep](https://github.com/Infiland/gm2godot-deep); users do not clone it.
+Open **Settings → Deep setup**, download the compatible components, and select a provider and model. **Download / update Deep components** and `deep install` select Deep 0.2.2 for new jobs. Saved jobs keep their original verified installation; an update does not migrate them. The extension includes its own Node runtime. Its source is maintained at [gm2godot-deep](https://github.com/Infiland/gm2godot-deep); users do not clone it.
 
 Choose an existing Codex, Claude Code or OpenCode installation, or an API provider. The setup panel can install a pinned official OpenCode binary privately in GM2Godot's application data. Existing global installations and settings remain untouched. Application-managed API keys use the OS keyring; coding agents can use their existing sign-in.
 

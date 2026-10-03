@@ -128,7 +128,7 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.8.14`.
+Current source version: `0.8.15`.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The macOS downloads require macOS 15.0 or later on Apple Silicon (arm64).

@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.14 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.15 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -131,7 +131,7 @@ Check more than an HTTP success code: an uninitialized Wiki redirects to the rep
 
 ```bash
 python scripts/wiki_publication.py complete --wiki-repository "$WIKI_DIR" \
-  --evidence "$EVIDENCE" --live-review "Reviewed all nine rendered pages, sidebar navigation, and external links"
+  --evidence "$EVIDENCE" --live-review "Reviewed all eight rendered pages, sidebar navigation, and external links"
 ```
 
 `complete` performs a fresh clone and remote-state recheck again; a moved branch or retargeted symbolic `HEAD` stops completion. Record all seven binding values, the durable evidence, and the live review result on the documentation issue; only then close it. A successful HTTP response or successful `ls-remote` alone is insufficient.

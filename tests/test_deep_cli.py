@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.deep.install import ExtensionManager
 from src.deep.jobs import DeepJob
 from src.deep.settings import DeepSettings
 from src.deep_cli import main, run_job
+from tests.test_deep_client import VerifiedReleaseFixture
 
 
 class DeepCliOutcomeTests(unittest.TestCase):
@@ -37,6 +42,42 @@ class DeepCliOutcomeTests(unittest.TestCase):
 
 
 class DeepCliSetupTests(unittest.TestCase):
+    def test_install_uses_shipped_default_and_preserves_explicit_manifest_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            releases = VerifiedReleaseFixture(root)
+            manager = ExtensionManager(root / "managed")
+            output = io.StringIO()
+            with patch("src.deep_cli.ExtensionManager", return_value=manager), patch(
+                "src.deep.install.platform_key", return_value="linux-x64",
+            ), patch("src.deep.install.download_verified_transport", side_effect=releases.download), redirect_stdout(output):
+                self.assertEqual(main(["install"]), 0)
+                current = manager.installation()
+                self.assertEqual(json.loads((current / "install.json").read_text())["manifest"]["version"], "0.2.2")
+                self.assertEqual(manager.command(), [
+                    str(current / "node/bin/node"), str(current / "engine/dist/host/main.js"),
+                ])
+                self.assertEqual((current / "engine/dist/host/main.js").read_bytes(), b"fixture engine 0.2.2\n")
+
+                self.assertEqual(main([
+                    "install", "--manifest-url",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                ]), 0)
+                legacy = manager.installation()
+                self.assertNotEqual(legacy, current)
+                self.assertEqual(json.loads((legacy / "install.json").read_text())["manifest"]["version"], "0.2.1")
+                self.assertEqual((legacy / "engine/dist/host/main.js").read_bytes(), b"fixture engine 0.2.1\n")
+                self.assertEqual(manager.command(current), [
+                    str(current / "node/bin/node"), str(current / "engine/dist/host/main.js"),
+                ])
+                self.assertEqual(releases.requested_urls, [
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/deep-manifest.json",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.2/fixture-deep-linux-x64.zip",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/deep-manifest.json",
+                    "https://github.com/Infiland/GM2Godot/releases/download/deep-v0.2.1/fixture-deep-linux-x64.zip",
+                ])
+            self.assertEqual(output.getvalue().splitlines(), [str(current), str(legacy)])
+
     def test_configure_custom_codex_path_then_restore_auto_detection(self) -> None:
         settings = DeepSettings()
         with patch("src.deep_cli.load_settings", return_value=settings), patch("src.deep_cli.save_settings") as save:

@@ -311,6 +311,8 @@ def _write_all(fd: int, content: bytes) -> None:
 
 
 def copy_zip(source: Path, destination: Path) -> ZipCopy:
+    if sys.platform == "win32":
+        raise MacGuiVerificationError("private ZIP copying requires POSIX")
     with BoundDirectory(source.parent) as parent, BoundDirectory(destination.parent) as output:
         fd, before = _open_file(parent, source.name, MAX_ZIP_BYTES)
         target: int | None = None
@@ -394,6 +396,8 @@ class _ZipReader(io.RawIOBase):
         return self.position
 
     def read(self, size: int = -1) -> bytes:
+        if sys.platform == "win32":
+            raise MacGuiVerificationError("retained ZIP reading requires POSIX")
         requested = self.size - self.position if size < 0 else size
         if requested > MAX_ZIP_READ_BYTES:
             raise MacGuiVerificationError("ZIP reader byte budget exceeded")
@@ -452,6 +456,8 @@ def extract_transcript(
     private_zip: Path, app: Path, expected: Mapping[str, str], architecture: str
 ) -> tuple[TreeEntry, ...]:
     """Every regular resource is read fully, CRC checked and exclusively written."""
+    if sys.platform == "win32":
+        raise MacGuiVerificationError("private App extraction requires POSIX")
     _bundle_verifier().inspect_zip_bundle(private_zip, expected, architecture)
     with BoundDirectory(private_zip.parent) as parent:
         fd, before = _open_file(parent, private_zip.name, MAX_ZIP_BYTES)
@@ -758,6 +764,8 @@ def _prove_process(process: subprocess.Popen[bytes]) -> None:
 
 
 def _positive_child_exit(process: subprocess.Popen[bytes]) -> bool:
+    if sys.platform != "darwin":
+        raise MacGuiVerificationError("native exit records require Darwin")
     if process.returncode is not None:
         raise ChildProcessError("the private child has already been reaped")
     record = _waitid_record(process.pid)
@@ -830,6 +838,8 @@ def _read_output(stream: _OutputPipe, output: bytearray) -> bool:
 
 
 def _observe_exit(process: subprocess.Popen[bytes], stream: _OutputPipe, output: bytearray, deadline: float) -> bool:
+    if sys.platform != "darwin":
+        raise MacGuiVerificationError("native exit observation requires Darwin")
     queue = select.kqueue()
     primary: BaseException | None = None
     eof = False
@@ -878,6 +888,8 @@ def _drain_output(stream: _OutputPipe, output: bytearray, *, timeout: float = DR
 
 
 def _group_signal(process: subprocess.Popen[bytes]) -> None:
+    if sys.platform != "darwin":
+        raise MacGuiVerificationError("native group signaling requires Darwin")
     _prove_process(process)
     try:
         os.killpg(process.pid, signal.SIGKILL)
@@ -892,6 +904,8 @@ def _group_signal(process: subprocess.Popen[bytes]) -> None:
 
 
 def _direct_signal(process: subprocess.Popen[bytes]) -> None:
+    if sys.platform != "darwin":
+        raise MacGuiVerificationError("native child signaling requires Darwin")
     _prove_process(process)
     try:
         os.kill(process.pid, signal.SIGKILL)
@@ -998,6 +1012,8 @@ def validate_gui_receipt(path: Path) -> str:
 
 
 def _remove_contents(fd: int, device: int, depth: int = 0) -> None:
+    if sys.platform == "win32":
+        raise MacGuiVerificationError("private directory cleanup requires POSIX")
     if depth > MAX_DEPTH:
         raise MacGuiVerificationError("private cleanup depth budget exceeded")
     for name in os.listdir(fd):
@@ -1025,6 +1041,8 @@ def _remove_contents(fd: int, device: int, depth: int = 0) -> None:
 
 
 def _cleanup_private_root(owner: BoundDirectory) -> None:
+    if sys.platform == "win32":
+        raise MacGuiVerificationError("private root cleanup requires POSIX")
     owner.verify()
     own = os.fstat(owner.fd)
     os.fchmod(owner.fd, stat.S_IMODE(own.st_mode) | 0o700)

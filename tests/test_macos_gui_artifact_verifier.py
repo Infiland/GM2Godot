@@ -95,6 +95,129 @@ class Fixture(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "posix", "physical POSIX ZIP extraction")
 class ZipTranscriptTests(Fixture):
+    def test_physical_tree_read_races_and_budgets_reject_changed_resources(self) -> None:
+        real_open, real_read, real_readlink, real_listdir = os.open, os.read, os.readlink, os.listdir
+        for case in ("shrink", "grow", "open-replacement", "read-replacement", "symlink-retarget", "directory-change", "total-budget", "count-budget"):
+            with self.subTest(case=case):
+                app = self.root / case
+                app.mkdir()
+                resource = app / "payload"
+                payload = b"sealed resource"
+                resource.write_bytes(payload)
+                link = app / "a-link"
+                if case == "symlink-retarget":
+                    link.symlink_to("payload")
+                self.assertTrue(subject.inspect_tree(app))
+                inode = resource.stat().st_ino
+                opened: list[int] = []
+                changed = False
+
+                def opening(path: str | Path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+                    nonlocal changed
+                    fd = real_open(path, flags, mode, dir_fd=dir_fd)
+                    opened.append(fd)
+                    if case == "open-replacement" and path == resource.name and not changed:
+                        changed = True
+                        resource.rename(self.root / (case + "-retained"))
+                        resource.write_bytes(payload)
+                    return fd
+
+                def reading(fd: int, count: int) -> bytes:
+                    nonlocal changed
+                    selected = os.fstat(fd).st_ino == inode
+                    if selected and not changed and case in {"shrink", "grow"}:
+                        changed = True
+                        if case == "shrink":
+                            resource.write_bytes(b"")
+                        else:
+                            with resource.open("ab") as writer:
+                                writer.write(b"growth")
+                    content = real_read(fd, count)
+                    if selected and not changed and case == "read-replacement" and not content:
+                        changed = True
+                        resource.rename(self.root / (case + "-retained"))
+                        resource.write_bytes(payload)
+                    return content
+
+                def readlink(path: str, *, dir_fd: int | None = None) -> str:
+                    nonlocal changed
+                    target = real_readlink(path, dir_fd=dir_fd)
+                    if case == "symlink-retarget" and path == link.name and not changed:
+                        changed = True
+                        link.rename(self.root / (case + "-retained"))
+                        link.symlink_to("different-resource")
+                    return target
+
+                def listing(path: int | str | Path) -> list[str]:
+                    nonlocal changed
+                    names = real_listdir(path)
+                    if case == "directory-change" and not changed:
+                        changed = True
+                        (app / "new-resource").write_bytes(b"not in the initial directory listing")
+                    return names
+
+                messages = {"shrink": "resource truncated", "grow": "resource grew", "open-replacement": "entry changed while opening", "read-replacement": "entry changed while reading", "symlink-retarget": "symlink changed", "directory-change": "directory changed during traversal", "total-budget": "total byte budget", "count-budget": "count budget"}
+                budget = mock.patch.object(subject, "MAX_TOTAL_BYTES", len(payload) - 1) if case == "total-budget" else mock.patch.object(subject, "MAX_ENTRIES", 1 if case == "count-budget" else subject.MAX_ENTRIES)
+                with mock.patch.object(subject.os, "open", opening), mock.patch.object(subject.os, "read", reading), mock.patch.object(subject.os, "readlink", readlink), mock.patch.object(subject.os, "listdir", listing), budget:
+                    with self.assertRaisesRegex(subject.MacGuiVerificationError, messages[case]):
+                        subject.inspect_tree(app)
+                self.assertTrue(opened)
+                for descriptor in opened:
+                    with self.assertRaises(OSError) as closed:
+                        os.fstat(descriptor)
+                    self.assertEqual(closed.exception.errno, errno.EBADF)
+
+    def test_real_pipe_output_eof_deadline_and_budget_are_bounded(self) -> None:
+        for case in ("eof", "deadline", "budget"):
+            with self.subTest(case=case):
+                read_fd, write_fd = os.pipe()
+                stream: io.FileIO | None = None
+                writer_open = True
+                try:
+                    stream = io.FileIO(read_fd, mode="rb", closefd=True)
+                    os.set_blocking(read_fd, False)
+                    output = bytearray()
+                    if case == "eof":
+                        self.assertFalse(getattr(subject, "_read_output")(stream, output))
+                        self.assertEqual(output, b"")
+                        os.write(write_fd, b"real output")
+                        self.assertFalse(getattr(subject, "_read_output")(stream, output))
+                        self.assertEqual(output, b"real output")
+                        os.close(write_fd)
+                        writer_open = False
+                        with self.assertRaises(OSError) as closed:
+                            os.fstat(write_fd)
+                        self.assertEqual(closed.exception.errno, errno.EBADF)
+                        self.assertTrue(getattr(subject, "_read_output")(stream, output))
+                        getattr(subject, "_drain_output")(stream, output, timeout=0.02)
+                        self.assertEqual(output, b"real output")
+                    elif case == "deadline":
+                        os.write(write_fd, b"still open")
+                        started = time.monotonic()
+                        with self.assertRaisesRegex(subject.MacGuiVerificationError, "stdout.*drain deadline"):
+                            getattr(subject, "_drain_output")(stream, output, timeout=0.02)
+                        self.assertLess(time.monotonic() - started, 1.0)
+                        self.assertEqual(output, b"still open")
+                        self.assertFalse(stream.closed)
+                        os.fstat(write_fd)
+                    else:
+                        os.write(write_fd, b"12345")
+                        with mock.patch.object(subject, "MAX_OUTPUT_BYTES", 4):
+                            with self.assertRaisesRegex(subject.MacGuiVerificationError, "output exceeds.*byte budget"):
+                                getattr(subject, "_read_output")(stream, output)
+                        self.assertEqual(output, b"12345")
+                finally:
+                    if writer_open:
+                        os.close(write_fd)
+                    if stream is None:
+                        os.close(read_fd)
+                    else:
+                        stream.close()
+                    for descriptor in (read_fd, write_fd):
+                        with self.assertRaises(OSError) as closed:
+                            os.fstat(descriptor)
+                        self.assertEqual(closed.exception.errno, errno.EBADF)
+
     def test_complete_resource_transcript_and_physical_tree_match(self) -> None:
         rows = self.extract()
         self.assertEqual(rows, subject.inspect_tree(self.root / "GM2Godot.app"))
@@ -289,7 +412,7 @@ class ReceiptAndRuntimeTests(Fixture):
         census = getattr(subject, "_group_contains_only_exited_leader")
         exit_record = struct.pack("=iiiiIi", 20, 0, 1, process.pid, 1000, 0) + bytes(80)
         records = ((bytes(104), False), (exit_record, True), (exit_record[:-1], None), (struct.pack("=iiiiIi", 20, 0, 1, 54321, 1000, 0) + bytes(80), None), (struct.pack("=iiiiIi", 20, 0, 5, process.pid, 1000, 0) + bytes(80), None))
-        with mock.patch.object(subject.signal, "SIGCHLD", 20, create=True), mock.patch.object(subject.os, "CLD_EXITED", 1, create=True), mock.patch.object(subject.os, "CLD_KILLED", 2, create=True), mock.patch.object(subject.os, "CLD_DUMPED", 3, create=True):
+        with mock.patch.object(subject.sys, "platform", "darwin"), mock.patch.object(subject.signal, "SIGCHLD", 20, create=True), mock.patch.object(subject.os, "CLD_EXITED", 1, create=True), mock.patch.object(subject.os, "CLD_KILLED", 2, create=True), mock.patch.object(subject.os, "CLD_DUMPED", 3, create=True):
             for record, expected in records:
                 with self.subTest(record=record[:24]), mock.patch.object(subject, "_waitid_record", return_value=record):
                     if expected is None:
@@ -342,7 +465,7 @@ class ReceiptAndRuntimeTests(Fixture):
             self.assertFalse(census(process))
             library.assert_not_called()
         permission = PermissionError(errno.EPERM, "modeled live-group denial")
-        with mock.patch.object(subject, "_prove_process"), mock.patch.object(subject, "_group_contains_only_exited_leader", return_value=False), mock.patch.object(subject.os, "killpg", side_effect=permission, create=True):
+        with mock.patch.object(subject.sys, "platform", "darwin"), mock.patch.object(subject.signal, "SIGKILL", 9, create=True), mock.patch.object(subject, "_prove_process"), mock.patch.object(subject, "_group_contains_only_exited_leader", return_value=False), mock.patch.object(subject.os, "killpg", side_effect=permission, create=True):
             with self.assertRaises(PermissionError) as caught:
                 getattr(subject, "_group_signal")(process)
             self.assertIs(caught.exception, permission)
@@ -465,6 +588,64 @@ class PipelineTests(Fixture):
         self.assertFalse(value["source_app_gui_tested"])
         self.assertFalse(value["dmg_gui_tested"])
         self.assertTrue(value["successful"])
+
+    def test_successful_pipeline_cleanup_failures_preserve_first_error_and_close_all_owners(self) -> None:
+        real_owner = subject.BoundDirectory
+        real_close = real_owner.close
+        real_cleanup = getattr(subject, "_cleanup_private_root")
+        for stage in ("cleanup", "root-close", "source-close", "combined"):
+            with self.subTest(stage=stage):
+                first = OSError("first forwarded cleanup failure")
+                root_error = OSError("forwarded root close failure")
+                source_error = OSError("forwarded source close failure")
+                owners: list[tuple[subject.BoundDirectory, tuple[int, ...]]] = []
+                closes: dict[int, int] = {}
+                source_owner: subject.BoundDirectory | None = None
+                private_owner: subject.BoundDirectory | None = None
+
+                def acquire(path: Path) -> subject.BoundDirectory:
+                    nonlocal source_owner, private_owner
+                    owner = real_owner(path)
+                    owners.append((owner, tuple(item[2] for item in owner.bindings)))
+                    if path == self.zip_path.parent and source_owner is None:
+                        source_owner = owner
+                    if path.name.startswith("gm2godot-macos-gui-") and private_owner is None:
+                        private_owner = owner
+                    return owner
+
+                def close(owner: subject.BoundDirectory, primary: BaseException | None = None) -> None:
+                    closes[id(owner)] = closes.get(id(owner), 0) + 1
+                    real_close(owner, primary)
+                    if owner is private_owner and stage in {"root-close", "combined"}:
+                        raise root_error
+                    if owner is source_owner and stage in {"source-close", "combined"}:
+                        raise source_error
+
+                def cleanup(owner: subject.BoundDirectory) -> None:
+                    real_cleanup(owner)
+                    if stage in {"cleanup", "combined"}:
+                        raise first
+
+                with mock.patch.object(subject, "BoundDirectory", side_effect=acquire), mock.patch.object(real_owner, "close", close), mock.patch.object(subject, "_cleanup_private_root", cleanup):
+                    with self.assertRaises(OSError) as caught:
+                        self.run_pipeline(self.fake_gui)
+                expected = root_error if stage == "root-close" else source_error if stage == "source-close" else first
+                self.assertIs(caught.exception, expected)
+                self.assertIsNotNone(source_owner)
+                self.assertIsNotNone(private_owner)
+                if private_owner is not None:
+                    self.assertFalse(private_owner.path.exists())
+                for owner, descriptors in owners:
+                    self.assertEqual(closes.get(id(owner)), 1)
+                    self.assertEqual(owner.bindings, [])
+                    for descriptor in descriptors:
+                        with self.assertRaises(OSError) as closed:
+                            os.fstat(descriptor)
+                        self.assertEqual(closed.exception.errno, errno.EBADF)
+                if stage == "combined":
+                    notes = getattr(caught.exception, "__notes__", ())
+                    self.assertTrue(any(str(root_error) in note for note in notes))
+                    self.assertTrue(any(str(source_error) in note for note in notes))
 
     def test_source_replacement_and_full_resource_flip_after_launch_fail(self) -> None:
         def replace(command: Sequence[str], root: Path, environment: dict[str, str]) -> subject.ProcessReceipt:
@@ -639,6 +820,8 @@ class NativeLifecycleTests(Fixture):
         self.assertEqual(value["machine"], platform.machine())
 
     def test_native_clean_exit_preserves_owned_leader(self) -> None:
+        if sys.platform != "darwin":
+            raise RuntimeError("native lifecycle requires Darwin")
         seen: list[int] = []
         real_signal = getattr(subject, "_group_signal")
 
@@ -697,6 +880,8 @@ class NativeLifecycleTests(Fixture):
             self.assertEqual(self.launch("print('immediate exit')\n").output, b"immediate exit\n")
 
     def test_native_timeout_reaps_owned_group(self) -> None:
+        if sys.platform != "darwin":
+            raise RuntimeError("native lifecycle requires Darwin")
         processes: list[subprocess.Popen[bytes]] = []
         real_popen = subprocess.Popen
 
@@ -714,6 +899,8 @@ class NativeLifecycleTests(Fixture):
             os.waitpid(processes[0].pid, os.WNOHANG)
 
     def test_native_inherited_stdout_descendant_is_bounded(self) -> None:
+        if sys.platform != "darwin":
+            raise RuntimeError("native lifecycle requires Darwin")
         code = "import subprocess, sys\nsubprocess.Popen([sys.executable, '-I', '-c', 'import time; time.sleep(30)'])\nprint('leader exiting', flush=True)\n"
         drains: list[bool] = []
         leader: list[subprocess.Popen[bytes]] = []
@@ -764,6 +951,8 @@ class NativeLifecycleTests(Fixture):
                 self.launch("import os\nwhile True: os.write(1, b'x' * 4096)\n")
 
     def test_native_observer_and_control_errors_preserve_primary(self) -> None:
+        if sys.platform != "darwin":
+            raise RuntimeError("native lifecycle requires Darwin")
         for error in (OSError("observer failure"), KeyboardInterrupt("control"), SystemExit(0)):
             with self.subTest(kind=type(error).__name__), mock.patch.object(subject, "_observe_exit", side_effect=error):
                 with self.assertRaises(type(error)) as caught:

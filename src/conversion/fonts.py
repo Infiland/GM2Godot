@@ -8,14 +8,20 @@ import shutil
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.font_metadata import (
+    parse_gamemaker_font_metadata,
+    project_font_conversion_fields,
+)
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_resource_stem,
+    generated_subfolder_path,
 )
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
@@ -24,9 +30,10 @@ from src.conversion.project_manifest import (
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
+    resolve_project_filesystem_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 FONT_EXTENSIONS = ('.ttf', '.otf', '.ttc', '.otc', '.woff', '.woff2')
 
@@ -501,21 +508,68 @@ class FontConverter(BaseConverter):
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            document = decode_gamemaker_json(content, source_path=yy_path)
+            if not isinstance(document.value, dict):
+                raise TypeError("Font metadata must be a JSON object")
+            metadata = parse_gamemaker_font_metadata(
+                document.value,
+                source_context=yy_path,
+            )
+            fields = project_font_conversion_fields(metadata)
             return {
-                'fontName': str(data['fontName']),
-                'name': str(data['name']),
-                'size': float(data.get('size', 12.0)),
-                'bold': bool(data.get('bold', False)),
-                'italic': bool(data.get('italic', False)),
-                'AntiAlias': int(data.get('AntiAlias', 0)),
-                'includeTTF': bool(data.get('includeTTF', False)),
-                'TTFName': str(data.get('TTFName', '')),
+                'fontName': fields.font_name,
+                'name': fields.name,
+                'size': fields.size,
+                'bold': fields.bold,
+                'italic': fields.italic,
+                'AntiAlias': fields.anti_alias,
+                'includeTTF': fields.include_ttf,
+                'TTFName': fields.ttf_name,
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError):
             self._safe_log(get_localized("Console_Convertor_Fonts_ParseError").format(yy_path=yy_path))
             return None
+
+    def _get_subfolder_from_yy(self, yy_path: StrPath) -> str:
+        """Read the current font source before deriving its IDE subfolder."""
+        try:
+            resolved = resolve_project_filesystem_source_path(
+                self.gm_project_path,
+                yy_path,
+            )
+            with open(resolved.filesystem_path, 'r', encoding='utf-8') as source_file:
+                content = source_file.read()
+            document = decode_gamemaker_json(
+                content,
+                source_path=resolved.filesystem_path,
+            )
+            if not isinstance(document.value, dict):
+                return ""
+        except (
+            OSError,
+            ProjectSourcePathError,
+            json.JSONDecodeError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            return ""
+        try:
+            metadata = parse_gamemaker_font_metadata(
+                document.value,
+                source_context=resolved.filesystem_path,
+            )
+            parent_path = metadata.parent_path
+            if parent_path.startswith('folders/'):
+                parent_path = parent_path[len('folders/'):]
+            if parent_path.endswith('.yy'):
+                parent_path = parent_path[:-len('.yy')]
+            parts = parent_path.split('/')
+            if len(parts) <= 1:
+                return ""
+            return generated_subfolder_path('/'.join(parts[1:]))
+        except (KeyError, TypeError, AttributeError):
+            return ""
 
     def _generate_system_font_tres(self, font_data: FontData) -> str:
         font_name = font_data['fontName']

@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.16 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.17 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -10,15 +10,22 @@ Godot is not required merely to launch GM2Godot. Install the exact [Godot 4.7.2 
 
 ## Install a packaged release
 
-The latest published release remains `0.8.15`, with the downloads listed below. Current source `0.8.16` builds separate native arm64 and x86_64 macOS CI artifacts, but public release publication is disabled until issue #857 adds the architecture-aware release contract.
+Source `0.8.17` defines the six payloads below, plus `SHA256SUMS` as the seventh uploaded asset. They become available after the merged `main` release gates and publication succeed. Until then, the latest published release remains `0.8.15`; its historical `GM2Godot-macos.zip` and `GM2Godot-macos.dmg` support Apple Silicon only.
 
 Download the asset for your operating system from [GitHub Releases](https://github.com/Infiland/GM2Godot/releases). Extract downloaded archives before launching the application.
 
 | Operating system | Release asset | Launch |
 | --- | --- | --- |
 | Windows | `GM2Godot-windows.zip` | Extract the archive, then run `GM2Godot.exe`. |
-| macOS 15.0+ on Apple Silicon (arm64) | `GM2Godot-macos.dmg` or `GM2Godot-macos.zip` | Open the DMG and copy `GM2Godot.app` to Applications, or extract the ZIP and launch the app. |
+| macOS 15.0+ on Apple Silicon (arm64) | `GM2Godot-macos-arm64.dmg` | Open the DMG and copy `GM2Godot.app` to Applications. |
+| macOS 15.0+ on Apple Silicon (arm64) | `GM2Godot-macos-arm64.zip` | Extract the archive, then launch `GM2Godot.app`. |
+| macOS 15.0+ on Intel (x86_64) | `GM2Godot-macos-x86_64.dmg` | Open the DMG and copy `GM2Godot.app` to Applications. |
+| macOS 15.0+ on Intel (x86_64) | `GM2Godot-macos-x86_64.zip` | Extract the archive, then launch `GM2Godot.app`. |
 | Linux | `GM2Godot-linux.zip` | On the validated Ubuntu 24.04 x86_64 baseline, extract the archive and run `./GM2Godot`. If the executable bit was lost during download or extraction, run `chmod +x GM2Godot` once. |
+
+Choose the Mac pair matching your hardware. The updater maps `arm64`/`aarch64` to the exact arm64 ZIP and `x86_64`/`amd64` to the exact x86_64 ZIP. For unknown machines, missing or duplicate exact matches, and invalid matching download URLs, the update dialog keeps its **Open release page** button and offers no download. Generic names, DMGs, and opposite-architecture assets are not substitutes.
+
+Developer ID signing and notarization remain pending in issue #737; the native build and GUI checks do not establish Gatekeeper trust. Availability of these core Mac assets does not promise an optional Deep component build for Intel.
 
 Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. PyInstaller does not bundle glibc, so glibc 2.39 is necessary; it is not by itself a portability guarantee for other distributions, which remain unverified and must also provide compatible system, OpenGL/EGL, and X11 libraries. The reviewed package manifest installs Ubuntu's `libegl1` and `libgl1` providers required by QtGui together with the XCB client libraries. The build rejects unresolved shared-library warnings and launches the executable extracted from the final ZIP through Qt's real `qxcb` platform under Xvfb before upload. A normal graphical X11 session, or XWayland when using a Wayland desktop, is still required at runtime.
 
@@ -34,7 +41,7 @@ sudo apt-get install --yes --no-install-recommends \
 
 ### Verify a release download
 
-Releases starting with 0.7.14 include `SHA256SUMS`, with one SHA-256 digest for each of the four platform payloads. To verify the complete release, download all four payloads and `SHA256SUMS` into one directory, then run one of these commands from that directory:
+Releases starting with 0.7.14 include `SHA256SUMS`. The current `0.8.17` contract contains one SHA-256 digest for each of the six payloads, in lexical filename order. To verify the complete release, download all six payloads and `SHA256SUMS`—all seven assets—into one directory, then run one of these commands from that directory. The historical `0.8.15` manifest instead contains its four payload rows.
 
 ```bash
 # Linux
@@ -52,7 +59,7 @@ The packaged builds are produced as windowed applications. For the CLI commands 
 
 Use the native, reproducible baseline for your host. Git is also required for the clone commands below.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.16`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.17`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 | Host | Python | Constraint |
 | --- | --- | --- |
@@ -90,7 +97,7 @@ If the `py` launcher is unavailable, use an x64 CPython 3.12.10 executable direc
 
 ### macOS
 
-Use a native arm64 or x86_64 CPython 3.12.10 interpreter matching your host. Both native candidate graphs reproduce the same version lock; their wheel hashes remain architecture-specific. This source procedure also supports Intel Macs, while the packaged Mac downloads above remain arm64.
+Use a native arm64 or x86_64 CPython 3.12.10 interpreter matching your host. Both native candidate graphs reproduce the same version lock; their wheel hashes remain architecture-specific. The current release contract also provides separate packaged Mac pairs for both architectures.
 
 ```bash
 git clone https://github.com/Infiland/GM2Godot.git
@@ -155,6 +162,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.16`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.17`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

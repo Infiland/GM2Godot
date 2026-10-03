@@ -25,7 +25,7 @@ class TestCheckForUpdate(unittest.TestCase):
             "html_url": "https://example.test/release",
             "assets": [
                 {
-                    "name": "GM2Godot-macOS.zip",
+                    "name": "GM2Godot-macos-arm64.zip",
                     "browser_download_url": "https://example.test/update.zip",
                     "digest": f"sha256:{digest.upper()}",
                     "size": len(payload),
@@ -36,6 +36,7 @@ class TestCheckForUpdate(unittest.TestCase):
         with (
             patch("src.update_checker.requests.get", return_value=response),
             patch("src.update_checker.platform.system", return_value="Darwin"),
+            patch("src.update_checker.platform.machine", return_value="arm64"),
             patch("src.update_checker.get_version", return_value="1.0.0"),
         ):
             info = UpdateChecker().check_for_update()
@@ -45,6 +46,157 @@ class TestCheckForUpdate(unittest.TestCase):
         self.assertTrue(info.available)
         self.assertEqual(info.asset_digest, f"sha256:{digest}")
         self.assertEqual(info.asset_size, len(payload))
+
+    def test_macos_architecture_aliases_select_exact_zip_metadata(self) -> None:
+        asset_names = [
+            "GM2Godot-linux.zip",
+            "GM2Godot-macos-arm64.dmg",
+            "GM2Godot-macos-arm64.zip",
+            "GM2Godot-macos-x86_64.dmg",
+            "GM2Godot-macos-x86_64.zip",
+            "GM2Godot-windows.zip",
+            "SHA256SUMS",
+        ]
+        assets: list[dict[str, object]] = [
+            {
+                "name": name,
+                "browser_download_url": f"https://example.test/releases/{name}",
+                "digest": "sha256:" + hashlib.sha256(name.encode()).hexdigest().upper(),
+                "size": 100 + index,
+            }
+            for index, name in enumerate(asset_names)
+        ]
+        aliases = (
+            ("arm64", "arm64"),
+            ("aarch64", "arm64"),
+            (" ARM64 ", "arm64"),
+            ("\tAaRcH64\n", "arm64"),
+            ("x86_64", "x86_64"),
+            ("amd64", "x86_64"),
+            (" X86_64 ", "x86_64"),
+            ("\tAmD64\n", "x86_64"),
+        )
+        for index, (machine, architecture) in enumerate(aliases):
+            with self.subTest(machine=machine):
+                shuffled = assets[index % len(assets):] + assets[:index % len(assets)]
+                if index % 2:
+                    shuffled = list(reversed(shuffled))
+                response = self._release_response(shuffled)
+                with (
+                    patch("src.update_checker.requests.get", return_value=response),
+                    patch("src.update_checker.platform.system", return_value="Darwin"),
+                    patch("src.update_checker.platform.machine", return_value=machine),
+                    patch("src.update_checker.get_version", return_value="1.0.0"),
+                ):
+                    info = UpdateChecker().check_for_update()
+                self.assertIsNotNone(info)
+                assert info is not None
+                expected_name = f"GM2Godot-macos-{architecture}.zip"
+                self.assertEqual(info.asset_name, expected_name)
+                self.assertEqual(info.download_url, f"https://example.test/releases/{expected_name}")
+                self.assertEqual(info.asset_digest, "sha256:" + hashlib.sha256(expected_name.encode()).hexdigest())
+                self.assertEqual(info.asset_size, 100 + asset_names.index(expected_name))
+                self.assertTrue(info.available)
+
+    def test_macos_unsafe_or_ambiguous_assets_keep_release_page_fallback(self) -> None:
+        selected: dict[str, object] = {
+            "name": "GM2Godot-macos-arm64.zip",
+            "browser_download_url": "https://example.test/releases/arm64.zip",
+            "digest": "sha256:" + "a" * 64,
+            "size": 123,
+        }
+        cases: list[tuple[str, str, list[dict[str, object]]]] = [
+            ("missing", "arm64", []),
+            ("opposite architecture", "arm64", [{**selected, "name": "GM2Godot-macos-x86_64.zip"}]),
+            ("generic legacy", "arm64", [{**selected, "name": "GM2Godot-macOS.zip"}]),
+            ("DMG only", "arm64", [{**selected, "name": "GM2Godot-macos-arm64.dmg"}]),
+            ("substring bait", "arm64", [{**selected, "name": "backup-GM2Godot-macos-arm64.zip"}]),
+            ("case bait", "arm64", [{**selected, "name": "GM2Godot-macos-ARM64.zip"}]),
+            ("duplicate valid", "arm64", [selected, dict(selected)]),
+            ("duplicate malformed second", "arm64", [selected, {**selected, "browser_download_url": None}]),
+            ("missing URL", "arm64", [{key: value for key, value in selected.items() if key != "browser_download_url"}]),
+        ]
+        for machine in ("", "unknown", "universal", "arm64,x86_64", "x86"):
+            cases.append(("unknown machine", machine, [selected]))
+        for url in (
+            None,
+            "",
+            42,
+            "javascript:alert(1)",
+            "file:///tmp/update.zip",
+            "//example.test/update.zip",
+            "https:///update.zip",
+            "https://example.test/update file.zip",
+            "https://example.test/\nupdate.zip",
+            "https://example.test/\x00update.zip",
+            "https://[broken/update.zip",
+            "https://example.test:not-a-port/update.zip",
+            "https://example.test:70000/update.zip",
+        ):
+            cases.append((f"unsafe URL {url!r}", "arm64", [{**selected, "browser_download_url": url}]))
+        for label, machine, assets in cases:
+            with self.subTest(case=label, machine=machine):
+                response = self._release_response(assets)
+                with (
+                    patch("src.update_checker.requests.get", return_value=response),
+                    patch("src.update_checker.platform.system", return_value="Darwin"),
+                    patch("src.update_checker.platform.machine", return_value=machine),
+                    patch("src.update_checker.get_version", return_value="1.0.0"),
+                ):
+                    info = UpdateChecker().check_for_update()
+                self.assertIsNotNone(info)
+                assert info is not None
+                self.assertTrue(info.available)
+                self.assertEqual(info.latest_version, "9.0.0")
+                self.assertEqual(info.release_notes, "release notes")
+                self.assertEqual(info.release_page_url, "https://example.test/release")
+                self.assertEqual(
+                    (info.download_url, info.asset_name, info.asset_digest, info.asset_size),
+                    (None, None, None, None),
+                )
+
+    def test_non_macos_selection_never_queries_machine(self) -> None:
+        for system, asset_name in (
+            ("Windows", "GM2Godot-windows.zip"),
+            ("Linux", "GM2Godot-linux.zip"),
+        ):
+            with self.subTest(system=system):
+                assets: list[dict[str, object]] = [
+                    {"name": "GM2Godot-macos-arm64.zip", "browser_download_url": "https://example.test/arm.zip"},
+                    {"name": "GM2Godot-macos-x86_64.zip", "browser_download_url": "https://example.test/intel.zip"},
+                    {
+                        "name": asset_name,
+                        "browser_download_url": f"https://example.test/{asset_name}",
+                        "digest": "sha256:" + "b" * 64,
+                        "size": 456,
+                    },
+                ]
+                response = self._release_response(assets)
+                with (
+                    patch("src.update_checker.requests.get", return_value=response),
+                    patch("src.update_checker.platform.system", return_value=system),
+                    patch("src.update_checker.platform.machine", side_effect=AssertionError("non-Mac machine query")) as machine,
+                    patch("src.update_checker.get_version", return_value="1.0.0"),
+                ):
+                    info = UpdateChecker().check_for_update()
+                machine.assert_not_called()
+                self.assertIsNotNone(info)
+                assert info is not None
+                self.assertEqual(info.asset_name, asset_name)
+                self.assertEqual(info.download_url, f"https://example.test/{asset_name}")
+                self.assertEqual(info.asset_digest, "sha256:" + "b" * 64)
+                self.assertEqual(info.asset_size, 456)
+
+    @staticmethod
+    def _release_response(assets: list[dict[str, object]]) -> MagicMock:
+        response = MagicMock()
+        response.json.return_value = {
+            "tag_name": "v9.0.0",
+            "body": "release notes",
+            "html_url": "https://example.test/release",
+            "assets": assets,
+        }
+        return response
 
 
 

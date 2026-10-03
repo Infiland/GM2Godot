@@ -113,29 +113,45 @@ RELEASE_SMOKE_PAYLOAD_SHA256 = (
 )
 RELEASE_PAYLOADS = (
     ("artifacts/GM2Godot-linux/GM2Godot-linux.zip", b"linux payload\n"),
-    ("artifacts/GM2Godot-macos/GM2Godot-macos.dmg", b"macOS DMG payload\n"),
-    ("artifacts/GM2Godot-macos/GM2Godot-macos.zip", b"macOS ZIP payload\n"),
+    ("artifacts/GM2Godot-macos-arm64/GM2Godot-macos-arm64.dmg", b"macOS arm64 DMG payload\n"),
+    ("artifacts/GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip", b"macOS arm64 ZIP payload\n"),
+    ("artifacts/GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.dmg", b"macOS x86_64 DMG payload\n"),
+    ("artifacts/GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.zip", b"macOS x86_64 ZIP payload\n"),
     ("artifacts/GM2Godot-windows/GM2Godot-windows.zip", b"windows payload\n"),
 )
-RELEASE_ARCHIVE_MEMBERS = {
+RELEASE_ARCHIVE_MEMBERS: dict[str, tuple[tuple[str, bytes], ...]] = {
     "GM2Godot-windows": (("GM2Godot-windows.zip", b"windows"),),
-    "GM2Godot-macos": (
-        ("GM2Godot-macos.dmg", b"macos-dmg"),
-        ("GM2Godot-macos.zip", b"macos-zip"),
+    "GM2Godot-macos-arm64": (
+        ("GM2Godot-macos-arm64.dmg", b"macos-arm64-dmg"),
+        ("GM2Godot-macos-arm64.zip", b"macos-arm64-zip"),
+    ),
+    "GM2Godot-macos-x86_64": (
+        ("GM2Godot-macos-x86_64.dmg", b"macos-x86_64-dmg"),
+        ("GM2Godot-macos-x86_64.zip", b"macos-x86_64-zip"),
     ),
     "GM2Godot-linux": (("GM2Godot-linux.zip", b"linux"),),
 }
+RELEASE_ARTIFACT_DOWNLOADS = (
+    ("Download verified Windows artifact archive", "GM2Godot-windows"),
+    ("Download verified Apple Silicon artifact archive", "GM2Godot-macos-arm64"),
+    ("Download verified Intel artifact archive", "GM2Godot-macos-x86_64"),
+    ("Download verified Linux artifact archive", "GM2Godot-linux"),
+)
 EXISTING_RELEASE_PAYLOAD_NAMES = (
     "GM2Godot-linux.zip",
-    "GM2Godot-macos.dmg",
-    "GM2Godot-macos.zip",
+    "GM2Godot-macos-arm64.dmg",
+    "GM2Godot-macos-arm64.zip",
+    "GM2Godot-macos-x86_64.dmg",
+    "GM2Godot-macos-x86_64.zip",
     "GM2Godot-windows.zip",
 )
 EXISTING_RELEASE_ASSET_NAMES = EXISTING_RELEASE_PAYLOAD_NAMES + ("SHA256SUMS",)
 EXISTING_RELEASE_BASE_PAYLOADS = {
     "GM2Godot-linux.zip": b"existing Linux payload\n",
-    "GM2Godot-macos.dmg": b"existing macOS DMG payload\n",
-    "GM2Godot-macos.zip": b"existing macOS ZIP payload\n",
+    "GM2Godot-macos-arm64.dmg": b"existing macOS arm64 DMG payload\n",
+    "GM2Godot-macos-arm64.zip": b"existing macOS arm64 ZIP payload\n",
+    "GM2Godot-macos-x86_64.dmg": b"existing macOS x86_64 DMG payload\n",
+    "GM2Godot-macos-x86_64.zip": b"existing macOS x86_64 ZIP payload\n",
     "GM2Godot-windows.zip": b"existing Windows payload\n",
 }
 LINUX_CONSTRAINT = "constraints/requirements-linux-py312.lock"
@@ -775,13 +791,29 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
     if any(position < 0 for position in positions) or positions != sorted(set(positions)):
         errors.append("native tests, three-form metadata, final GUI and uploads must be ordered")
     expected_publisher_guard = (
-        "    if: ${{ false && !cancelled() && github.event_name != 'pull_request' && "
+        "    if: ${{ !cancelled() && github.event_name != 'pull_request' && "
         "github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && "
         "needs.get-version.outputs.tag_exists == 'false' && "
         "needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}"
     )
     if re.findall(r"(?m)^    if:.*$", publisher) != [expected_publisher_guard]:
-        errors.append("the unchanged publisher guards must retain the literal false barrier")
+        errors.append("publication requires main, successful native builds/preflight and an absent tag")
+    download_action = (
+        "        uses: actions/download-artifact@"
+        "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n"
+    )
+    if publisher.count(download_action) != 4:
+        errors.append("publication must download exactly four named payload archives")
+    for step_name, artifact_name in RELEASE_ARTIFACT_DOWNLOADS:
+        expected_step = (
+            f"      - name: {step_name}\n" + download_action + "        with:\n"
+            f"          name: {artifact_name}\n"
+            f"          path: raw-artifacts/{artifact_name}\n"
+            "          skip-decompress: true\n"
+            "          digest-mismatch: error\n\n"
+        )
+        if _workflow_step_sections(publisher, step_name) != (expected_step,):
+            errors.append(f"{step_name} must bind only its original verified payload archive")
     return tuple(errors)
 
 
@@ -1440,7 +1472,7 @@ def _existing_release_fixture() -> tuple[
         "tag_name": f"{EXISTING_RELEASE_TEST_TAG}0",
     }
     release_pages = [[prefix_release], [exact_release]]
-    asset_pages = [[assets[2], assets[0]], [assets[4], assets[1], assets[3]]]
+    asset_pages = [[assets[2], assets[0], assets[5]], [assets[6], assets[1], assets[4], assets[3]]]
     tag_response: dict[str, object] = {
         "object": {
             "sha": "9" * 40,
@@ -2790,8 +2822,9 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertIn("skip-decompress: true", content)
         self.assertIn("digest-mismatch: error", content)
         self.assertIn("Extract verified artifact archives", content)
+        self.assertEqual(_macos_release_build_policy_errors(content), ())
         self.assertIn(
-            "for name in GM2Godot-windows GM2Godot-macos GM2Godot-linux",
+            "for name in GM2Godot-windows GM2Godot-macos-arm64 GM2Godot-macos-x86_64 GM2Godot-linux",
             content,
         )
         self.assertIn('archive="raw-artifacts/$name/$name.zip"', content)
@@ -2841,6 +2874,46 @@ class TestCIWorkflows(unittest.TestCase):
                     with self.subTest(artifact=artifact_name, member=member_name):
                         extracted = root / "artifacts" / artifact_name / member_name
                         self.assertEqual(extracted.read_bytes(), payload)
+
+    def test_release_rejects_incomplete_or_cross_architecture_macos_pairs(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Extract verified artifact archives")
+        for architecture, opposite in (("arm64", "x86_64"), ("x86_64", "arm64")):
+            artifact_name = f"GM2Godot-macos-{architecture}"
+            expected_members = RELEASE_ARCHIVE_MEMBERS[artifact_name]
+            cases = {
+                "missing ZIP": (expected_members[0],),
+                "missing DMG": (expected_members[1],),
+                "duplicate ZIP": (*expected_members, expected_members[1]),
+                "opposite pair": RELEASE_ARCHIVE_MEMBERS[f"GM2Godot-macos-{opposite}"],
+                "cross-pair": (
+                    expected_members[0],
+                    (f"GM2Godot-macos-{opposite}.zip", b"wrong architecture ZIP"),
+                ),
+                "generic pair": (
+                    ("GM2Godot-macos.dmg", b"legacy DMG"),
+                    ("GM2Godot-macos.zip", b"legacy ZIP"),
+                ),
+                "embedded proof": (*expected_members, ("release-native-tests.json", b"{}")),
+            }
+            for case, members in cases.items():
+                with self.subTest(architecture=architecture, case=case):
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = Path(directory)
+                        for name, original_members in RELEASE_ARCHIVE_MEMBERS.items():
+                            _write_raw_artifact_archive(
+                                root, name, members if name == artifact_name else original_members,
+                            )
+                        environment, unzip_log = _fake_unzip_environment(root)
+                        result = subprocess.run(
+                            ["bash", "-c", script], cwd=root, check=False,
+                            capture_output=True, text=True, env=environment,
+                        )
+                        self.assertNotEqual(result.returncode, 0, result.stderr)
+                        self.assertIn("Unexpected archive members", result.stderr)
+                        self.assertIn(f"raw-artifacts/{artifact_name}/{artifact_name}.zip", result.stderr)
+                        self.assertFalse(unzip_log.exists())
+                        self.assertFalse((root / "artifacts").exists())
 
     def test_release_rejects_existing_extraction_roots_before_unzip(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
@@ -3016,7 +3089,9 @@ class TestCIWorkflows(unittest.TestCase):
                         if case_name == "posix-absolute"
                         else invalid_members
                     )
-                    for artifact_name in ("GM2Godot-windows", "GM2Godot-macos"):
+                    for artifact_name in (
+                        "GM2Godot-windows", "GM2Godot-macos-arm64", "GM2Godot-macos-x86_64",
+                    ):
                         _write_raw_artifact_archive(
                             root,
                             artifact_name,
@@ -3160,7 +3235,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
             "Missing, non-regular, symlinked, or empty verified archive: "
-            "raw-artifacts/GM2Godot-macos/GM2Godot-macos.zip",
+            "raw-artifacts/GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip",
             result.stderr,
         )
 
@@ -3233,8 +3308,10 @@ class TestCIWorkflows(unittest.TestCase):
         )
         for relative_path in (
             "GM2Godot-windows/GM2Godot-windows.zip",
-            "GM2Godot-macos/GM2Godot-macos.zip",
-            "GM2Godot-macos/GM2Godot-macos.dmg",
+            "GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip",
+            "GM2Godot-macos-arm64/GM2Godot-macos-arm64.dmg",
+            "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.zip",
+            "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.dmg",
             "GM2Godot-linux/GM2Godot-linux.zip",
             "SHA256SUMS",
         ):
@@ -3251,10 +3328,9 @@ class TestCIWorkflows(unittest.TestCase):
             for invalid_kind in ("missing", "empty")
         ]
         invalid_cases.extend(
-            (
-                (Path(RELEASE_PAYLOADS[1][0]), "directory"),
-                (Path(RELEASE_PAYLOADS[1][0]), "symlink"),
-            )
+            (Path(relative_path), invalid_kind)
+            for relative_path, _ in RELEASE_PAYLOADS
+            for invalid_kind in ("directory", "symlink")
         )
 
         for invalid_path, invalid_kind in invalid_cases:
@@ -3813,7 +3889,7 @@ class TestCIWorkflows(unittest.TestCase):
             ]
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(calls), 11)
+        self.assertEqual(len(calls), 13)
         self.assertTrue(all(call[:3] == ["api", "--method", "GET"] for call in calls))
         self.assertEqual(
             [call[-1] for call in calls],
@@ -3823,7 +3899,7 @@ class TestCIWorkflows(unittest.TestCase):
                 f"repos/Infiland/GM2Godot/git/ref/tags/{EXISTING_RELEASE_TEST_TAG}",
                 *[
                     f"repos/Infiland/GM2Godot/releases/assets/{740_000 + index}"
-                    for index in range(1, 6)
+                    for index in range(1, 8)
                 ],
                 "repos/Infiland/GM2Godot/releases?per_page=100",
                 "repos/Infiland/GM2Godot/releases/740/assets?per_page=100",
@@ -3851,7 +3927,7 @@ class TestCIWorkflows(unittest.TestCase):
             download_endpoints,
             [
                 f"repos/Infiland/GM2Godot/releases/assets/{740_000 + index}"
-                for index in range(1, 6)
+                for index in range(1, 8)
             ],
         )
         asset_list_endpoints = [
@@ -3987,6 +4063,18 @@ class TestCIWorkflows(unittest.TestCase):
             [asset for asset in base_assets if asset.get("name") != "SHA256SUMS"],
             "invalid asset inventory",
         )
+        for architecture in ("arm64", "x86_64"):
+            for extension in ("zip", "dmg"):
+                selected_name = f"GM2Godot-macos-{architecture}.{extension}"
+                cases[f"missing {selected_name}"] = (
+                    [asset for asset in base_assets if asset.get("name") != selected_name],
+                    "invalid asset inventory",
+                )
+        generic_assets = copy.deepcopy(base_assets)
+        for asset in generic_assets:
+            if asset.get("name") in {"GM2Godot-macos-arm64.zip", "GM2Godot-macos-arm64.dmg"}:
+                asset["name"] = str(asset["name"]).replace("-arm64", "")
+        cases["legacy generic Mac pair"] = (generic_assets, "invalid asset inventory")
         extra_assets = copy.deepcopy(base_assets)
         extra_assets.append(
             {
@@ -4263,7 +4351,7 @@ class TestCIWorkflows(unittest.TestCase):
         release_pages, asset_pages, tag_response, payloads_by_id = (
             _existing_release_fixture()
         )
-        manifest_id = 740_005
+        manifest_id = 740_007
         canonical = payloads_by_id[manifest_id]
         lines = canonical.splitlines(keepends=True)
         variants = {
@@ -4278,6 +4366,10 @@ class TestCIWorkflows(unittest.TestCase):
             + b"  GM2Godot-linux.dmg\n",
             "star marker": canonical.replace(b"  GM2Godot", b" *GM2Godot", 1),
             "wrong payload digest": b"0" * 64 + lines[0][64:] + b"".join(lines[1:]),
+            "missing Intel pair": b"".join(lines[:3] + lines[5:]),
+            "legacy generic Mac pair": canonical.replace(b"macos-arm64.", b"macos."),
+            "duplicate architecture pair": canonical.replace(b"macos-x86_64.", b"macos-arm64."),
+            "wrong Intel ZIP digest": b"".join(lines[:4]) + b"0" * 64 + lines[4][64:] + lines[5],
         }
 
         for case, manifest in variants.items():
@@ -4561,7 +4653,7 @@ class TestCIWorkflows(unittest.TestCase):
             "needs.release-state-preflight.result == 'success') }}"
         )
         release_guard = (
-            "${{ false && !cancelled() && github.event_name != 'pull_request' && "
+            "${{ !cancelled() && github.event_name != 'pull_request' && "
             "github.ref == 'refs/heads/main' && "
             "needs.get-version.result == 'success' && "
             f"{absence_guard} && "
@@ -7415,9 +7507,13 @@ class TestCIWorkflows(unittest.TestCase):
                 '--zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip"',
                 '--zip "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app"',
             ),
-            "publisher enabled": release.replace("${{ false && !cancelled()", "${{ !cancelled()", 1),
+            "publisher guard bypassed": release.replace(
+                "    if: ${{ !cancelled() && github.event_name != 'pull_request'",
+                "    if: ${{ always() && github.event_name != 'pull_request'", 1
+            ),
             "publisher condition weakened": release.replace(
-                "false && !cancelled()", "false || !cancelled()", 1
+                "github.ref == 'refs/heads/main' && needs.get-version.result",
+                "github.ref == 'refs/heads/main' || needs.get-version.result", 1
             ),
         }
         for name in (
@@ -7436,6 +7532,20 @@ class TestCIWorkflows(unittest.TestCase):
             mutations[f"non-fatal {name}"] = release.replace(
                 step, step.replace(MACOS_RELEASE_GUARD, MACOS_RELEASE_GUARD + "        continue-on-error: true\n"), 1
             )
+        for name, artifact_name in RELEASE_ARTIFACT_DOWNLOADS:
+            step = _workflow_step_sections(release, name)[0]
+            mutations[f"missing {name}"] = release.replace(step, "", 1)
+            mutations[f"duplicate {name}"] = release.replace(step, step * 2, 1)
+            for old, new in (
+                (f"          name: {artifact_name}\n", "          name: GM2Godot-macos\n"),
+                (f"          name: {artifact_name}\n", "          pattern: GM2Godot-*\n"),
+                (f"          path: raw-artifacts/{artifact_name}\n", "          path: raw-artifacts\n"),
+                ("          digest-mismatch: error\n", "          digest-mismatch: warn\n"),
+                ("          skip-decompress: true\n", "          skip-decompress: false\n"),
+            ):
+                mutations[f"{name}: {new.strip()}"] = release.replace(
+                    step, step.replace(old, new, 1), 1
+                )
         for name in (
             MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP,
             "Verify macOS bundle metadata", MACOS_GUI_STEP,

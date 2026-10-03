@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.17 - 2026-10-03
+
+- Publish separate native arm64 and x86_64 macOS ZIP/DMG pairs alongside Linux and Windows archives; require six canonical checksum rows and seven verified release assets.
+- Select the matching canonical Mac ZIP in the updater, with a release-page fallback for unknown machines or missing, ambiguous, or invalid matches.
+
 ## 0.8.16 - 2026-10-03
 
 - Build separate native arm64 and x86_64 macOS app, ZIP and DMG artifacts on matching runners and Python interpreters.

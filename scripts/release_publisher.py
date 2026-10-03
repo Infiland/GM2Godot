@@ -1003,6 +1003,8 @@ class ReceiptStore:
         }
 
     def save(self) -> None:
+        if sys.platform == "win32":
+            raise OSError("Release publishing requires POSIX file permissions.")
         destination = self._config.receipt_path
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
@@ -1125,9 +1127,14 @@ class ReleasePublisher:
         root = self.config.asset_root
         specifications = (
             (root / "GM2Godot-windows/GM2Godot-windows.zip", "application/zip"),
-            (root / "GM2Godot-macos/GM2Godot-macos.zip", "application/zip"),
+            (root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip", "application/zip"),
             (
-                root / "GM2Godot-macos/GM2Godot-macos.dmg",
+                root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.dmg",
+                "application/x-apple-diskimage",
+            ),
+            (root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.zip", "application/zip"),
+            (
+                root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.dmg",
                 "application/x-apple-diskimage",
             ),
             (root / "GM2Godot-linux/GM2Godot-linux.zip", "application/zip"),
@@ -1146,8 +1153,10 @@ class ReleasePublisher:
         manifest = by_name["SHA256SUMS"]
         payload_order = (
             "GM2Godot-linux.zip",
-            "GM2Godot-macos.dmg",
-            "GM2Godot-macos.zip",
+            "GM2Godot-macos-arm64.dmg",
+            "GM2Godot-macos-arm64.zip",
+            "GM2Godot-macos-x86_64.dmg",
+            "GM2Godot-macos-x86_64.zip",
             "GM2Godot-windows.zip",
         )
         expected = "".join(f"{by_name[name].sha256}  {name}\n" for name in payload_order).encode("ascii")
@@ -1163,7 +1172,7 @@ class ReleasePublisher:
         if _fingerprint(final) != _expected_fingerprint(manifest):
             raise ValueError("SHA256SUMS changed while it was validated.")
         if actual != expected:
-            raise ValueError("SHA256SUMS is not the exact canonical four-line manifest for the sealed payloads.")
+            raise ValueError("SHA256SUMS is not the exact canonical six-line manifest for the sealed payloads.")
 
     def _verify_main_target(self) -> None:
         phase = "verify-main-target"

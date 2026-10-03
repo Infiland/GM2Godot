@@ -58,14 +58,18 @@ def _publisher_environment(
 def _write_release_assets(root: Path) -> None:
     payloads = {
         "GM2Godot-windows.zip": b"PK\x03\x04GM2Godot Windows recovery test\n",
-        "GM2Godot-macos.zip": b"PK\x03\x04GM2Godot macOS recovery test\n",
-        "GM2Godot-macos.dmg": b"kolyGM2Godot macOS recovery test\n",
+        "GM2Godot-macos-arm64.zip": b"PK\x03\x04GM2Godot macOS arm64 recovery test\n",
+        "GM2Godot-macos-arm64.dmg": b"kolyGM2Godot macOS arm64 recovery test\n",
+        "GM2Godot-macos-x86_64.zip": b"PK\x03\x04GM2Godot macOS x86_64 recovery test\n",
+        "GM2Godot-macos-x86_64.dmg": b"kolyGM2Godot macOS x86_64 recovery test\n",
         "GM2Godot-linux.zip": b"PK\x03\x04GM2Godot Linux recovery test\n",
     }
     locations = {
         "GM2Godot-windows.zip": root / "GM2Godot-windows/GM2Godot-windows.zip",
-        "GM2Godot-macos.zip": root / "GM2Godot-macos/GM2Godot-macos.zip",
-        "GM2Godot-macos.dmg": root / "GM2Godot-macos/GM2Godot-macos.dmg",
+        "GM2Godot-macos-arm64.zip": root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.zip",
+        "GM2Godot-macos-arm64.dmg": root / "GM2Godot-macos-arm64/GM2Godot-macos-arm64.dmg",
+        "GM2Godot-macos-x86_64.zip": root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.zip",
+        "GM2Godot-macos-x86_64.dmg": root / "GM2Godot-macos-x86_64/GM2Godot-macos-x86_64.dmg",
         "GM2Godot-linux.zip": root / "GM2Godot-linux/GM2Godot-linux.zip",
     }
     for name, destination in locations.items():
@@ -114,6 +118,27 @@ class SnapshottingTransport(ScriptedTransport):
 
 
 class TestPublisherConfiguration(unittest.TestCase):
+    def test_windows_publisher_fails_before_receipt_or_api_mutations(self) -> None:
+        workspace = Path.cwd()
+        with tempfile.TemporaryDirectory(prefix=".publisher-platform-", dir=workspace) as directory:
+            root = Path(directory)
+            destination = root / "uncreated-receipts" / "publisher.json"
+            environment = _publisher_environment(receipt_path=str(destination.relative_to(workspace)))
+            stderr = StringIO()
+            with (
+                patch.object(publisher_module.sys, "platform", "win32"),
+                patch.object(publisher_module.tempfile, "mkstemp", side_effect=AssertionError("receipt created")) as mkstemp,
+                patch.object(publisher_module, "HttpsTransport", side_effect=AssertionError("API created")) as transport,
+                redirect_stderr(stderr),
+            ):
+                result = publisher_module.main(environment)
+            self.assertEqual(result, 1)
+            self.assertIn("Release publishing requires POSIX file permissions", stderr.getvalue())
+            mkstemp.assert_not_called()
+            transport.assert_not_called()
+            self.assertFalse(destination.parent.exists())
+            self.assertEqual(list(root.iterdir()), [])
+
     def test_accepts_only_main_branch_release_events_and_exact_sha(self) -> None:
         for event_name in ("push", "workflow_dispatch"):
             with self.subTest(accepted_event=event_name):
@@ -243,7 +268,9 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
             27: f"upload-{ASSET_ORDER[2]}",
             33: f"upload-{ASSET_ORDER[3]}",
             39: f"upload-{ASSET_ORDER[4]}",
-            45: "publish-owned-release",
+            45: f"upload-{ASSET_ORDER[5]}",
+            51: f"upload-{ASSET_ORDER[6]}",
+            57: "publish-owned-release",
         }
         self.assertEqual(
             sorted(transport.pre_mutation_receipts),
@@ -329,7 +356,7 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
         )
 
         failure = cast(dict[str, object], receipt["failure"])
-        self.assertEqual(failure["phase"], "upload-GM2Godot-macos.dmg")
+        self.assertEqual(failure["phase"], "upload-GM2Godot-macos-arm64.dmg")
         self.assertEqual(failure["status"], 500)
         self.assertEqual(failure["request_id"], "request-027")
         self.assertIs(failure["ambiguous"], True)
@@ -419,7 +446,7 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
         self,
     ) -> None:
         receipt, stderr, transport = self._run_main_with_fault(
-            45,
+            57,
             None,
             response_loss=True,
         )
@@ -442,7 +469,7 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
         intents = cast(list[dict[str, object]], receipt["mutation_intents"])
         self.assertEqual(
             [intent["state"] for intent in intents],
-            ["accepted"] * 7 + ["pending"],
+            ["accepted"] * 9 + ["pending"],
         )
         pending = intents[-1]
         self.assertEqual(pending["phase"], "publish-owned-release")
@@ -452,7 +479,7 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
             f"/repos/{REPOSITORY}/releases/{OWNED_RELEASE_ID}",
         )
 
-        publish_snapshot = transport.pre_mutation_receipts[45]
+        publish_snapshot = transport.pre_mutation_receipts[57]
         snapshot_assets = cast(
             list[dict[str, object]],
             publish_snapshot["asset_receipts"],
@@ -463,9 +490,90 @@ class TestPublisherRecoveryReceipt(unittest.TestCase):
         )
         self._assert_pending_snapshots_match_requests(
             transport,
-            [8, 9, 15, 21, 27, 33, 39, 45],
+            [8, 9, 15, 21, 27, 33, 39, 45, 51, 57],
         )
         self.assertIn(f"releases/{OWNED_RELEASE_ID}", stderr)
+
+    def test_intel_upload_failure_records_exact_pending_asset_and_owned_prefix(self) -> None:
+        for ordinal, asset_name, prefix_count, expected_ordinals in (
+            (33, "GM2Godot-macos-x86_64.zip", 3, [8, 9, 15, 21, 27, 33]),
+            (39, "GM2Godot-macos-x86_64.dmg", 4, [8, 9, 15, 21, 27, 33, 39]),
+        ):
+            with self.subTest(asset=asset_name):
+                receipt, stderr, transport = self._run_main_with_fault(ordinal, "upload-server-error")
+                failure = cast(dict[str, object], receipt["failure"])
+                self.assertEqual(receipt["schema_version"], 1)
+                self.assertEqual(receipt["stage"], "failed")
+                self.assertEqual(failure["phase"], f"upload-{asset_name}")
+                self.assertEqual(failure["status"], 500)
+                self.assertIs(failure["ambiguous"], True)
+                self.assertEqual(failure["owned_release_id"], OWNED_RELEASE_ID)
+                self.assertEqual(failure["completed_asset_names"], list(ASSET_ORDER[:prefix_count]))
+                intents = cast(list[dict[str, object]], receipt["mutation_intents"])
+                self.assertEqual([item["state"] for item in intents], ["accepted"] * (prefix_count + 2) + ["pending"])
+                self.assertEqual(intents[-1]["asset"], asset_name)
+                self.assertEqual(intents[-1]["owned_release_id"], OWNED_RELEASE_ID)
+                self.assertNotIn("status", intents[-1])
+                self.assertEqual(len(transport.calls), ordinal)
+                self.assertFalse(transport.published)
+                self._assert_pending_snapshots_match_requests(transport, expected_ordinals)
+                self.assertIn(f"releases/{OWNED_RELEASE_ID}", stderr)
+                self.assertIn("do not rerun, adopt, delete, or roll back", stderr)
+
+    def test_intel_upload_control_exceptions_leave_persisted_pending_intent(self) -> None:
+        workspace = Path.cwd()
+        for ordinal, asset_name, prefix_count, expected_ordinals in (
+            (33, "GM2Godot-macos-x86_64.zip", 3, [8, 9, 15, 21, 27, 33]),
+            (39, "GM2Godot-macos-x86_64.dmg", 4, [8, 9, 15, 21, 27, 33, 39]),
+        ):
+            for control in (KeyboardInterrupt("interrupted upload"), SystemExit(0), SystemExit(2)):
+                with self.subTest(asset=asset_name, control=type(control).__name__, code=str(control)), tempfile.TemporaryDirectory(
+                    prefix=".release-publisher-control-", dir=workspace
+                ) as temporary_directory:
+                    temporary_root = Path(temporary_directory)
+                    relative_root = temporary_root.relative_to(workspace)
+                    receipt_path = temporary_root / "receipt/publisher.json"
+                    _write_release_assets(temporary_root / "artifacts")
+                    transport = SnapshottingTransport(receipt_path, {})
+                    original_request = transport.request
+
+                    def controlled_request(
+                        method: str,
+                        url: str,
+                        headers: Mapping[str, str],
+                        *,
+                        json_body: bytes | None = None,
+                        file_body: publisher_module.FileSeal | None = None,
+                    ) -> publisher_module.TransportResult:
+                        result = original_request(method, url, headers, json_body=json_body, file_body=file_body)
+                        if len(transport.calls) == ordinal:
+                            raise control
+                        return result
+
+                    environment = _publisher_environment(
+                        receipt_path=str(relative_root / "receipt/publisher.json"),
+                        asset_root=str(relative_root / "artifacts"),
+                    )
+                    with (
+                        patch.object(publisher_module, "HttpsTransport", return_value=transport),
+                        patch.object(transport, "request", side_effect=controlled_request),
+                        self.assertRaises(type(control)) as caught,
+                    ):
+                        publisher_module.main(environment)
+                    self.assertIs(caught.exception, control)
+                    receipt = cast(dict[str, object], json.loads(receipt_path.read_text(encoding="utf-8")))
+                    self.assertEqual(receipt["schema_version"], 1)
+                    self.assertEqual(receipt["stage"], f"upload-{asset_name}")
+                    self.assertIsNone(receipt["failure"])
+                    assets = cast(list[dict[str, object]], receipt["asset_receipts"])
+                    self.assertEqual([item["name"] for item in assets], list(ASSET_ORDER[:prefix_count]))
+                    intents = cast(list[dict[str, object]], receipt["mutation_intents"])
+                    self.assertEqual([item["state"] for item in intents], ["accepted"] * (prefix_count + 2) + ["pending"])
+                    self.assertEqual(intents[-1]["asset"], asset_name)
+                    self.assertEqual(len(transport.calls), ordinal)
+                    self.assertEqual(len(transport.uploaded), prefix_count + 1)
+                    self.assertFalse(transport.published)
+                    self._assert_pending_snapshots_match_requests(transport, expected_ordinals)
 
     def test_foreign_collision_diagnostics_name_owned_and_foreign_ids(self) -> None:
         receipt, stderr, _ = self._run_main_with_fault(

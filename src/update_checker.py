@@ -9,6 +9,7 @@ import requests
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Optional, cast
+from urllib.parse import urlsplit
 
 from src.version import get_version
 
@@ -77,6 +78,33 @@ class UpdateChecker:
     ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
         """Find the download URL for the current platform."""
         system = platform.system().lower()
+        if system == "darwin":
+            architecture = {
+                "arm64": "arm64",
+                "aarch64": "arm64",
+                "x86_64": "x86_64",
+                "amd64": "x86_64",
+            }.get(platform.machine().strip().lower())
+            if architecture is None:
+                return None, None, None, None
+            expected_name = f"GM2Godot-macos-{architecture}.zip"
+            matching_assets = [asset for asset in assets if asset.get("name") == expected_name]
+            if len(matching_assets) != 1:
+                return None, None, None, None
+            download_url = matching_assets[0].get("browser_download_url")
+            if not isinstance(download_url, str) or any(
+                character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+                for character in download_url
+            ):
+                return None, None, None, None
+            try:
+                parsed_url = urlsplit(download_url)
+                _ = parsed_url.port
+                if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname:
+                    return None, None, None, None
+            except ValueError:
+                return None, None, None, None
+            assets = matching_assets
         platform_keywords = {
             "windows": ["windows", "win", ".exe"],
             "darwin": ["macos", "mac", "darwin"],

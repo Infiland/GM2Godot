@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.8.16 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.17 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -47,11 +47,13 @@ Three separate platform questions are easy to confuse:
 
 | Question | Current contract |
 | --- | --- |
-| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
+| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. The `0.8.17` release contract has separate native macOS 15.0+ arm64 and x86_64 ZIP/DMG pairs. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
 | **What does `--target-platform` select?** | The CLI accepts `windows`, `macos`, or `linux`. This is a **GameMaker source/configuration filter** used for target-specific project options, conditional GML and macros, and capability-report context. It does not filter the project's resource inventory. It defaults from the conversion host. |
 | **Where can the generated game be exported?** | The generated project targets Godot 4.7.2, but GM2Godot does not certify a complete export for a platform. Godot export templates and presets, signing, permissions, SDKs, native extensions, store services, and target-device tests remain separate work. |
 
 Selecting `--target-platform windows`, for example, does **not** create or validate a production Windows export and does not make Steam, Xbox, native DLL, or other platform APIs available. Use the generated platform capability report and configure the required Godot plugins and export settings explicitly.
+
+For the Mac host, choose the matching core asset on [Installation](Installation). The updater recognizes `arm64`/`aarch64` and `x86_64`/`amd64`, requires exactly one canonical ZIP for that architecture, and falls back to the release page for unknown machines or an unusable match. These core Mac builds do not promise an optional Deep component build for Intel. Developer ID signing and notarization remain pending in issue #737; native GUI validation is not Gatekeeper approval.
 
 ## Compatibility baseline
 

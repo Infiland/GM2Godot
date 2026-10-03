@@ -279,7 +279,13 @@ class TestDocumentationHealth(unittest.TestCase):
                 self.assertIn(runtime_package, linux_release_installation)
         self.assertIn("only validated packaged-Linux baseline", installation)
         self.assertIn("not a signature or proof of publisher identity", installation)
-        self.assertIn("exactly five unique, non-empty assets", release_maintenance)
+        self.assertIn("exactly seven unique, non-empty assets", release_maintenance)
+        for architecture in ("arm64", "x86_64"):
+            for extension in ("zip", "dmg"):
+                filename = f"GM2Godot-macos-{architecture}.{extension}"
+                with self.subTest(mac_download=filename):
+                    self.assertIn(filename, installation)
+                    self.assertIn(filename, release_maintenance)
         self.assertIn(
             "after the `sha256:` prefix in GitHub's `assets[].digest` field",
             release_maintenance,

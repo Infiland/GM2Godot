@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.18 - 2026-10-03
+
+- Reconcile contributor and installation guidance with the published native arm64 and Intel Mac downloads, and retain each release audit as version-specific evidence.
+
 ## 0.8.17 - 2026-10-03
 
 - Publish separate native arm64 and x86_64 macOS ZIP/DMG pairs alongside Linux and Windows archives; require six canonical checksum rows and seven verified release assets.

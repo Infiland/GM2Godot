@@ -1,8 +1,8 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.17 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.18 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-09-14
+> **Last reviewed:** 2026-10-03
 
 This page is the short contributor route map. The repository's [CONTRIBUTING.md](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md) and `AGENTS.md` remain authoritative for development rules.
 
@@ -69,7 +69,7 @@ Native arm64 and Intel generation proves that both Mac version graphs reproduce 
 | macOS x64 (Intel) | `constraints/requirements-macos-x64-py312.wheels.lock` |
 | Windows x64 | `constraints/requirements-windows-x64-py312.wheels.lock` |
 
-The [native wheel workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/native-wheel-proposals.yml) requires the committed companions, two independent native wheel observations, and two equal clean offline complete-graph installs. Its aggregate validator binds four original archives to the exact source, run, and attempt. The [repository contributor guide](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md#native-wheel-proposals) provides complete hash-enforced development install commands using `--require-hashes`, a fresh wheel directory, and an offline install. Ordinary source, Tests, and Release install commands remain version constrained. Intel source support does not add an Intel packaged release.
+The [native wheel workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/native-wheel-proposals.yml) requires the committed companions, two independent native wheel observations, and two equal clean offline complete-graph installs. Its aggregate validator binds four original archives to the exact source, run, and attempt. The [repository contributor guide](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md#native-wheel-proposals) provides complete hash-enforced development install commands using `--require-hashes`, a fresh wheel directory, and an offline install. Ordinary source, Tests, and Release install commands remain version constrained. Published releases starting with 0.8.17 provide separate native arm64 and x86_64 Mac ZIP/DMG pairs. Select the download matching the host architecture; source dependency proofs and packaged-app validation remain separate checks.
 
 ## Choose the right extension point
 

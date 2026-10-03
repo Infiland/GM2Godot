@@ -1,8 +1,8 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.8.22 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.23 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-10-03
+> **Last reviewed:** 2026-10-04
 
 This guide covers a first conversion through either the desktop interface or the source CLI. GM2Godot converts source projects, so select the GameMaker project root that contains the `.yyp` file—not an exported or compiled game.
 

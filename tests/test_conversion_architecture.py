@@ -16,6 +16,7 @@ from unittest.mock import mock_open, patch
 from src.conversion import resource_models
 from src.conversion.font_metadata import GameMakerFontMetadata
 from src.conversion.sound_metadata import GameMakerSoundMetadata
+from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
 from src.conversion.conversion_plan import (
     build_conversion_plan,
     group_conversion_plan,
@@ -43,6 +44,7 @@ from src.conversion.resource_models import (
     PathModel,
     ResourceModel,
     SoundModel,
+    TileSetModel,
     parse_gamemaker_resource_models,
 )
 
@@ -1376,6 +1378,386 @@ class TestSoundResourceModelBoundary(unittest.TestCase):
         self.assertIn('"present": false', json.dumps(reflected))
         with self.assertRaises(FrozenInstanceError):
             setattr(plain, "sound_file", "changed.wav")
+
+
+class TestTilesetResourceModelBoundary(unittest.TestCase):
+    @staticmethod
+    def _write_project(project: Path, names: tuple[str, ...] = ("tileset_test",)) -> Path:
+        source = project / "TilesetBoundary.yyp"
+        source.write_text(json.dumps({
+            "%Name": "TilesetBoundary", "resourceType": "GMProject",
+            "resources": [
+                {"id": {"name": name, "path": f"tilesets/{name}/{name}.yy"}, "resourceType": "GMTileSet"}
+                for name in names
+            ],
+        }), encoding="utf-8")
+        return source
+
+    @staticmethod
+    def _write_tileset(project: Path, data: JsonObject, name: str = "tileset_test") -> Path:
+        source = project / "tilesets" / name / f"{name}.yy"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(json.dumps(data), encoding="utf-8")
+        return source
+
+    def test_resource_matrix_tileset_uses_separate_identical_decoder_without_outputs(self) -> None:
+        self.assertIs(resource_models.decode_gamemaker_tileset_json, decode_gamemaker_json)
+        documents: list[GameMakerJsonDocument] = []
+
+        def track_decode(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            document = decode_gamemaker_json(source, source_path=source_path)
+            documents.append(document)
+            return document
+
+        with patch("src.conversion.resource_models.decode_gamemaker_tileset_json", side_effect=track_decode), ExitStack() as stack:
+            unrelated_decoders = [
+                stack.enter_context(patch(f"src.conversion.resource_models.{name}", wraps=decode_gamemaker_json))
+                for name in ("decode_gamemaker_json", "decode_gamemaker_font_json", "decode_gamemaker_sound_json")
+            ]
+            models = parse_gamemaker_resource_models(RESOURCE_MATRIX_PATH)
+        self.assertEqual([decoder.call_count for decoder in unrelated_decoders], [1, 1, 1])
+        self.assertEqual(len(documents), 1)
+        model = models.tilesets[0]
+        metadata = model.metadata
+        assert metadata is not None
+        self.assertEqual((model.name, model.sprite_name, model.tile_width, model.tile_height, model.subfolder),
+                         ("ts_ground", "spr_checker", 16, 16, ""))
+        self.assertEqual(model.yyp_path, "tilesets/ts_ground/ts_ground.yy")
+        self.assertEqual(metadata.source_context, model.yy_path)
+        self.assertIs(model.raw_data, metadata.raw_data)
+        self.assertIs(metadata.raw_data, documents[0].value)
+        self.assertEqual(models.diagnostics, ())
+        self.assertFalse((Path(RESOURCE_MATRIX_PATH) / "gm2godot").exists())
+
+    def test_captured_summary_is_authoritative_after_known_raw_keys_are_replaced(self) -> None:
+        raw: JsonObject = {"spriteId": {"name": "captured", "path": None}, "tileWidth": True, "tileHeight": -7,
+                           "parent": {"path": "folders/Tile Sets/Captured.yy"}}
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_tileset(project, raw)
+            metadata = parse_gamemaker_tileset_metadata(raw, source_context=str(source))
+            raw.update({"spriteId": {"name": "replacement"}, "tileWidth": "99", "tileHeight": 8.5,
+                        "parent": {"path": "folders/Tile Sets/Replacement.yy"}})
+            document = GameMakerJsonDocument(str(source), "{}", raw)
+            with patch("src.conversion.resource_models.decode_gamemaker_tileset_json", return_value=document), patch(
+                "src.conversion.resource_models.parse_gamemaker_tileset_metadata", return_value=metadata,
+            ) as capture, ExitStack() as stack:
+                for name in ("_read_lenient_json_file", "_base_kwargs", "_subfolder_from_raw_data"):
+                    stack.enter_context(patch(f"src.conversion.resource_models.{name}", side_effect=AssertionError(name)))
+                stack.enter_context(patch("src.conversion.tileset_metadata.project_tileset_conversion_fields",
+                                          side_effect=AssertionError("converter projection")))
+                stack.enter_context(patch.object(GameMakerTilesetMetadata, "project_conversion_fields",
+                                                side_effect=AssertionError("class projection")))
+                model = parse_gamemaker_resource_models(directory).tilesets[0]
+        self.assertIs(model.metadata, metadata)
+        self.assertIs(model.raw_data, raw)
+        self.assertEqual((model.sprite_name, model.tile_width, model.tile_height, model.subfolder),
+                         ("captured", True, -7, "captured"))
+        self.assertIs(type(model.tile_width), bool)
+        capture.assert_called_once_with(raw, source_context=str(source))
+
+    def test_dimension_summaries_keep_native_int_types_and_default_other_json_kinds_to_zero(self) -> None:
+        cases: tuple[tuple[JsonObject, int, int], ...] = (
+            ({}, 0, 0), ({"tileWidth": None, "tileHeight": None}, 0, 0),
+            ({"tileWidth": True, "tileHeight": False}, True, False),
+            ({"tileWidth": 10 ** 400, "tileHeight": -10 ** 400}, 10 ** 400, -10 ** 400),
+            ({"tileWidth": -9, "tileHeight": 0}, -9, 0),
+            ({"tileWidth": "16", "tileHeight": "bad"}, 0, 0),
+            ({"tileWidth": [], "tileHeight": {}}, 0, 0),
+            ({"tileWidth": 16.0, "tileHeight": -0.0}, 0, 0),
+            ({"tileWidth": float("nan"), "tileHeight": float("inf")}, 0, 0),
+            ({"tileWidth": float("-inf"), "tileHeight": 1.25}, 0, 0),
+        )
+        for data, width, height in cases:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                self._write_tileset(project, data)
+                with patch.object(GameMakerTilesetMetadata, "project_conversion_fields",
+                                  side_effect=AssertionError("converter coercions")):
+                    models = parse_gamemaker_resource_models(directory)
+                model = models.tilesets[0]
+                assert model.metadata is not None
+                self.assertEqual((model.tile_width, model.tile_height), (width, height))
+                self.assertIs(type(model.tile_width), type(width))
+                self.assertIs(type(model.tile_height), type(height))
+                self.assertEqual((models.project.resource_count, models.diagnostics), (1, ()))
+                for key in ("tileWidth", "tileHeight"):
+                    if key in data:
+                        self.assertIs(type(model.metadata.raw_data[key]), type(data[key]))
+                input_width = data.get("tileWidth")
+                if isinstance(input_width, float) and math.isnan(input_width):
+                    raw_width = model.metadata.raw_data["tileWidth"]
+                    assert isinstance(raw_width, float)
+                    self.assertTrue(math.isnan(raw_width))
+
+    def test_sprite_name_summary_is_independent_of_path_authority_and_parent_shape(self) -> None:
+        cases: tuple[tuple[JsonObject, str | None], ...] = (
+            ({}, None), ({"spriteId": None}, None), ({"spriteId": "sprite"}, None),
+            ({"spriteId": {"name": ""}}, None), ({"spriteId": {"name": 3}}, None),
+            ({"spriteId": {"name": [], "path": "sprites/safe/safe.yy"}}, None),
+            ({"spriteId": {"name": " ", "path": None}}, " "),
+            ({"spriteId": {"name": "declared", "path": "../outside.yy"}}, "declared"),
+            ({"spriteId": {"name": "declared", "path": []}}, "declared"),
+            ({"spriteId": {"name": "declared"}, "parent": "folder"}, "declared"),
+            ({"spriteId": {"name": "declared"}, "parent": {"path": None}}, "declared"),
+            ({"spriteId": {"name": "declared"}, "parent": {"path": []}}, "declared"),
+        )
+        for data, name in cases:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                self._write_tileset(project, data)
+                with patch("src.conversion.tilesets.TileSetConverter._resolve_sprite_reference",
+                           side_effect=AssertionError("aggregate sprite resolution")):
+                    models = parse_gamemaker_resource_models(directory)
+                model = models.tilesets[0]
+                assert model.metadata is not None
+                self.assertEqual((model.sprite_name, model.metadata.sprite_name, model.subfolder), (name, name, ""))
+                self.assertEqual((model.metadata.parent_path, models.diagnostics), ("", ()))
+
+    def test_actual_trailing_comma_source_uses_shared_literal_rewrite_and_context(self) -> None:
+        text = '{"spriteId":{"name":"sprite",},"tileWidth":8,"parent":{"path":"folders/Tile Sets/UI.yy",},"extra":"comma, }",}'
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_tileset(project, {})
+            source.write_text(text, encoding="utf-8")
+            with patch("src.conversion.resource_models.decode_gamemaker_tileset_json", wraps=decode_gamemaker_json) as decoder:
+                models = parse_gamemaker_resource_models(directory)
+            decoder.assert_called_once_with(text, source_path=str(source))
+        model = models.tilesets[0]
+        self.assertEqual((model.sprite_name, model.tile_width, model.tile_height, model.subfolder), ("sprite", 8, 0, "ui"))
+        self.assertEqual(model.raw_data["extra"], "comma}")
+        self.assertEqual(models.diagnostics, ())
+
+    def test_nonobject_invalid_utf8_and_missing_sources_keep_warning_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project, ("first", "valid", "last"))
+            first = self._write_tileset(project, {}, "first")
+            first.write_bytes(b"\xff")
+            self._write_tileset(project, {"tileWidth": 6}, "valid")
+            last = self._write_tileset(project, {}, "last")
+            last.write_text("[]", encoding="utf-8")
+            models = parse_gamemaker_resource_models(directory)
+            self.assertEqual([model.name for model in models.tilesets], ["valid"])
+            self.assertEqual((models.tilesets[0].order, models.project.resource_count), (1, 3))
+            self.assertEqual(
+                [(d.severity, d.code, d.message, d.source_path, d.resource_name, d.resource_kind) for d in models.diagnostics],
+                [("warning", "GM2GD-RESOURCE-YY-MISSING", f"Could not parse GameMaker resource .yy: {p}", str(p), name, "tilesets")
+                 for p, name in ((first, "first"), (last, "last"))],
+            )
+            for root in ("null", '"tileset"', "true", "false", "42", "1.25", "{broken", "\ufeff{}"):
+                with self.subTest(root=root):
+                    first.write_text(root, encoding="utf-8")
+                    self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+            digit_limit = sys.get_int_max_str_digits()
+            if digit_limit:
+                first.write_text('{"unknown":' + "1" * (digit_limit + 1) + "}", encoding="utf-8")
+                self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+            first.unlink()
+            self.assertEqual(parse_gamemaker_resource_models(directory).diagnostics, models.diagnostics)
+
+    def test_acquisition_wide_catch_and_control_exception_identity_are_preserved(self) -> None:
+        handled: tuple[Exception, ...] = (
+            OSError("read"), TypeError("decode type"), ValueError("decode value"),
+            json.JSONDecodeError("malformed", "{", 1), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid"),
+        )
+        unhandled: tuple[BaseException, ...] = (
+            KeyError("key"), AttributeError("attribute"), OverflowError("overflow"), RecursionError("nesting"),
+            RuntimeError("runtime"), KeyboardInterrupt("stop"), SystemExit(7),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_tileset(project, {})
+            for stage in ("open", "read", "decode_gamemaker_tileset_json"):
+                for failure in handled + unhandled:
+                    with self.subTest(stage=stage, failure=type(failure).__name__), ExitStack() as stack:
+                        if stage == "read":
+                            opener = mock_open(read_data="{}")
+                            opener.return_value.read.side_effect = failure
+                            stack.enter_context(patch("src.conversion.resource_models.open", opener))
+                        else:
+                            stack.enter_context(patch(f"src.conversion.resource_models.{stage}", side_effect=failure))
+                        if failure in handled:
+                            models = parse_gamemaker_resource_models(directory)
+                            self.assertEqual(models.tilesets, ())
+                            self.assertEqual(len(models.diagnostics), 1)
+                            d = models.diagnostics[0]
+                            self.assertEqual((d.code, d.source_path, d.resource_name, d.resource_kind),
+                                             ("GM2GD-RESOURCE-YY-MISSING", str(source), "tileset_test", "tilesets"))
+                        else:
+                            with self.assertRaises(type(failure)) as raised:
+                                parse_gamemaker_resource_models(directory)
+                            self.assertIs(raised.exception, failure)
+
+    def test_capture_subfolder_and_constructor_failures_stay_outside_acquisition_catch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_tileset(project, {})
+            for owner in ("parse_gamemaker_tileset_metadata", "_tileset_subfolder", "TileSetModel"):
+                for failure in (OSError("capture"), TypeError("capture"), ValueError("capture"), KeyError("capture"),
+                                AttributeError("capture"), OverflowError("capture"), RecursionError("capture"),
+                                RuntimeError("capture"), KeyboardInterrupt("stop"), SystemExit(9)):
+                    with self.subTest(owner=owner, failure=type(failure).__name__), patch(
+                        f"src.conversion.resource_models.{owner}", side_effect=failure,
+                    ), self.assertRaises(type(failure)) as raised:
+                        parse_gamemaker_resource_models(directory)
+                    self.assertIs(raised.exception, failure)
+
+    def test_invalid_unknown_decoded_graphs_map_to_existing_warning(self) -> None:
+        unsupported: dict[str, object] = {"unknown": object()}
+        nonstring: dict[int, object] = {1: "key"}
+        cyclic: JsonArray = []
+        cyclic.append(cyclic)
+        for invalid in (unsupported, nonstring, {"unknown": cyclic}, {"unknown": b"bytes"}, {"unknown": (1, 2)}):
+            def decode_invalid(source: str, *, source_path: str) -> GameMakerJsonDocument:
+                with patch("src.conversion.gamemaker_json.json.loads", return_value=invalid):
+                    return decode_gamemaker_json(source, source_path=source_path)
+
+            with self.subTest(invalid_type=type(invalid).__name__), tempfile.TemporaryDirectory() as directory:
+                project = Path(directory)
+                self._write_project(project)
+                source = self._write_tileset(project, {})
+                with patch("src.conversion.resource_models.decode_gamemaker_tileset_json", side_effect=decode_invalid):
+                    models = parse_gamemaker_resource_models(directory)
+                self.assertEqual(models.tilesets, ())
+                self.assertEqual(len(models.diagnostics), 1)
+                self.assertEqual(models.diagnostics[0].message, f"Could not parse GameMaker resource .yy: {source}")
+
+    def test_deep_unknown_json_and_shared_children_retain_native_identity_without_outputs(self) -> None:
+        nested: JsonArray = []
+        cursor = nested
+        for _ in range(1600):
+            child: JsonArray = []
+            cursor.append(child)
+            cursor = child
+        reference: JsonObject = {"name": "deep", "path": None, "unknown": nested}
+        parent: JsonObject = {"path": "folders/Tile Sets/Deep.yy", "unknown": nested}
+        raw: JsonObject = {"first": 1, "spriteId": reference, "tileWidth": 10 ** 400,
+                           "parent": parent, "unknown": nested, "shared": nested, "last": 2}
+
+        def decode_deep(source: str, *, source_path: str) -> GameMakerJsonDocument:
+            with patch("src.conversion.gamemaker_json.json.loads", return_value=raw):
+                return decode_gamemaker_json(source, source_path=source_path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            self._write_tileset(project, {})
+            before = sorted(p.relative_to(project) for p in project.rglob("*"))
+            with patch("src.conversion.resource_models.decode_gamemaker_tileset_json", side_effect=decode_deep):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(sorted(p.relative_to(project) for p in project.rglob("*")), before)
+        model = models.tilesets[0]
+        assert model.metadata is not None
+        self.assertIs(model.raw_data, raw)
+        self.assertIs(model.metadata.raw_data, raw)
+        self.assertIs(model.raw_data["parent"], parent)
+        self.assertIs(model.raw_data["spriteId"], reference)
+        self.assertIs(model.raw_data["unknown"], nested)
+        self.assertIs(model.raw_data["shared"], nested)
+        self.assertEqual(tuple(model.raw_data), ("first", "spriteId", "tileWidth", "parent", "unknown", "shared", "last"))
+        self.assertEqual((model.sprite_name, model.tile_width, model.subfolder, models.diagnostics), ("deep", 10 ** 400, "deep", ()))
+
+    def test_source_is_acquired_once_after_containment_and_family_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            self._write_project(project)
+            source = self._write_tileset(project, {"tileWidth": 5})
+            with patch("src.conversion.resource_models.open", wraps=open) as source_open, patch(
+                "src.conversion.resource_models.decode_gamemaker_tileset_json", wraps=decode_gamemaker_json,
+            ) as decoder, patch("src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic reader")):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(models.tilesets[0].tile_width, 5)
+            source_open.assert_called_once_with(str(source), "r", encoding="utf-8")
+            decoder.assert_called_once_with(source.read_text(encoding="utf-8"), source_path=str(source))
+            yyp = project / "TilesetBoundary.yyp"
+            for declared in ("../outside.yy", "tilesets/../objects/other/other.yy"):
+                yyp.write_text(json.dumps({
+                    "%Name": "TilesetBoundary", "resourceType": "GMProject",
+                    "resources": [{"id": {"name": "tileset_test", "path": declared}, "resourceType": "GMTileSet"}],
+                }), encoding="utf-8")
+                with self.subTest(declared=declared), patch(
+                    "src.conversion.resource_models.open", side_effect=AssertionError("rejected source opened"),
+                ), patch("src.conversion.resource_models.decode_gamemaker_tileset_json", side_effect=AssertionError("rejected source decoded")):
+                    rejected = parse_gamemaker_resource_models(directory)
+                self.assertEqual(rejected.tilesets, ())
+                self.assertEqual(len(rejected.diagnostics), 1)
+                self.assertEqual((rejected.diagnostics[0].code, rejected.diagnostics[0].source_path),
+                                 ("GM2GD-SOURCE-PATH-REJECTED", str(yyp)))
+
+    def test_parent_spelling_relative_nested_source_and_live_reread_are_preserved(self) -> None:
+        cases = (
+            ("folders/Tile Sets.yy", ""), ("folders/Tile Sets/UI.yy", "ui"),
+            ("folders\\Tile Sets\\UI.yy", ""), ("folders/Tile Sets/UI\\Sub.yy", "ui/sub"),
+            ("Folders/Tile Sets/UI.yy", "tile_sets/ui"), ("folders/Tile Sets/UI.YY", "ui_yy"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            yyp = self._write_project(project)
+            relative = "tilesets/nested/tileset_test/declared.yy"
+            source = project / relative
+            source.parent.mkdir(parents=True, exist_ok=True)
+            yyp.write_text(json.dumps({
+                "%Name": "TilesetBoundary", "resourceType": "GMProject",
+                "resources": [{"id": {"name": "tileset_test", "path": relative}, "resourceType": "GMTileSet"}],
+            }), encoding="utf-8")
+            for parent_path, expected in cases:
+                with self.subTest(parent_path=parent_path):
+                    source.write_text(json.dumps({"spriteId": {"name": "first", "path": None}, "tileWidth": 6,
+                                                  "parent": {"path": parent_path}}), encoding="utf-8")
+                    first = parse_gamemaker_resource_models(directory).tilesets[0]
+                    assert first.metadata is not None
+                    self.assertEqual((first.subfolder, first.yy_path, first.yyp_path), (expected, str(source), relative))
+                    self.assertEqual((first.metadata.parent_path, first.metadata.source_context), (parent_path, str(source)))
+                    source.write_text(json.dumps({"spriteId": {"name": "second"}, "tileWidth": "8", "tileHeight": False,
+                                                  "parent": {"path": "folders/Tile Sets/New.yy"}}), encoding="utf-8")
+                    second = parse_gamemaker_resource_models(directory).tilesets[0]
+                    self.assertEqual((second.sprite_name, second.tile_width, second.tile_height, second.subfolder),
+                                     ("second", 0, False, "new"))
+                    self.assertIs(type(second.tile_height), bool)
+                    self.assertEqual((first.sprite_name, first.tile_width, first.subfolder), ("first", 6, expected))
+                    self.assertIsNot(first.raw_data, second.raw_data)
+                    self.assertIsNot(first.metadata, second.metadata)
+
+    def test_carrier_preserves_eleven_field_prefix_with_honest_primitive_reflection(self) -> None:
+        old_fields = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data",
+                      "sprite_name", "tile_width", "tile_height")
+        self.assertEqual(tuple(f.name for f in fields(TileSetModel)), old_fields + ("metadata",))
+        self.assertEqual(tuple(inspect.signature(TileSetModel).parameters), old_fields + ("metadata",))
+        self.assertEqual(TileSetModel.__match_args__, old_fields + ("metadata",))
+        self.assertEqual(TileSetModel.__module__, "src.conversion.resource_models")
+        self.assertEqual(TileSetModel.__bases__, (ResourceModel,))
+        plain = TileSetModel("tileset", "tilesets", "GMTileSet", "/source/tileset.yy", "tilesets/tileset.yy", 3)
+        raw: JsonObject = {}
+        metadata = GameMakerTilesetMetadata(raw_data=raw, source_context="/source/tileset.yy")
+        attached = TileSetModel("tileset", "tilesets", "GMTileSet", "/source/tileset.yy", "tilesets/tileset.yy", 3,
+                                "", raw, None, 0, 0, metadata)
+        self.assertIsNone(plain.metadata)
+        self.assertEqual((plain.subfolder, plain.raw_data, plain.sprite_name, plain.tile_width, plain.tile_height),
+                         ("", {}, None, 0, 0))
+        self.assertEqual(plain, attached)
+        self.assertEqual(repr(plain), repr(attached))
+        self.assertFalse(fields(TileSetModel)[-1].compare)
+        self.assertFalse(fields(TileSetModel)[-1].repr)
+        self.assertIsNone(fields(TileSetModel)[-1].default)
+        self.assertIs(attached.metadata, metadata)
+        self.assertIs(attached.raw_data, metadata.raw_data)
+        self.assertIsNot(plain.raw_data, TileSetModel("other", "tilesets", "GMTileSet", "other.yy", "other.yy", 0).raw_data)
+        self.assertEqual(len(astuple(plain)), len(old_fields) + 1)
+        self.assertIsNone(astuple(plain)[-1])
+        self.assertIsNone(asdict(plain)["metadata"])
+        reflected = asdict(attached)
+        self.assertEqual(tuple(reflected), old_fields + ("metadata",))
+        self.assertIn('"_conversion_inputs"', json.dumps(reflected))
+        self.assertIn('"present": false', json.dumps(reflected))
+        with self.assertRaises(FrozenInstanceError):
+            setattr(plain, "tile_width", 7)
 
 
 if __name__ == "__main__":

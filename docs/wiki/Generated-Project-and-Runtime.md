@@ -1,8 +1,8 @@
 # Generated Project and Runtime
 
-> **Applies to:** GM2Godot 0.8.22 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.23 · GameMaker LTS 2026 · Godot 4.7.2
 >
-> **Last reviewed:** 2026-10-03
+> **Last reviewed:** 2026-10-04
 
 [Home](Home) · [Installation](Installation) · [Quick start](Quick-Start-Conversion) · [Compatibility](Compatibility-and-Limitations) · [Diagnostics](Diagnostics-and-Troubleshooting) · [Contributing](Contributing-and-Testing)
 

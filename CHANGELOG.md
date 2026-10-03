@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.23 - 2026-10-04
+
+- Share typed GameMaker tileset metadata between resource summaries and conversion, preserving sprite-reference diagnostics, ordered coercions, mutable metadata lists and generated output.
+- Continue issue #797’s JSON migration; remaining resource readers, registry planning, legacy aliases and numeric-finiteness policy remain follow-up work.
+
 ## 0.8.22 - 2026-10-03
 
 - Share typed GameMaker sound metadata between resource summaries and audio conversion, preserving source validation, ordered coercions, audio-group errors and fresh folder reads.

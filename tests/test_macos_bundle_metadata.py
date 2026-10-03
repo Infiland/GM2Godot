@@ -351,6 +351,25 @@ class BundleMetadataFixture(unittest.TestCase):
 
 
 class MacOSBundleMetadataHappyPathTests(BundleMetadataFixture):
+    def test_public_zip_and_extracted_app_inspections_retain_native_checks(self) -> None:
+        expected = verifier.load_source_policy(self.source_root)
+        archive = verifier.inspect_zip_bundle(self.zip_path, expected, "arm64")
+        physical = verifier.inspect_app_bundle(self.app_path, expected, "arm64")
+        self.assertEqual(archive, physical)
+        self.assertEqual(archive.inventory.mach_o_files[0].relative_path, "Contents/MacOS/GM2Godot")
+        self.assertEqual(archive.inventory.mach_o_files[0].minimum_macos, (15, 0, 0))
+        for inspect, path in ((verifier.inspect_zip_bundle, self.zip_path), (verifier.inspect_app_bundle, self.app_path)):
+            with self.subTest(path=path):
+                with self.assertRaises(verifier.MetadataVerificationError):
+                    inspect(path, expected, "x86_64")
+        over_minimum = {"Contents/MacOS/GM2Godot": _macho_bytes(minimum=(16, 0, 0))}
+        _write_zip(self.zip_path, self.plist_content, over_minimum)
+        _write_app(self.app_path.parent, self.plist_content, over_minimum)
+        for inspect, path in ((verifier.inspect_zip_bundle, self.zip_path), (verifier.inspect_app_bundle, self.app_path)):
+            with self.subTest(over_minimum=path):
+                with self.assertRaisesRegex(verifier.MetadataVerificationError, "below native Mach-O requirement 16.0"):
+                    inspect(path, expected, "arm64")
+
     def test_executable_mode_drift_between_app_zip_and_dmg_is_rejected(self) -> None:
         with zipfile.ZipFile(self.zip_path, "w") as archive:
             plist_member = zipfile.ZipInfo("GM2Godot.app/Contents/Info.plist")

@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.15 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.16 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -8,7 +8,9 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the release trigger and source version. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. The workflow builds Linux, macOS, and Windows archives, creates the macOS DMG, generates `SHA256SUMS` from those four final payloads, and publishes all five assets with the GitHub release/tag. Every new release must use a new version.
+`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Current source `0.8.16` builds Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs. Release aggregation and publication are disabled until issue #857 adds the architecture-aware release contract. The latest published release remains `0.8.15`, with four platform payloads and `SHA256SUMS` as its five assets. Every new release must use a new version.
+
+The publisher and integrity procedure below describes that existing five-asset contract. The release-state preflight and existing-release-integrity audits retain their existing conditions; only the release job's aggregation and publication are disabled until issue #857 updates the release consumers and checksums.
 
 Publication-capable push and manual-dispatch runs share one concurrency group across refs, covering the exact remote-tag check, builds, and publication. Pull-request validation remains independent. The active publisher is not cancelled and one additional publisher may remain pending; GitHub's default concurrency behavior can replace that pending run if a third publisher arrives, and it does not guarantee FIFO ordering. When the surviving waiter starts, it rechecks the exact remote tag. An absent tag after a clean prepublication failure lets it try the normal build and publication path. A present tag keeps builds and publication skipped, but the run succeeds only after the existing release passes the integrity audit described below.
 
@@ -30,11 +32,11 @@ Pull requests that change the release workflow, create-only publisher, or dedica
 
 ## macOS bundle identity and native gate
 
-The checked-in `packaging/macos/GM2Godot.spec` is the only supported macOS release build definition. It loads the strict policy in `packaging/macos/bundle_metadata.py` and stamps `GM2Godot.app` with the stable reverse-domain identifier `land.infi.gm2godot`. Both `CFBundleShortVersionString` and `CFBundleVersion` equal the exact three-component numeric release version in `src/version.py`. GM2Godot produces one production macOS build for each source release version; do not substitute a workflow run number, timestamp, or mutable counter.
+The checked-in `packaging/macos/GM2Godot.spec` is the only supported macOS build definition. It loads the strict policy in `packaging/macos/bundle_metadata.py` and stamps `GM2Godot.app` with the stable reverse-domain identifier `land.infi.gm2godot`. Both `CFBundleShortVersionString` and `CFBundleVersion` equal the exact three-component numeric source version in `src/version.py` in both native architecture lanes; do not substitute a workflow run number, timestamp, or mutable counter.
 
-Before artifact upload, `scripts/verify_macos_bundle_metadata.py` checks the source app, the app embedded in `GM2Godot-macos.zip`, and the app mounted read-only from `GM2Godot-macos.dmg`. All three copies must have the exact policy values and byte-identical `Info.plist` contents, including `LSMinimumSystemVersion` exactly `15.0`. The verifier reads native headers and load commands and requires a non-empty Mach-O inventory containing the main executable. Every native member must use the expected thin architecture and declare a macOS deployment target no higher than 15.0; the relative native paths, architectures, and deployment targets must agree across all three forms. Malformed or universal native members, unsafe archive paths or links, inconsistent inventories, and invalid metadata fail the release.
+Before artifact upload, `scripts/verify_macos_bundle_metadata.py` checks each source app, its matching `GM2Godot-macos-<architecture>.zip`, and its matching `GM2Godot-macos-<architecture>.dmg` mounted read-only. All three copies must have the exact policy values and byte-identical `Info.plist` contents, including `LSMinimumSystemVersion` exactly `15.0`. The verifier reads native headers and load commands and requires a non-empty Mach-O inventory containing the main executable. Every native member must use the expected thin architecture and declare a macOS deployment target no higher than 15.0; the relative native paths, architectures, and deployment targets must agree across all three forms. Malformed or universal native members, unsafe archive paths or links, inconsistent inventories, and invalid metadata fail the build.
 
-The current macOS release invokes this gate with `--expected-architecture arm64`. The same parameter accepts `x86_64` for the Intel build lane tracked in issue #856. Developer ID signing and notarization remain tracked in issue #737.
+The native CI lanes use matching CPython 3.12.10 interpreters and invoke this gate with `--expected-architecture arm64` or `--expected-architecture x86_64`. They produce `GM2Godot-macos-arm64.zip`/`.dmg` and `GM2Godot-macos-x86_64.zip`/`.dmg`. The GUI gate launches only a fresh private extraction of the exact final ZIP on the matching native host, verifies its extracted content, and requires GUI readiness followed by a bounded clean exit before upload. The latest published `0.8.15` Mac downloads remain arm64. Developer ID signing and notarization remain tracked in issue #737.
 
 ## Linux packaged-GUI gate
 
@@ -57,20 +59,24 @@ Before merging:
 
 - [ ] Confirm `refs/tags/v<version>` does not already exist on the GitHub remote; do not rely only on a local checkout's tag list.
 - [ ] Confirm all pull-request checks pass, including exact Godot 4.7.2 smoke and GameMaker LTS 2026 conversion gates.
-- [ ] Confirm Linux, macOS, and Windows build jobs produce non-empty artifacts.
+- [ ] Confirm Linux, Windows, macOS arm64, and macOS x86_64 build jobs produce non-empty artifacts.
 - [ ] Confirm the Linux build reports no unresolved shared libraries and its extracted-ZIP `qxcb` GUI smoke passes with the required Qt GUI/XCB runtime inventory and excluded TIFF plugin.
-- [ ] Confirm the macOS build verifies bundle identity, source release version, the exact macOS 15.0 minimum, and matching thin-arm64 native inventories in the `.app`, ZIP, and DMG before upload.
+- [ ] Confirm both native macOS builds verify bundle identity, source version, the exact macOS 15.0 minimum, and matching thin-arm64 or thin-x86_64 native inventories in each `.app`, ZIP, and DMG, then pass the GUI gate from a fresh final-ZIP extraction before upload.
+- [ ] Keep release aggregation and publication disabled until issue #857 updates the architecture-aware release contract.
 - [ ] Confirm the pull request references the intended issue, uses the correct closure timing, and does not absorb unrelated work.
 
 After merging:
+
+- [ ] Confirm post-merge tests, exact-LTS conversions, Godot smoke, and all four build jobs pass while the release-publication barrier remains active.
+- [ ] If `docs/wiki/` changed, publish the exact merged pages and verify the live Wiki before closing the documentation issue. Record the merged source SHA and published Wiki SHA on the issue before closing it.
+
+For audits of the existing published `0.8.15` release, retain the checks below. New releases require issue #857's updated inventory before publication is enabled.
 
 - [ ] Confirm the tag points to the intended `main` commit.
 - [ ] Confirm the release is neither draft nor prerelease and has exactly five unique, non-empty assets: the four platform payloads and `SHA256SUMS`.
 - [ ] Download the run's `release-publisher-receipt` Actions artifact and confirm it ends at `verified`, contains one accepted tag claim, one accepted draft creation, five accepted asset receipts, and one accepted finalization for the same release ID.
 - [ ] Download all five assets, run `sha256sum --check --strict SHA256SUMS`, and confirm each payload digest also matches the hexadecimal value after the `sha256:` prefix in GitHub's `assets[].digest` field.
 - [ ] Inspect the downloaded macOS ZIP and read-only mounted DMG and confirm their bundle metadata, `Info.plist` digests, and native inventories match each other and the release policy.
-- [ ] Confirm post-merge tests, exact-LTS conversions, Godot smoke, and release jobs pass.
-- [ ] If `docs/wiki/` changed, publish the exact merged pages and verify the live Wiki before closing the documentation issue. Record the merged source SHA and published Wiki SHA on the issue before closing it.
 
 ## Canonical Wiki sources
 

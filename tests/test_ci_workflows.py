@@ -586,6 +586,205 @@ def _workflow_job_section(content: str, job_name: str) -> str:
     return content[start:end]
 
 
+MACOS_NATIVE_TEST_STEP = "Verify native macOS GUI lifecycle tests"
+MACOS_NATIVE_RUNTIME_STEP = "Verify native macOS build runtime"
+MACOS_GUI_STEP = "Verify packaged macOS GUI"
+MACOS_PROOF_STEP = "Upload macOS build proof"
+MACOS_RELEASE_GUARD = "        if: matrix.expected_platform == 'darwin'\n"
+MACOS_NATIVE_TEST_SCRIPT = (
+    "python -I tests/test_macos_gui_artifact_verifier.py \\\n"
+    '  --native-architecture "${{ matrix.expected_machine }}" \\\n'
+    '  --output "$RUNNER_TEMP/release-${{ matrix.name }}-native-tests.json"\n'
+)
+MACOS_NATIVE_RUNTIME_SCRIPT = (
+    "python -I scripts/verify_macos_gui_artifact.py \\\n"
+    "  --check-native-runtime \\\n"
+    '  --expected-architecture "${{ matrix.expected_machine }}"\n'
+)
+MACOS_GUI_SCRIPT = (
+    "python -I scripts/verify_macos_gui_artifact.py \\\n"
+    '  --source-root "$GITHUB_WORKSPACE" \\\n'
+    '  --zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip" \\\n'
+    '  --expected-architecture "${{ matrix.expected_machine }}" \\\n'
+    '  --output "$RUNNER_TEMP/release-${{ matrix.name }}-gui.json"\n'
+)
+MACOS_METADATA_SCRIPT = (
+    '/usr/bin/plutil -lint "dist/${{ matrix.name }}/GM2Godot.app/Contents/Info.plist"\n'
+    "python -I scripts/verify_macos_bundle_metadata.py \\\n"
+    '  --source-root "$GITHUB_WORKSPACE" \\\n'
+    '  --app "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app" \\\n'
+    '  --zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip" \\\n'
+    '  --dmg "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.dmg" \\\n'
+    '  --expected-architecture "${{ matrix.expected_machine }}"\n'
+)
+
+
+def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
+    """Keep both native lanes, fatal package gates and separate retained proofs."""
+
+    errors: list[str] = []
+    if content.count("\n  build:\n") != 1 or content.count("\n  release:\n") != 1:
+        return ("exact build and publisher jobs are required",)
+    build = _workflow_job_section(content, "build")
+    publisher = _workflow_job_section(content, "release")
+    matrix_marker = "        include:\n"
+    if build.count(matrix_marker) != 1 or build.count("    runs-on:") != 1:
+        return ("one explicit native matrix is required",)
+    actual_matrix = build.split(matrix_marker, 1)[1].split("    runs-on:", 1)[0]
+    expected_rows = (
+        ("windows-2025", "windows", ".exe", "--onefile", "3.12.10", "x64",
+         WINDOWS_CONSTRAINT, "nul", "win32", "AMD64"),
+        ("macos-26", "macos-arm64", '\"\"', "--onedir", "3.12.10", "arm64",
+         MACOS_CONSTRAINT, "/dev/null", "darwin", "arm64"),
+        ("macos-26-intel", "macos-x86_64", '\"\"', "--onedir", "3.12.10", "x64",
+         MACOS_CONSTRAINT, "/dev/null", "darwin", "x86_64"),
+        ("ubuntu-24.04", "linux", '\"\"', "--onefile", "3.12.13", "x64",
+         LINUX_CONSTRAINT, "/dev/null", "linux", "x86_64"),
+    )
+    fields = (
+        "name", "ext", "pyinstaller_mode", "python_version", "python_architecture",
+        "constraint", "pip_config_file", "expected_platform", "expected_machine",
+    )
+    expected_matrix = "".join(
+        f"          - os: {row[0]}\n" + "".join(
+            f"            {field}: '{value}'\n" if field == "python_version"
+            else f"            {field}: {value}\n"
+            for field, value in zip(fields, row[1:], strict=True)
+        )
+        for row in expected_rows
+    )
+    if actual_matrix != expected_matrix:
+        errors.append("the four exact native runtime/name rows must be retained")
+    if re.search(r"(?m)^\s*['\"]?continue-on-error['\"]?\s*:", build) or "always()" in build:
+        errors.append("native gates and uploads cannot bypass earlier failures")
+    for name in (
+        MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP, "Build macOS app bundle", "Create macOS DMG",
+        "Verify macOS bundle metadata", MACOS_GUI_STEP, "Upload macOS artifacts",
+        MACOS_PROOF_STEP,
+    ):
+        sections = _workflow_step_sections(build, name)
+        if len(sections) != 1:
+            errors.append(f"exactly one {name} step is required")
+            continue
+        metadata = sections[0].split("        run:", 1)[0].split("        uses:", 1)[0]
+        conditions = re.findall(r"(?m)^        if:.*\n", metadata)
+        if conditions != [MACOS_RELEASE_GUARD]:
+            errors.append(f"{name} must run for both native Mac rows after success")
+        if "        shell:" in metadata or "        env:" in metadata:
+            errors.append(f"{name} must retain the selected interpreter and environment")
+    for name in ("Build executable", "Upload artifact"):
+        sections = _workflow_step_sections(build, name)
+        if len(sections) != 1 or "        if: matrix.expected_platform != 'darwin'\n" not in sections[0]:
+            errors.append(f"{name} must retain the non-Mac lanes")
+    for name, expected_script, timeout in (
+        (MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_RUNTIME_SCRIPT, 1),
+        (MACOS_NATIVE_TEST_STEP, MACOS_NATIVE_TEST_SCRIPT, 10),
+        (MACOS_GUI_STEP, MACOS_GUI_SCRIPT, 5),
+    ):
+        sections = _workflow_step_sections(build, name)
+        if len(sections) != 1:
+            continue
+        if re.findall(r"(?m)^        timeout-minutes:.*\n", sections[0]) != [
+            f"        timeout-minutes: {timeout}\n"
+        ]:
+            errors.append(f"{name} needs its finite deadline")
+        try:
+            script = _workflow_run_script(build, name)
+        except AssertionError:
+            errors.append(f"{name} needs one fatal isolated command")
+        else:
+            if script != expected_script:
+                errors.append(f"{name} must retain its exact isolated strict invocation")
+    try:
+        metadata_script = _workflow_run_script(build, "Verify macOS bundle metadata")
+    except AssertionError:
+        errors.append("three-form metadata verification must retain its fatal command")
+    else:
+        if metadata_script != MACOS_METADATA_SCRIPT:
+            errors.append("three-form metadata verification cannot be omitted or bypassed")
+    required_paths = {
+        "Build macOS app bundle": (
+            '--workpath "build/${{ matrix.name }}"',
+            '--distpath "dist/${{ matrix.name }}"',
+            "packaging/macos/GM2Godot.spec",
+        ),
+        "Package build": (
+            'mkdir -p "release/${{ matrix.name }}"',
+            'cp -R "dist/${{ matrix.name }}/GM2Godot.app" "release/${{ matrix.name }}/"',
+        ),
+        "Zip release": (
+            'cd "release/${{ matrix.name }}"',
+            "7z a -snl ../../GM2Godot-${{ matrix.name }}.zip .",
+        ),
+        "Create macOS DMG": (
+            'mkdir -p "dmg/${{ matrix.name }}"',
+            'cp -R "dist/${{ matrix.name }}/GM2Godot.app" "dmg/${{ matrix.name }}/"',
+            '-srcfolder "dmg/${{ matrix.name }}"',
+            "GM2Godot-${{ matrix.name }}.dmg",
+        ),
+        "Verify macOS bundle metadata": (
+            "python -I scripts/verify_macos_bundle_metadata.py",
+            '--source-root "$GITHUB_WORKSPACE"',
+            '--app "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app"',
+            '--zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip"',
+            '--dmg "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.dmg"',
+            '--expected-architecture "${{ matrix.expected_machine }}"',
+        ),
+    }
+    for name, required in required_paths.items():
+        try:
+            script = _workflow_run_script(build, name)
+        except AssertionError:
+            errors.append(f"{name} needs its package command")
+            continue
+        for fragment in required:
+            if script.count(fragment) != 1:
+                errors.append(f"{name} must bind architecture-specific paths: {fragment}")
+    for name, expected_paths, expected_name in (
+        ("Upload macOS artifacts", (
+            "            GM2Godot-${{ matrix.name }}.zip\n",
+            "            GM2Godot-${{ matrix.name }}.dmg\n",
+        ), "GM2Godot-${{ matrix.name }}"),
+        (MACOS_PROOF_STEP, tuple(
+            f"            ${{{{ runner.temp }}}}/release-${{{{ matrix.name }}}}-{suffix}.json\n"
+            for suffix in ("bootstrap", "dependencies", "native-tests", "gui")
+        ), "GM2Godot-${{ matrix.name }}-proof-${{ github.run_id }}-${{ github.run_attempt }}"),
+    ):
+        sections = _workflow_step_sections(build, name)
+        if len(sections) != 1:
+            continue
+        step = sections[0]
+        paths = re.findall(r"(?m)^            \S.*\n", step)
+        if paths != list(expected_paths) or step.count("          path: |\n") != 1:
+            errors.append(f"{name} must retain exactly its separate archive members")
+        if step.count(f"          name: {expected_name}\n") != 1:
+            errors.append(f"{name} must retain its unique artifact identity")
+        for fragment in (
+            "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n",
+            "          archive: true\n", "          if-no-files-found: error\n",
+        ):
+            if step.count(fragment) != 1:
+                errors.append(f"{name} must preserve archive and missing-file enforcement")
+    ordered_steps = (
+        MACOS_NATIVE_RUNTIME_STEP, "Install and verify dependencies",
+        MACOS_NATIVE_TEST_STEP, "Build macOS app bundle", "Zip release",
+        "Create macOS DMG", "Verify macOS bundle metadata", MACOS_GUI_STEP,
+        "Upload macOS artifacts", MACOS_PROOF_STEP,
+    )
+    positions = [build.find(f"      - name: {name}\n") for name in ordered_steps]
+    if any(position < 0 for position in positions) or positions != sorted(set(positions)):
+        errors.append("native tests, three-form metadata, final GUI and uploads must be ordered")
+    expected_publisher_guard = (
+        "    if: ${{ false && !cancelled() && github.event_name != 'pull_request' && "
+        "github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && "
+        "needs.get-version.outputs.tag_exists == 'false' && "
+        "needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}"
+    )
+    if re.findall(r"(?m)^    if:.*$", publisher) != [expected_publisher_guard]:
+        errors.append("the unchanged publisher guards must retain the literal false barrier")
+    return tuple(errors)
+
+
 NATIVE_WHEEL_PROPOSAL_HOSTS = (
     ("linux-x64", "ubuntu-24.04", "x64", "3.12.13", "Linux"),
     ("macos-arm64", "macos-26", "arm64", "3.12.10", "macOS arm64"),
@@ -1799,8 +1998,8 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        # The four-host proposal matrix and its aggregate add two source upload blocks.
-        self.assertEqual(len(locations), 16, locations)
+        # Native Mac builds retain a separate proof archive beside each payload pair.
+        self.assertEqual(len(locations), 17, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             3,
@@ -4362,7 +4561,7 @@ class TestCIWorkflows(unittest.TestCase):
             "needs.release-state-preflight.result == 'success') }}"
         )
         release_guard = (
-            "${{ !cancelled() && github.event_name != 'pull_request' && "
+            "${{ false && !cancelled() && github.event_name != 'pull_request' && "
             "github.ref == 'refs/heads/main' && "
             "needs.get-version.result == 'success' && "
             f"{absence_guard} && "
@@ -4640,7 +4839,7 @@ class TestCIWorkflows(unittest.TestCase):
             "            expected_platform: win32\n"
             "            expected_machine: AMD64\n",
             "          - os: macos-26\n"
-            "            name: macos\n"
+            "            name: macos-arm64\n"
             "            ext: \"\"\n"
             "            pyinstaller_mode: --onedir\n"
             "            python_version: '3.12.10'\n"
@@ -4649,6 +4848,16 @@ class TestCIWorkflows(unittest.TestCase):
             "            pip_config_file: /dev/null\n"
             "            expected_platform: darwin\n"
             "            expected_machine: arm64\n",
+            "          - os: macos-26-intel\n"
+            "            name: macos-x86_64\n"
+            "            ext: \"\"\n"
+            "            pyinstaller_mode: --onedir\n"
+            "            python_version: '3.12.10'\n"
+            "            python_architecture: x64\n"
+            f"            constraint: {MACOS_CONSTRAINT}\n"
+            "            pip_config_file: /dev/null\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: x86_64\n",
             "          - os: ubuntu-24.04\n"
             "            name: linux\n"
             "            ext: \"\"\n"
@@ -4662,6 +4871,7 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(workflow="release.yml", native_tuple=native_tuple):
                 self.assertIn(native_tuple, release_build)
+        self.assertEqual(release_build.count("          - os:"), 4)
         self.assertNotIn("-latest", release_build)
 
         dependency_locks = (workflow_dir / "dependency-locks.yml").read_text(
@@ -6944,13 +7154,17 @@ class TestCIWorkflows(unittest.TestCase):
 
         for required in (
             'SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"',
-            'expected = ("CPython", "3.12.10", "darwin", "Darwin", "arm64")',
+            'expected = ("CPython", "3.12.10", "darwin", "Darwin", sys.argv[1])',
+            'if [[ "$#" -ne 2 || "${1:-}" != "--architecture" ]]; then',
+            "arm64|x86_64) ;;",
+            'readonly MACOS_ARCHITECTURE="$2"',
+            'readonly BUILD_NAME="macos-${MACOS_ARCHITECTURE}"',
             f"readonly DEPENDENCY_CONSTRAINT={MACOS_CONSTRAINT}",
             "readonly DEPENDENCY_BOOTSTRAP=requirements-bootstrap.txt",
             "readonly DEPENDENCY_BOOTSTRAP_VERIFIER="
             "scripts/verify_dependency_bootstrap.py",
             "export PIP_CONFIG_FILE=/dev/null",
-            'BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-XXXXXX")"',
+            'BUILD_TEMP_ROOT="$(mktemp -d "${BUILD_TEMP_PARENT}/gm2godot-build-${MACOS_ARCHITECTURE}-XXXXXX")"',
             'readonly VENV_PYTHON="${BUILD_VENV}/bin/python"',
             '"$PYTHON_BIN" -m venv "$BUILD_VENV"',
             '--constraint "$DEPENDENCY_CONSTRAINT"',
@@ -6961,14 +7175,23 @@ class TestCIWorkflows(unittest.TestCase):
             "readonly MACOS_BUNDLE_SPEC=packaging/macos/GM2Godot.spec",
             "readonly MACOS_METADATA_POLICY=packaging/macos/bundle_metadata.py",
             "readonly MACOS_METADATA_VERIFIER=scripts/verify_macos_bundle_metadata.py",
-            '"$VENV_PYTHON" -m PyInstaller --clean "$MACOS_BUNDLE_SPEC"',
-            "/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist",
+            "readonly MACOS_GUI_VERIFIER=scripts/verify_macos_gui_artifact.py",
+            '"$VENV_PYTHON" -m PyInstaller --clean',
+            '--workpath "$BUILD_DIRECTORY"',
+            '--distpath "$DIST_DIRECTORY"',
+            '"$MACOS_BUNDLE_SPEC"',
+            '/usr/bin/plutil -lint "$DIST_DIRECTORY/GM2Godot.app/Contents/Info.plist"',
             '"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER"',
             '--source-root "$SCRIPT_DIRECTORY"',
-            '--app "$SCRIPT_DIRECTORY/dist/GM2Godot.app"',
-            '--zip "$SCRIPT_DIRECTORY/GM2Godot-macos.zip"',
-            '--dmg "$SCRIPT_DIRECTORY/GM2Godot-macos.dmg"',
-            "--expected-architecture arm64",
+            '--app "$SCRIPT_DIRECTORY/$DIST_DIRECTORY/GM2Godot.app"',
+            '--zip "$SCRIPT_DIRECTORY/$ZIP_ARTIFACT"',
+            '--dmg "$SCRIPT_DIRECTORY/$DMG_ARTIFACT"',
+            '--expected-architecture "$MACOS_ARCHITECTURE"',
+            '--expected-machine "$MACOS_ARCHITECTURE"',
+            '"$VENV_PYTHON" -I "$MACOS_GUI_VERIFIER"',
+            '"$PYTHON_BIN" -I "$MACOS_GUI_VERIFIER"',
+            "--check-native-runtime",
+            '--output "$GUI_RECEIPT"',
             "ditto -c -k --sequesterRsrc --keepParent GM2Godot.app",
         ):
             with self.subTest(script="build_macos.sh", required=required):
@@ -6984,6 +7207,14 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertNotRegex(macos, r"(?m)^\s*pyinstaller\b")
         self.assertLess(
+            macos.index('if ! "$PYTHON_BIN" - "$MACOS_ARCHITECTURE"'),
+            macos.index('"$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER"'),
+        )
+        self.assertLess(
+            macos.index('"$PYTHON_BIN" -I "$MACOS_GUI_VERIFIER"'),
+            macos.index('"$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER"'),
+        )
+        self.assertLess(
             macos.index('"$PYTHON_BIN" "$DEPENDENCY_BOOTSTRAP_VERIFIER"'),
             macos.index('"$PYTHON_BIN" -m venv "$BUILD_VENV"'),
         )
@@ -6997,6 +7228,10 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertLess(
             macos.index('"$VENV_PYTHON" -I "$MACOS_METADATA_VERIFIER"'),
+            macos.index('"$VENV_PYTHON" -I "$MACOS_GUI_VERIFIER"'),
+        )
+        self.assertLess(
+            macos.index('"$VENV_PYTHON" -I "$MACOS_GUI_VERIFIER"'),
             macos.rindex("\ncleanup_build_temp\n"),
         )
 
@@ -7063,14 +7298,17 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertIn(
             "      - name: Build executable\n"
-            "        if: matrix.name != 'macos'\n",
+            "        if: matrix.expected_platform != 'darwin'\n",
             release_build,
         )
         self.assertIn(
             "      - name: Build macOS app bundle\n"
-            "        if: matrix.name == 'macos'\n"
-            "        run: python -m PyInstaller --clean "
-            "packaging/macos/GM2Godot.spec\n",
+            "        if: matrix.expected_platform == 'darwin'\n"
+            "        run: |\n"
+            "          python -m PyInstaller --clean \\\n"
+            '            --workpath "build/${{ matrix.name }}" \\\n'
+            '            --distpath "dist/${{ matrix.name }}" \\\n'
+            "            packaging/macos/GM2Godot.spec\n",
             release_build,
         )
         for required in (
@@ -7087,25 +7325,27 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertIn(
             "      - name: Verify macOS bundle metadata\n"
-            "        if: matrix.name == 'macos'\n",
+            "        if: matrix.expected_platform == 'darwin'\n",
             release_build,
         )
         for required in (
-            "/usr/bin/plutil -lint dist/GM2Godot.app/Contents/Info.plist",
+            '/usr/bin/plutil -lint "dist/${{ matrix.name }}/GM2Godot.app/Contents/Info.plist"',
             "python -I scripts/verify_macos_bundle_metadata.py",
             '--source-root "$GITHUB_WORKSPACE"',
-            '--app "$GITHUB_WORKSPACE/dist/GM2Godot.app"',
-            '--zip "$GITHUB_WORKSPACE/GM2Godot-macos.zip"',
-            '--dmg "$GITHUB_WORKSPACE/GM2Godot-macos.dmg"',
+            '--app "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app"',
+            '--zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip"',
+            '--dmg "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.dmg"',
             '--expected-architecture "${{ matrix.expected_machine }}"',
         ):
             with self.subTest(required=required):
                 self.assertIn(required, metadata_verification)
         self.assertEqual(release_build.count("scripts/verify_macos_bundle_metadata.py"), 1)
         self.assertIn(
-            'if [ "${{ matrix.name }}" = "macos" ]; then\n'
-            "            7z a -snl ../GM2Godot-${{ matrix.name }}.zip .\n"
+            'if [ "${{ matrix.expected_platform }}" = "darwin" ]; then\n'
+            '            cd "release/${{ matrix.name }}"\n'
+            "            7z a -snl ../../GM2Godot-${{ matrix.name }}.zip .\n"
             "          else\n"
+            "            cd release\n"
             "            7z a ../GM2Godot-${{ matrix.name }}.zip .\n"
             "          fi\n",
             release_build,
@@ -7120,8 +7360,169 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertLess(
             release_build.index("      - name: Verify macOS bundle metadata\n"),
+            release_build.index("      - name: Verify packaged macOS GUI\n"),
+        )
+        self.assertLess(
+            release_build.index("      - name: Verify packaged macOS GUI\n"),
             release_build.index("      - name: Upload macOS artifacts\n"),
         )
+
+    def test_macos_release_policy_rejects_missing_lanes_or_bypassed_proofs(
+        self,
+    ) -> None:
+        release = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(_macos_release_build_policy_errors(release), ())
+        build = _workflow_job_section(release, "build")
+        arm_start = build.index("          - os: macos-26\n")
+        intel_start = build.index("          - os: macos-26-intel\n")
+        linux_start = build.index("          - os: ubuntu-24.04\n")
+        arm_row = build[arm_start:intel_start]
+        intel_row = build[intel_start:linux_start]
+        mutations = {
+            "missing arm lane": release.replace(arm_row, "", 1),
+            "missing Intel lane": release.replace(intel_row, "", 1),
+            "duplicate Intel lane": release.replace(intel_row, intel_row * 2, 1),
+            "generic Mac identity": release.replace("name: macos-x86_64", "name: macos", 1),
+            "wrong Intel runner": release.replace("- os: macos-26-intel", "- os: macos-26", 1),
+            "wrong Intel Python": release.replace(
+                intel_row, intel_row.replace("'3.12.10'", "'3.12.13'"), 1
+            ),
+            "wrong Intel setup architecture": release.replace(
+                intel_row, intel_row.replace("python_architecture: x64", "python_architecture: arm64"), 1
+            ),
+            "wrong native machine": release.replace(
+                intel_row, intel_row.replace("expected_machine: x86_64", "expected_machine: arm64"), 1
+            ),
+            "wrong native platform": release.replace(
+                intel_row, intel_row.replace("expected_platform: darwin", "expected_platform: linux"), 1
+            ),
+            "cross-lane dist": release.replace(
+                '--distpath "dist/${{ matrix.name }}"', '--distpath "dist/macos"', 1
+            ),
+            "cross-lane work": release.replace(
+                '--workpath "build/${{ matrix.name }}"', '--workpath "build/macos"', 1
+            ),
+            "cross-lane release": release.replace(
+                'cd "release/${{ matrix.name }}"', "cd release", 1
+            ),
+            "cross-lane DMG": release.replace(
+                '-srcfolder "dmg/${{ matrix.name }}"', "-srcfolder dmg", 1
+            ),
+            "link flattening": release.replace("7z a -snl ../../", "7z a ../../", 1),
+            "source App substituted for final ZIP": release.replace(
+                '--zip "$GITHUB_WORKSPACE/GM2Godot-${{ matrix.name }}.zip"',
+                '--zip "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app"',
+            ),
+            "publisher enabled": release.replace("${{ false && !cancelled()", "${{ !cancelled()", 1),
+            "publisher condition weakened": release.replace(
+                "false && !cancelled()", "false || !cancelled()", 1
+            ),
+        }
+        for name in (
+            MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP, "Verify macOS bundle metadata", MACOS_GUI_STEP,
+            "Upload macOS artifacts", MACOS_PROOF_STEP,
+        ):
+            step = _workflow_step_sections(release, name)[0]
+            mutations[f"missing {name}"] = release.replace(step, "", 1)
+            mutations[f"duplicate {name}"] = release.replace(step, step * 2, 1)
+            mutations[f"only arm {name}"] = release.replace(
+                step, step.replace(MACOS_RELEASE_GUARD, "        if: matrix.name == 'macos-arm64'\n"), 1
+            )
+            mutations[f"always {name}"] = release.replace(
+                step, step.replace(MACOS_RELEASE_GUARD, "        if: ${{ always() }}\n"), 1
+            )
+            mutations[f"non-fatal {name}"] = release.replace(
+                step, step.replace(MACOS_RELEASE_GUARD, MACOS_RELEASE_GUARD + "        continue-on-error: true\n"), 1
+            )
+        for name in (
+            MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP,
+            "Verify macOS bundle metadata", MACOS_GUI_STEP,
+        ):
+            step = _workflow_step_sections(release, name)[0]
+            script = _workflow_run_script(release, name)
+            last_command = script.rstrip().splitlines()[-1]
+            mutations[f"ignored exit {name}"] = release.replace(
+                step, step.replace(last_command, last_command + " || true"), 1
+            )
+        for name in (MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP, MACOS_GUI_STEP):
+            step = _workflow_step_sections(release, name)[0]
+            mutations[f"unbounded {name}"] = release.replace(
+                step, re.sub(r"(?m)^        timeout-minutes:.*\n", "", step), 1
+            )
+            mutations[f"non-isolated {name}"] = release.replace(
+                step, step.replace("python -I ", "python ", 1), 1
+            )
+        native = _workflow_step_sections(release, MACOS_NATIVE_TEST_STEP)[0]
+        mutations["plain unittest bypass"] = release.replace(
+            native, native.replace("python -I tests/test_macos_gui_artifact_verifier.py", "python -m unittest"), 1
+        )
+        proof = _workflow_step_sections(release, MACOS_PROOF_STEP)[0]
+        for suffix in ("bootstrap", "dependencies", "native-tests", "gui"):
+            member = f"            ${{{{ runner.temp }}}}/release-${{{{ matrix.name }}}}-{suffix}.json\n"
+            mutations[f"missing {suffix} proof"] = release.replace(proof, proof.replace(member, "", 1), 1)
+        mutations["proof shares payload name"] = release.replace(
+            proof, proof.replace("-proof-${{ github.run_id }}-${{ github.run_attempt }}", ""), 1
+        )
+        mutations["proof ignores missing files"] = release.replace(
+            proof, proof.replace("if-no-files-found: error", "if-no-files-found: ignore"), 1
+        )
+        mutations["proof not archived"] = release.replace(
+            proof, proof.replace("archive: true", "archive: false"), 1
+        )
+        payload = _workflow_step_sections(release, "Upload macOS artifacts")[0]
+        mutations["proof mixed into payload pair"] = release.replace(
+            payload, payload.replace(
+                "          archive: true\n", "            unexpected-proof.json\n          archive: true\n"
+            ), 1
+        )
+        gui = _workflow_step_sections(release, MACOS_GUI_STEP)[0]
+        metadata = _workflow_step_sections(release, "Verify macOS bundle metadata")[0]
+        mutations["GUI before metadata"] = release.replace(gui, "", 1).replace(metadata, gui + metadata, 1)
+        mutations["payload before GUI"] = release.replace(payload, "", 1).replace(gui, payload + gui, 1)
+        for name, mutated in mutations.items():
+            with self.subTest(mutation=name):
+                self.assertNotEqual(mutated, release)
+                self.assertTrue(_macos_release_build_policy_errors(mutated))
+
+    def test_macos_local_architecture_selection_is_explicit_and_bounded(self) -> None:
+        macos = (PROJECT_ROOT / "build_macos.sh").read_text(encoding="utf-8")
+        selector = macos[
+            macos.index('if [[ "$#" -ne 2') : macos.index('if [[ "$(uname -s)"')
+        ]
+        program = "set -euo pipefail\n" + selector + (
+            "printf '%s\\n' \"$MACOS_ARCHITECTURE\" \"$BUILD_NAME\" "
+            '"$BUILD_DIRECTORY" "$DIST_DIRECTORY" "$RELEASE_DIRECTORY" '
+            '"$DMG_DIRECTORY" "$ZIP_ARTIFACT" "$DMG_ARTIFACT"\n'
+        )
+        for architecture in ("arm64", "x86_64"):
+            with self.subTest(architecture=architecture):
+                result = subprocess.run(
+                    ["bash", "-c", program, "local-build-selector", "--architecture", architecture],
+                    check=False, capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.stdout.splitlines(), [
+                    architecture, f"macos-{architecture}", f"build/macos-{architecture}",
+                    f"dist/macos-{architecture}", f"release/macos-{architecture}",
+                    f"dmg/macos-{architecture}", f"GM2Godot-macos-{architecture}.zip",
+                    f"GM2Godot-macos-{architecture}.dmg",
+                ])
+        for arguments in (
+            (), ("arm64",), ("--machine", "arm64"), ("--architecture",),
+            ("--architecture", "x64"), ("--architecture", "universal2"),
+            ("--architecture", "../arm64"), ("--architecture", "arm64", "extra"),
+        ):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    ["bash", "-c", program, "local-build-selector", *arguments],
+                    check=False, capture_output=True, text=True, timeout=10,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertTrue(result.stderr)
 
     def test_linux_release_build_proves_packaged_xcb_gui(self) -> None:
         release = (

@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.15 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.16 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -9,6 +9,8 @@ Use a packaged release for the desktop interface, or run from source when you al
 Godot is not required merely to launch GM2Godot. Install the exact [Godot 4.7.2 release](https://github.com/godotengine/godot/releases/tag/4.7.2-stable) separately to open or headlessly validate converted output.
 
 ## Install a packaged release
+
+The latest published release remains `0.8.15`, with the downloads listed below. Current source `0.8.16` builds separate native arm64 and x86_64 macOS CI artifacts, but public release publication is disabled until issue #857 adds the architecture-aware release contract.
 
 Download the asset for your operating system from [GitHub Releases](https://github.com/Infiland/GM2Godot/releases). Extract downloaded archives before launching the application.
 
@@ -46,11 +48,11 @@ On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in Power
 
 The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.15`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
-
 ## Run from source
 
 Use the native, reproducible baseline for your host. Git is also required for the clone commands below.
+
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.16`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 | Host | Python | Constraint |
 | --- | --- | --- |
@@ -153,6 +155,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.15`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.16`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

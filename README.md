@@ -128,7 +128,9 @@ The full compatibility roadmap lives in [`todo-list/`](todo-list/README.md). It 
 
 ## Releases
 
-Current source version: `0.8.15`.
+Current source version: `0.8.16`.
+
+The latest published release remains `0.8.15`. Current macOS CI builds produce separate native arm64 and x86_64 ZIP/DMG artifacts; public release publication is disabled until issue #857 adds the architecture-aware release contract.
 
 Downloadable releases include Windows (`.exe`), macOS (`.dmg` with `.app`), and Linux binaries. You can also run from source on Windows, macOS, and Linux.
 The macOS downloads require macOS 15.0 or later on Apple Silicon (arm64).
@@ -147,7 +149,7 @@ sudo apt-get install --yes --no-install-recommends \
 Releases starting with 0.7.14 include `SHA256SUMS` for the four platform payloads so downloaded bytes can be checked independently.
 When an exact version tag already exists, a release-workflow rerun now audits the published release, exact five-asset inventory, GitHub digests, downloaded bytes, checksum manifest, and stable tag/release receipt before accepting the run as a build-and-publication no-op.
 
-To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_macos.sh` from the project root. The macOS app uses the stable bundle identifier `land.infi.gm2godot`; its short and build versions both match the three-component release version in `src/version.py`.
+To build local macOS distributables (`.app` + `.zip` + `.dmg`), run `bash build_macos.sh --architecture arm64` on Apple Silicon or `bash build_macos.sh --architecture x86_64` on Intel from the project root. Each selection requires a matching native CPython 3.12.10 interpreter and rejects an architecture mismatch before bootstrap. The app is written to `dist/macos-<architecture>/GM2Godot.app`, with `GM2Godot-macos-<architecture>.zip` and `.dmg` distributables. The macOS app uses the stable bundle identifier `land.infi.gm2godot`; its short and build versions both match the three-component source version in `src/version.py`.
 
 ## Installation
 

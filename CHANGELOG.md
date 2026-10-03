@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.14 - 2026-10-03
+
+- Prove the native Intel Mac dependency graph on CPython 3.12.10 and retain the shared Mac version lock after byte-for-byte arm64/x64 reproduction.
+- Commit four independently observed wheel hash locks and require matching native offline complete-graph proofs on pull requests and main.
+- Add the Intel receipt and dependency snapshot lane, validate four original platform artifacts before submission, and document Intel source installation separately from packaged releases.
+
 ## 0.8.13 - 2026-10-03
 
 - Verify every bundled macOS native binary and internal link across the app, ZIP, and DMG before upload; require the selected thin architecture and exact macOS 15.0 minimum policy.

@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.13 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.14 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-09-14
 
@@ -8,7 +8,7 @@ This page is the short contributor route map. The repository's [CONTRIBUTING.md]
 
 ## Set up a development checkout
 
-Use the matching procedure on [Installation](Installation). The reviewed dependency baselines are Linux x64 with CPython 3.12.13, macOS arm64 with CPython 3.12.10, and Windows x64 with CPython 3.12.10. Each has a complete native constraint under `constraints/`.
+Use the matching procedure on [Installation](Installation). The reviewed dependency baselines are Linux x64 with CPython 3.12.13, macOS arm64 and x64 (Intel) with CPython 3.12.10, and Windows x64 with CPython 3.12.10. Each has a complete native constraint under `constraints/`.
 
 For example, the Linux x64 baseline is:
 
@@ -36,11 +36,11 @@ python -m pip --isolated --disable-pip-version-check --no-input install \
   -r requirements-bootstrap.txt -r requirements-tooling.txt
 ```
 
-On macOS arm64, use CPython 3.12.10 and `constraints/requirements-macos-py312.lock`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.lock`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for both hosts. Install Godot 4.7.2 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
+On macOS arm64 or x64 (Intel), use CPython 3.12.10 and `constraints/requirements-macos-py312.lock`, retaining `PIP_CONFIG_FILE=/dev/null`. On Windows x64, use CPython 3.12.10 and `constraints/requirements-windows-py312.lock`, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell. The null config file and `--isolated` prevent local pip settings from changing the reviewed install behavior. The installation page has complete commands for all four hosts. Install Godot 4.7.2 and set `GODOT_BIN` when a change needs generated-resource or runtime validation. GameMaker source compatibility targets GameMaker LTS 2026.
 
 ### Refresh dependency constraints
 
-`requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools compatibility pair. `requirements.txt` and `requirements-tooling.txt` contain the other reviewed runtime and development roots, while `requirements-lock.in` includes all three sources as the combined compile input. Generated native graphs use `.lock` paths so Dependabot cannot present unverified cross-platform output as an editable manifest. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, macOS, and Windows baselines.
+`requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools compatibility pair. `requirements.txt` and `requirements-tooling.txt` contain the other reviewed runtime and development roots, while `requirements-lock.in` includes all three sources as the combined compile input. Generated native graphs use `.lock` paths so Dependabot cannot present unverified cross-platform output as an editable manifest. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, both Mac architectures, and Windows baselines.
 
 Pull requests and pushes use `refresh=locked`, which preference-seeds generation with the committed constraint and requests no upgrades. A manual `workflow_dispatch` run accepts:
 
@@ -54,9 +54,22 @@ Pull requests and pushes use `refresh=locked`, which preference-seeds generation
 
 Each native job accepts either a stable source/lock pair or one explicit source transition where all three committed locks agree. Before full graph generation, the old committed generator creates a bootstrap-only probe and the proposed pair must install, pass environment verification and `pip check`, and reproduce the same parsed probe graph. The candidate then regenerates a self-hosted complete constraint and performs two clean complete-graph installs with identical normalized receipts. Probe, candidate, self-hosted output, receipts, dependency snapshot, and evidence manifest are uploaded before the final equality gates.
 
-An intentional refresh that changes pins is expected to fail the committed-equality gate. Review the artifacts for all three platforms, commit the approved native locks, and rerun until `refresh=locked` is clean. A pip-family Dependabot pull request is only a source proposal: continue it on a maintainer branch, never merge bot-generated native output, and do not auto-merge dependency changes. Security proposals for other direct dependencies may update their own authored requirements file, but they use the same native artifact review and never supply generated locks. If a proposed generator makes the full candidate differ from its self-hosted output, review and commit the self-hosted result first, then rerun. Do not generate a lock for a different platform locally; native environment markers and platform-specific transitive dependencies must be resolved on the platform they describe.
+An intentional refresh that changes pins is expected to fail the committed-equality gate. Review the artifacts for all four platforms, commit the three approved version locks, and rerun until `refresh=locked` is clean. A pip-family Dependabot pull request is only a source proposal: continue it on a maintainer branch, never merge bot-generated native output, and do not auto-merge dependency changes. Security proposals for other direct dependencies may update their own authored requirements file, but they use the same native artifact review and never supply generated locks. If a proposed generator makes the full candidate differ from its self-hosted output, review and commit the self-hosted result first, then rerun. Do not generate a lock for a different platform locally; native environment markers and platform-specific transitive dependencies must be resolved on the platform they describe.
 
 Upgrade `pip` and `pip-tools` as one compatibility unit by reviewing the two source pins and all three native locks together. Live consumers derive the expected pip version after preflight instead of carrying numeric copies. Successful main-branch native runs submit the verified platform graphs under stable correlators, preserving transitive Dependabot alerts even though `.lock` outputs are hidden from its manifest updater. The current install and compile paths reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. A future path that admits a source distribution must pass a separately reviewed `--build-constraint` for the isolated build environment under pip 26.2 or later.
+
+### Native wheel hash locks
+
+Native arm64 and Intel generation proves that both Mac version graphs reproduce the same `constraints/requirements-macos-py312.lock` bytes. The three unique version locks therefore serve four native platforms, with separate complete wheel hash requirements:
+
+| Host | Complete wheel hash requirements |
+| --- | --- |
+| Linux x64 | `constraints/requirements-linux-x64-py312.wheels.lock` |
+| macOS arm64 | `constraints/requirements-macos-arm64-py312.wheels.lock` |
+| macOS x64 (Intel) | `constraints/requirements-macos-x64-py312.wheels.lock` |
+| Windows x64 | `constraints/requirements-windows-x64-py312.wheels.lock` |
+
+The [native wheel workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/native-wheel-proposals.yml) requires the committed companions, two independent native wheel observations, and two equal clean offline complete-graph installs. Its aggregate validator binds four original archives to the exact source, run, and attempt. The [repository contributor guide](https://github.com/Infiland/GM2Godot/blob/main/CONTRIBUTING.md#native-wheel-proposals) provides complete hash-enforced development install commands using `--require-hashes`, a fresh wheel directory, and an offline install. Ordinary source, Tests, and Release install commands remain version constrained. Intel source support does not add an Intel packaged release.
 
 ## Choose the right extension point
 
@@ -208,6 +221,7 @@ Receipt publication changes require the exact `native-receipts` gates in `archit
 | --- | --- | --- |
 | `N01-linux` | CPython 3.12.13, `linux`, `x86_64` | Six real POSIX receipt cases and four ordinary producer cases: 10 |
 | `N01-macos` | CPython 3.12.10, `darwin`, `arm64` | Six real POSIX cases, three trusted-alias Darwin cases, and four producers: 13 |
+| `N01-macos-x64` | CPython 3.12.10, `darwin`, `x86_64` | The same six POSIX, three Darwin, and four producer methods: 13 |
 | `N01-windows` | CPython 3.12.10, `win32`, `AMD64`, actual NTFS | Thirteen real Windows cases, including unopened-parent junction substitution, and four producers: 17 |
 
 Run only the matching gate on its actual native host, using that verified environment's Python and an output path outside the checkout:
@@ -218,7 +232,7 @@ NATIVE_RECEIPT_PROFILE=stable python -m scripts.run_required_unittest \
   --receipt /absolute/native-receipts/n01-linux.json
 ```
 
-Use `N01-macos` or `N01-windows` and a corresponding distinct receipt path on those hosts. The `Tests` workflow requires these gates on its Ubuntu 24.04, macOS 26 arm64, and Windows 2025 jobs. `Dependency Locks` requires them inside each committed generator with `NATIVE_RECEIPT_PROFILE=native-lock-workflow`, outside the exact eight-file dependency receipt artifact. The stable producer profile verifies pip; the generator profile verifies pip and pip-tools. Both profiles execute ordinary bootstrap/environment CLIs and actual nonempty required-runner publication; the narrowly isolated parity-writer test proves receipt publication only and is not conversion-parity evidence.
+Use `N01-macos`, `N01-macos-x64`, or `N01-windows` and a corresponding distinct receipt path on those hosts. The `Tests` workflow requires these gates on its Ubuntu 24.04, macOS 26 arm64, and Windows 2025 jobs. `Dependency Locks` additionally runs the Intel Mac gate and requires the matching gate inside each of its four committed generators with `NATIVE_RECEIPT_PROFILE=native-lock-workflow`, outside the exact eight-file dependency receipt artifact. The stable producer profile verifies pip; the generator profile verifies pip and pip-tools. Both profiles execute ordinary bootstrap/environment CLIs and actual nonempty required-runner publication; the narrowly isolated parity-writer test proves receipt publication only and is not conversion-parity evidence.
 
 Ordinary unittest discovery on another Python/OS/machine tuple skips the constrained environment-producer case. That discovery result is not native acceptance: a required N01 gate checks its exact tuple before collection and rejects every skip. Incorrect package pins on a supported native tuple still fail the producer test.
 

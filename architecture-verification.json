@@ -286,6 +286,45 @@
         "machine": "arm64"
       }
     },
+    "N01-macos-x64": {
+      "validation_kind": "native-receipts",
+      "unittest_ids": [
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_absent_and_identical_preserve_private_inode",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_different_and_linked_targets_fail_without_mutation",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_symlink_parent_and_target_never_redirect_publication",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_real_file_and_directory_fsync_are_executed",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_parent_relocation_is_detected_and_retained_descriptor_closes",
+        "tests.test_native_receipts_posix.TestNativeReceiptsPosix.test_post_write_failure_cleans_stage_and_closes_descriptor",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_tmp_alias_preserves_physical_inode",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_var_alias_preserves_physical_inode",
+        "tests.test_native_receipts_darwin.TestNativeReceiptsDarwin.test_redirect_below_trusted_alias_is_rejected",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_bootstrap_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_environment_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_required_writer_and_cli_fresh_identical_conflict",
+        "tests.test_native_receipt_producers.TestNativeReceiptProducers.test_parity_writer_and_cli_fresh_identical_conflict"
+      ],
+      "required_environment": {},
+      "required_paths": [
+        "scripts/_anchored_output.py",
+        "scripts/run_required_unittest.py",
+        "scripts/capture_conversion_parity.py",
+        "scripts/verify_dependency_bootstrap.py",
+        "scripts/verify_dependency_environment.py",
+        "requirements-bootstrap.txt",
+        "tests/test_native_receipt_producers.py",
+        "tests/test_native_receipt_gate_policy.py",
+        "scripts/_anchored_receipt_posix.py",
+        "tests/test_native_receipts_posix.py",
+        "tests/test_native_receipts_darwin.py",
+        "constraints/requirements-macos-py312.lock"
+      ],
+      "allowed_skips": {},
+      "runtime": {
+        "python_version": "3.12.10",
+        "platform": "darwin",
+        "machine": "x86_64"
+      }
+    },
     "N01-windows": {
       "validation_kind": "native-receipts",
       "unittest_ids": [

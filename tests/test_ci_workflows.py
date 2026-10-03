@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -20,6 +21,7 @@ import zipfile
 import zlib
 from pathlib import Path
 from typing import cast
+from unittest import mock
 from urllib.parse import quote
 
 from scripts import build_dependency_snapshot as dependency_snapshot
@@ -582,6 +584,390 @@ def _workflow_job_section(content: str, job_name: str) -> str:
     next_job = re.search(r"(?m)^  [A-Za-z0-9_-]+:\s*$", remainder)
     end = len(content) if next_job is None else start + len(marker) + next_job.start()
     return content[start:end]
+
+
+NATIVE_WHEEL_PROPOSAL_HOSTS = (
+    ("linux-x64", "ubuntu-24.04", "x64", "3.12.13", "Linux"),
+    ("macos-arm64", "macos-26", "arm64", "3.12.10", "macOS arm64"),
+    ("macos-x64", "macos-26-intel", "x64", "3.12.10", "macOS x64"),
+    ("windows-x64", "windows-2025", "x64", "3.12.10", "Windows"),
+)
+NATIVE_WHEEL_PRODUCER_STEP = (
+    "Prove native graph, wheels, self-hosting and two clean installs"
+)
+NATIVE_WHEEL_VALIDATOR_STEP = "Independently require all four complete proofs"
+NATIVE_WHEEL_NATIVE_ROOT_STEP = "Select fresh native proposal root"
+NATIVE_WHEEL_AGGREGATE_ROOT_STEP = "Select fresh aggregate roots"
+NATIVE_WHEEL_ROOT_READY = (
+    "${{ always() && steps.runtime-roots.outcome == 'success' }}"
+)
+# Freeze the complete finite setup programs; the runtime cases below exercise
+# their actual environment-file output and rejection before any output writes.
+NATIVE_WHEEL_ROOT_SCRIPT_SHA256 = {
+    NATIVE_WHEEL_NATIVE_ROOT_STEP: (
+        "efd10e981ca1344364c224b05eb7f352f14ff54f3c7bb0fa87e1a9a1f2a4f0b1"
+    ),
+    NATIVE_WHEEL_AGGREGATE_ROOT_STEP: (
+        "49b0f12359efb3d2fff3918b89bfb1d5611222963118873d1a548dc96602bc79"
+    ),
+}
+NATIVE_WHEEL_LF_STEP = "Materialize exact source bytes as LF"
+NATIVE_WHEEL_LF_COMMAND = (
+    "git -c core.autocrlf=false -c core.eol=lf checkout-index --all --force"
+)
+NATIVE_WHEEL_LF_SCRIPT = (
+    "set -euo pipefail\n"
+    "git read-tree --empty\n"
+    'git --no-replace-objects read-tree "$SOURCE_SHA"\n'
+    f"{NATIVE_WHEEL_LF_COMMAND}\n"
+)
+NATIVE_WHEEL_CHECKOUT_ACTION = (
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
+)
+NATIVE_WHEEL_SETUP_ACTION = (
+    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
+)
+NATIVE_WHEEL_UPLOAD_ACTION = (
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+)
+NATIVE_WHEEL_DOWNLOAD_ACTION = (
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+)
+
+
+def _native_wheel_source_binding_script(content: str, step_name: str) -> str:
+    script = _workflow_run_script(content, step_name)
+    marker = "python -I - <<'PY_SOURCE_BINDING'\n"
+    prefix, separator, remainder = script.partition(marker)
+    if prefix != "set -euo pipefail\n" or not separator:
+        raise AssertionError("source binding must be the first fatal command")
+    binding, separator, _ = remainder.partition("\nPY_SOURCE_BINDING\n")
+    if not separator or script.count(marker) != 1:
+        raise AssertionError("source binding must have one complete heredoc")
+    return binding + "\n"
+
+
+def _native_wheel_runtime_root_script(content: str, step_name: str) -> str:
+    script = _workflow_run_script(content, step_name)
+    interpreter = "python" if step_name == NATIVE_WHEEL_NATIVE_ROOT_STEP else "python3"
+    marker = f"{interpreter} -I - <<'PY_RUNTIME_ROOTS'\n"
+    prefix, separator, remainder = script.partition(marker)
+    if prefix != "set -euo pipefail\n" or not separator:
+        raise AssertionError("runtime root selection must be a fatal isolated step")
+    binding, separator, tail = remainder.partition("\nPY_RUNTIME_ROOTS\n")
+    if not separator or tail or script.count(marker) != 1:
+        raise AssertionError("runtime root selection must have one bounded program")
+    return binding + "\n"
+
+
+def _native_wheel_proposal_policy_errors(content: str) -> tuple[str, ...]:
+    """Freeze committed four-host proofs, commands and original archive routing."""
+
+    errors: list[str] = []
+    prelude = "\n".join(
+        line for line in content.partition("jobs:\n")[0].splitlines()
+        if not line.startswith("#")
+    ).strip()
+    expected_prelude = (
+        "name: Native Wheel Proposals\n\non:\n  push:\n"
+        "    branches: [main, codex/native-intel-wheel-locks]\n  pull_request:\n"
+        "    branches: [main]\n\npermissions:\n  contents: read\n\n"
+        "concurrency:\n"
+        "  group: native-wheel-proposals-${{ github.workflow }}-${{ github.ref }}\n"
+        "  cancel-in-progress: true\n\nenv:\n"
+        "  SOURCE_SHA: ${{ github.event_name == 'pull_request' && "
+        "github.event.pull_request.head.sha || github.sha }}\n"
+        "  PROOF_PHASE: require-committed"
+    )
+    if prelude != expected_prelude:
+        errors.append("events, read-only permissions, source or explicit phase changed")
+    if re.findall(r"(?m)^  ([A-Za-z0-9_-]+):$", content.partition("jobs:\n")[2]) != [
+        "native", "aggregate",
+    ]:
+        errors.append("exactly the native matrix and all-four aggregate are required")
+    try:
+        native = _workflow_job_section(content, "native")
+        aggregate = _workflow_job_section(content, "aggregate")
+    except AssertionError as error:
+        return (*errors, str(error))
+
+    matrix = "".join(
+        f"          - platform: {platform}\n            runner: {runner}\n"
+        f"            architecture: {architecture}\n            python_version: '{python}'\n"
+        for platform, runner, architecture, python, _ in NATIVE_WHEEL_PROPOSAL_HOSTS
+    )
+    native_header = (
+        "  native:\n"
+        "    name: proposal / ${{ matrix.platform }} / Python ${{ matrix.python_version }}\n"
+        "    runs-on: ${{ matrix.runner }}\n    timeout-minutes: 75\n"
+        "    strategy:\n      fail-fast: false\n      matrix:\n        include:\n"
+        + matrix + "    env:\n      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n"
+    )
+    aggregate_header = (
+        "  aggregate:\n    name: require all four native proposal proofs\n"
+        "    needs: native\n    if: ${{ always() }}\n    runs-on: ubuntu-24.04\n"
+        "    timeout-minutes: 30\n    env:\n"
+        "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n"
+    )
+    for job, header in ((native, native_header), (aggregate, aggregate_header)):
+        actual_header = job.partition("    steps:\n")[0]
+        if re.search(r"\$\{\{[^}\n]*\brunner\.", actual_header):
+            errors.append("runner context is unavailable in job-level environment values")
+        if actual_header != header:
+            errors.append("native tuples, finite job budget, fresh roots or matrix result changed")
+
+    checkout = (
+        "      - name: Check out exact source\n"
+        f"        uses: {NATIVE_WHEEL_CHECKOUT_ACTION}\n        with:\n"
+        "          ref: ${{ env.SOURCE_SHA }}\n          persist-credentials: false"
+    )
+    setup = (
+        "      - name: Set up exact native Python\n"
+        f"        uses: {NATIVE_WHEEL_SETUP_ACTION}\n        with:\n"
+        "          python-version: ${{ matrix.python_version }}\n"
+        "          architecture: ${{ matrix.architecture }}"
+    )
+    expected_steps: dict[str, str] = {
+        "Check out exact source": checkout,
+        "Set up exact native Python": setup,
+        NATIVE_WHEEL_LF_STEP: (
+            f"      - name: {NATIVE_WHEEL_LF_STEP}\n"
+            "        timeout-minutes: 5\n        shell: bash\n"
+            "        run: |\n"
+            + "\n".join(
+                f"          {line}" for line in NATIVE_WHEEL_LF_SCRIPT.splitlines()
+            )
+        ),
+    }
+    for platform, _, _, python, label in NATIVE_WHEEL_PROPOSAL_HOSTS:
+        name = f"Download exact {label} proposal archive"
+        expected_steps[name] = (
+            f"      - name: {name}\n        if: {NATIVE_WHEEL_ROOT_READY}\n"
+            f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_DOWNLOAD_ACTION}\n"
+            "        with:\n"
+            f"          name: native-wheel-proposal-{platform}-py{python}-"
+            "${{ github.run_id }}-${{ github.run_attempt }}\n"
+            f"          path: ${{{{ env.RAW_ROOT }}}}/{platform}\n"
+            "          skip-decompress: true\n          digest-mismatch: error"
+        )
+    for name, artifact_name, path in (
+        (
+            "Retain proposal evidence including failures",
+            "native-wheel-proposal-${{ matrix.platform }}-py${{ matrix.python_version }}-"
+            "${{ github.run_id }}-${{ github.run_attempt }}",
+            "${{ env.PROPOSAL_ROOT }}/artifact/",
+        ),
+        (
+            "Retain aggregate decision including failures",
+            "native-wheel-proposal-aggregate-${{ github.run_id }}-${{ github.run_attempt }}",
+            "${{ env.AGGREGATE_ROOT }}/",
+        ),
+    ):
+        expected_steps[name] = (
+            f"      - name: {name}\n        if: {NATIVE_WHEEL_ROOT_READY}\n"
+            f"        timeout-minutes: 10\n        uses: {NATIVE_WHEEL_UPLOAD_ACTION}\n"
+            f"        with:\n          name: {artifact_name}\n          path: {path}\n"
+            "          if-no-files-found: error\n          retention-days: 7\n"
+            "          archive: true\n          include-hidden-files: false\n"
+            "          overwrite: false"
+        )
+    for name, expected in expected_steps.items():
+        sections = _workflow_step_sections(content, name)
+        expected_count = 2 if name in ("Check out exact source", NATIVE_WHEEL_LF_STEP) else 1
+        if len(sections) != expected_count or any(
+            section.rstrip() != expected for section in sections
+        ):
+            errors.append(f"exact action routing and fatal inputs changed: {name}")
+
+    for name, expected_digest in NATIVE_WHEEL_ROOT_SCRIPT_SHA256.items():
+        try:
+            section, = _workflow_step_sections(content, name)
+            if section.partition("        run: |\n")[0] != (
+                f"      - name: {name}\n        id: runtime-roots\n"
+                "        timeout-minutes: 5\n        shell: bash\n"
+            ):
+                errors.append("runtime root selection must be unconditional, finite and fatal")
+            script = _native_wheel_runtime_root_script(content, name)
+            if hashlib.sha256(script.encode()).hexdigest() != expected_digest:
+                errors.append("bounded runtime root selection or qualified destinations changed")
+        except (AssertionError, ValueError) as error:
+            errors.append(str(error))
+
+    native_names = re.findall(r"(?m)^      - name: (.+)$", native)
+    aggregate_names = re.findall(r"(?m)^      - name: (.+)$", aggregate)
+    for job, names in ((native, native_names), (aggregate, aggregate_names)):
+        if re.findall(r"(?m)^      - (.+)$", job) != [f"name: {name}" for name in names]:
+            errors.append("unnamed or custom executable steps are forbidden")
+    if native_names != [
+        "Check out exact source", NATIVE_WHEEL_LF_STEP, "Set up exact native Python",
+        NATIVE_WHEEL_NATIVE_ROOT_STEP, NATIVE_WHEEL_PRODUCER_STEP,
+        "Retain proposal evidence including failures",
+    ] or aggregate_names != [
+        "Check out exact source", NATIVE_WHEEL_LF_STEP, NATIVE_WHEEL_AGGREGATE_ROOT_STEP,
+        *(f"Download exact {host[4]} proposal archive" for host in NATIVE_WHEEL_PROPOSAL_HOSTS),
+        NATIVE_WHEEL_VALIDATOR_STEP, "Retain aggregate decision including failures",
+    ]:
+        errors.append("missing, duplicate or extra executable workflow steps")
+
+    for step, timeout, conditional, command in (
+        (
+            NATIVE_WHEEL_PRODUCER_STEP, 60, "",
+            ('python', '-I', 'scripts/propose_native_wheels.py',
+             '--phase', '$PROOF_PHASE', '--platform', '$PROPOSAL_PLATFORM',
+             '--source-root', '$GITHUB_WORKSPACE', '--repository', '$GITHUB_REPOSITORY',
+             '--source-sha', '$SOURCE_SHA', '--run-id', '$GITHUB_RUN_ID',
+             '--run-attempt', '$GITHUB_RUN_ATTEMPT', '--work-root', '$PROPOSAL_ROOT'),
+        ),
+        (
+            NATIVE_WHEEL_VALIDATOR_STEP, 10, f"        if: {NATIVE_WHEEL_ROOT_READY}\n",
+            ('python3', '-I', 'scripts/verify_native_wheel_proposal.py',
+             '--phase', '$PROOF_PHASE', '--source-root', '$GITHUB_WORKSPACE',
+             '--repository', '$GITHUB_REPOSITORY', '--source-sha', '$SOURCE_SHA',
+             '--run-id', '$GITHUB_RUN_ID', '--run-attempt', '$GITHUB_RUN_ATTEMPT',
+             '--native-jobs-result', '$NATIVE_MATRIX_RESULT', '--artifact-root', '$RAW_ROOT',
+             '--output', '$AGGREGATE_ROOT/acceptance.json'),
+        ),
+    ):
+        try:
+            section, = _workflow_step_sections(content, step)
+            if section.partition("        run: |\n")[0] != (
+                f"      - name: {step}\n{conditional}"
+                f"        timeout-minutes: {timeout}\n        shell: bash\n"
+            ):
+                errors.append("proof execution is conditional, unbounded or non-fatal")
+            binding = _native_wheel_source_binding_script(content, step)
+            for required in (
+                'require(event_sha == source_sha, "event source SHA mismatch")',
+                'require(repository == "Infiland/GM2Godot", "noncanonical repository")',
+                'require(os.environ["GITHUB_REF"] in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks"), "unexpected push ref")',
+                'require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")',
+                'require(event.get("deleted") is False, "deleted or malformed push")',
+                'require(head.returncode == 0 and head.stdout.strip() == source_sha,',
+                '"--no-replace-objects"', 'timeout=30',
+                'event_file.read(1024 * 1024 + 1)',
+            ):
+                if required not in binding:
+                    errors.append("bounded event and literal HEAD preflight is missing")
+            tail = _workflow_run_script(content, step).partition("\nPY_SOURCE_BINDING\n")[2]
+            if step == NATIVE_WHEEL_PRODUCER_STEP:
+                fixture_command = (
+                    "python -m unittest tests.test_native_wheel_proposals "
+                    "tests.test_native_wheel_proposal_validation\n"
+                )
+                if not tail.startswith(fixture_command):
+                    errors.append("both stdlib mechanism test modules must run fatally before producer")
+                tail = tail.partition("\n")[2]
+            else:
+                if not tail.startswith('mkdir "$AGGREGATE_ROOT"\n'):
+                    errors.append("aggregate receipt parent must be fresh")
+                tail = tail.partition("\n")[2]
+            if tuple(shlex.split(tail.replace("\\\n", " "))) != command:
+                errors.append("proof command, binding arguments or fatal exit handling changed")
+        except (AssertionError, ValueError) as error:
+            errors.append(str(error))
+    return tuple(errors)
+
+
+DEPENDENCY_LOCK_NATIVE_HOSTS = (
+    ("linux-x64", "ubuntu-24.04", "x64", "3.12.13", "requirements-linux-py312.lock", "linux", "x86_64", "bin/python", "/dev/null", "N01-linux"),
+    ("macos-arm64", "macos-26", "arm64", "3.12.10", "requirements-macos-py312.lock", "darwin", "arm64", "bin/python", "/dev/null", "N01-macos"),
+    ("macos-x64", "macos-26-intel", "x64", "3.12.10", "requirements-macos-py312.lock", "darwin", "x86_64", "bin/python", "/dev/null", "N01-macos-x64"),
+    ("windows-x64", "windows-2025", "x64", "3.12.10", "requirements-windows-py312.lock", "win32", "AMD64", "Scripts/python.exe", "nul", "N01-windows"),
+)
+
+
+def _workflow_literal_assignment(script: str, name: str) -> object:
+    _, separator, remainder = script.partition("python3 - <<'PY'\n")
+    if not separator:
+        raise AssertionError("Expected one embedded Python program")
+    program, separator, _ = remainder.partition("\nPY\n")
+    if not separator:
+        raise AssertionError("Incomplete embedded Python program")
+    assignments = [
+        node for node in ast.parse(program).body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id == name
+    ]
+    if len(assignments) != 1:
+        raise AssertionError("Required literal assignment must appear exactly once")
+    value = assignments[0].value
+    for node in ast.walk(value):
+        if isinstance(node, ast.Dict):
+            keys = [cast(object, ast.literal_eval(key)) for key in node.keys if key is not None]
+            if len(keys) != len(node.keys) or any(type(key) is not str for key in keys):
+                raise AssertionError("Platform policy keys must be literal strings")
+            if len(set(cast(list[str], keys))) != len(keys):
+                raise AssertionError("Duplicate platform policy keys are forbidden")
+    return cast(object, ast.literal_eval(value))
+
+
+def _dependency_lock_four_platform_policy_errors(content: str) -> tuple[str, ...]:
+    """Check all five identities without importing or executing workflow policy."""
+
+    errors: list[str] = []
+    try:
+        generate = _workflow_job_section(content, "generate")
+        matrix = generate.partition("        include:\n")[2].partition("    env:\n")[0]
+        expected_matrix = "".join(
+            f"          - platform: {platform}\n"
+            f"            runner: {runner}\n"
+            f"            architecture: {architecture}\n"
+            f"            python_version: '{python}'\n"
+            f"            constraint: {constraint}\n"
+            f"            expected_platform: {sys_platform}\n"
+            f"            expected_machine: {machine}\n"
+            f"            venv_python: {venv_python}\n"
+            f"            pip_config_file: {pip_config}\n"
+            f"            native_receipt_gate: {gate}\n"
+            for platform, runner, architecture, python, constraint, sys_platform, machine, venv_python, pip_config, gate
+            in DEPENDENCY_LOCK_NATIVE_HOSTS
+        )
+        if matrix != expected_matrix:
+            errors.append("exact four native Locks rows and gate identities are required")
+        fetch = _workflow_run_script(content, "Fetch authoritative native locks at exact push")
+        expected_paths = {
+            host[0]: f"constraints/{host[4]}" for host in DEPENDENCY_LOCK_NATIVE_HOSTS
+        }
+        expected_shell = "".join(f"{platform}|{path}\n" for platform, path in expected_paths.items())
+        if fetch.partition("done <<'LOCKS'\n")[2].partition("LOCKS\n")[0] != expected_shell:
+            errors.append("four distinct shell fetch identities must bind real source paths")
+        if _workflow_literal_assignment(fetch, "expected") != expected_paths:
+            errors.append("four strict API response identities must bind real source paths")
+        for required in (
+            'if verified_locks["macos-arm64"] != verified_locks["macos-x64"]:',
+            'destination = lock_root / f"{platform}.lock"',
+            'with destination.open("xb") as handle:',
+        ):
+            if required not in fetch:
+                errors.append("raw shared-Mac equality and distinct exclusive outputs are required")
+        if fetch.index('if verified_locks["macos-arm64"]') > fetch.index('with destination.open("xb")'):
+            errors.append("shared-Mac raw equality must precede every output write")
+        validator = _workflow_run_script(content, "Validate every snapshot before submission")
+        expected_snapshots = {
+            platform: {
+                "artifact": f"dependency-lock-{platform}-py{python}",
+                "constraint": f"constraints/{constraint}",
+                "candidate": f"candidate/{constraint}",
+                "authoritative": f"{platform}.lock",
+                "python": python,
+                "sys_platform": sys_platform,
+                "machine": machine,
+            }
+            for platform, _runner, _architecture, python, constraint, sys_platform, machine, _venv_python, _pip_config, _gate
+            in DEPENDENCY_LOCK_NATIVE_HOSTS
+        }
+        if _workflow_literal_assignment(validator, "expected") != expected_snapshots:
+            errors.append("four distinct snapshot, raw archive and authoritative identities are required")
+        submit = _workflow_run_script(content, "Submit validated native dependency graphs")
+        if submit.count("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do") != 1:
+            errors.append("all four graph submissions must remain distinct and ordered")
+        if 'verify_current_main "$platform"\n  gh api \\\n    --method POST' not in submit:
+            errors.append("current main must be checked immediately before every POST")
+    except (AssertionError, ValueError, SyntaxError) as error:
+        errors.append(str(error))
+    return tuple(errors)
 
 
 def _run_git(
@@ -1413,13 +1799,553 @@ class TestCIWorkflows(unittest.TestCase):
                 with self.subTest(location=locations[-1]):
                     self.assertEqual(archive_inputs, ["true"])
 
-        # Three test-host uploads and one generator upload add native N01 evidence.
-        self.assertEqual(len(locations), 14, locations)
+        # The four-host proposal matrix and its aggregate add two source upload blocks.
+        self.assertEqual(len(locations), 16, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             3,
             locations,
         )
+        self.assertEqual(
+            sum(location.startswith("native-wheel-proposals.yml:") for location in locations),
+            2,
+            locations,
+        )
+
+    def test_native_wheel_proposals_bind_four_native_hosts_and_original_archives(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(_native_wheel_proposal_policy_errors(content), ())
+        self.assertEqual(
+            _native_wheel_source_binding_script(content, NATIVE_WHEEL_PRODUCER_STEP),
+            _native_wheel_source_binding_script(content, NATIVE_WHEEL_VALIDATOR_STEP),
+        )
+        self.assertEqual(content.count("actions/download-artifact@"), 4)
+        self.assertEqual(content.count("skip-decompress: true"), 4)
+        self.assertEqual(content.count("digest-mismatch: error"), 4)
+        self.assertEqual(content.count(NATIVE_WHEEL_LF_COMMAND), 2)
+        self.assertEqual(
+            _workflow_run_scripts(content, NATIVE_WHEEL_LF_STEP),
+            (NATIVE_WHEEL_LF_SCRIPT, NATIVE_WHEEL_LF_SCRIPT),
+        )
+        self.assertNotIn("${{ runner.temp }}", content)
+        self.assertEqual(content.count(NATIVE_WHEEL_ROOT_READY), 7)
+        for job_name in ("native", "aggregate"):
+            with self.subTest(job=job_name):
+                job = _workflow_job_section(content, job_name)
+                names = re.findall(r"(?m)^      - name: (.+)$", job)
+                self.assertEqual(names[:2], ["Check out exact source", NATIVE_WHEEL_LF_STEP])
+        producer = _workflow_run_script(content, NATIVE_WHEEL_PRODUCER_STEP)
+        fixture_command = (
+            "python -m unittest tests.test_native_wheel_proposals "
+            "tests.test_native_wheel_proposal_validation"
+        )
+        self.assertEqual(producer.count(fixture_command), 1)
+        self.assertLess(producer.index("\nPY_SOURCE_BINDING\n"), producer.index(fixture_command))
+        self.assertLess(producer.index(fixture_command), producer.index("python -I scripts/propose_native_wheels.py"))
+        for forbidden in (
+            "unzip", "extractall", "merge-multiple", "pattern:", "pip install",
+            "-m pip", "secrets.", "pull_request_target", "workflow_dispatch",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, content)
+
+    def test_native_wheel_proposal_policy_rejects_missing_or_bypassed_proofs(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        intel_row = (
+            "          - platform: macos-x64\n            runner: macos-26-intel\n"
+            "            architecture: x64\n            python_version: '3.12.10'\n"
+        )
+        producer_line = "          python -I scripts/propose_native_wheels.py"
+        fixture_line = (
+            "          python -m unittest tests.test_native_wheel_proposals "
+            "tests.test_native_wheel_proposal_validation\n"
+        )
+        mutations = {
+            "unsupported-native-job-runner-context": content.replace(
+                "      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n",
+                "      PROPOSAL_PLATFORM: ${{ matrix.platform }}\n"
+                "      PROPOSAL_ROOT: ${{ runner.temp }}/proposal\n",
+            ),
+            "unsupported-aggregate-job-runner-context": content.replace(
+                "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n",
+                "      RAW_ROOT: ${{ runner.temp }}/archives\n"
+                "      NATIVE_MATRIX_RESULT: ${{ needs.native.result }}\n",
+            ),
+            "root-readiness-bypass": content.replace(
+                NATIVE_WHEEL_ROOT_READY, "${{ always() }}",
+            ),
+            "checkout-root-instead-of-runner-temp": content.replace(
+                'os.environ.get("RUNNER_TEMP", "")',
+                'os.environ.get("GITHUB_WORKSPACE", "")',
+            ),
+            "reused-runtime-roots": content.replace(
+                "and not os.path.lexists(root)", "",
+            ),
+            "unbounded-runtime-path": content.replace(
+                "0 < len(temporary) <= 4096", "len(temporary) > 0",
+            ),
+            "missing-intel": content.replace(intel_row, ""),
+            "duplicate-intel": content.replace(intel_row, intel_row * 2),
+            "non-native-intel": content.replace("runner: macos-26-intel", "runner: macos-26"),
+            "wrong-native-patch": content.replace("python_version: '3.12.13'", "python_version: '3.12.10'"),
+            "implicit-phase": content.replace("PROOF_PHASE: require-committed", "PROOF_PHASE: ${{ vars.PHASE }}"),
+            "discovery-downgrade": content.replace("PROOF_PHASE: require-committed", "PROOF_PHASE: discover"),
+            "missing-main-push": content.replace("branches: [main, codex/native-intel-wheel-locks]", "branches: [codex/native-intel-wheel-locks]"),
+            "extra-push-ref": content.replace("branches: [main, codex/native-intel-wheel-locks]", "branches: [main, codex/native-intel-wheel-locks, other]"),
+            "main-preflight-omission": content.replace(
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks")',
+                'in ("refs/heads/codex/native-intel-wheel-locks",)',
+            ),
+            "extra-preflight-ref": content.replace(
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks")',
+                'in ("refs/heads/main", "refs/heads/codex/native-intel-wheel-locks", "refs/heads/other")',
+            ),
+            "ignored-deleted-push": content.replace(
+                'require(event.get("deleted") is False, "deleted or malformed push")',
+                'require(True, "deleted or malformed push")',
+            ),
+            "ignored-event-push-ref": content.replace(
+                'require(event.get("ref") == os.environ["GITHUB_REF"], "event push ref mismatch")',
+                'require(True, "event push ref mismatch")',
+            ),
+            "PR-path-omission": content.replace("    branches: [main]", "    branches: [main]\n    paths: ['constraints/**']"),
+            "draft-omission": content.replace("    strategy:", "    if: ${{ !github.event.pull_request.draft }}\n    strategy:"),
+            "write-permission": content.replace("contents: read", "contents: write"),
+            "matrix-fast-fail": content.replace("fail-fast: false", "fail-fast: true"),
+            "floating-source": content.replace("ref: ${{ env.SOURCE_SHA }}", "ref: main"),
+            "quoted-nonfatal": content.replace("        shell: bash", '        "continue-on-error": true\n        shell: bash', 1),
+            "producer-conditional": content.replace("        timeout-minutes: 60", "        if: ${{ false }}\n        timeout-minutes: 60"),
+            "ignored-producer-exit": content.replace('            --work-root "$PROPOSAL_ROOT"', '            --work-root "$PROPOSAL_ROOT" || true'),
+            "unknown-helper-flag": content.replace('--work-root "$PROPOSAL_ROOT"', '--output-root "$PROPOSAL_ROOT"'),
+            "private-work-upload": content.replace("${{ env.PROPOSAL_ROOT }}/artifact/", "${{ env.PROPOSAL_ROOT }}/"),
+            "missing-attempt": content.replace("-${{ github.run_attempt }}", ""),
+            "artifact-overwrite": content.replace("overwrite: false", "overwrite: true"),
+            "decompressed-input": content.replace("skip-decompress: true", "skip-decompress: false", 1),
+            "ignored-digest": content.replace("digest-mismatch: error", "digest-mismatch: warn", 1),
+            "merged-download-roots": content.replace("${{ env.RAW_ROOT }}/macos-x64", "${{ env.RAW_ROOT }}/macos-arm64"),
+            "literal-success-result": content.replace("NATIVE_MATRIX_RESULT: ${{ needs.native.result }}", "NATIVE_MATRIX_RESULT: success"),
+            "omitted-matrix-result": content.replace('            --native-jobs-result "$NATIVE_MATRIX_RESULT" \\\n', ""),
+            "unbounded-event-read": content.replace("event_file.read(1024 * 1024 + 1)", "event_file.read()"),
+            "no-HEAD-check": content.replace('require(head.returncode == 0 and head.stdout.strip() == source_sha,', 'require(True,'),
+            "unbounded-Git": content.replace("timeout=30", "timeout=None"),
+            "preflight-after-producer": content.replace(producer_line, producer_line + "\n          true"),
+            "extra-unnamed-action": content.replace("    steps:\n", "    steps:\n      - uses: actions/checkout@main\n", 1),
+            "missing-mechanism-tests": content.replace(fixture_line, ""),
+            "partial-mechanism-tests": content.replace(fixture_line, "          python -m unittest tests.test_native_wheel_proposals\n"),
+            "ignored-mechanism-test-exit": content.replace(fixture_line, fixture_line.rstrip("\n") + " || true\n"),
+            "tests-after-producer": content.replace(fixture_line, "").replace('            --work-root "$PROPOSAL_ROOT"\n', '            --work-root "$PROPOSAL_ROOT"\n' + fixture_line),
+        }
+        download = _workflow_step_sections(content, "Download exact macOS x64 proposal archive")[0]
+        mutations["missing-download"] = content.replace(download, "")
+        mutations["duplicate-download"] = content.replace(download, download * 2)
+        lf_step = _workflow_step_sections(content, NATIVE_WHEEL_LF_STEP)[0]
+        mutations["missing-LF-materialization"] = content.replace(lf_step, "", 1)
+        mutations["persistent-LF-config"] = content.replace(NATIVE_WHEEL_LF_COMMAND, "git config --global core.autocrlf false", 1)
+        mutations["missing-index-cache-clear"] = content.replace(
+            "          git read-tree --empty\n", "", 1,
+        )
+        mutations["missing-immutable-index-rebuild"] = content.replace(
+            '          git --no-replace-objects read-tree "$SOURCE_SHA"\n', "", 1,
+        )
+        mutations["nonfatal-index-cache-clear"] = content.replace(
+            "          git read-tree --empty\n",
+            "          git read-tree --empty || true\n", 1,
+        )
+        mutations["nonfatal-immutable-index-rebuild"] = content.replace(
+            '          git --no-replace-objects read-tree "$SOURCE_SHA"\n',
+            '          git --no-replace-objects read-tree "$SOURCE_SHA" || true\n', 1,
+        )
+        mutations["replacement-enabled-index-rebuild"] = content.replace(
+            'git --no-replace-objects read-tree "$SOURCE_SHA"',
+            'git read-tree "$SOURCE_SHA"', 1,
+        )
+        mutations["floating-index-rebuild"] = content.replace(
+            'git --no-replace-objects read-tree "$SOURCE_SHA"',
+            "git --no-replace-objects read-tree HEAD", 1,
+        )
+        mutations["nonfatal-LF-program"] = content.replace(
+            "          set -euo pipefail\n          git read-tree --empty\n",
+            "          set +e\n          git read-tree --empty\n", 1,
+        )
+        mutations["conditional-LF-materialization"] = content.replace(
+            lf_step, lf_step.replace("        timeout-minutes: 5\n", "        if: ${{ false }}\n        timeout-minutes: 5\n"), 1,
+        )
+        mutations["LF-after-producer"] = content.replace(lf_step, "", 1).replace(
+            "      - name: Retain proposal evidence including failures\n",
+            lf_step + "      - name: Retain proposal evidence including failures\n",
+        )
+        native_roots = _workflow_step_sections(content, NATIVE_WHEEL_NATIVE_ROOT_STEP)[0]
+        aggregate_roots = _workflow_step_sections(content, NATIVE_WHEEL_AGGREGATE_ROOT_STEP)[0]
+        for label, setup in (("native", native_roots), ("aggregate", aggregate_roots)):
+            mutations[f"missing-{label}-root-setup"] = content.replace(setup, "")
+            mutations[f"conditional-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        id: runtime-roots\n", "        if: ${{ false }}\n        id: runtime-roots\n"),
+            )
+            mutations[f"nonfatal-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        id: runtime-roots\n", "        continue-on-error: true\n        id: runtime-roots\n"),
+            )
+            mutations[f"unbounded-{label}-root-setup"] = content.replace(
+                setup, setup.replace("        timeout-minutes: 5\n", ""),
+            )
+        mutations["native-root-setup-after-producer"] = content.replace(native_roots, "").replace(
+            "      - name: Retain proposal evidence including failures\n",
+            native_roots + "      - name: Retain proposal evidence including failures\n",
+        )
+        mutations["aggregate-root-setup-after-downloads"] = content.replace(aggregate_roots, "").replace(
+            f"      - name: {NATIVE_WHEEL_VALIDATOR_STEP}\n",
+            aggregate_roots + f"      - name: {NATIVE_WHEEL_VALIDATOR_STEP}\n",
+        )
+        for label, mutated in mutations.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, content)
+                self.assertTrue(_native_wheel_proposal_policy_errors(mutated))
+
+    def test_native_wheel_LF_materialization_rebuilds_cached_CRLF_index_fatally(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        scripts = _workflow_run_scripts(content, NATIVE_WHEEL_LF_STEP)
+        self.assertEqual(scripts, (NATIVE_WHEEL_LF_SCRIPT, NATIVE_WHEEL_LF_SCRIPT))
+        git_executable = shutil.which("git")
+        bash_executable = shutil.which("bash")
+        if os.name == "nt" and git_executable is not None:
+            git_path = Path(git_executable).resolve()
+            for candidate in (
+                git_path.parent.parent / "bin" / "bash.exe",
+                git_path.parent.parent.parent / "bin" / "bash.exe",
+            ):
+                if candidate.is_file():
+                    bash_executable = str(candidate)
+                    break
+        self.assertIsNotNone(git_executable, "The CI fixture requires native Git")
+        self.assertIsNotNone(bash_executable, "The workflow requires native Bash")
+        git_binary = cast(str, git_executable)
+        bash_binary = cast(str, bash_executable)
+        blobs = {
+            ".github/workflows/native-wheel-proposals.yml": (
+                b"name: cached-clean fixture\njobs:\n  fixture:\n"
+                b"    runs-on: windows-2025\n"
+            ),
+            "scripts/fixture.py": b"print('immutable source fixture')\n",
+            "scripts/executable.sh": b"#!/bin/sh\nexit 0\n",
+            "fixtures/raw.bin": b"\x00\xffbinary\r\n\x00\x01",
+        }
+        modes = {name: b"100644" for name in blobs}
+        modes["scripts/executable.sh"] = b"100755"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            empty_configuration = root / "empty-git-config"
+            empty_configuration.write_bytes(b"")
+            for case in ("valid-source", "missing-source", "unavailable-source"):
+                with self.subTest(case=case):
+                    repository = root / case
+                    repository.mkdir()
+                    environment = {
+                        key: value for key, value in os.environ.items()
+                        if not key.startswith("GIT_") and key != "SOURCE_SHA"
+                    }
+                    environment.update({
+                        "GIT_CONFIG_NOSYSTEM": "1",
+                        "GIT_CONFIG_GLOBAL": str(empty_configuration),
+                        "GIT_TERMINAL_PROMPT": "0",
+                    })
+
+                    def run_git(*arguments: str) -> bytes:
+                        result = subprocess.run(
+                            [git_binary, *arguments], cwd=repository,
+                            env=environment, capture_output=True, timeout=15,
+                        )
+                        self.assertLessEqual(len(result.stdout), 1024 * 1024)
+                        self.assertLessEqual(len(result.stderr), 1024 * 1024)
+                        self.assertEqual(
+                            result.returncode, 0,
+                            result.stderr.decode("utf-8", errors="replace"),
+                        )
+                        return result.stdout
+
+                    def index_modes() -> dict[str, bytes]:
+                        observed: dict[str, bytes] = {}
+                        for entry in run_git("ls-files", "--stage", "-z").split(b"\0"):
+                            if entry:
+                                header, separator, name = entry.partition(b"\t")
+                                self.assertEqual(separator, b"\t")
+                                observed[name.decode("utf-8")] = header.split()[0]
+                        return observed
+
+                    run_git("init", "--quiet")
+                    run_git("config", "user.name", "Disposable Source Fixture")
+                    run_git("config", "user.email", "fixture@example.invalid")
+                    run_git("config", "core.autocrlf", "false")
+                    for name, data in blobs.items():
+                        path = repository / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(data)
+                    run_git("add", "--all")
+                    run_git("update-index", "--chmod=+x", "scripts/executable.sh")
+                    run_git("commit", "--quiet", "-m", "Create disposable source fixture")
+                    source_sha = run_git("rev-parse", "HEAD").decode().strip()
+                    source_tree = run_git("rev-parse", "HEAD^{tree}")
+                    for name, data in blobs.items():
+                        self.assertEqual(run_git("cat-file", "blob", f"{source_sha}:{name}"), data)
+                    self.assertEqual(index_modes(), modes)
+                    run_git("config", "core.autocrlf", "true")
+                    for name in blobs:
+                        (repository / name).unlink()
+                    run_git("checkout-index", "--all", "--force", "--index")
+                    # A past mtime avoids Git's racy-clean content reread, which
+                    # can otherwise accidentally conceal the cached CRLF defect.
+                    for name in blobs:
+                        os.utime(repository / name, ns=(946684800000000000, 946684800000000000))
+                    run_git("update-index", "--refresh")
+                    self.assertEqual(run_git("status", "--porcelain=v1"), b"")
+                    index_mtime = (repository / ".git" / "index").stat().st_mtime_ns
+                    for name in blobs:
+                        self.assertLess((repository / name).stat().st_mtime_ns, index_mtime)
+                    cached = {name: (repository / name).read_bytes() for name in blobs}
+                    for name, data in blobs.items():
+                        expected = data if name.endswith(".bin") else data.replace(b"\n", b"\r\n")
+                        self.assertEqual(cached[name], expected)
+                    run_git(*shlex.split(NATIVE_WHEEL_LF_COMMAND)[1:])
+                    self.assertEqual(
+                        {name: (repository / name).read_bytes() for name in blobs}, cached,
+                        "Force alone must reproduce the clean-index CRLF defect",
+                    )
+                    configuration = (repository / ".git" / "config").read_bytes()
+                    head = (repository / ".git" / "HEAD").read_bytes()
+                    script_environment = environment.copy()
+                    if case != "missing-source":
+                        script_environment["SOURCE_SHA"] = (
+                            source_sha if case == "valid-source" else "f" * 40
+                        )
+                    result = subprocess.run(
+                        [bash_binary, "-c", scripts[0]], cwd=repository,
+                        env=script_environment, capture_output=True, timeout=15,
+                    )
+                    self.assertLessEqual(len(result.stdout), 1024 * 1024)
+                    self.assertLessEqual(len(result.stderr), 1024 * 1024)
+                    self.assertEqual((repository / ".git" / "config").read_bytes(), configuration)
+                    self.assertEqual((repository / ".git" / "HEAD").read_bytes(), head)
+                    self.assertEqual(run_git("rev-parse", "HEAD").decode().strip(), source_sha)
+                    self.assertEqual(
+                        {
+                            path.relative_to(repository).as_posix()
+                            for path in repository.rglob("*")
+                            if path.relative_to(repository).parts[0] != ".git" and path.is_file()
+                        }, set(blobs),
+                    )
+                    if case == "valid-source":
+                        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
+                        self.assertEqual(index_modes(), modes)
+                        self.assertEqual(run_git("write-tree"), source_tree)
+                        for name, data in blobs.items():
+                            self.assertEqual((repository / name).read_bytes(), data)
+                        if os.name == "posix":
+                            self.assertTrue((repository / "scripts/executable.sh").stat().st_mode & stat.S_IXUSR)
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(run_git("ls-files", "--stage", "-z"), b"")
+                        self.assertEqual(
+                            {name: (repository / name).read_bytes() for name in blobs}, cached,
+                            "An unbound source must stop before rematerializing files",
+                        )
+
+    def test_native_wheel_runtime_roots_are_bounded_fresh_and_exported_only_on_success(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        for step, native in (
+            (NATIVE_WHEEL_NATIVE_ROOT_STEP, True),
+            (NATIVE_WHEEL_AGGREGATE_ROOT_STEP, False),
+        ):
+            with self.subTest(step=step), tempfile.TemporaryDirectory() as temporary:
+                runner_temp = Path(temporary).resolve() / "runner-temp"
+                runner_temp.mkdir()
+                export = Path(temporary) / "github-env"
+                environment = {
+                    "RUNNER_TEMP": str(runner_temp), "GITHUB_ENV": str(export),
+                    "SOURCE_SHA": "a" * 40, "GITHUB_RUN_ID": "17",
+                    "GITHUB_RUN_ATTEMPT": "2", "PROPOSAL_PLATFORM": "linux-x64",
+                }
+                expected = (
+                    {"PROPOSAL_ROOT": runner_temp / "gm2godot-native-wheel-proposal-17-2-linux-x64"}
+                    if native else {
+                        "RAW_ROOT": runner_temp / "gm2godot-native-proposal-archives-17-2",
+                        "AGGREGATE_ROOT": runner_temp / "gm2godot-native-proposal-aggregate-17-2",
+                    }
+                )
+                script = _native_wheel_runtime_root_script(content, step)
+
+                def execute(values: dict[str, str]) -> None:
+                    with mock.patch.dict(os.environ, values, clear=True):
+                        exec(compile(script, "<native-proposal-runtime-roots>", "exec"), {})
+
+                execute(environment)
+                self.assertEqual(
+                    export.read_bytes(),
+                    "".join(f"{name}={path}\n" for name, path in expected.items()).encode(),
+                )
+                self.assertTrue(all(not path.exists() for path in expected.values()))
+                sentinel = b"existing-environment-record\n"
+                cases = [
+                    ("SOURCE_SHA", "A" * 40),
+                    ("GITHUB_RUN_ID", "0"),
+                    ("GITHUB_RUN_ATTEMPT", "1" * 21),
+                    ("RUNNER_TEMP", "relative-directory"),
+                    ("RUNNER_TEMP", "x" * 4097),
+                    ("RUNNER_TEMP", str(runner_temp) + "\ninjected=value"),
+                    ("RUNNER_TEMP", str(runner_temp / "absent")),
+                ]
+                if native:
+                    cases.append(("PROPOSAL_PLATFORM", "unknown-platform"))
+                for name, value in cases:
+                    with self.subTest(step=step, field=name, value=value[:80]):
+                        export.write_bytes(sentinel)
+                        altered = dict(environment)
+                        altered[name] = value
+                        with self.assertRaises((SystemExit, OSError)):
+                            execute(altered)
+                        self.assertEqual(export.read_bytes(), sentinel)
+                for path in expected.values():
+                    with self.subTest(step=step, collision=path.name):
+                        path.mkdir()
+                        export.write_bytes(sentinel)
+                        with self.assertRaises(SystemExit):
+                            execute(environment)
+                        self.assertEqual(export.read_bytes(), sentinel)
+                        self.assertTrue(path.is_dir())
+                        path.rmdir()
+
+    def test_native_wheel_source_preflight_checks_actual_event_and_literal_HEAD(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        binding = _native_wheel_source_binding_script(content, NATIVE_WHEEL_PRODUCER_STEP)
+        sha = "a" * 40
+        repository = "Infiland/GM2Godot"
+        push_ref = "refs/heads/codex/native-intel-wheel-locks"
+        push: dict[str, object] = {
+            "repository": {"full_name": repository}, "ref": push_ref,
+            "deleted": False, "after": sha,
+        }
+        main_push = copy.deepcopy(push)
+        main_push["ref"] = "refs/heads/main"
+        pull_request: dict[str, object] = {
+            "repository": {"full_name": repository}, "action": "synchronize", "number": 854,
+            "pull_request": {
+                "base": {"ref": "main", "repo": {"full_name": repository}},
+                "head": {"sha": sha, "repo": {"full_name": "contributor/GM2Godot"}},
+            },
+        }
+        scenarios: list[tuple[str, dict[str, object], dict[str, str], str, int, bool]] = [
+            ("feature-push", push, {}, sha, 0, True),
+            ("main-push", main_push, {"GITHUB_REF": "refs/heads/main"}, sha, 0, True),
+            ("fork-PR", pull_request, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/854/merge"}, sha, 0, True),
+            ("repository", push, {"GITHUB_REPOSITORY": "fork/GM2Godot"}, sha, 0, False),
+            ("SHA-shape", push, {"SOURCE_SHA": "A" * 40}, sha, 0, False),
+            ("zero-run", push, {"GITHUB_RUN_ID": "0"}, sha, 0, False),
+            ("empty-attempt", push, {"GITHUB_RUN_ATTEMPT": ""}, sha, 0, False),
+            ("leading-zero-attempt", push, {"GITHUB_RUN_ATTEMPT": "01"}, sha, 0, False),
+            ("wrong-push-ref", push, {"GITHUB_REF": "refs/heads/other"}, sha, 0, False),
+            ("main-event-ref-mismatch", main_push, {}, sha, 0, False),
+            ("unsupported-event", push, {"GITHUB_EVENT_NAME": "workflow_dispatch"}, sha, 0, False),
+            ("different-HEAD", push, {}, "b" * 40, 0, False),
+            ("failed-Git", push, {}, sha, 1, False),
+        ]
+        for label, field, value in (
+            ("event-repository", "repository", {"full_name": "fork/GM2Godot"}),
+            ("event-source", "after", "b" * 40),
+            ("deleted", "deleted", True),
+            ("nonboolean-deleted", "deleted", 0),
+            ("event-ref", "ref", "refs/heads/main"),
+        ):
+            mutated = copy.deepcopy(push)
+            mutated[field] = value
+            scenarios.append((label, mutated, {}, sha, 0, False))
+        for label, field, value in (
+            ("main-source", "after", "b" * 40),
+            ("main-deleted", "deleted", True),
+            ("main-ref", "ref", push_ref),
+        ):
+            mutated = copy.deepcopy(main_push)
+            mutated[field] = value
+            scenarios.append((label, mutated, {"GITHUB_REF": "refs/heads/main"}, sha, 0, False))
+        for label, replacement in (
+            ("PR-base", {"base": {"ref": "develop", "repo": {"full_name": repository}}, "head": {"sha": sha}}),
+            ("PR-base-repository", {"base": {"ref": "main", "repo": {"full_name": "fork/GM2Godot"}}, "head": {"sha": sha}}),
+            ("PR-source", {"base": {"ref": "main", "repo": {"full_name": repository}}, "head": {"sha": "b" * 40}}),
+        ):
+            mutated = copy.deepcopy(pull_request)
+            mutated["pull_request"] = replacement
+            scenarios.append((label, mutated, {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/854/merge"}, sha, 0, False))
+
+        for label, event, updates, head_sha, returncode, accepts in scenarios:
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                event_path = root / "event.json"
+                event_path.write_text(json.dumps(event), encoding="utf-8")
+                environment = {
+                    "GITHUB_REPOSITORY": repository, "SOURCE_SHA": sha,
+                    "GITHUB_RUN_ID": "37000000001", "GITHUB_RUN_ATTEMPT": "2",
+                    "GITHUB_EVENT_PATH": str(event_path), "GITHUB_WORKSPACE": str(root),
+                    "GITHUB_EVENT_NAME": "push", "GITHUB_REF": push_ref,
+                    **updates,
+                }
+                result = subprocess.CompletedProcess(["git"], returncode, head_sha + "\n", "")
+                with (
+                    mock.patch.dict(os.environ, environment, clear=True),
+                    mock.patch("subprocess.run", return_value=result) as run,
+                    mock.patch("builtins.print"),
+                ):
+                    if accepts:
+                        exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    if accepts or label in ("different-HEAD", "failed-Git"):
+                        run.assert_called_once_with(
+                            ["git", "--no-replace-objects", "-C", str(root), "rev-parse", "--verify", "HEAD^{commit}"],
+                            check=False, capture_output=True, text=True, timeout=30,
+                        )
+                    else:
+                        run.assert_not_called()
+
+    def test_native_wheel_source_preflight_rejects_duplicate_and_oversized_events(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "native-wheel-proposals.yml"
+        ).read_text(encoding="utf-8")
+        binding = _native_wheel_source_binding_script(content, NATIVE_WHEEL_VALIDATOR_STEP)
+        for label, payload in (
+            ("duplicate-field", b'{"repository":{},"repository":{}}'),
+            ("size-bound", b" " * (1024 * 1024 + 1)),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                event_path = Path(temporary) / "event.json"
+                event_path.write_bytes(payload)
+                environment = {
+                    "GITHUB_REPOSITORY": "Infiland/GM2Godot", "SOURCE_SHA": "a" * 40,
+                    "GITHUB_RUN_ID": "1", "GITHUB_RUN_ATTEMPT": "1",
+                    "GITHUB_EVENT_PATH": str(event_path),
+                }
+                with mock.patch.dict(os.environ, environment, clear=True), mock.patch("subprocess.run") as run:
+                    with self.assertRaises(SystemExit):
+                        exec(compile(binding, "<native-proposal-source-binding>", "exec"), {})
+                    run.assert_not_called()
 
     def test_release_action_smoke_verifies_sentinel_archive(self) -> None:
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release-action-smoke.yml"
@@ -3758,6 +4684,16 @@ class TestCIWorkflows(unittest.TestCase):
             "            expected_platform: darwin\n"
             "            expected_machine: arm64\n"
             "            venv_python: bin/python\n",
+            "          - platform: macos-x64\n"
+            "            runner: macos-26-intel\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-macos-py312.lock\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: x86_64\n"
+            "            venv_python: bin/python\n"
+            "            pip_config_file: /dev/null\n"
+            "            native_receipt_gate: N01-macos-x64\n",
             "          - platform: windows-x64\n"
             "            runner: windows-2025\n"
             "            architecture: x64\n"
@@ -3769,7 +4705,7 @@ class TestCIWorkflows(unittest.TestCase):
         ):
             with self.subTest(workflow="dependency-locks.yml", native_tuple=native_tuple):
                 self.assertIn(native_tuple, dependency_locks)
-        self.assertEqual(dependency_locks.count("          - platform:"), 3)
+        self.assertEqual(dependency_locks.count("          - platform:"), 4)
         self.assertNotIn("-latest", dependency_locks)
 
     def test_native_workflow_installs_use_fresh_selected_venvs(self) -> None:
@@ -4740,8 +5676,12 @@ class TestCIWorkflows(unittest.TestCase):
             tuple(sorted(path.name for path in constraints_directory.glob("*.lock"))),
             (
                 "requirements-linux-py312.lock",
+                "requirements-linux-x64-py312.wheels.lock",
+                "requirements-macos-arm64-py312.wheels.lock",
                 "requirements-macos-py312.lock",
+                "requirements-macos-x64-py312.wheels.lock",
                 "requirements-windows-py312.lock",
+                "requirements-windows-x64-py312.wheels.lock",
             ),
         )
         self.assertFalse(tuple(constraints_directory.glob("*.txt")))
@@ -4767,6 +5707,37 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(
                     constraint_pins.get("pip-tools"),
                     bootstrap_pins["pip-tools"],
+                )
+
+        for platform, constraint_name in (
+            ("linux-x64", "requirements-linux-py312.lock"),
+            ("macos-arm64", "requirements-macos-py312.lock"),
+            ("macos-x64", "requirements-macos-py312.lock"),
+            ("windows-x64", "requirements-windows-py312.lock"),
+        ):
+            with self.subTest(companion=platform):
+                companion = constraints_directory / f"requirements-{platform}-py312.wheels.lock"
+                payload = companion.read_bytes()
+                self.assertTrue(payload.endswith(b"\n"))
+                self.assertNotIn(b"\r", payload)
+                names: list[str] = []
+                observed_pins: dict[str, str] = {}
+                for line in payload.decode("ascii").splitlines():
+                    match = re.fullmatch(
+                        r"([a-z0-9]+(?:-[a-z0-9]+)*)==([A-Za-z0-9.!+_-]+) --hash=sha256:([0-9a-f]{64})",
+                        line,
+                    )
+                    self.assertIsNotNone(match, line)
+                    if match is None:
+                        raise AssertionError("wheel companion requires one canonical SHA256 per pin")
+                    name, version, _digest = match.groups()
+                    names.append(name)
+                    self.assertNotIn(name, observed_pins)
+                    observed_pins[name] = version
+                self.assertEqual(names, sorted(set(names)))
+                self.assertEqual(
+                    observed_pins,
+                    _exact_requirement_pins(constraints_directory / constraint_name),
                 )
 
         workflow = (
@@ -4856,6 +5827,133 @@ class TestCIWorkflows(unittest.TestCase):
             "normalize_lock_newlines(candidate_bytes) != normalize_lock_newlines(",
             validator,
         )
+        self.assertEqual(_dependency_lock_four_platform_policy_errors(content), ())
+        for bound in (
+            "MAX_ARCHIVE_BYTES = 64 * 1024 * 1024",
+            "MAX_MEMBER_BYTES = 16 * 1024 * 1024",
+            "MAX_TOTAL_BYTES = 64 * 1024 * 1024",
+            "MAX_MEMBERS = 256",
+            "MAX_LOCK_BYTES = 1024 * 1024",
+        ):
+            self.assertIn(bound, validator)
+
+    def test_dependency_lock_four_platform_policy_rejects_missing_or_aliased_identities(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        self.assertEqual(_dependency_lock_four_platform_policy_errors(content), ())
+
+        def mutate_step(step: str, old: str, new: str) -> str:
+            section, = _workflow_step_sections(content, step)
+            self.assertEqual(section.count(old), 1)
+            return content.replace(section, section.replace(old, new), 1)
+
+        intel_matrix = (
+            "          - platform: macos-x64\n"
+            "            runner: macos-26-intel\n"
+            "            architecture: x64\n"
+            "            python_version: '3.12.10'\n"
+            "            constraint: requirements-macos-py312.lock\n"
+            "            expected_platform: darwin\n"
+            "            expected_machine: x86_64\n"
+            "            venv_python: bin/python\n"
+            "            pip_config_file: /dev/null\n"
+            "            native_receipt_gate: N01-macos-x64\n"
+        )
+        fetch_step = "Fetch authoritative native locks at exact push"
+        validator_step = "Validate every snapshot before submission"
+        shell_row = "          macos-x64|constraints/requirements-macos-py312.lock\n"
+        fetch_row = '              "macos-x64": "constraints/requirements-macos-py312.lock",\n'
+        snapshot_row = (
+            '              "macos-x64": {\n'
+            '                  "artifact": "dependency-lock-macos-x64-py3.12.10",\n'
+            '                  "constraint": "constraints/requirements-macos-py312.lock",\n'
+            '                  "candidate": "candidate/requirements-macos-py312.lock",\n'
+            '                  "authoritative": "macos-x64.lock",\n'
+            '                  "python": "3.12.10",\n'
+            '                  "sys_platform": "darwin",\n'
+            '                  "machine": "x86_64",\n'
+            '              },\n'
+        )
+        mutations = {
+            "missing-Intel-matrix": content.replace(intel_matrix, ""),
+            "duplicate-Intel-matrix": content.replace(intel_matrix, intel_matrix * 2),
+            "Intel-arm-runner": content.replace(intel_matrix, intel_matrix.replace("runner: macos-26-intel", "runner: macos-26")),
+            "Intel-arm-gate": content.replace(intel_matrix, intel_matrix.replace("N01-macos-x64", "N01-macos")),
+            "missing-Intel-shell-fetch": mutate_step(fetch_step, shell_row, ""),
+            "duplicate-Intel-shell-fetch": mutate_step(fetch_step, shell_row, shell_row * 2),
+            "wrong-Intel-shell-source": mutate_step(fetch_step, shell_row, shell_row.replace("requirements-macos-py312.lock", "requirements-macos-x64-py312.wheels.lock")),
+            "missing-Intel-response-policy": mutate_step(fetch_step, fetch_row, ""),
+            "duplicate-Intel-response-policy": mutate_step(fetch_step, fetch_row, fetch_row * 2),
+            "wrong-Intel-response-source": mutate_step(fetch_step, fetch_row, fetch_row.replace("requirements-macos-py312.lock", "requirements-macos-x64-py312.wheels.lock")),
+            "authoritative-basename-collision": mutate_step(fetch_step, 'destination = lock_root / f"{platform}.lock"', "destination = lock_root / Path(lock_path).name"),
+            "missing-raw-Mac-equality": mutate_step(fetch_step, 'if verified_locks["macos-arm64"] != verified_locks["macos-x64"]:', "if False:"),
+            "nonexclusive-authoritative-write": mutate_step(fetch_step, 'destination.open("xb")', 'destination.open("wb")'),
+            "missing-Intel-snapshot-policy": mutate_step(validator_step, snapshot_row, ""),
+            "duplicate-Intel-snapshot-policy": mutate_step(validator_step, snapshot_row, snapshot_row * 2),
+            "Intel-arm-archive": mutate_step(validator_step, snapshot_row, snapshot_row.replace("dependency-lock-macos-x64-py3.12.10", "dependency-lock-macos-arm64-py3.12.10")),
+            "Intel-arm-authoritative-file": mutate_step(validator_step, snapshot_row, snapshot_row.replace("macos-x64.lock", "macos-arm64.lock")),
+            "Intel-arm-tuple": mutate_step(validator_step, snapshot_row, snapshot_row.replace('"machine": "x86_64"', '"machine": "arm64"')),
+            "missing-Intel-submission": content.replace("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do", "for platform in linux-x64 macos-arm64 windows-x64; do"),
+            "duplicate-Intel-submission": content.replace("for platform in linux-x64 macos-arm64 macos-x64 windows-x64; do", "for platform in linux-x64 macos-arm64 macos-x64 macos-x64 windows-x64; do"),
+            "stale-main-guard-bypass": content.replace('            verify_current_main "$platform"\n', ""),
+        }
+        for label, mutated in mutations.items():
+            with self.subTest(case=label):
+                self.assertNotEqual(mutated, content)
+                self.assertTrue(_dependency_lock_four_platform_policy_errors(mutated))
+
+    def test_dependency_evidence_manifest_requires_exact_eight_verified_receipts(
+        self,
+    ) -> None:
+        content = (
+            PROJECT_ROOT / ".github" / "workflows" / "dependency-locks.yml"
+        ).read_text(encoding="utf-8")
+        script = _workflow_run_script(content, "Write dependency evidence manifest")
+        program = script.partition("python - <<'PY'\n")[2].partition("\nPY\n")[0]
+        self.assertTrue(program)
+        receipts = (
+            "bootstrap-preflight.json", "bootstrap-probe-generator.json",
+            "bootstrap-probe-preflight.json", "candidate-generator.json",
+            "candidate-preflight.json", "current-generator.json", "fresh-1.json", "fresh-2.json",
+        )
+        for case in ("exact", "missing", "ninth", "unverified"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                receipt_root = root / "receipts"
+                receipt_root.mkdir()
+                for name in receipts:
+                    (receipt_root / name).write_text('{"status":"verified"}\n', encoding="utf-8")
+                if case == "missing":
+                    (receipt_root / "fresh-2.json").unlink()
+                elif case == "ninth":
+                    (receipt_root / "native-receipts.json").write_text('{"status":"verified"}\n', encoding="utf-8")
+                elif case == "unverified":
+                    (receipt_root / "fresh-2.json").write_text('{"status":"failed"}\n', encoding="utf-8")
+                (root / "dependency-submission.json").write_text("{}\n", encoding="utf-8")
+                environment = {
+                    "RECEIPT_DIR": str(receipt_root), "ARTIFACT_DIR": str(root),
+                    "BOOTSTRAP_SOURCE": str(PROJECT_ROOT / "requirements-bootstrap.txt"),
+                    "COMMITTED_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "CANDIDATE_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "SELFHOST_CONSTRAINT": str(PROJECT_ROOT / MACOS_CONSTRAINT),
+                    "GITHUB_SHA": "a" * 40, "PLATFORM_LABEL": "macos-x64",
+                    "EXPECTED_PYTHON": "3.12.10", "EXPECTED_PLATFORM": "darwin",
+                    "EXPECTED_MACHINE": "x86_64", "REFRESH_MODE": "locked", "REFRESH_PACKAGE": "",
+                }
+                with mock.patch.dict(os.environ, environment):
+                    if case == "exact":
+                        exec(compile(program, "<dependency-evidence-manifest>", "exec"), {})
+                        manifest = cast(dict[str, object], json.loads((root / "manifest.json").read_text(encoding="utf-8")))
+                        self.assertEqual(manifest["schema_version"], 2)
+                        self.assertEqual(set(cast(dict[str, object], manifest["receipts"])), set(receipts))
+                        self.assertEqual(manifest["platform"], "macos-x64")
+                    else:
+                        with self.assertRaises(SystemExit):
+                            exec(compile(program, "<dependency-evidence-manifest>", "exec"), {})
+                        self.assertFalse((root / "manifest.json").exists())
 
     def test_dependency_lock_stale_candidate_fails_after_evidence_upload_step(self) -> None:
         content = (
@@ -4921,6 +6019,7 @@ class TestCIWorkflows(unittest.TestCase):
         lock_paths = {
             "linux-x64": "constraints/requirements-linux-py312.lock",
             "macos-arm64": "constraints/requirements-macos-py312.lock",
+            "macos-x64": "constraints/requirements-macos-py312.lock",
             "windows-x64": "constraints/requirements-windows-py312.lock",
         }
         expected_endpoints = {
@@ -4935,9 +6034,9 @@ class TestCIWorkflows(unittest.TestCase):
             for platform, path in lock_paths.items()
         }
 
-        def response_bytes(platform: str) -> bytes:
+        def response_bytes(platform: str, content_override: bytes | None = None) -> bytes:
             path = lock_paths[platform]
-            content = lock_bytes[platform]
+            content = lock_bytes[platform] if content_override is None else content_override
             blob_header = f"blob {len(content)}\0".encode("ascii")
             return (
                 json.dumps(
@@ -4982,14 +6081,21 @@ class TestCIWorkflows(unittest.TestCase):
                 "fi\n"
                 "endpoint=\"${!#}\"\n"
                 "printf '%s\\n' \"$endpoint\" >> \"$FAKE_GH_LOG\"\n"
-                "case \"$endpoint\" in\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                "request_number=0\n"
+                "while IFS= read -r _line; do\n"
+                "  request_number=$((request_number + 1))\n"
+                "done < \"$FAKE_GH_LOG\"\n"
+                "case \"$request_number:$endpoint\" in\n"
+                '  "1:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-linux-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/linux-x64.json\" ;;\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                '  "2:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-macos-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/macos-arm64.json\" ;;\n"
-                '  "/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                '  "3:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
+                'requirements-macos-py312.lock?ref=$FAKE_EXPECTED_SHA") '
+                "cat \"$FAKE_RESPONSE_ROOT/macos-x64.json\" ;;\n"
+                '  "4:/repos/$FAKE_EXPECTED_REPOSITORY/contents/constraints/'
                 'requirements-windows-py312.lock?ref=$FAKE_EXPECTED_SHA") '
                 "cat \"$FAKE_RESPONSE_ROOT/windows-x64.json\" ;;\n"
                 "  *) exit 65 ;;\n"
@@ -5030,9 +6136,14 @@ class TestCIWorkflows(unittest.TestCase):
                 (root / "gh.log").read_text(encoding="utf-8").splitlines(),
                 list(expected_endpoints.values()),
             )
-            for platform, path in lock_paths.items():
+            self.assertEqual(
+                tuple(sorted(path.name for path in (root / "authoritative-fetch" / "locks").iterdir())),
+                tuple(sorted(f"{platform}.lock" for platform in lock_paths)),
+            )
+            self.assertEqual(list(expected_endpoints.values()).count(expected_endpoints["macos-arm64"]), 2)
+            for platform in lock_paths:
                 self.assertEqual(
-                    (root / "authoritative-fetch" / "locks" / Path(path).name).read_bytes(),
+                    (root / "authoritative-fetch" / "locks" / f"{platform}.lock").read_bytes(),
                     lock_bytes[platform],
                 )
 
@@ -5126,6 +6237,43 @@ class TestCIWorkflows(unittest.TestCase):
                 (),
             )
 
+        def intel_wrong_metadata(_platform: str, responses: dict[str, bytes]) -> None:
+            response = cast(dict[str, object], json.loads(responses["macos-x64"]))
+            response["name"] = "macos-x64.lock"
+            responses["macos-x64"] = json.dumps(response).encode("utf-8")
+
+        def intel_wrong_source(_platform: str, responses: dict[str, bytes]) -> None:
+            response = cast(dict[str, object], json.loads(responses["macos-x64"]))
+            response["path"] = "constraints/requirements-macos-x64-py312.lock"
+            responses["macos-x64"] = json.dumps(response).encode("utf-8")
+
+        def intel_missing(_platform: str, responses: dict[str, bytes]) -> None:
+            del responses["macos-x64"]
+
+        def intel_different_raw_bytes(_platform: str, responses: dict[str, bytes]) -> None:
+            responses["macos-x64"] = response_bytes(
+                "macos-x64", lock_bytes["macos-x64"] + b"# separately authenticated drift\n",
+            )
+
+        def intel_newline_only_drift(_platform: str, responses: dict[str, bytes]) -> None:
+            responses["macos-x64"] = response_bytes(
+                "macos-x64", lock_bytes["macos-x64"].replace(b"\n", b"\r\n"),
+            )
+
+        for label, mutate, expected_error in (
+            ("Intel-metadata-name", intel_wrong_metadata, "repository-contents binding is invalid"),
+            ("Intel-source-path", intel_wrong_source, "repository-contents binding is invalid"),
+            ("Intel-missing-response", intel_missing, ""),
+            ("shared-Mac-content", intel_different_raw_bytes, "differ in raw bytes"),
+            ("shared-Mac-newlines", intel_newline_only_drift, "differ in raw bytes"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_fetcher(root, mutate=mutate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "authoritative-fetch" / "locks").iterdir()), ())
+
     def test_privileged_dependency_snapshot_validator_matches_producer_contract(
         self,
     ) -> None:
@@ -5160,6 +6308,13 @@ class TestCIWorkflows(unittest.TestCase):
                 "3.12.10",
                 "darwin",
                 "arm64",
+            ),
+            "macos-x64": (
+                "dependency-lock-macos-x64-py3.12.10",
+                "constraints/requirements-macos-py312.lock",
+                "3.12.10",
+                "darwin",
+                "x86_64",
             ),
             "windows-x64": (
                 "dependency-lock-windows-x64-py3.12.10",
@@ -5333,6 +6488,7 @@ class TestCIWorkflows(unittest.TestCase):
             snapshot_attempt: str,
             candidate_kind: str = "authoritative",
             mutate: Callable[[str, dict[str, bytes]], None] | None = None,
+            mutate_roots: Callable[[Path, Path], None] | None = None,
         ) -> subprocess.CompletedProcess[str]:
             raw_root, output_root = build_artifacts(
                 root,
@@ -5343,10 +6499,11 @@ class TestCIWorkflows(unittest.TestCase):
             authoritative_root = root / "authoritative"
             authoritative_root.mkdir()
             for platform, policy in authoritative.items():
-                constraint_path = platforms[platform][1]
-                (authoritative_root / Path(constraint_path).name).write_bytes(
+                (authoritative_root / f"{platform}.lock").write_bytes(
                     normalized_newlines(policy.file.content)
                 )
+            if mutate_roots is not None:
+                mutate_roots(raw_root, authoritative_root)
             environment = os.environ.copy()
             environment.update(
                 {
@@ -5376,7 +6533,7 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(
                     tuple(sorted(path.name for path in (root / "validated").iterdir())),
-                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                    ("linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"),
                 )
 
         for candidate_kind in ("windows-crlf", "windows-lone-cr"):
@@ -5395,7 +6552,7 @@ class TestCIWorkflows(unittest.TestCase):
                     tuple(
                         sorted(path.name for path in (root / "validated").iterdir())
                     ),
-                    ("linux-x64.json", "macos-arm64.json", "windows-x64.json"),
+                    ("linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"),
                 )
 
         def drift_html_url(platform: str, members: dict[str, bytes]) -> None:
@@ -5496,6 +6653,94 @@ class TestCIWorkflows(unittest.TestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((Path(raw_directory) / "validated").iterdir()), ())
+
+        def intel_receipt_tuple(platform: str, members: dict[str, bytes]) -> None:
+            if platform != "macos-x64":
+                return
+            receipt = cast(dict[str, object], json.loads(members["receipts/fresh-2.json"]))
+            environment = cast(dict[str, object], receipt["expected_environment"])
+            environment["platform_machine"] = "arm64"
+            receipt_bytes = json.dumps(receipt).encode("utf-8")
+            members["receipts/fresh-2.json"] = receipt_bytes
+            snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+            metadata = cast(dict[str, object], snapshot["metadata"])
+            metadata["verification_receipt_sha256"] = hashlib.sha256(receipt_bytes).hexdigest()
+            members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_correlator(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                job = cast(dict[str, object], snapshot["job"])
+                job["correlator"] = "gm2godot-dependency-locks-macos-arm64"
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_manifest_source(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                manifests = cast(dict[str, object], snapshot["manifests"])
+                manifest = cast(dict[str, object], manifests["constraints/requirements-macos-py312.lock"])
+                file_binding = cast(dict[str, object], manifest["file"])
+                file_binding["source_location"] = "constraints/requirements-macos-x64-py312.wheels.lock"
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_source_fingerprint(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                snapshot = cast(dict[str, object], json.loads(members["dependency-submission.json"]))
+                metadata = cast(dict[str, object], snapshot["metadata"])
+                metadata["source_fingerprint"] = hashlib.sha256(b"different authored source").hexdigest()
+                members["dependency-submission.json"] = json.dumps(snapshot).encode("utf-8")
+
+        def intel_missing_receipt(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                del members["receipts/fresh-2.json"]
+
+        def intel_missing_snapshot(platform: str, members: dict[str, bytes]) -> None:
+            if platform == "macos-x64":
+                del members["dependency-submission.json"]
+
+        for label, mutate, expected_error in (
+            ("Intel-arm64-receipt", intel_receipt_tuple, "native tuple is wrong"),
+            ("Intel-arm64-correlator", intel_correlator, "job binding is wrong"),
+            ("Intel-companion-source", intel_manifest_source, "manifest source binding is wrong"),
+            ("Intel-source-fingerprint", intel_source_fingerprint, "authored source fingerprint"),
+            ("Intel-missing-fresh-2", intel_missing_receipt, "evidence differs"),
+            ("Intel-missing-snapshot", intel_missing_snapshot, "evidence differs"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_validator(root, snapshot_attempt="2", mutate=mutate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "validated").iterdir()), ())
+
+        intel_artifact = platforms["macos-x64"][0]
+
+        def missing_intel_archive(raw_root: Path, _authoritative_root: Path) -> None:
+            shutil.rmtree(raw_root / intel_artifact)
+
+        def duplicate_intel_archive(raw_root: Path, _authoritative_root: Path) -> None:
+            archive_root = raw_root / intel_artifact
+            shutil.copyfile(archive_root / f"{intel_artifact}.zip", archive_root / "duplicate.zip")
+
+        def missing_intel_authoritative(_raw_root: Path, authoritative_root: Path) -> None:
+            (authoritative_root / "macos-x64.lock").unlink()
+
+        def duplicate_intel_authoritative(_raw_root: Path, authoritative_root: Path) -> None:
+            shutil.copyfile(authoritative_root / "macos-x64.lock", authoritative_root / "macos-x64-copy.lock")
+
+        for label, mutate_roots, expected_error in (
+            ("Intel-missing-archive", missing_intel_archive, "artifact inventory differs"),
+            ("Intel-duplicate-archive", duplicate_intel_archive, "unexpected entries"),
+            ("Intel-deduplicated-authoritative", missing_intel_authoritative, "lock inventory differs"),
+            ("Intel-duplicate-authoritative", duplicate_intel_authoritative, "lock inventory differs"),
+        ):
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                result = run_validator(root, snapshot_attempt="2", mutate_roots=mutate_roots)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertEqual(tuple((root / "validated").iterdir()), ())
 
     def test_dependency_submission_rechecks_authoritative_main_before_post(
         self,
@@ -5514,10 +6759,11 @@ class TestCIWorkflows(unittest.TestCase):
             current_main_sha: str,
             *,
             stale_after_first_post: bool = False,
+            stale_before_intel: bool = False,
         ) -> subprocess.CompletedProcess[str]:
             submission_root = root / "validated"
             submission_root.mkdir()
-            for platform in ("linux-x64", "macos-arm64", "windows-x64"):
+            for platform in ("linux-x64", "macos-arm64", "macos-x64", "windows-x64"):
                 (submission_root / f"{platform}.json").write_text(
                     "{}\n",
                     encoding="utf-8",
@@ -5533,6 +6779,15 @@ class TestCIWorkflows(unittest.TestCase):
                 "  main_sha=\"$FAKE_MAIN_SHA\"\n"
                 "  if [[ \"$FAKE_STALE_AFTER_FIRST_POST\" == 1 "
                 "&& -f \"$FAKE_POST_MARKER\" ]]; then\n"
+                "    main_sha=\"$FAKE_STALE_MAIN_SHA\"\n"
+                "  fi\n"
+                "  post_count=0\n"
+                "  while IFS= read -r call; do\n"
+                "    if [[ \" $call \" == *\" --method POST \"* ]]; then\n"
+                "      post_count=$((post_count + 1))\n"
+                "    fi\n"
+                "  done < \"$FAKE_GH_LOG\"\n"
+                "  if [[ \"$FAKE_STALE_BEFORE_INTEL\" == 1 && \"$post_count\" -ge 2 ]]; then\n"
                 "    main_sha=\"$FAKE_STALE_MAIN_SHA\"\n"
                 "  fi\n"
                 "  printf '{\"ref\":\"refs/heads/main\",\"object\":'\n"
@@ -5553,6 +6808,7 @@ class TestCIWorkflows(unittest.TestCase):
                     "FAKE_MAIN_SHA": current_main_sha,
                     "FAKE_POST_MARKER": str(root / "first-post-complete"),
                     "FAKE_STALE_AFTER_FIRST_POST": "1" if stale_after_first_post else "0",
+                    "FAKE_STALE_BEFORE_INTEL": "1" if stale_before_intel else "0",
                     "FAKE_STALE_MAIN_SHA": "f" * 40,
                     "GITHUB_REPOSITORY": "Infiland/GM2Godot",
                     "GITHUB_SHA": repository_sha,
@@ -5585,7 +6841,17 @@ class TestCIWorkflows(unittest.TestCase):
             self.assertEqual(current.returncode, 0, current.stderr)
             self.assertEqual(
                 method_sequence(root),
-                ["GET", "POST", "GET", "POST", "GET", "POST"],
+                ["GET", "POST", "GET", "POST", "GET", "POST", "GET", "POST"],
+            )
+
+            post_calls = [
+                shlex.split(call)
+                for call in (root / "gh.log").read_text(encoding="utf-8").splitlines()
+                if "--method POST" in call
+            ]
+            self.assertEqual(
+                [Path(call[call.index("--input") + 1]).name for call in post_calls],
+                ["linux-x64.json", "macos-arm64.json", "macos-x64.json", "windows-x64.json"],
             )
 
         with tempfile.TemporaryDirectory() as raw_directory:
@@ -5607,6 +6873,23 @@ class TestCIWorkflows(unittest.TestCase):
             sequence = method_sequence(root)
             self.assertEqual(sequence, ["GET", "POST", "GET"])
             self.assertEqual(sequence.count("POST"), 1)
+
+        with tempfile.TemporaryDirectory() as raw_directory:
+            root = Path(raw_directory)
+            stale_intel = run_submit(root, repository_sha, stale_before_intel=True)
+            self.assertNotEqual(stale_intel.returncode, 0)
+            self.assertIn("Refusing stale dependency submission", stale_intel.stderr)
+            self.assertEqual(method_sequence(root), ["GET", "POST", "GET", "POST", "GET"])
+            calls = (root / "gh.log").read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("--method POST" in call and "macos-x64.json" in call for call in calls))
+            self.assertEqual(
+                tuple(sorted(path.name for path in (root / "responses").iterdir())),
+                (
+                    "linux-x64.json", "macos-arm64.json",
+                    "main-ref-before-linux-x64.json", "main-ref-before-macos-arm64.json",
+                    "main-ref-before-macos-x64.json",
+                ),
+            )
 
     def test_dependency_lock_refresh_package_requires_native_graph_membership(
         self,

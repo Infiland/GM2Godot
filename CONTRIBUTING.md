@@ -19,6 +19,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
      | --- | --- | --- |
      | Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.lock` |
      | macOS arm64 | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
+     | macOS x64 (Intel) | CPython 3.12.10 | `constraints/requirements-macos-py312.lock` |
      | Windows x64 | CPython 3.12.10 | `constraints/requirements-windows-py312.lock` |
 
    - Run the bootstrap preflight with that exact interpreter before creating the environment; `venv` invokes `ensurepip`, so policy validation must happen first. Then activate the environment and confirm `python --version` reports the required patch version.
@@ -40,7 +41,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
        --no-cache-dir --only-binary=:all: \
        --constraint constraints/requirements-linux-py312.lock -r requirements.txt
      ```
-   - On macOS arm64, use CPython 3.12.10 and substitute `constraints/requirements-macos-py312.lock` in the preflight and every install command below. Keep `PIP_CONFIG_FILE=/dev/null`.
+   - On macOS arm64 or x64 (Intel), use CPython 3.12.10 and substitute `constraints/requirements-macos-py312.lock` in the preflight and every install command below. Keep `PIP_CONFIG_FILE=/dev/null`.
    - On Windows x64, use CPython 3.12.10, substitute `constraints/requirements-windows-py312.lock` in the preflight and every install command below, and set `$env:PIP_CONFIG_FILE = "nul"` in PowerShell before the isolated install commands.
    - The platform null device disables config-file discovery, while `--isolated` ignores user configuration and environment settings that could change resolution.
    - Install the reviewed bootstrap generator and development tools under the same constraint when changing Python code. For Linux x64:
@@ -55,7 +56,7 @@ Thank you for your interest in contributing to GM2Godot! We aim to make GameMake
 
 `requirements-bootstrap.txt` is the only reviewed source for the exact pip/pip-tools compatibility pair. `requirements.txt` and `requirements-tooling.txt` declare the other runtime and development roots; `requirements-lock.in` includes those three authored files as the single compile input for their combined graph. Generated native locks deliberately use `.lock` rather than a Dependabot-recognized requirements suffix. Constraint changes must be intentional and reviewed with the input change that caused them.
 
-Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml), which runs the exact pair declared in `requirements-bootstrap.txt` on the Linux x64, macOS arm64, and Windows x64 baselines. Pull-request and push runs always use `refresh=locked`: each committed lock preference-seeds a candidate without requesting upgrades. Manual `workflow_dispatch` runs expose these policies:
+Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml), which runs the exact pair declared in `requirements-bootstrap.txt` on the Linux x64, macOS arm64, macOS x64 (Intel), and Windows x64 baselines. Pull-request and push runs always use `refresh=locked`: each committed lock preference-seeds a candidate without requesting upgrades. Manual `workflow_dispatch` runs expose these policies:
 
 | Selection | Behavior |
 | --- | --- |
@@ -65,13 +66,44 @@ Use the native [dependency-lock workflow](.github/workflows/dependency-locks.yml
 
 Leave `refresh_package` empty for `refresh=locked` and `refresh=all`. It is required for `refresh=package` and must already be normalized, such as `pyside6`. `pip` and `pip-tools` are rejected in package-refresh mode because their reviewed pair is changed only through `requirements-bootstrap.txt`.
 
-Every native job first accepts only a stable source/lock pair or one explicit source transition where all three committed locks agree on the same old pair. The old committed generator compiles a bootstrap-only probe; the proposed pair must install, pass environment verification and `pip check`, and reproduce its parsed bootstrap graph before full lock generation begins. The candidate then regenerates a self-hosted complete constraint, performs two clean complete-graph installs, and compares their normalized receipts. Bootstrap probe, candidate, self-hosted output, receipts, dependency snapshot, and manifest are uploaded before the final gates run. When an intentional refresh changes pins, the committed-equality gate is expected to fail: review all three native artifacts, commit the approved constraints, and rerun until `locked` generation is clean.
+Every native job first accepts only a stable source/lock pair or one explicit source transition where all three committed locks agree on the same old pair. The old committed generator compiles a bootstrap-only probe; the proposed pair must install, pass environment verification and `pip check`, and reproduce its parsed bootstrap graph before full lock generation begins. The candidate then regenerates a self-hosted complete constraint, performs two clean complete-graph installs, and compares their normalized receipts. Bootstrap probe, candidate, self-hosted output, receipts, dependency snapshot, and manifest are uploaded before the final gates run. When an intentional refresh changes pins, the committed-equality gate is expected to fail: review all four native artifacts, commit the three approved version constraints, and rerun until `locked` generation is clean.
 
-For a pip-family security proposal, use the source-only Dependabot pull request as a review starting point; do not merge it or copy generated locks from the bot. Continue on a maintainer branch, run the native workflow, review the Linux, macOS, and Windows probe/candidate/self-host/clean-install evidence, and commit all three approved `.lock` artifacts. Security proposals for other direct dependencies may update their own authored requirements file, but they follow the same native artifact review and never supply generated locks. If the full candidate differs from the proposed generator's self-hosted result, commit the uploaded self-hosted lock first and rerun so the new committed generator proves stable output. No dependency workflow auto-merges. Do not compile a Linux or Windows constraint on macOS, or any other cross-platform combination: environment markers and native transitive dependencies are part of the graph.
+For a pip-family security proposal, use the source-only Dependabot pull request as a review starting point; do not merge it or copy generated locks from the bot. Continue on a maintainer branch, run the native workflow, review the Linux, both Mac architectures, and Windows probe/candidate/self-host/clean-install evidence, and commit all three approved `.lock` artifacts. Security proposals for other direct dependencies may update their own authored requirements file, but they follow the same native artifact review and never supply generated locks. If the full candidate differs from the proposed generator's self-hosted result, commit the uploaded self-hosted lock first and rerun so the new committed generator proves stable output. No dependency workflow auto-merges. Do not compile a Linux or Windows constraint on macOS, or any other cross-platform combination: environment markers and native transitive dependencies are part of the graph.
 
-Treat `pip` and `pip-tools` as one compatibility unit: review the two exact source pins together and commit all three native locks in the same maintainer pull request. Live consumers derive the expected pip version from that source after a fail-closed preflight rather than duplicating numeric literals. Successful main-branch native runs submit the three verified dependency graphs under stable platform correlators so transitive Dependabot alerts remain available even though generated `.lock` files are not editable manifests. Current install and compile commands reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. If a future path permits a source distribution, it must also pass an explicit reviewed `--build-constraint` for the isolated build environment; do not assume the runtime constraint governs build dependencies under pip 26.2 or later.
+Treat `pip` and `pip-tools` as one compatibility unit: review the two exact source pins together and commit all three native locks in the same maintainer pull request. Live consumers derive the expected pip version from that source after a fail-closed preflight rather than duplicating numeric literals. Successful main-branch native runs submit the four verified dependency graphs under stable platform correlators so transitive Dependabot alerts remain available even though generated `.lock` files are not editable manifests. Current install and compile commands reject source distributions with `--only-binary=:all:` and disable pip's cache with `--no-cache-dir`, so pip 26.2's isolated-build and index-cache changes do not alter the locked graph. If a future path permits a source distribution, it must also pass an explicit reviewed `--build-constraint` for the isolated build environment; do not assume the runtime constraint governs build dependencies under pip 26.2 or later.
 
 Compatibility work continues to target GameMaker LTS 2026 source projects and exact Godot 4.7.2 validation.
+
+
+### Native wheel proposals
+
+The [native wheel workflow](.github/workflows/native-wheel-proposals.yml) proves Linux x64, macOS arm64, macOS x64 (Intel), and Windows x64 separately. Native discovery proved that both Mac candidate and self-hosted version-lock bytes match `constraints/requirements-macos-py312.lock`. The repository therefore retains three unique version locks and four architecture-specific wheel hash locks:
+
+| Host | Complete wheel hash requirements |
+| --- | --- |
+| Linux x64 | `constraints/requirements-linux-x64-py312.wheels.lock` |
+| macOS arm64 | `constraints/requirements-macos-arm64-py312.wheels.lock` |
+| macOS x64 (Intel) | `constraints/requirements-macos-x64-py312.wheels.lock` |
+| Windows x64 | `constraints/requirements-windows-x64-py312.wheels.lock` |
+
+The fixed `require-committed` phase runs on pull requests to main and pushes to main or `codex/native-intel-wheel-locks`. Each native job observes two independent wheel downloads, reproduces the candidate and self-hosted version graph, and performs two clean offline complete-graph installs with equal normalized receipts. The aggregate checker reads the four original archives from the exact source commit, run, and attempt without extracting or executing their contents; it requires the observed hash requirements to match their committed companions.
+
+For a complete hash-enforced development install on Intel macOS, first use the exact CPython 3.12.10 interpreter, bootstrap preflight, environment creation, and constrained pip setup above. Then use a fresh private wheel directory:
+
+```bash
+native_wheelhouse="$(mktemp -d)"
+python -m pip --isolated --disable-pip-version-check --no-input download \
+  --no-cache-dir --only-binary=:all: --require-hashes \
+  -r constraints/requirements-macos-x64-py312.wheels.lock \
+  --dest "$native_wheelhouse"
+python -m pip --isolated --disable-pip-version-check --no-input install \
+  --no-cache-dir --only-binary=:all: --require-hashes --force-reinstall --no-index \
+  --find-links "$native_wheelhouse" \
+  -r constraints/requirements-macos-x64-py312.wheels.lock
+python -m pip check
+```
+
+Use the matching companion from the table for another host, with its exact interpreter and version-lock preflight. These companions include the complete runtime, bootstrap, and development graph. Ordinary runtime source installs and existing Tests/Release installs continue using version constraints. A recorded wheel hash does not authenticate those version-only installs. Refresh version graphs and their wheel companions together through native evidence review before changing pins; neither dependency workflow auto-merges. Intel source installation is separate from the currently arm64-only packaged Mac release.
 
 ## Development Guidelines
 

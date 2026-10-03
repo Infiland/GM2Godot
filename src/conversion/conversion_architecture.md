@@ -31,6 +31,25 @@ paths, sequences, timelines, generic remaining resources, and diagnostics.
 Converters can adopt these models incrementally as resource-specific renderers
 are separated from discovery and parsing.
 
+### Project JSON boundary
+
+The first migrated JSON family is project metadata: `project_manifest` uses
+`gamemaker_json` to retain the original GameMaker source text and validate every
+decoded value as recursive `json_values.JsonValue`, with typed field access
+through `json_fields`. These three leaves depend only on the standard library
+and the JSON value leaf; they do not acquire source-containment responsibilities
+or import converter/resource owners. Validation preserves raw container identity
+and insertion order, rejects unsupported values and ancestor cycles, and walks
+deep native values iteratively.
+
+`project_settings` uses the same decoder only to revalidate freshly acquired
+options files; it continues to render its cached manifest. The owners retain
+their different read/decode exception boundaries and their existing diagnostics.
+Other resource readers and the legacy `type_defs` JSON aliases remain pending
+migration under #797. This first family preserves the decoder's current nonfinite
+number behavior; numeric-finiteness policy and complete legal-JSON migration are
+unfinished work, rather than guarantees of this boundary.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

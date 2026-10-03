@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.19 - 2026-10-03
+
+- Add a shared recursive GameMaker JSON boundary and typed field accessors, preserving original source text and existing lenient decoding behavior.
+- Migrate project manifests and fresh options validation to the typed boundary while retaining unknown metadata and existing diagnostics; remaining resource readers and legacy JSON aliases remain follow-up work in issue #797.
+
 ## 0.8.18 - 2026-10-03
 
 - Reconcile contributor and installation guidance with the published native arm64 and Intel Mac downloads, and retain each release audit as version-specific evidence.

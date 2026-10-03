@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from collections.abc import Callable
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1031,6 +1032,242 @@ class TestConvertIconFallback(unittest.TestCase):
             json.loads(payload_line.removeprefix(marker)),
             {"icon": "res://icon.png", "icon_exists": True},
         )
+
+
+class TestFreshOptionsJsonBoundary(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.gm_dir)
+        self.addCleanup(shutil.rmtree, self.godot_dir)
+        self.logs: list[str] = []
+        self.yyp_path = Path(self.gm_dir) / "Game.yyp"
+        self.yyp_path.write_text(SAMPLE_YYP, encoding="utf-8")
+        self.main_options = Path(self.gm_dir) / "options" / "main" / "options_main.yy"
+        self.windows_options = Path(self.gm_dir) / "options" / "windows" / "options_windows.yy"
+        self.main_options.parent.mkdir(parents=True)
+        self.windows_options.parent.mkdir(parents=True)
+        self.main_options.write_text('{"option_game_speed":144,}', encoding="utf-8")
+        self.windows_options.write_text(
+            '{"option_windows_description_info":"cached description",'
+            '"option_windows_version":"123","option_windows_vsync":false,}',
+            encoding="utf-8",
+        )
+        self.project_path = Path(self.godot_dir) / "project.godot"
+        self.project_path.write_text(
+            'config_version=5\n\n[application]\nconfig/name="Existing"\n'
+            'custom/keep="unchanged"\n\n[display]\nwindow/size/viewport_width=1600\n',
+            encoding="utf-8",
+        )
+        self.bus_path = Path(self.godot_dir) / "default_bus_layout.tres"
+        self.bus_path.write_bytes(b"existing audio bus bytes\n")
+        self.converter = ProjectSettingsConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            conversion_running=lambda: True,
+            gm_platform="windows",
+        )
+
+    def _output_bytes(self) -> tuple[bytes, bytes]:
+        return self.project_path.read_bytes(), self.bus_path.read_bytes()
+
+    def _assert_cached_settings(self) -> None:
+        content = self.project_path.read_text(encoding="utf-8")
+        self.assertIn('config/description="cached description"', content)
+        self.assertIn('config/version="123"', content)
+        self.assertIn("run/max_fps=144", content)
+        self.assertIn("window/vsync/vsync_mode=0", content)
+        self.assertIn('custom/keep="unchanged"', content)
+        self.assertIn("window/size/viewport_width=1600", content)
+
+    def test_valid_fresh_replacements_render_cached_settings_and_audio_groups(self) -> None:
+        manifest = self.converter.project_manifest
+        self.main_options.write_text(
+            '{"option_game_speed":999,"unknown":{"nested":[null,true,{},[]]},}',
+            encoding="utf-8",
+        )
+        self.windows_options.write_text(
+            '{"option_windows_description_info":"fresh description",'
+            '"option_windows_version":"999","option_windows_vsync":true}',
+            encoding="utf-8",
+        )
+        self.yyp_path.write_text(
+            '{"%Name":"Fresh Project","AudioGroups":[{"%Name":"fresh_audio"}]}',
+            encoding="utf-8",
+        )
+
+        settings = self.converter.update_project_settings()
+        buses = self.converter.generate_audio_bus_layout()
+
+        self.assertEqual(settings.state, "completed")
+        self.assertEqual(buses.state, "completed")
+        self.assertIs(self.converter.project_manifest, manifest)
+        self._assert_cached_settings()
+        self.assertNotIn("fresh description", self.project_path.read_text(encoding="utf-8"))
+        self.assertNotIn("999", self.project_path.read_text(encoding="utf-8"))
+        bus_text = self.bus_path.read_text(encoding="utf-8")
+        self.assertIn('bus/0/name = "Master"', bus_text)
+        self.assertIn('bus/1/name = "audiogroup_music"', bus_text)
+        self.assertNotIn("fresh_audio", bus_text)
+
+    def test_fresh_empty_objects_are_valid_and_keep_cached_options(self) -> None:
+        self.main_options.write_text("{}", encoding="utf-8")
+        self.windows_options.write_text("{}", encoding="utf-8")
+
+        result = self.converter.update_project_settings()
+
+        self.assertEqual(result.state, "completed")
+        self._assert_cached_settings()
+        self.assertEqual(self.bus_path.read_bytes(), b"existing audio bus bytes\n")
+
+    def test_nonobject_fresh_roots_skip_without_rewriting_outputs(self) -> None:
+        before = self._output_bytes()
+        for source in ("null", "true", "17", '"fresh"', "[]", '[1,{"extra":true}]'):
+            with self.subTest(source=source):
+                self.main_options.write_text(source, encoding="utf-8")
+                result = self.converter.update_project_settings()
+                self.assertEqual(result.state, "skipped")
+                self.assertEqual(
+                    result.reason,
+                    f"GameMaker options metadata is malformed: {self.main_options}",
+                )
+                self.assertEqual(self._output_bytes(), before)
+
+    def test_malformed_and_bom_fresh_text_skip_without_rewriting_outputs(self) -> None:
+        before = self._output_bytes()
+        for source in ('{"broken":', '\ufeff{"option_game_speed":999}'):
+            with self.subTest(source=source):
+                self.main_options.write_text(source, encoding="utf-8")
+                result = self.converter.update_project_settings()
+                self.assertEqual(result.state, "skipped")
+                self.assertEqual(
+                    result.reason,
+                    f"GameMaker options metadata is malformed: {self.main_options}",
+                )
+                self.assertEqual(self._output_bytes(), before)
+
+    def test_fresh_decoder_exhaustively_rejects_invalid_nested_values(self) -> None:
+        before = self._output_bytes()
+        invalid: dict[str, object] = {"extra": [{"unsupported": b"bytes"}]}
+        with patch("src.conversion.gamemaker_json.json.loads", return_value=invalid):
+            result = self.converter.update_project_settings()
+
+        self.assertEqual(result.state, "skipped")
+        self.assertEqual(
+            result.reason,
+            f"GameMaker options metadata is malformed: {self.windows_options}",
+        )
+        self.assertEqual(self._output_bytes(), before)
+
+    def test_invalid_utf8_fresh_read_propagates_without_rewriting_outputs(self) -> None:
+        before = self._output_bytes()
+        self.main_options.write_bytes(b"\xff")
+
+        with self.assertRaises(UnicodeDecodeError) as raised:
+            self.converter.update_project_settings()
+
+        self.assertEqual(raised.exception.object, b"\xff")
+        self.assertEqual(raised.exception.start, 0)
+        self.assertEqual(self._output_bytes(), before)
+
+    def test_fresh_read_oserror_is_failed_without_rewriting_outputs(self) -> None:
+        before = self._output_bytes()
+        error = PermissionError("options read denied")
+        with patch("src.conversion.project_settings.open", side_effect=error, create=True):
+            result = self.converter.update_project_settings()
+
+        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.reason, str(error))
+        self.assertEqual(self._output_bytes(), before)
+
+    def test_fresh_read_non_os_errors_keep_their_identity(self) -> None:
+        before = self._output_bytes()
+        errors = (
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid byte"),
+            ValueError("read value error"),
+            RecursionError("read recursion error"),
+            KeyboardInterrupt(),
+            SystemExit(17),
+        )
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.project_settings.open", side_effect=error, create=True):
+                    with self.assertRaises(type(error)) as raised:
+                        self.converter.update_project_settings()
+                self.assertIs(raised.exception, error)
+                self.assertEqual(self._output_bytes(), before)
+
+    def test_fresh_decode_errors_remain_skipped(self) -> None:
+        before = self._output_bytes()
+        errors = (
+            json.JSONDecodeError("bad JSON", "{", 1),
+            TypeError("decode type error"),
+            ValueError("decode value error"),
+        )
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.project_settings.decode_gamemaker_json", side_effect=error):
+                    result = self.converter.update_project_settings()
+                self.assertEqual(result.state, "skipped")
+                self.assertEqual(
+                    result.reason,
+                    f"GameMaker options metadata is malformed: {self.windows_options}",
+                )
+                self.assertEqual(self._output_bytes(), before)
+
+    def test_fresh_decode_recursion_and_controls_keep_their_identity(self) -> None:
+        before = self._output_bytes()
+        for error in (RecursionError("decode depth"), KeyboardInterrupt(), SystemExit(23)):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.project_settings.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as raised:
+                        self.converter.update_project_settings()
+                self.assertIs(raised.exception, error)
+                self.assertEqual(self._output_bytes(), before)
+
+    def test_uppercase_fresh_options_suffix_is_validated_without_refreshing_manifest(self) -> None:
+        uppercase = self.main_options.with_suffix(".YY")
+        self.main_options.rename(uppercase)
+        uppercase.write_text('{"option_game_speed":999}', encoding="utf-8")
+
+        result = self.converter.update_project_settings()
+
+        self.assertEqual(result.state, "completed")
+        self._assert_cached_settings()
+
+    def test_contained_fresh_options_symlink_keeps_cached_settings(self) -> None:
+        target = Path(self.gm_dir) / "fresh_options.txt"
+        target.write_text('{"option_game_speed":999}', encoding="utf-8")
+        self.main_options.unlink()
+        try:
+            self.main_options.symlink_to(target)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"Symbolic links are unavailable: {error}")
+
+        result = self.converter.update_project_settings()
+
+        self.assertEqual(result.state, "completed")
+        self._assert_cached_settings()
+
+    def test_rejected_fresh_options_symlink_is_not_decoded(self) -> None:
+        before = self._output_bytes()
+        with tempfile.TemporaryDirectory() as outside_dir:
+            target = Path(outside_dir) / "outside.yy"
+            target.write_bytes(b"\xff")
+            self.main_options.unlink()
+            try:
+                self.main_options.symlink_to(target)
+            except (NotImplementedError, OSError) as error:
+                self.skipTest(f"Symbolic links are unavailable: {error}")
+            with patch("src.conversion.project_settings.decode_gamemaker_json") as decode:
+                result = self.converter.update_project_settings()
+            decode.assert_not_called()
+
+        self.assertEqual(result.state, "skipped")
+        self.assertEqual(result.reason, "GameMaker options metadata contains a rejected source path.")
+        self.assertEqual(self._output_bytes(), before)
+        self.assertTrue(any("Rejected GameMaker source path" in log for log in self.logs))
 
 
 if __name__ == "__main__":

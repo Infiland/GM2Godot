@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -14,6 +13,10 @@ from PIL import Image
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sprites import SpriteConverter
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    write_fixture_text as _write_text,
+)
 
 _EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
@@ -37,24 +40,6 @@ class _FixtureSpec(TypedDict):
     collision_tolerance: int
     frames: list[list[str]]
     sprites: list[_SpriteSpec]
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _load_fixture() -> _FixtureSpec:

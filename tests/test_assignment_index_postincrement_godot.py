@@ -9,11 +9,7 @@ from pathlib import Path
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
 from src.conversion.godot_validation import find_godot_binary
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+from tests.godot_test_support import write_fixture_text as _write_text
 
 
 class TestAssignmentIndexPostincrementGodotSmoke(unittest.TestCase):

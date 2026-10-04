@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -20,30 +19,14 @@ from src.conversion.sequence_assets import (
     normalize_sequence_asset,
     render_sequence_resource,
 )
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    write_fixture_text as _write_text,
+)
 
 AUTHORED_SEQUENCE_FIXTURE = (
     Path(__file__).parent / "fixtures" / "authored_sequences" / "fixture.json"
 )
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _write_registry(project_dir: Path) -> None:

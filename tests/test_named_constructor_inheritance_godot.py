@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import shutil
-import subprocess
 import tempfile
 import textwrap
 import unittest
@@ -14,22 +11,11 @@ from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.script_functions import modern_script_function_declarations
 from src.conversion.scripts import ScriptConverter
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    run_headless_scene,
+    write_fixture_text as _write_text,
+)
 
 
 class TestNamedConstructorInheritanceGodot(unittest.TestCase):
@@ -177,14 +163,7 @@ class TestNamedConstructorInheritanceGodot(unittest.TestCase):
                     """
                 ),
             )
-            result = subprocess.run(
-                [godot_binary, "--headless", "--path", str(godot_dir), "smoke.tscn"],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=30,
-            )
+            result = run_headless_scene(godot_binary, godot_dir, 'smoke.tscn', timeout=30)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn(

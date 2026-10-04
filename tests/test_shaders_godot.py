@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +11,7 @@ from typing import TypedDict, cast
 
 from src.conversion.asset_output_paths import build_asset_output_paths
 from src.conversion.shaders import ShaderConverter
+from tests.godot_test_support import find_smoke_godot_binary as _find_godot_binary
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHADER_CORPUS_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "shader_corpus"
@@ -40,17 +40,6 @@ def _load_shader_corpus() -> _ShaderCorpusManifest:
             (SHADER_CORPUS_ROOT / "manifest.json").read_text(encoding="utf-8")
         ),
     )
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
 
 
 class TestConvertedShaderGodotSmoke(unittest.TestCase):

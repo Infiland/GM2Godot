@@ -1,5 +1,4 @@
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -7,18 +6,7 @@ import unittest
 from collections.abc import Callable as _Callable
 from pathlib import Path
 
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
+from tests.godot_test_support import find_smoke_godot_binary as _find_godot_binary
 
 godot_binary = _find_godot_binary()
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.37 - 2026-10-04
+
+- Give CLI signal installation, restoration and cancellation state a dedicated typed session owner while preserving live bindings, summaries, reports and error precedence.
+
 ## 0.8.36 - 2026-10-04
 
 - Simplify the README into a project overview with GUI and CLI getting-started instructions and links to detailed guides.

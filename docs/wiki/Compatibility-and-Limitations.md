@@ -1,6 +1,6 @@
 # Compatibility and Limitations
 
-> **Applies to:** GM2Godot 0.8.35 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.36 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -47,7 +47,7 @@ Three separate platform questions are easy to confuse:
 
 | Question | Current contract |
 | --- | --- |
-| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. The `0.8.35` release contract has separate native macOS 15.0+ arm64 and x86_64 ZIP/DMG pairs. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
+| **Where can GM2Godot run?** | Release artifacts and source execution are supported on Windows, macOS, and Linux. The `0.8.36` release contract has separate native macOS 15.0+ arm64 and x86_64 ZIP/DMG pairs. Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline. Its glibc 2.39 requirement is necessary, while other distributions remain unverified and also need compatible system and X11 libraries. This is the **conversion host**. |
 | **What does `--target-platform` select?** | The CLI accepts `windows`, `macos`, or `linux`. This is a **GameMaker source/configuration filter** used for target-specific project options, conditional GML and macros, and capability-report context. It does not filter the project's resource inventory. It defaults from the conversion host. |
 | **Where can the generated game be exported?** | The generated project targets Godot 4.7.2, but GM2Godot does not certify a complete export for a platform. Godot export templates and presets, signing, permissions, SDKs, native extensions, store services, and target-device tests remain separate work. |
 

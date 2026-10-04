@@ -115,16 +115,51 @@ class TestDocumentationHealth(unittest.TestCase):
         readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
 
         required_phrases = (
-            "GML-to-GDScript transpiler",
-            "Generated Runtime",
-            "Diagnostics and Reports",
-            "compatibility reports",
-            "A perfect 1:1 conversion tool",
-            "--fail-on-unsupported",
+            "editable GameMaker projects",
+            "its GML source and assets",
+            "generates GDScript,",
+            "Godot resources and runtime helpers",
+            "Diagnostics and compatibility reports",
+            "migration starting point",
+            "compiled GameMaker games are not accepted input",
         )
         for phrase in required_phrases:
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, readme)
+
+        for page in (
+            "Quick-Start-Conversion",
+            "Installation",
+            "Compatibility-and-Limitations",
+            "Diagnostics-and-Troubleshooting",
+        ):
+            with self.subTest(page=page):
+                self.assertIn(f"(https://github.com/Infiland/GM2Godot/wiki/{page})", readme)
+
+        detailed_guidance = {
+            "Home.md": (
+                "GML-to-GDScript transpiler",
+                "generated runtime helpers",
+                "not a promise of automatic one-to-one gameplay parity",
+            ),
+            "Generated-Project-and-Runtime.md": (
+                "## Generated layout and ownership",
+                "gml_runtime.gd",
+                "compatibility reports",
+            ),
+            "Diagnostics-and-Troubleshooting.md": (
+                "## Report files",
+                "gm2godot/conversion_diagnostics.json",
+                "gm2godot/conversion_diagnostics.md",
+                "`--fail-on-unsupported`: fail when any diagnostic is identified as unsupported.",
+                "`--max-unsupported N`: fail when unsupported diagnostics exceed `N`.",
+            ),
+        }
+        for filename, phrases in detailed_guidance.items():
+            content = (WIKI_SOURCE_DIR / filename).read_text(encoding="utf-8")
+            for phrase in phrases:
+                with self.subTest(page=filename, phrase=phrase):
+                    self.assertIn(phrase, content)
 
     def test_contributing_documents_extension_points(self) -> None:
         contributing = (PROJECT_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
@@ -252,6 +287,7 @@ class TestDocumentationHealth(unittest.TestCase):
         installation = (WIKI_SOURCE_DIR / "Installation.md").read_text(
             encoding="utf-8"
         )
+        quick_start = (WIKI_SOURCE_DIR / "Quick-Start-Conversion.md").read_text(encoding="utf-8")
         release_maintenance = (
             WIKI_SOURCE_DIR / "Maintainer-Release-and-Wiki.md"
         ).read_text(encoding="utf-8")
@@ -260,10 +296,28 @@ class TestDocumentationHealth(unittest.TestCase):
         )
 
         self.assertIn(
-            "[Documentation](https://github.com/Infiland/GM2Godot/wiki) ·",
+            "[Documentation](https://github.com/Infiland/GM2Godot/wiki)",
             readme,
         )
-        self.assertIn("missing, empty, or an existing valid Godot project", readme)
+        self.assertIn("[Downloads](https://github.com/Infiland/GM2Godot/releases/latest)", readme)
+        self.assertIn(
+            "(https://github.com/Infiland/GM2Godot/wiki/Installation#run-from-source)",
+            readme,
+        )
+        self.assertIn("## Run from source", installation)
+        self.assertIn(
+            "(https://github.com/Infiland/GM2Godot/wiki/Quick-Start-Conversion#convert-with-the-cli)",
+            readme,
+        )
+        self.assertIn("## Convert with the CLI", quick_start)
+        for destination in (
+            "| Path does not exist | Not accepted; create an empty directory first. | Accepted. |",
+            "| Existing empty directory | Accepted. | Accepted. |",
+            "| Existing Godot project with a valid regular `project.godot` | Accepted. | Accepted. |",
+            "| Non-empty directory without `project.godot` | Rejected. | Rejected. |",
+        ):
+            with self.subTest(destination=destination):
+                self.assertIn(destination, quick_start)
         self.assertIn("Languages/template/template.json", contributing)
         self.assertNotIn("Languages/template.json", contributing)
         self.assertNotIn("modern_widgets.py", contributing)
@@ -271,7 +325,7 @@ class TestDocumentationHealth(unittest.TestCase):
         self.assertNotIn("Add link if available", readme + contributing)
         self.assertIn(
             "Releases starting with 0.7.14 include `SHA256SUMS`",
-            readme,
+            installation,
         )
         self.assertIn(
             "sha256sum --check --strict SHA256SUMS",
@@ -286,12 +340,11 @@ class TestDocumentationHealth(unittest.TestCase):
         self.assertNotIn("packaging/linux/qt-xcb-runtime-packages.txt", macos_source)
         self.assertIn("packaging/linux/qt-xcb-runtime-packages.txt", linux_source)
         self.assertIn("sudo apt-get install", linux_source)
-        linux_release_readme = readme.partition(
-            "The packaged Linux artifact is validated"
-        )[2].partition("## Installation")[0]
         linux_release_installation = installation.partition(
             "Ubuntu 24.04 x86_64 is the only validated packaged-Linux baseline"
         )[2].partition("### Verify a release download")[0]
+        linux_package_command = linux_release_installation.partition("```bash\n")[2].partition("\n```")[0]
+        self.assertIn("sudo apt-get install --yes --no-install-recommends", linux_package_command)
         runtime_packages = tuple(
             line.strip()
             for line in (
@@ -306,9 +359,13 @@ class TestDocumentationHealth(unittest.TestCase):
         )
         for runtime_package in runtime_packages:
             with self.subTest(runtime_package=runtime_package):
-                self.assertIn(runtime_package, linux_release_readme)
+                self.assertIn(runtime_package, linux_package_command)
                 self.assertIn(runtime_package, linux_release_installation)
         self.assertIn("only validated packaged-Linux baseline", installation)
+        self.assertIn(
+            "| Linux x64 | CPython 3.12.13 | `constraints/requirements-linux-py312.lock` |",
+            installation,
+        )
         self.assertIn("not a signature or proof of publisher identity", installation)
         self.assertIn("exactly seven unique, non-empty assets", release_maintenance)
         for architecture in ("arm64", "x86_64"):

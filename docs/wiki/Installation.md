@@ -1,6 +1,6 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.37 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.38 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -10,7 +10,7 @@ Godot is not required merely to launch GM2Godot. Install the exact [Godot 4.7.2 
 
 ## Install a packaged release
 
-Source `0.8.37` defines the six payloads below, plus `SHA256SUMS` as the seventh uploaded asset. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) already provides this verified download set. New source versions become downloadable after their merged `main` release gates and publication succeed. Historical generic `GM2Godot-macos.zip` and `GM2Godot-macos.dmg` assets from `0.8.15` support Apple Silicon only.
+Source `0.8.38` defines the six payloads below, plus `SHA256SUMS` as the seventh uploaded asset. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) already provides this verified download set. New source versions become downloadable after their merged `main` release gates and publication succeed. Historical generic `GM2Godot-macos.zip` and `GM2Godot-macos.dmg` assets from `0.8.15` support Apple Silicon only.
 
 Download the asset for your operating system from [GitHub Releases](https://github.com/Infiland/GM2Godot/releases). Extract downloaded archives before launching the application.
 
@@ -41,7 +41,7 @@ sudo apt-get install --yes --no-install-recommends \
 
 ### Verify a release download
 
-Releases starting with 0.7.14 include `SHA256SUMS`. The current `0.8.37` contract contains one SHA-256 digest for each of the six payloads, in lexical filename order. To verify the complete release, download all six payloads and `SHA256SUMS`—all seven assets—into one directory, then run one of these commands from that directory. The historical `0.8.15` manifest instead contains its four payload rows.
+Releases starting with 0.7.14 include `SHA256SUMS`. The current `0.8.38` contract contains one SHA-256 digest for each of the six payloads, in lexical filename order. To verify the complete release, download all six payloads and `SHA256SUMS`—all seven assets—into one directory, then run one of these commands from that directory. The historical `0.8.15` manifest instead contains its four payload rows.
 
 ```bash
 # Linux
@@ -59,7 +59,7 @@ The packaged builds are produced as windowed applications. For the CLI commands 
 
 Use the native, reproducible baseline for your host. Git is also required for the clone commands below.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.37`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.38`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 | Host | Python | Constraint |
 | --- | --- | --- |
@@ -162,6 +162,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.37`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.38`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

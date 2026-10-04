@@ -2680,19 +2680,7 @@ def _transpile_assignment_to_emitted_value(
     )
     if array_writeback_lines is not None:
         return array_writeback_lines
-    if isinstance(target_expr, _Index):
-        container = emit_gml_expression(
-            target_expr.target,
-            local_names,
-            scope_context=scope_context,
-        ).text
-        index = emit_gml_expression(
-            target_expr.index,
-            local_names,
-            scope_context=scope_context,
-        ).text
-        return [f"GMRuntime.gml_array_set({container}, {index}, {value})"]
-    if isinstance(target_expr, _ArrayRefAccess):
+    if isinstance(target_expr, (_Index, _ArrayRefAccess)):
         container = emit_gml_expression(
             target_expr.target,
             local_names,

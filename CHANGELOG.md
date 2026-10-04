@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.27 - 2026-10-04
+
+- Move included-files transaction records and constants into dedicated modules, preserving the converter API, helper patch points, and transaction behavior.
+- Define the dependency boundary for these modules and verify facade identity, record reflection, and borrowed-descriptor ownership.
+
 ## 0.8.26 - 2026-10-04
 
 - Finish the GameMaker JSON migration with consumed typed room, sequence, timeline and particle views, preserving each owner's field defaults, numeric rules and callback order.

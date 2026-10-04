@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.35 - 2026-10-04
+
+- Give CLI report checkpointing, restoration and publication a dedicated typed owner while preserving report bytes, summaries, cancellation and error precedence.
+
 ## 0.8.34 - 2026-10-04
 
 - Enforce 26 focused Ruff bug-risk rules locally and in CI with regression and suppression-bypass checks.

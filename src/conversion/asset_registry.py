@@ -47,8 +47,8 @@ from src.conversion.generation_inventory import (
 )
 from src.conversion.managed_resource_outputs import (
     STALE_INVALIDATION_RESOURCE_KINDS,
-    managed_resource_outputs,
-    reconcile_timeline_action_outputs,
+    managed_gamemaker_resource_outputs,
+    reconcile_timeline_json_outputs,
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -57,6 +57,12 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.timeline_metadata import (
+    TimelineMomentFields,
+    capture_timeline_action_fields,
+    capture_timeline_moment_frame,
+    capture_timeline_moment_list,
+)
 from src.conversion.resource_reference_metadata import capture_registry_resource_declaration
 from src.conversion.sound_metadata import (
     capture_sound_registry_audio_group,
@@ -66,7 +72,6 @@ from src.conversion.sound_metadata import (
 from src.conversion.script_functions import modern_script_function_names
 from src.conversion.type_defs import (
     ConversionRunning,
-    JsonDict,
     LogCallback,
     ProgressCallback,
     StrPath,
@@ -369,9 +374,9 @@ class AssetRegistryEntry:
     legacy_id: str
     tags: tuple[str, ...] = ()
     dynamic: bool = False
-    metadata: JsonDict | None = None
+    metadata: JsonObject | None = None
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "id": self.id,
             "name": self.name,
@@ -484,6 +489,24 @@ class _AssetRegistryConversionPlan:
     included_file_logical_paths: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _RoomRegistryFields:
+    room_order: int
+    width: int
+    height: int
+    persistent: bool
+    volume: float
+
+    def to_json(self) -> JsonObject:
+        return {
+            "room_order": self.room_order,
+            "width": self.width,
+            "height": self.height,
+            "persistent": self.persistent,
+            "volume": self.volume,
+        }
+
+
 @dataclass
 class _TextureGroupRegistryEntry:
     name: str
@@ -494,15 +517,15 @@ class _TextureGroupRegistryEntry:
     asset_ids: list[int] = field(default_factory=_empty_int_list)
     asset_names: list[str] = field(default_factory=_empty_str_list)
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "name": self.name,
             "parent": self.parent,
             "dynamic": self.dynamic,
             "dynamic_path": self.dynamic_path,
             "targets": list(self.targets),
-            "asset_ids": sorted(self.asset_ids),
-            "asset_names": sorted(self.asset_names),
+            "asset_ids": [asset_id for asset_id in sorted(self.asset_ids)],
+            "asset_names": [name for name in sorted(self.asset_names)],
         }
 
 
@@ -515,14 +538,14 @@ class _AudioGroupRegistryEntry:
     asset_ids: list[int] = field(default_factory=_empty_int_list)
     asset_names: list[str] = field(default_factory=_empty_str_list)
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "name": self.name,
             "targets": list(self.targets),
             "loaded": self.loaded,
             "gain": self.gain,
-            "asset_ids": sorted(self.asset_ids),
-            "asset_names": sorted(self.asset_names),
+            "asset_ids": [asset_id for asset_id in sorted(self.asset_ids)],
+            "asset_names": [name for name in sorted(self.asset_names)],
         }
 
 
@@ -833,14 +856,14 @@ class AssetRegistryConverter(BaseConverter):
                 published.append(entry)
                 continue
             if entry.kind == "timelines":
-                metadata, missing = reconcile_timeline_action_outputs(
+                metadata, missing = reconcile_timeline_json_outputs(
                     entry.metadata,
                     available_paths,
                 )
                 missing_timeline_scripts.update(missing)
                 published.append(replace(entry, metadata=metadata))
                 continue
-            outputs = managed_resource_outputs(
+            outputs = managed_gamemaker_resource_outputs(
                 entry.kind,
                 entry.godot_path,
                 entry.metadata,
@@ -2555,7 +2578,7 @@ class AssetRegistryConverter(BaseConverter):
     def build_group_registries(
         self,
         entries: tuple[AssetRegistryEntry, ...],
-    ) -> tuple[tuple[JsonDict, ...], tuple[JsonDict, ...]]:
+    ) -> tuple[tuple[JsonObject, ...], tuple[JsonObject, ...]]:
         """Return generated texture/audio group registry entries."""
         return (
             self._texture_group_registry(entries),
@@ -3124,17 +3147,17 @@ class AssetRegistryConverter(BaseConverter):
         *,
         timeline_script_stem: str | None = None,
         godot_path: str = "",
-    ) -> JsonDict:
+    ) -> JsonObject:
         if resource.kind == "rooms":
             room_settings = resource.raw_data.get("roomSettings")
-            settings = cast(JsonDict, room_settings) if isinstance(room_settings, dict) else {}
-            return {
-                "room_order": (room_order_indices or {}).get(resource.name, -1),
-                "width": self._metadata_int(settings.get("Width"), 1024),
-                "height": self._metadata_int(settings.get("Height"), 768),
-                "persistent": bool(settings.get("persistent", False)),
-                "volume": self._metadata_float(resource.raw_data.get("volume"), 1.0),
-            }
+            settings = room_settings if isinstance(room_settings, dict) else {}
+            return _RoomRegistryFields(
+                room_order=(room_order_indices or {}).get(resource.name, -1),
+                width=self._metadata_int(settings.get("Width"), 1024),
+                height=self._metadata_int(settings.get("Height"), 768),
+                persistent=bool(settings.get("persistent", False)),
+                volume=self._metadata_float(resource.raw_data.get("volume"), 1.0),
+            ).to_json()
 
         if resource.kind == "sequences":
             return self._sequence_metadata(resource)
@@ -3178,8 +3201,8 @@ class AssetRegistryConverter(BaseConverter):
             "type": sound.sound_type,
         }
 
-    def _texture_group_asset_metadata(self, texture_group: str) -> JsonDict:
-        metadata: JsonDict = {"texture_group": texture_group}
+    def _texture_group_asset_metadata(self, texture_group: str) -> JsonObject:
+        metadata: JsonObject = {"texture_group": texture_group}
         group = self._manifest_texture_group(texture_group)
         if group is None:
             return metadata
@@ -3189,7 +3212,7 @@ class AssetRegistryConverter(BaseConverter):
             metadata["texture_group_dynamic_path"] = group.dynamic_path
         return metadata
 
-    def _texture_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonDict, ...]:
+    def _texture_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonObject, ...]:
         groups: dict[str, _TextureGroupRegistryEntry] = {}
         for manifest_group in self.project_manifest.texture_groups:
             if not manifest_group.name:
@@ -3213,7 +3236,7 @@ class AssetRegistryConverter(BaseConverter):
 
         return tuple(groups[name].to_dict() for name in sorted(groups))
 
-    def _audio_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonDict, ...]:
+    def _audio_group_registry(self, entries: tuple[AssetRegistryEntry, ...]) -> tuple[JsonObject, ...]:
         groups: dict[str, _AudioGroupRegistryEntry] = {}
         for manifest_group in self.project_manifest.audio_groups:
             if not manifest_group.name:
@@ -3249,8 +3272,8 @@ class AssetRegistryConverter(BaseConverter):
     def _write_group_compatibility_report(
         self,
         entries: tuple[AssetRegistryEntry, ...],
-        texture_groups: tuple[JsonDict, ...],
-        audio_groups: tuple[JsonDict, ...],
+        texture_groups: tuple[JsonObject, ...],
+        audio_groups: tuple[JsonObject, ...],
     ) -> str:
         report_path = os.path.join(self.godot_project_path, GROUP_COMPATIBILITY_REPORT_RELATIVE_PATH)
         payload = self._group_compatibility_report(entries, texture_groups, audio_groups)
@@ -3264,10 +3287,10 @@ class AssetRegistryConverter(BaseConverter):
     def _group_compatibility_report(
         self,
         entries: tuple[AssetRegistryEntry, ...],
-        texture_groups: tuple[JsonDict, ...],
-        audio_groups: tuple[JsonDict, ...],
-    ) -> JsonDict:
-        diagnostics: list[JsonDict] = []
+        texture_groups: tuple[JsonObject, ...],
+        audio_groups: tuple[JsonObject, ...],
+    ) -> JsonObject:
+        diagnostics: list[JsonObject] = []
         for group in texture_groups:
             name = self._metadata_string(group.get("name"), "Default")
             if bool(group.get("dynamic", False)):
@@ -3323,13 +3346,13 @@ class AssetRegistryConverter(BaseConverter):
 
         return {
             "format_version": 1,
-            "texture_groups": list(texture_groups),
-            "audio_groups": list(audio_groups),
-            "diagnostics": diagnostics,
+            "texture_groups": [group for group in texture_groups],
+            "audio_groups": [group for group in audio_groups],
+            "diagnostics": [diagnostic for diagnostic in diagnostics],
         }
 
     @staticmethod
-    def _group_diagnostic(code: str, severity: str, subject: str, message: str) -> JsonDict:
+    def _group_diagnostic(code: str, severity: str, subject: str, message: str) -> JsonObject:
         return {
             "code": code,
             "severity": severity,
@@ -3344,7 +3367,7 @@ class AssetRegistryConverter(BaseConverter):
         return None
 
     @staticmethod
-    def _audio_group_initial_loaded(name: str, raw_data: JsonDict) -> bool:
+    def _audio_group_initial_loaded(name: str, raw_data: JsonObject) -> bool:
         if name in {"", "audiogroup_default"}:
             return True
         for key in ("loaded", "preload", "loadOnStartup"):
@@ -3353,7 +3376,7 @@ class AssetRegistryConverter(BaseConverter):
                 return value
         return False
 
-    def _sequence_metadata(self, resource: _ProjectResource) -> JsonDict:
+    def _sequence_metadata(self, resource: _ProjectResource) -> JsonObject:
         descriptor, issues = normalize_sequence_asset(resource.raw_data)
         if issues:
             self._sequence_incomplete_resources.add(
@@ -3384,7 +3407,7 @@ class AssetRegistryConverter(BaseConverter):
         resource: _ProjectResource,
         *,
         script_stem: str | None = None,
-    ) -> JsonDict:
+    ) -> JsonObject:
         resolved_script_stem = script_stem or generated_resource_stem(
             resource.name
         )
@@ -3398,7 +3421,7 @@ class AssetRegistryConverter(BaseConverter):
             if isinstance(moment.get("frame"), int | float)
         ]
         return {
-            "moments": moments,
+            "moments": [moment for moment in moments],
             "moment_count": len(moments),
             "max_moment": max(frames, default=-1),
         }
@@ -3408,23 +3431,19 @@ class AssetRegistryConverter(BaseConverter):
         resource: _ProjectResource,
         *,
         script_stem: str | None = None,
-    ) -> list[JsonDict]:
+    ) -> list[JsonObject]:
         resolved_script_stem = script_stem or generated_resource_stem(
             resource.name
         )
-        raw_moments = resource.raw_data.get("momentList")
-        if not isinstance(raw_moments, list):
-            raw_moments = resource.raw_data.get("moments")
-        if not isinstance(raw_moments, list):
-            raw_moments = []
+        raw_moments = capture_timeline_moment_list(resource.raw_data)
 
-        moments: list[JsonDict] = []
-        for index, raw_moment in enumerate(cast(list[object], raw_moments)):
+        moments: list[JsonObject] = []
+        for index, raw_moment in enumerate(raw_moments):
             if not isinstance(raw_moment, dict):
                 continue
-            moment = cast(JsonDict, raw_moment)
+            moment = raw_moment
             frame = self._metadata_int(
-                moment.get("moment", moment.get("frame", moment.get("time", index))),
+                capture_timeline_moment_frame(moment, index),
                 index,
             )
             actions = self._timeline_action_metadata(
@@ -3433,12 +3452,12 @@ class AssetRegistryConverter(BaseConverter):
                 frame,
                 script_stem=resolved_script_stem,
             )
-            moments.append({
-                "frame": frame,
-                "order": index,
-                "actions": actions,
-                "source_path": resource.source_path,
-            })
+            moments.append(TimelineMomentFields(
+                frame=frame,
+                order=index,
+                actions=actions,
+                source_path=resource.source_path,
+            ).to_json())
 
         if not moments:
             discovered_actions = self._timeline_discovered_source_actions(
@@ -3448,12 +3467,12 @@ class AssetRegistryConverter(BaseConverter):
             for discovered_index, (frame, actions) in enumerate(
                 discovered_actions
             ):
-                moments.append({
-                    "frame": frame,
-                    "order": discovered_index,
-                    "actions": actions,
-                    "source_path": resource.source_path,
-                })
+                moments.append(TimelineMomentFields(
+                    frame=frame,
+                    order=discovered_index,
+                    actions=actions,
+                    source_path=resource.source_path,
+                ).to_json())
         return sorted(
             moments,
             key=lambda item: (
@@ -3465,12 +3484,12 @@ class AssetRegistryConverter(BaseConverter):
     def _timeline_action_metadata(
         self,
         resource: _ProjectResource,
-        moment: JsonDict,
+        moment: JsonObject,
         frame: int,
         *,
         script_stem: str | None = None,
-    ) -> list[JsonDict]:
-        actions: list[JsonDict] = []
+    ) -> list[JsonObject]:
+        actions: list[JsonObject] = []
         reported_unsupported = False
         for action_index, raw_action in enumerate(
             self._raw_action_items(moment)
@@ -3486,7 +3505,7 @@ class AssetRegistryConverter(BaseConverter):
             if self.diagnostics is not None:
                 action_type = (
                     self._metadata_string(
-                        cast(JsonDict, raw_action).get("resourceType"),
+                        raw_action.get("resourceType"),
                         "metadata",
                     )
                     if isinstance(raw_action, dict)
@@ -3558,11 +3577,11 @@ class AssetRegistryConverter(BaseConverter):
         resource: _ProjectResource,
         *,
         script_stem: str | None = None,
-    ) -> list[tuple[int, list[JsonDict]]]:
+    ) -> list[tuple[int, list[JsonObject]]]:
         resolved_script_stem = script_stem or generated_resource_stem(
             resource.name
         )
-        discovered: list[tuple[int, list[JsonDict]]] = []
+        discovered: list[tuple[int, list[JsonObject]]] = []
         timeline_directory = self._resolve_discovered_project_source(
             os.path.dirname(resource.yy_path),
             owner_source_path=resource.source_path,
@@ -3622,7 +3641,7 @@ class AssetRegistryConverter(BaseConverter):
     def _timeline_source_path(
         self,
         resource: _ProjectResource,
-        moment: JsonDict,
+        moment: JsonObject,
         frame: int,
     ) -> str:
         for key in ("gmlFile", "eventFile", "filename", "source", "sourceFile"):
@@ -3660,35 +3679,25 @@ class AssetRegistryConverter(BaseConverter):
                 return resolved_source.source_path
         return ""
 
-    def _raw_action_items(self, moment: JsonDict) -> list[object]:
+    def _raw_action_items(self, moment: JsonObject) -> list[JsonValue]:
         raw_actions = moment.get("actions")
         if not isinstance(raw_actions, list):
             raw_actions = moment.get("actionList")
         if isinstance(raw_actions, list):
-            return list(cast(list[object], raw_actions))
+            return list(raw_actions)
         scripts = moment.get("scripts")
         if isinstance(scripts, list):
-            return [{"script": script} for script in cast(list[object], scripts)]
+            return [{"script": script} for script in scripts]
         callable_name = moment.get("callable")
         if isinstance(callable_name, str) and callable_name:
             return [{"callable": callable_name}]
         return []
 
-    def _timeline_action_from_raw(self, raw_action: object) -> JsonDict | None:
-        if isinstance(raw_action, str) and raw_action:
-            return {"kind": "script", "script": raw_action}
-        if not isinstance(raw_action, dict):
-            return None
-        action = cast(JsonDict, raw_action)
-        callable_name = action.get("callable")
-        if isinstance(callable_name, str) and callable_name:
-            return {"kind": "callable", "callable": callable_name}
-        script = action.get("script") or action.get("scriptName") or action.get("name")
-        if isinstance(script, str) and script:
-            return {"kind": "script", "script": script}
-        return {"kind": "metadata", "raw": action}
+    def _timeline_action_from_raw(self, raw_action: JsonValue) -> JsonObject | None:
+        fields = capture_timeline_action_fields(raw_action)
+        return fields.to_json() if fields is not None else None
 
-    def _particle_system_metadata(self, resource: _ProjectResource) -> JsonDict:
+    def _particle_system_metadata(self, resource: _ProjectResource) -> JsonObject:
         unsupported_fields = particle_system_unsupported_modifier_fields(
             resource.raw_data
         )
@@ -3790,18 +3799,18 @@ class AssetRegistryConverter(BaseConverter):
                     completeness.get(timeline_key, True) and timeline_complete
                 )
                 continue
-            for raw_moment in cast(list[object], raw_moments):
+            for raw_moment in raw_moments:
                 if not isinstance(raw_moment, dict):
                     continue
-                moment = cast(JsonDict, raw_moment)
+                moment = raw_moment
                 frame = self._metadata_int(moment.get("frame"), 0)
                 raw_actions = moment.get("actions")
                 if not isinstance(raw_actions, list):
                     continue
-                for raw_action in cast(list[object], raw_actions):
+                for raw_action in raw_actions:
                     if not isinstance(raw_action, dict):
                         continue
-                    action = cast(JsonDict, raw_action)
+                    action = raw_action
                     if action.get("kind") != "gml":
                         continue
                     source_path = action.get("source_path")
@@ -3917,11 +3926,11 @@ class AssetRegistryConverter(BaseConverter):
         return int(digits)
 
     @staticmethod
-    def _json_list(raw_data: JsonDict, keys: tuple[str, ...]) -> list[object]:
+    def _json_list(raw_data: JsonObject, keys: tuple[str, ...]) -> list[JsonValue]:
         for key in keys:
             value = raw_data.get(key)
             if isinstance(value, list):
-                return list(cast(list[object], value))
+                return list(value)
         return []
 
     def _room_order_indices(self, resources: Iterable[_ProjectResource]) -> dict[str, int]:
@@ -3932,14 +3941,17 @@ class AssetRegistryConverter(BaseConverter):
         ordered: list[str] = []
         yyp_data = self.project_manifest.raw_data
         if "RoomOrderNodes" in yyp_data:
-            for raw_node in cast(list[object], yyp_data.get("RoomOrderNodes", [])):
+            room_nodes = yyp_data.get("RoomOrderNodes", [])
+            if not isinstance(room_nodes, list):
+                raise TypeError(f"RoomOrderNodes must be a JSON array: {self.project_manifest.yyp_path}")
+            for raw_node in room_nodes:
                 if not isinstance(raw_node, dict):
                     continue
-                node = cast(JsonDict, raw_node)
+                node = raw_node
                 room_id = node.get("roomId")
                 if not isinstance(room_id, dict):
                     continue
-                room_ref = cast(JsonDict, room_id)
+                room_ref = room_id
                 name = room_ref.get("name")
                 if not isinstance(name, str) or not name:
                     path = room_ref.get("path")
@@ -4085,7 +4097,7 @@ class AssetRegistryConverter(BaseConverter):
         return tuple(sorted(tags))
 
     @staticmethod
-    def _metadata_float(value: object, default: float) -> float:
+    def _metadata_float(value: JsonValue, default: float) -> float:
         if not isinstance(value, (str, int, float)):
             return default
         try:
@@ -4094,7 +4106,7 @@ class AssetRegistryConverter(BaseConverter):
             return default
 
     @staticmethod
-    def _metadata_int(value: object, default: int) -> int:
+    def _metadata_int(value: JsonValue, default: int) -> int:
         if not isinstance(value, (str, int, float)):
             return default
         try:
@@ -4103,15 +4115,15 @@ class AssetRegistryConverter(BaseConverter):
             return default
 
     @staticmethod
-    def _metadata_string(value: object, default: str) -> str:
+    def _metadata_string(value: JsonValue, default: str) -> str:
         return value if isinstance(value, str) and value else default
 
 
 def render_asset_registry_script(
     entries: tuple[AssetRegistryEntry, ...],
     *,
-    texture_groups: tuple[JsonDict, ...] = (),
-    audio_groups: tuple[JsonDict, ...] = (),
+    texture_groups: tuple[JsonObject, ...] = (),
+    audio_groups: tuple[JsonObject, ...] = (),
 ) -> str:
     payload = [entry.to_godot_dict() for entry in entries]
     assets_literal = json.dumps(payload, indent=2, sort_keys=True)

@@ -3,9 +3,19 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from typing import cast
 
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.sequence_metadata import (
+    SequenceDescriptor,
+    SequenceAssetTrack,
+    SequenceParameterTrack,
+    SequenceAudioEffectTrack,
+    SequenceTextKey,
+    SequenceKeyframeBase,
+    SequenceActionBase,
+    SequenceChannel,
+    SequenceEventAction,
+)
 
 
 SEQUENCE_DESCRIPTOR_FORMAT_VERSION = 1
@@ -141,12 +151,12 @@ class SequenceCompatibilityIssue:
 
 
 def normalize_sequence_asset(
-    raw_data: JsonDict,
-) -> tuple[JsonDict, tuple[SequenceCompatibilityIssue, ...]]:
+    raw_data: JsonObject,
+) -> tuple[JsonObject, tuple[SequenceCompatibilityIssue, ...]]:
     """Normalize one authored GameMaker sequence into a runtime descriptor."""
 
     issues: list[SequenceCompatibilityIssue] = []
-    tracks: list[JsonDict] = []
+    tracks: list[JsonObject] = []
     raw_tracks = _dict_list(raw_data.get("tracks"))
     for index, raw_track in enumerate(raw_tracks):
         normalized = _normalize_asset_track(
@@ -178,7 +188,7 @@ def normalize_sequence_asset(
         isinstance(event_to_function, dict)
         and any(
             _contains_authored_event_binding(value)
-            for value in cast(dict[object, object], event_to_function).values()
+            for value in event_to_function.values()
         )
     ):
         issues.append(
@@ -197,35 +207,35 @@ def normalize_sequence_asset(
             )
         )
 
-    descriptor: JsonDict = {
-        "descriptor_format_version": SEQUENCE_DESCRIPTOR_FORMAT_VERSION,
-        "name": _string(raw_data.get("name") or raw_data.get("%Name"), ""),
-        "length": max(_number(raw_data.get("length", raw_data.get("duration")), 0.0), 0.0),
-        "playback_speed": max(_number(raw_data.get("playbackSpeed"), 1.0), 0.0),
-        "playback_speed_type": _integer(raw_data.get("playbackSpeedType"), 0),
-        "loopmode": _integer(
+    descriptor: JsonObject = SequenceDescriptor(
+        descriptor_format_version=SEQUENCE_DESCRIPTOR_FORMAT_VERSION,
+        name=_string(raw_data.get("name") or raw_data.get("%Name"), ""),
+        length=max(_number(raw_data.get("length", raw_data.get("duration")), 0.0), 0.0),
+        playback_speed=max(_number(raw_data.get("playbackSpeed"), 1.0), 0.0),
+        playback_speed_type=_integer(raw_data.get("playbackSpeedType"), 0),
+        loopmode=_integer(
             raw_data.get("playback", raw_data.get("loopmode")),
             0,
         ),
-        "time_units": _integer(raw_data.get("timeUnits"), 1),
-        "xorigin": _number(raw_data.get("xorigin"), 0.0),
-        "yorigin": _number(raw_data.get("yorigin"), 0.0),
-        "volume": min(
+        time_units=_integer(raw_data.get("timeUnits"), 1),
+        xorigin=_number(raw_data.get("xorigin"), 0.0),
+        yorigin=_number(raw_data.get("yorigin"), 0.0),
+        volume=min(
             1.0,
             max(_number(raw_data.get("volume"), 1.0), 0.0),
         ),
-        "tracks": tracks,
-        "moments": moments,
-        "broadcasts": broadcasts,
-        "complete": not issues,
-    }
+        tracks=tracks,
+        moments=moments,
+        broadcasts=broadcasts,
+        complete=not issues,
+    ).to_json()
     return descriptor, tuple(issues)
 
 
 def render_sequence_resource(
     name: str,
     source_path: str,
-    descriptor: JsonDict,
+    descriptor: JsonObject,
 ) -> str:
     """Render a loadable Godot Resource carrying a sequence descriptor."""
 
@@ -247,12 +257,12 @@ def render_sequence_resource(
 
 
 def _normalize_asset_track(
-    raw_track: JsonDict,
+    raw_track: JsonObject,
     *,
     path: str,
     order: int,
     issues: list[SequenceCompatibilityIssue],
-) -> JsonDict | None:
+) -> JsonObject | None:
     resource_type = _resource_type(raw_track)
     track_kind = _asset_track_kind(raw_track, resource_type)
     if track_kind is None:
@@ -294,8 +304,8 @@ def _normalize_asset_track(
         path=f"{path}.keyframes",
         issues=issues,
     )
-    parameters: list[JsonDict] = []
-    children: list[JsonDict] = []
+    parameters: list[JsonObject] = []
+    children: list[JsonObject] = []
     for child_index, child in enumerate(_dict_list(raw_track.get("tracks"))):
         child_path = f"{path}.tracks[{child_index}]"
         child_type = _resource_type(child)
@@ -344,32 +354,32 @@ def _normalize_asset_track(
             )
         )
 
-    return {
-        "kind": track_kind,
-        "name": _string(
+    return SequenceAssetTrack(
+        kind=track_kind,
+        name=_string(
             raw_track.get("name") or raw_track.get("%Name"),
             f"{track_kind}_{order}",
         ),
-        "path": path,
-        "order": order,
-        "resource_type": resource_type,
-        "enabled": _track_enabled(raw_track),
-        "visible": _track_visible(raw_track),
-        "interpolation": raw_interpolation if raw_interpolation in {0, 1} else 0,
-        "keyframes": keyframes,
-        "parameters": parameters,
-        "children": children,
-    }
+        path=path,
+        order=order,
+        resource_type=resource_type,
+        enabled=_track_enabled(raw_track),
+        visible=_track_visible(raw_track),
+        interpolation=raw_interpolation if raw_interpolation in {0, 1} else 0,
+        keyframes=keyframes,
+        parameters=parameters,
+        children=children,
+    ).to_json()
 
 
 def _normalize_asset_keyframes(
-    raw_track: JsonDict,
+    raw_track: JsonObject,
     *,
     track_kind: str,
     path: str,
     issues: list[SequenceCompatibilityIssue],
-) -> list[JsonDict]:
-    keyframes: list[JsonDict] = []
+) -> list[JsonObject]:
+    keyframes: list[JsonObject] = []
     for index, raw_keyframe in enumerate(_keyframes(raw_track.get("keyframes"))):
         key_path = f"{path}.Keyframes[{index}]"
         channels = _channels(raw_keyframe)
@@ -478,61 +488,61 @@ def _normalize_asset_keyframes(
     )
 
 
-def _normalize_text_key(raw_channel: JsonDict) -> JsonDict:
+def _normalize_text_key(raw_channel: JsonObject) -> JsonObject:
     alignment = _integer(
         raw_channel.get("Alignment", raw_channel.get("alignment")),
         0,
     )
-    return {
-        "asset": _reference_name(
+    return SequenceTextKey(
+        asset=_reference_name(
             raw_channel.get("Id")
             if raw_channel.get("Id") is not None
             else raw_channel.get("fontIndex")
         ),
-        "text": _string(
+        text=_string(
             raw_channel.get("Text", raw_channel.get("text")),
             "",
             allow_empty=True,
         ),
-        "wrap": _boolean(raw_channel.get("Wrap", raw_channel.get("wrap")), False),
-        "alignment_h": alignment & 0xFF,
-        "alignment_v": (alignment >> 8) & 0xFF,
-        "effects_enabled": _boolean(
+        wrap=_boolean(raw_channel.get("Wrap", raw_channel.get("wrap")), False),
+        alignment_h=alignment & 0xFF,
+        alignment_v=(alignment >> 8) & 0xFF,
+        effects_enabled=_boolean(
             raw_channel.get(
                 "EnableEffects",
                 raw_channel.get("effectsEnabled"),
             ),
             False,
         ),
-        "glow_enabled": _boolean(
+        glow_enabled=_boolean(
             raw_channel.get("EnableGlow", raw_channel.get("glowEnabled")),
             False,
         ),
-        "outline_enabled": _boolean(
+        outline_enabled=_boolean(
             raw_channel.get(
                 "EnableOutline",
                 raw_channel.get("outlineEnabled"),
             ),
             False,
         ),
-        "shadow_enabled": _boolean(
+        shadow_enabled=_boolean(
             raw_channel.get(
                 "EnableShadow",
                 raw_channel.get("dropShadowEnabled"),
             ),
             False,
         ),
-    }
+    ).to_json()
 
 
 def _normalize_parameter_track(
-    raw_track: JsonDict,
+    raw_track: JsonObject,
     *,
     path: str,
     order: int,
     issues: list[SequenceCompatibilityIssue],
     effect_parameter: bool = False,
-) -> JsonDict | None:
+) -> JsonObject | None:
     resource_type = _resource_type(raw_track)
     parameter_kind = _PARAMETER_TRACK_TYPES.get(resource_type.casefold())
     name = _parameter_name(raw_track)
@@ -578,7 +588,7 @@ def _normalize_parameter_track(
         )
         return None
 
-    keyframes: list[JsonDict] = []
+    keyframes: list[JsonObject] = []
     for key_index, raw_keyframe in enumerate(
         _keyframes(raw_track.get("keyframes"))
     ):
@@ -596,7 +606,7 @@ def _normalize_parameter_track(
                 )
             )
             continue
-        values: list[object] = []
+        values: list[JsonValue] = []
         unsupported_curve = False
         for channel, raw_channel in channels:
             embedded_curve = raw_channel.get("EmbeddedAnimCurve")
@@ -639,31 +649,31 @@ def _normalize_parameter_track(
         key["values"] = values
         keyframes.append(key)
 
-    return {
-        "kind": parameter_kind,
-        "name": name,
-        "path": path,
-        "order": order,
-        "resource_type": resource_type,
-        "enabled": _track_enabled(raw_track),
-        "interpolation": interpolation,
-        "keyframes": sorted(
+    return SequenceParameterTrack(
+        kind=parameter_kind,
+        name=name,
+        path=path,
+        order=order,
+        resource_type=resource_type,
+        enabled=_track_enabled(raw_track),
+        interpolation=interpolation,
+        keyframes=sorted(
             keyframes,
             key=lambda item: (
                 _number(item.get("frame"), 0.0),
                 _integer(item.get("order"), 0),
             ),
         ),
-    }
+    ).to_json()
 
 
 def _normalize_audio_effect_track(
-    raw_track: JsonDict,
+    raw_track: JsonObject,
     *,
     path: str,
     order: int,
     issues: list[SequenceCompatibilityIssue],
-) -> JsonDict | None:
+) -> JsonObject | None:
     resource_type = _resource_type(raw_track)
     effect_type = _audio_effect_type(raw_track)
     if effect_type not in _SUPPORTED_AUDIO_EFFECT_TYPES:
@@ -684,7 +694,7 @@ def _normalize_audio_effect_track(
         )
         return None
 
-    parameter_tracks: list[JsonDict] = []
+    parameter_tracks: list[JsonObject] = []
     supported_properties = _SUPPORTED_AUDIO_EFFECT_PROPERTIES[effect_type]
     for child_index, child in enumerate(_dict_list(raw_track.get("tracks"))):
         child_name = _parameter_name(child)
@@ -717,7 +727,7 @@ def _normalize_audio_effect_track(
             parameter_tracks.append(parameter)
 
     raw_defaults = _effect_defaults(raw_track)
-    defaults: JsonDict = {}
+    defaults: JsonObject = {}
     for property_name, value in raw_defaults.items():
         if property_name in supported_properties:
             defaults[property_name] = value
@@ -738,34 +748,34 @@ def _normalize_audio_effect_track(
                 ),
             )
         )
-    return {
-        "kind": "audio_effect",
-        "name": _string(
+    return SequenceAudioEffectTrack(
+        kind="audio_effect",
+        name=_string(
             raw_track.get("name") or raw_track.get("%Name"),
             effect_type,
         ),
-        "path": path,
-        "order": order,
-        "resource_type": resource_type,
-        "effect_type": effect_type,
-        "enabled": _track_enabled(raw_track),
-        "defaults": defaults,
-        "parameters": parameter_tracks,
-    }
+        path=path,
+        order=order,
+        resource_type=resource_type,
+        effect_type=effect_type,
+        enabled=_track_enabled(raw_track),
+        defaults=defaults,
+        parameters=parameter_tracks,
+    ).to_json()
 
 
 def _normalize_sequence_actions(
-    raw_data: JsonDict,
+    raw_data: JsonObject,
     *,
     source_key: str,
     legacy_keys: tuple[str, ...],
     kind: str,
     issues: list[SequenceCompatibilityIssue],
-) -> list[JsonDict]:
-    actions: list[JsonDict] = []
+) -> list[JsonObject]:
+    actions: list[JsonObject] = []
     raw_store = raw_data.get(source_key)
     if isinstance(raw_store, dict):
-        raw_keyframes = _keyframes(cast(JsonDict, raw_store))
+        raw_keyframes = _keyframes(raw_store)
         for key_index, raw_keyframe in enumerate(raw_keyframes):
             key_path = f"{source_key}.Keyframes[{key_index}]"
             frame = _number(
@@ -826,12 +836,12 @@ def _normalize_sequence_actions(
                 )
                 continue
             for event_index, value in enumerate(event_values):
-                action: JsonDict = {
-                    "frame": frame,
-                    "order": len(actions),
-                    "source_order": key_index,
-                    "channel_order": event_index,
-                }
+                action = SequenceEventAction(
+                    frame=frame,
+                    order=len(actions),
+                    source_order=key_index,
+                    channel_order=event_index,
+                ).to_json()
                 if kind == "moment":
                     action["script"] = value
                 else:
@@ -840,7 +850,7 @@ def _normalize_sequence_actions(
     elif isinstance(raw_store, list):
         actions.extend(
             _normalize_legacy_actions(
-                cast(list[object], raw_store),
+                raw_store,
                 kind=kind,
             )
         )
@@ -850,7 +860,7 @@ def _normalize_sequence_actions(
         if isinstance(raw_legacy, list):
             actions.extend(
                 _normalize_legacy_actions(
-                    cast(list[object], raw_legacy),
+                    raw_legacy,
                     kind=kind,
                     order_offset=len(actions),
                 )
@@ -865,26 +875,26 @@ def _normalize_sequence_actions(
 
 
 def _normalize_legacy_actions(
-    raw_actions: list[object],
+    raw_actions: list[JsonValue],
     *,
     kind: str,
     order_offset: int = 0,
-) -> list[JsonDict]:
-    actions: list[JsonDict] = []
+) -> list[JsonObject]:
+    actions: list[JsonObject] = []
     for index, raw_action in enumerate(raw_actions):
         if not isinstance(raw_action, dict):
             continue
-        action_data = cast(JsonDict, raw_action)
-        normalized: JsonDict = {
-            "frame": _number(
+        action_data = raw_action
+        normalized = SequenceActionBase(
+            frame=_number(
                 action_data.get(
                     "frame",
                     action_data.get("moment", action_data.get("time")),
                 ),
                 float(index),
             ),
-            "order": order_offset + index,
-        }
+            order=order_offset + index,
+        ).to_json()
         for name in ("name", "event", "callable", "script"):
             value = action_data.get(name)
             if isinstance(value, str) and value:
@@ -899,10 +909,10 @@ def _normalize_legacy_actions(
 
 
 def _parameter_channel_value(
-    raw_channel: JsonDict,
+    raw_channel: JsonObject,
     *,
     parameter_kind: str,
-) -> object:
+) -> JsonValue:
     if parameter_kind == "colour":
         colour_value = raw_channel.get(
             "Colour",
@@ -911,7 +921,7 @@ def _parameter_channel_value(
         if isinstance(colour_value, list):
             return [
                 min(1.0, max(0.0, _number(component, 0.0)))
-                for component in cast(list[object], colour_value)[:4]
+                for component in colour_value[:4]
             ]
         packed = _integer(colour_value, 0xFFFFFFFF) & 0xFFFFFFFF
         return [
@@ -929,12 +939,12 @@ def _parameter_channel_value(
     )
 
 
-def _effect_defaults(raw_track: JsonDict) -> JsonDict:
-    defaults: JsonDict = {}
+def _effect_defaults(raw_track: JsonObject) -> JsonObject:
+    defaults: JsonObject = {}
     candidate = raw_track.get("effect")
     if not isinstance(candidate, dict):
         candidate = raw_track.get("params")
-    sources = [cast(JsonDict, candidate)] if isinstance(candidate, dict) else []
+    sources = [candidate] if isinstance(candidate, dict) else []
     sources.append(raw_track)
     for source in sources:
         for key, value in source.items():
@@ -945,7 +955,7 @@ def _effect_defaults(raw_track: JsonDict) -> JsonDict:
     return defaults
 
 
-def _audio_effect_type(raw_track: JsonDict) -> str:
+def _audio_effect_type(raw_track: JsonObject) -> str:
     candidates = (
         raw_track.get("effectType"),
         raw_track.get("type"),
@@ -966,7 +976,7 @@ def _audio_effect_type(raw_track: JsonDict) -> str:
     return ""
 
 
-def _is_audio_effect_track(raw_track: JsonDict, resource_type: str) -> bool:
+def _is_audio_effect_track(raw_track: JsonObject, resource_type: str) -> bool:
     normalized_type = resource_type.casefold()
     if "audioeffect" in normalized_type:
         return True
@@ -980,7 +990,7 @@ def _is_audio_effect_track(raw_track: JsonDict, resource_type: str) -> bool:
     ) >= 32
 
 
-def _asset_track_kind(raw_track: JsonDict, resource_type: str) -> str | None:
+def _asset_track_kind(raw_track: JsonObject, resource_type: str) -> str | None:
     normalized = resource_type.casefold()
     if normalized in _ASSET_TRACK_TYPES:
         return _ASSET_TRACK_TYPES[normalized]
@@ -990,7 +1000,7 @@ def _asset_track_kind(raw_track: JsonDict, resource_type: str) -> str | None:
     return None
 
 
-def _parameter_name(raw_track: JsonDict) -> str:
+def _parameter_name(raw_track: JsonObject) -> str:
     name = _string(raw_track.get("name") or raw_track.get("%Name"), "")
     alias = _PARAMETER_NAME_ALIASES.get(name.casefold())
     if alias is not None:
@@ -1000,7 +1010,7 @@ def _parameter_name(raw_track: JsonDict) -> str:
     return name
 
 
-def _track_enabled(raw_track: JsonDict) -> bool:
+def _track_enabled(raw_track: JsonObject) -> bool:
     if not _boolean(raw_track.get("enabled"), True):
         return False
     if _boolean(raw_track.get("disabled"), False):
@@ -1008,83 +1018,83 @@ def _track_enabled(raw_track: JsonDict) -> bool:
     return not _has_modifier(raw_track, "disabled")
 
 
-def _track_visible(raw_track: JsonDict) -> bool:
+def _track_visible(raw_track: JsonObject) -> bool:
     if not _boolean(raw_track.get("visible"), True):
         return False
     return not _has_modifier(raw_track, "invisible")
 
 
-def _has_modifier(raw_track: JsonDict, marker: str) -> bool:
+def _has_modifier(raw_track: JsonObject, marker: str) -> bool:
     for modifier in _dict_list(raw_track.get("modifiers")):
         if marker in _resource_type(modifier).casefold():
             return True
     return False
 
 
-def _keyframe_base(raw_keyframe: JsonDict, order: int) -> JsonDict:
-    return {
-        "frame": _number(
+def _keyframe_base(raw_keyframe: JsonObject, order: int) -> JsonObject:
+    return SequenceKeyframeBase(
+        frame=_number(
             raw_keyframe.get(
                 "Key",
                 raw_keyframe.get("frame", raw_keyframe.get("Frame")),
             ),
             float(order),
         ),
-        "length": max(
+        length=max(
             _number(
                 raw_keyframe.get("Length", raw_keyframe.get("length")),
                 1.0,
             ),
             0.0,
         ),
-        "stretch": _boolean(
+        stretch=_boolean(
             raw_keyframe.get("Stretch", raw_keyframe.get("stretch")),
             False,
         ),
-        "disabled": _boolean(
+        disabled=_boolean(
             raw_keyframe.get("Disabled", raw_keyframe.get("disabled")),
             False,
         ),
-        "creation": _boolean(
+        creation=_boolean(
             raw_keyframe.get(
                 "IsCreationKey",
                 raw_keyframe.get("isCreationKey"),
             ),
             False,
         ),
-        "order": order,
-    }
+        order=order,
+    ).to_json()
 
 
-def _event_strings(channel_data: JsonDict) -> list[str]:
+def _event_strings(channel_data: JsonObject) -> list[str]:
     raw_events = channel_data.get("Events", channel_data.get("events"))
     if isinstance(raw_events, list):
         return [
             value
-            for value in cast(list[object], raw_events)
+            for value in raw_events
             if isinstance(value, str) and value
         ]
     event = channel_data.get("Event", channel_data.get("event"))
     return [event] if isinstance(event, str) and event else []
 
 
-def _contains_authored_event_binding(value: object) -> bool:
+def _contains_authored_event_binding(value: JsonValue) -> bool:
     if value is None or value is False or value == "":
         return False
     if isinstance(value, dict):
         return any(
             _contains_authored_event_binding(item)
-            for item in cast(dict[object, object], value).values()
+            for item in value.values()
         )
     if isinstance(value, list):
         return any(
             _contains_authored_event_binding(item)
-            for item in cast(list[object], value)
+            for item in value
         )
     return True
 
 
-def _resource_type(data: JsonDict) -> str:
+def _resource_type(data: JsonObject) -> str:
     explicit = data.get("resourceType")
     if isinstance(explicit, str) and explicit:
         return explicit
@@ -1094,57 +1104,57 @@ def _resource_type(data: JsonDict) -> str:
     return ""
 
 
-def _keyframes(value: object) -> list[JsonDict]:
+def _keyframes(value: JsonValue) -> list[JsonObject]:
     if isinstance(value, list):
-        return _dict_list(cast(list[object], value))
+        return _dict_list(value)
     if not isinstance(value, dict):
         return []
-    store = cast(JsonDict, value)
+    store = value
     return _dict_list(store.get("Keyframes", store.get("keyframes")))
 
 
-def _channels(keyframe: JsonDict) -> list[tuple[int, JsonDict]]:
+def _channels(keyframe: JsonObject) -> list[tuple[int, JsonObject]]:
     raw_channels = keyframe.get("Channels", keyframe.get("channels"))
-    channels: list[tuple[int, JsonDict]] = []
+    channels: list[tuple[int, JsonObject]] = []
     if isinstance(raw_channels, dict):
         for fallback, (raw_channel, data) in enumerate(
-            cast(dict[object, object], raw_channels).items()
+            raw_channels.items()
         ):
             if not isinstance(data, dict):
                 continue
             channel = _integer(raw_channel, fallback)
-            channels.append((max(channel, 0), cast(JsonDict, data)))
+            channels.append(SequenceChannel(max(channel, 0), data).as_pair())
     elif isinstance(raw_channels, list):
-        for fallback, data in enumerate(cast(list[object], raw_channels)):
+        for fallback, data in enumerate(raw_channels):
             if not isinstance(data, dict):
                 continue
-            channel_data = cast(JsonDict, data)
+            channel_data = data
             channel = _integer(channel_data.get("channel"), fallback)
-            channels.append((max(channel, 0), channel_data))
+            channels.append(SequenceChannel(max(channel, 0), channel_data).as_pair())
     return sorted(channels, key=lambda item: item[0])
 
 
-def _dict_list(value: object) -> list[JsonDict]:
+def _dict_list(value: JsonValue) -> list[JsonObject]:
     if not isinstance(value, list):
         return []
     return [
-        cast(JsonDict, item)
-        for item in cast(list[object], value)
+        item
+        for item in value
         if isinstance(item, dict)
     ]
 
 
-def _reference_name(value: object) -> str:
+def _reference_name(value: JsonValue) -> str:
     if isinstance(value, str):
         return value
     if not isinstance(value, dict):
         return ""
-    reference = cast(JsonDict, value)
+    reference = value
     name = reference.get("name")
     return name if isinstance(name, str) else ""
 
 
-def _number(value: object, default: float) -> float:
+def _number(value: JsonValue, default: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return default
     try:
@@ -1154,7 +1164,7 @@ def _number(value: object, default: float) -> float:
     return number if math.isfinite(number) else default
 
 
-def _integer(value: object, default: int) -> int:
+def _integer(value: JsonValue, default: int) -> int:
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return default
     try:
@@ -1163,7 +1173,7 @@ def _integer(value: object, default: int) -> int:
         return default
 
 
-def _boolean(value: object, default: bool) -> bool:
+def _boolean(value: JsonValue, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, int | float):
@@ -1178,7 +1188,7 @@ def _boolean(value: object, default: bool) -> bool:
 
 
 def _string(
-    value: object,
+    value: JsonValue,
     default: str,
     *,
     allow_empty: bool = False,

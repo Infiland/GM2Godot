@@ -47,8 +47,8 @@ options files; it continues to render its cached manifest. The owners retain
 their different read/decode exception boundaries and their existing diagnostics.
 All GameMaker project/resource acquisition readers now use this shared decoder.
 Their owner-local containment, catches and non-object-root handling remain
-distinct. Known nested consumers and the legacy `type_defs` JSON aliases remain
-pending migration under #797. This boundary preserves the decoder's current
+distinct. Known consumers use typed views or existing models, and `type_defs`
+no longer exports unbounded JSON aliases. This boundary preserves the decoder's current
 nonfinite number behavior; a finite-only numeric policy is not part of it.
 
 ### Path metadata boundary
@@ -69,8 +69,8 @@ retains native numeric values without eager float/int conversion, so aggregate
 inspection does not acquire the producer's numeric failures. Registry numeric
 construction and coordinate rendering retain their existing ordering, including
 nonfinite coordinate failures after a scene is opened and nonfinite speed JSON
-serialization. Remaining nested consumers and legacy JSON aliases are still
-unfinished #797 work.
+serialization. Those numeric policies remain local to the owner rather than
+being imposed by the shared JSON boundary.
 
 ### Font metadata boundary
 
@@ -115,8 +115,7 @@ presence/value capture. The separate sound decoder alias is the same shared
 function, preserving the path and font patch seams. Registry sound planning
 consumes separate file, audio-group and metadata projections with its original
 forgiving numeric defaults. File capture precedes source resolution; group
-capture follows that callback and precedes fresh folder discovery. Remaining
-nested consumers and legacy aliases are unfinished #797 work.
+capture follows that callback and precedes fresh folder discovery.
 
 ### Tileset metadata boundary
 
@@ -137,8 +136,8 @@ callbacks can affect later values, and preserves its ordered conversions and
 late rendering failures. Its nested sprite reader now uses the shared decoder,
 captures each atlas frame before owner reference validation, and selects layers
 after that validation. The room layout projection retains conditional tile-count
-access after column conversion. Registry nested views and legacy aliases remain
-unfinished #797 work.
+access after column conversion. Tileset declarations use typed per-entry
+resource-reference captures, leaving containment and rejection with the owner.
 
 ### Sprite, object and reference acquisition models
 
@@ -162,15 +161,14 @@ Source discovery, generic aggregate resources, room layers, curves, extensions,
 object reads and tileset atlas reads share the decoder without merging their
 catch policies. Aggregate family decoder aliases remain separate patch seams
 for the same underlying function. Nested room, sequence, timeline, particle and
-registry output consumers, plus final `type_defs` alias retirement, still remain
-under #797.
+registry output consumers now retain recursive JSON types throughout. The
+unbounded `type_defs` JSON aliases and their redundant transport casts are removed.
 
 ### Shared resource reader and parent metadata
 
 `BaseConverter._read_yy_file` retains its owner-local containment refresh and
 UTF-8 read, then uses `gamemaker_json` to validate the decoded graph. It returns
-the original object or its existing failure result; the legacy return annotation
-remains until its consumers migrate. The current GameMaker decoding dialect
+the original `JsonObject` or its existing `None` failure result. The current GameMaker decoding dialect
 continues to accept nonfinite floats, separately from standard JSON compliance.
 
 `resource_parent_metadata` captures the optional parent path without acquiring
@@ -179,8 +177,29 @@ folder helper keeps virtual reader dispatch, fresh source reads, string-subclass
 behavior, formatting order and its existing exception boundaries. A captured
 `has_parent_path` flag distinguishes missing or malformed paths from a valid
 empty string, preserving the original string-method and early-return boundaries. Unknown raw
-metadata stays attached by identity. Known nested views and legacy alias
-retirement are still open work under #797.
+metadata stays attached by identity.
+
+### Nested room and authored asset views
+
+`room_metadata` keeps room-index capture after the creation-code callback and
+preserves malformed truthy settings/layers as `JsonValue` until their original
+use point. Inheritance remains an owner-managed copy/merge. Renderer fields are
+live reads after name allocation, warnings and reference callbacks. Strict
+aggregate summaries use settings capture, lazy preorder layer fields and then
+room-summary projection; they do not borrow the renderer or registry defaults.
+
+`sequence_metadata`, `particle_metadata` and `timeline_metadata` define precise
+records consumed by normalization, registry planning and rendering. Aggregate
+track/moment counts retain their strict list-of-object policy. Timeline aliases,
+action precedence and callback ordering remain with their existing owners.
+Sequence and particle numeric exception policies remain distinct.
+
+Generated reports and Deep host snapshots return recursive `JsonObject` and
+`JsonArray` values with their existing formats, ordering and finiteness policies.
+GameMaker managed-output reconciliation has an explicitly typed JSON route;
+the separate general mapping API keeps its broader non-GameMaker contract.
+These leaves depend on standard-library and JSON primitives, keeping resource
+acquisition, source containment and side effects in the existing owners.
 
 ## GML Pipeline Phases
 

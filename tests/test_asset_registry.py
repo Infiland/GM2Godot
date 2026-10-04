@@ -10,7 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from typing import BinaryIO, Iterable, cast
+from typing import BinaryIO, Iterable, Mapping
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,12 +44,38 @@ from src.conversion.extension_registry import (
 from src.conversion.fonts import FontConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
-from src.conversion.json_values import JsonObject
+from src.conversion.json_values import JsonObject, JsonValue, validate_json_value
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
-from src.conversion.type_defs import JsonDict, StrPath
+from src.conversion.type_defs import StrPath
 
 
-def _write_json(path: str, data: dict[str, object]) -> None:
+def _json_object(value: JsonValue) -> JsonObject:
+    assert isinstance(value, dict)
+    return value
+
+
+def _json_objects(value: JsonValue) -> list[JsonObject]:
+    assert isinstance(value, list)
+    result: list[JsonObject] = []
+    for item in value:
+        assert isinstance(item, dict)
+        result.append(item)
+    return result
+
+
+def _json_string(value: JsonValue) -> str:
+    assert isinstance(value, str)
+    return value
+
+
+def _timeline_first_script_path(entry: AssetRegistryEntry) -> str:
+    assert entry.metadata is not None
+    moment = _json_objects(entry.metadata["moments"])[0]
+    action = _json_objects(moment["actions"])[0]
+    return _json_string(action["script_path"])
+
+
+def _write_json(path: str, data: Mapping[str, object]) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -61,7 +87,7 @@ def _write_file(path: str, content: str) -> None:
         f.write(content)
 
 
-def _resource_entry(kind: str, name: str) -> dict[str, object]:
+def _resource_entry(kind: str, name: str) -> JsonObject:
     return {
         "id": {
             "name": name,
@@ -85,9 +111,9 @@ def _minimal_yy(
     name: str,
     resource_type: str,
     parent_path: str,
-    extra: dict[str, object] | None = None,
-) -> dict[str, object]:
-    data: dict[str, object] = {
+    extra: JsonObject | None = None,
+) -> JsonObject:
+    data: JsonObject = {
         "%Name": name,
         "name": name,
         "parent": {"name": "Parent", "path": parent_path},
@@ -119,7 +145,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         name: str,
         resource_type: str,
         parent_path: str,
-        extra: dict[str, object] | None = None,
+        extra: JsonObject | None = None,
     ) -> None:
         _write_json(
             os.path.join(self.gm_dir, kind, name, name + ".yy"),
@@ -440,14 +466,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(sequence_metadata["playback_speed"], 30.0)
         self.assertEqual(sequence_metadata["loopmode"], 1)
         self.assertEqual(sequence_metadata["descriptor_format_version"], 1)
-        self.assertEqual(sequence_metadata["tracks"][0]["kind"], "sprite")
-        self.assertEqual(sequence_metadata["tracks"][0]["name"], "Title")
+        self.assertEqual(_json_objects(sequence_metadata["tracks"])[0]["kind"], "sprite")
+        self.assertEqual(_json_objects(sequence_metadata["tracks"])[0]["name"], "Title")
         self.assertEqual(
-            sequence_metadata["tracks"][0]["keyframes"][0]["asset"],
+            _json_objects(_json_objects(sequence_metadata["tracks"])[0]["keyframes"])[0]["asset"],
             "s_player",
         )
-        self.assertEqual(sequence_metadata["moments"][0]["callable"], "_on_sequence_moment")
-        self.assertEqual(sequence_metadata["broadcasts"][0]["message"], "beat")
+        self.assertEqual(_json_objects(sequence_metadata["moments"])[0]["callable"], "_on_sequence_moment")
+        self.assertEqual(_json_objects(sequence_metadata["broadcasts"])[0]["message"], "beat")
         self.assertEqual(
             by_name["seq_intro"].godot_path,
             "res://sequences/seq_intro/seq_intro.tres",
@@ -458,7 +484,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert timeline_metadata is not None
         self.assertEqual(timeline_metadata["moment_count"], 2)
         self.assertEqual(timeline_metadata["max_moment"], 4)
-        first_timeline_action = timeline_metadata["moments"][0]["actions"][0]
+        first_timeline_action = _json_objects(_json_objects(timeline_metadata["moments"])[0]["actions"])[0]
         self.assertEqual(first_timeline_action["source_path"], "timelines/tl_intro/Moment_2.gml")
         self.assertEqual(first_timeline_action["script_path"], "res://gm2godot/timelines/tl_intro_2.gd")
         self.assertEqual(by_name["ps_spark"].asset_type, "particle_system")
@@ -469,13 +495,13 @@ class TestAssetRegistryConverter(unittest.TestCase):
         particle_metadata = by_name["ps_spark"].metadata
         self.assertIsNotNone(particle_metadata)
         assert particle_metadata is not None
-        self.assertEqual(particle_metadata["types"][0]["name"], "pt_spark")
-        self.assertEqual(particle_metadata["emitters"][0]["name"], "pe_spark")
+        self.assertEqual(_json_objects(particle_metadata["types"])[0]["name"], "pt_spark")
+        self.assertEqual(_json_objects(particle_metadata["emitters"])[0]["name"], "pe_spark")
         self.assertEqual(by_name["ps_legacy"].asset_type, "particle_system")
         legacy_particle_metadata = by_name["ps_legacy"].metadata
         self.assertIsNotNone(legacy_particle_metadata)
         assert legacy_particle_metadata is not None
-        self.assertEqual(legacy_particle_metadata["types"][0]["name"], "pt_legacy")
+        self.assertEqual(_json_objects(legacy_particle_metadata["types"])[0]["name"], "pt_legacy")
         self.assertEqual(by_name["AdSDK"].asset_type, "extension")
         self.assertEqual(
             by_name["AdSDK"].godot_path,
@@ -485,7 +511,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertIsNotNone(extension_metadata)
         assert extension_metadata is not None
         self.assertEqual(extension_metadata["version"], "1.2.3")
-        self.assertEqual(extension_metadata["files"][0]["functions"][0]["name"], "ads_show_rewarded")
+        self.assertEqual(_json_objects(_json_objects(extension_metadata["files"])[0]["functions"])[0]["name"], "ads_show_rewarded")
         self.assertEqual(by_name["config/game.json"].asset_type, "included_file")
         self.assertEqual(by_name["config/game.json"].godot_path, "res://included_files/config/game.json")
 
@@ -540,14 +566,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert entry.metadata is not None
         self.assertEqual(entry.metadata["descriptor_format_version"], 1)
         self.assertEqual(entry.metadata["draw_order"], "new_to_old")
-        self.assertEqual(entry.metadata["types"][0]["shape"], "smoke")
-        self.assertEqual(entry.metadata["types"][0]["life_min"], 30.0)
+        self.assertEqual(_json_objects(entry.metadata["types"])[0]["shape"], "smoke")
+        self.assertEqual(_json_objects(entry.metadata["types"])[0]["life_min"], 30.0)
         self.assertEqual(
-            entry.metadata["types"][0]["spawn_on_death"]["count"],
+            _json_object(_json_objects(entry.metadata["types"])[0]["spawn_on_death"])["count"],
             3.0,
         )
         self.assertEqual(
-            entry.metadata["emitters"][0]["region"],
+            _json_object(_json_objects(entry.metadata["emitters"])[0]["region"]),
             {
                 "xmin": -5.0,
                 "xmax": 25.0,
@@ -595,7 +621,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
 
     def test_authored_sequence_descriptors_generate_managed_resources(self) -> None:
         with open(AUTHORED_SEQUENCE_FIXTURE, encoding="utf-8") as fixture_file:
-            fixture = cast(JsonDict, json.load(fixture_file))
+            fixture = _json_object(validate_json_value(json.load(fixture_file), source_path=AUTHORED_SEQUENCE_FIXTURE))
         _write_yyp(
             self.gm_dir,
             [
@@ -608,14 +634,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "seq_authored",
             "GMSequence",
             "folders/Sequences.yy",
-            cast(dict[str, object], fixture["root"]),
+            _json_object(fixture["root"]),
         )
         self._write_resource(
             "sequences",
             "seq_nested",
             "GMSequence",
             "folders/Sequences.yy",
-            cast(dict[str, object], fixture["nested"]),
+            _json_object(fixture["nested"]),
         )
         diagnostics = DiagnosticCollector()
         converter = self._converter(diagnostics=diagnostics)
@@ -631,7 +657,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert root.metadata is not None
         self.assertTrue(root.metadata["complete"])
         self.assertEqual(
-            [track["kind"] for track in root.metadata["tracks"]],
+            [track["kind"] for track in _json_objects(root.metadata["tracks"])],
             ["sprite", "instance", "audio", "text", "sequence"],
         )
         output_path = os.path.join(
@@ -870,10 +896,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert entry.metadata is not None
         moments = entry.metadata["moments"]
         assert isinstance(moments, list)
-        typed_moments = cast(list[dict[str, list[dict[str, str]]]], moments)
+        typed_moments = _json_objects(moments)
 
         self.assertEqual(
-            [moment["actions"][0]["source_path"] for moment in typed_moments],
+            [_json_objects(moment["actions"])[0]["source_path"] for moment in typed_moments],
             [
                 f"timelines/tl_paths/Moment_{frame}.gml"
                 for frame in range(1, 6)
@@ -910,10 +936,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         converter = self._converter()
         entries = converter.build_entries()
         script_paths = {
-            entry.name: cast(
-                list[dict[str, list[dict[str, str]]]],
-                cast(JsonDict, entry.metadata)["moments"],
-            )[0]["actions"][0]["script_path"]
+            entry.name: _timeline_first_script_path(entry)
             for entry in entries
         }
 
@@ -963,10 +986,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         )
         reordered_entries = self._converter().build_entries()
         reordered_paths = {
-            entry.name: cast(
-                list[dict[str, list[dict[str, str]]]],
-                cast(JsonDict, entry.metadata)["moments"],
-            )[0]["actions"][0]["script_path"]
+            entry.name: _timeline_first_script_path(entry)
             for entry in reordered_entries
         }
         self.assertEqual(reordered_paths, script_paths)
@@ -1144,7 +1164,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
             len(extension_names),
         )
         for name, entry in extension_entries.items():
-            metadata = cast(JsonDict, entry.metadata)
+            metadata = entry.metadata
+            assert metadata is not None
             self.assertEqual(metadata["stub_path"], stub_paths[name])
 
         converter.convert_all()
@@ -1167,10 +1188,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "r",
             encoding="utf-8",
         ) as report_file:
-            report = cast(JsonDict, json.load(report_file))
+            report = _json_object(validate_json_value(json.load(report_file), source_path=report_file.name))
         report_paths = {
-            cast(str, stub["extension"]): cast(str, stub["path"])
-            for stub in cast(list[JsonDict], report["stubs"])
+            _json_string(stub["extension"]): _json_string(stub["path"])
+            for stub in _json_objects(report["stubs"])
         }
         self.assertEqual(report_paths, stub_paths)
 
@@ -1241,7 +1262,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "r",
             encoding="utf-8",
         ) as report_file:
-            report = cast(JsonDict, json.load(report_file))
+            report = _json_object(validate_json_value(json.load(report_file), source_path=report_file.name))
         self.assertEqual(report["extensions"], [])
         self.assertEqual(report["stubs"], [])
         self.assertFalse(
@@ -1304,10 +1325,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
             EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
         )
         with open(report_path, "r", encoding="utf-8") as report_file:
-            report = cast(JsonDict, json.load(report_file))
-        stubs = cast(list[JsonDict], report["stubs"])
+            report = _json_object(validate_json_value(json.load(report_file), source_path=report_file.name))
+        stubs = _json_objects(report["stubs"])
         self.assertEqual(len(stubs), 1)
-        stub_path = cast(str, stubs[0]["path"])
+        stub_path = _json_string(stubs[0]["path"])
         self.assertTrue(
             os.path.isfile(
                 os.path.join(
@@ -1365,14 +1386,14 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "r",
             encoding="utf-8",
         ) as report_file:
-            report = cast(JsonDict, json.load(report_file))
-        stubs = cast(list[JsonDict], report["stubs"])
+            report = _json_object(validate_json_value(json.load(report_file), source_path=report_file.name))
+        stubs = _json_objects(report["stubs"])
         self.assertEqual(
-            {cast(str, stub["extension"]) for stub in stubs},
+            {_json_string(stub["extension"]) for stub in stubs},
             set(extension_names),
         )
         self.assertEqual(
-            len({cast(str, stub["path"]).casefold() for stub in stubs}),
+            len({_json_string(stub["path"]).casefold() for stub in stubs}),
             2,
         )
 
@@ -1386,7 +1407,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         os.makedirs(timeline_directory)
         explicit_fields = ("gmlFile", "eventFile", "filename", "source", "sourceFile")
         expected_cases: list[tuple[int, str, str]] = []
-        moments: list[dict[str, object]] = []
+        moments: list[JsonObject] = []
         diagnostics = DiagnosticCollector()
 
         with tempfile.TemporaryDirectory() as outside_dir:
@@ -1435,7 +1456,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
                 "tl_paths",
                 "GMTimeline",
                 "folders/Timelines.yy",
-                {"momentList": moments},
+                {"momentList": [moment for moment in moments]},
             )
             converter = self._converter(diagnostics=diagnostics)
             with patch("builtins.open", wraps=open) as tracked_open:
@@ -1461,7 +1482,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         assert entry.metadata is not None
         raw_moments = entry.metadata["moments"]
         assert isinstance(raw_moments, list)
-        typed_moments = cast(list[dict[str, object]], raw_moments)
+        typed_moments = _json_objects(raw_moments)
         rejected = [
             diagnostic
             for diagnostic in diagnostics.diagnostics()
@@ -2000,7 +2021,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         read_paths: list[str] = []
         original_read = converter._read_yy_file
 
-        def tracking_read(path: str) -> dict[str, object] | None:
+        def tracking_read(path: str) -> JsonObject | None:
             read_paths.append(os.path.realpath(path))
             return original_read(path)
 
@@ -3945,7 +3966,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         read_paths: list[str] = []
         original_read = converter._read_yy_file
 
-        def tracking_read(path: str) -> dict[str, object] | None:
+        def tracking_read(path: str) -> JsonObject | None:
             read_paths.append(os.path.realpath(path))
             return original_read(path)
 
@@ -4588,7 +4609,7 @@ class TestAssetRegistryConverter(unittest.TestCase):
         def remove_before_read(
             active_converter: AssetRegistryConverter,
             yy_path: StrPath,
-        ) -> JsonDict | None:
+        ) -> JsonObject | None:
             os.unlink(os.fspath(yy_path))
             return original_read(active_converter, yy_path)
 
@@ -5742,6 +5763,64 @@ class TestAssetRegistryConverter(unittest.TestCase):
             converter, "_get_subfolder_from_resource", side_effect=folder,
         ):
             self.assertEqual(converter._sound_godot_path(resource), "res://sounds/after_source/nested/snd_theme/theme.ogg")
+
+
+    def test_typed_room_registry_fields_preserve_forgiving_coercions(self) -> None:
+        _write_yyp(self.gm_dir, [])
+        converter = self._converter()
+        raw: JsonObject = {"roomSettings": {"Width": "7.9", "Height": None, "persistent": []}, "volume": "0.5"}
+        resource = _ProjectResource("rooms", "room", "rooms/room.yy", "rooms/room.yy", raw)
+        self.assertEqual(converter._metadata(resource, {"room": 2}), {"room_order": 2, "width": 1024, "height": 768, "persistent": False, "volume": 0.5})
+        raw["roomSettings"] = True
+        self.assertEqual(converter._metadata(resource)["width"], 1024)
+
+    def test_typed_room_registry_capture_observes_later_field_mutation(self) -> None:
+        _write_yyp(self.gm_dir, [])
+        converter = self._converter()
+        settings: JsonObject = {"Width": 1, "Height": 2}
+        raw: JsonObject = {"roomSettings": settings, "volume": 3}
+        resource = _ProjectResource("rooms", "room", "rooms/room.yy", "rooms/room.yy", raw)
+        observed: list[tuple[JsonValue, int]] = []
+        original = converter._metadata_int
+        def numeric(value: JsonValue, default: int) -> int:
+            observed.append((value, default))
+            if default == 1024:
+                settings["Height"] = 9.5
+            elif default == 768:
+                settings["persistent"] = [False]
+                raw["volume"] = "0.25"
+            return original(value, default)
+        with patch.object(converter, "_metadata_int", side_effect=numeric):
+            metadata = converter._metadata(resource)
+        self.assertEqual(observed, [(1, 1024), (9.5, 768)])
+        self.assertEqual(metadata, {"room_order": -1, "width": 1, "height": 9, "persistent": True, "volume": 0.25})
+
+    def test_typed_timeline_keeps_live_moment_iteration_after_callback(self) -> None:
+        _write_yyp(self.gm_dir, [])
+        converter = self._converter()
+        moments: list[JsonValue] = [{"moment": 1}]
+        raw: JsonObject = {"momentList": moments}
+        resource = _ProjectResource("timelines", "intro", "timelines/intro.yy", "timelines/intro.yy", raw)
+        frames: list[int] = []
+        def actions(_resource: _ProjectResource, _moment: JsonObject, frame: int, *, script_stem: str) -> list[JsonObject]:
+            frames.append(frame)
+            if frame == 1:
+                moments.append({"moment": 3.9})
+            return [{"kind": "callable", "callable": f"run_{frame}"}]
+        with patch.object(converter, "_timeline_action_metadata", side_effect=actions):
+            result = converter._timeline_moment_metadata(resource)
+        self.assertEqual(frames, [1, 3])
+        self.assertEqual([item["frame"] for item in result], [1, 3])
+        self.assertIs(raw["momentList"], moments)
+
+    def test_typed_room_order_rejects_malformed_known_array_at_consumption(self) -> None:
+        _write_yyp(self.gm_dir, [])
+        converter = self._converter()
+        resource = _ProjectResource("rooms", "room", "rooms/room.yy", "rooms/room.yy", {})
+        converter.project_manifest.raw_data["RoomOrderNodes"] = "invalid"
+        with self.assertRaisesRegex(TypeError, "RoomOrderNodes must be a JSON array:.*AssetRegistryTest.yyp"):
+            converter._room_order_indices((resource,))
+        self.assertEqual(converter._room_order_indices(()), {})
 
 
 if __name__ == "__main__":

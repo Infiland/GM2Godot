@@ -6,7 +6,7 @@ import posixpath
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
@@ -32,7 +32,13 @@ from src.conversion.room_creation_code import (
     resolve_room_creation_code,
 )
 from src.conversion.room_layers import godot_string, serialize_room_layers
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.room_metadata import (
+    RoomInstanceFields, RoomLayerFields, RoomPhysicsSettingsFields,
+    RoomSettingsFields, RoomSceneRootFields, room_object_items,
+    room_strict_layer_resource_type, room_value_length,
+)
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 ROOM_RUNTIME_SCRIPT_RELATIVE_PATH = os.path.join("gm2godot", "gml_room_node.gd")
 ROOM_RUNTIME_SCRIPT_RESOURCE_PATH = "res://gm2godot/gml_room_node.gd"
@@ -77,29 +83,16 @@ def _gdscript_identifier_suffix(value: str, fallback: str) -> str:
     return identifier
 
 
-def _dict_items(value: object) -> list[JsonDict]:
-    if not isinstance(value, list):
-        return []
-    items: list[JsonDict] = []
-    for item in cast(list[object], value):
-        if isinstance(item, dict):
-            items.append(cast(JsonDict, item))
-    return items
+def _dict_items(value: JsonValue) -> list[JsonObject]:
+    return room_object_items(value)
 
 
-def _layer_resource_type(layer: JsonDict) -> str:
-    resource_type = layer.get("resourceType")
-    if isinstance(resource_type, str) and resource_type:
-        return resource_type
-    for key in layer:
-        if key.startswith("$GMR"):
-            return key[1:]
-    return "UnknownLayer"
+def _layer_resource_type(layer: JsonObject) -> str:
+    return room_strict_layer_resource_type(layer)
 
 
-def _instance_name(instance: JsonDict) -> str:
-    name = instance.get("%Name") or instance.get("name")
-    return name if isinstance(name, str) and name else "Instance"
+def _instance_name(instance: JsonObject) -> str:
+    return RoomInstanceFields(instance, "").name
 
 
 def _instance_name_from_creation_code_source(source_path: str) -> str | None:
@@ -113,29 +106,29 @@ def _instance_name_from_creation_code_source(source_path: str) -> str | None:
     ]
 
 
-def _iter_room_instances(layers: object) -> list[JsonDict]:
-    instances: list[JsonDict] = []
+def _iter_room_instances(layers: JsonValue) -> list[JsonObject]:
+    instances: list[JsonObject] = []
     for layer in _dict_items(layers):
         if _layer_resource_type(layer) == "GMRInstanceLayer":
-            instances.extend(_dict_items(layer.get("instances")))
-        instances.extend(_iter_room_instances(layer.get("layers") or layer.get("children")))
+            instances.extend(RoomLayerFields(layer, "").instances)
+        instances.extend(_iter_room_instances(RoomLayerFields(layer, "").child_values))
     return instances
 
 
-def _iter_room_effect_layers(layers: object) -> list[JsonDict]:
-    effect_layers: list[JsonDict] = []
+def _iter_room_effect_layers(layers: JsonValue) -> list[JsonObject]:
+    effect_layers: list[JsonObject] = []
     for layer in _dict_items(layers):
         if _layer_resource_type(layer) == "GMREffectLayer":
             effect_layers.append(layer)
-        effect_layers.extend(_iter_room_effect_layers(layer.get("layers") or layer.get("children")))
+        effect_layers.extend(_iter_room_effect_layers(RoomLayerFields(layer, "").child_values))
     return effect_layers
 
 
 class RoomProcessResult(TypedDict):
     status: Literal["completed", "skipped"]
     name: str
-    width: object
-    height: object
+    width: JsonValue
+    height: JsonValue
     scene_path: str
 
 
@@ -201,15 +194,15 @@ class RoomConverter(BaseConverter):
 
         declared: dict[str, _DeclaredRoomResource] = {}
         for resource_index, raw_resource in enumerate(
-            cast(list[object], raw_resources)
+            raw_resources
         ):
             if not isinstance(raw_resource, dict):
                 continue
-            resource = cast(JsonDict, raw_resource)
+            resource = raw_resource
             raw_resource_id = resource.get("id")
             if not isinstance(raw_resource_id, dict):
                 continue
-            resource_id = cast(JsonDict, raw_resource_id)
+            resource_id = raw_resource_id
             raw_path = resource_id.get("path")
             normalized_path = (
                 raw_path.replace("\\", "/")
@@ -284,8 +277,8 @@ class RoomConverter(BaseConverter):
         room_script_resource_path: str | None = None,
         source_resolver: CreationCodeSourceResolver | None = None,
     ) -> str:
-        room_settings = room.room_settings
-        physics_settings = room.physics_settings
+        room_settings = RoomSettingsFields(room.room_settings, room.yy_path)
+        physics_settings = RoomPhysicsSettingsFields(room.physics_settings, room.yy_path)
         room_creation_code = resolve_room_creation_code(
             room,
             self.gm_project_path,
@@ -331,19 +324,19 @@ class RoomConverter(BaseConverter):
         lines.extend([
             f'[node name={godot_string(room.name)} type="Node2D"]',
             f'script = ExtResource("{ROOM_RUNTIME_EXT_RESOURCE_ID}")',
-            f'metadata/gamemaker_room_width = {json.dumps(room_settings.get("Width", 1024))}',
-            f'metadata/gamemaker_room_height = {json.dumps(room_settings.get("Height", 768))}',
-            f'metadata/gamemaker_room_persistent = {json.dumps(bool(room_settings.get("persistent", False)))}',
-            f'metadata/gamemaker_room_volume = {json.dumps(room.raw_data.get("volume", 1.0))}',
+            f'metadata/gamemaker_room_width = {json.dumps(room_settings.width)}',
+            f'metadata/gamemaker_room_height = {json.dumps(room_settings.height)}',
+            f'metadata/gamemaker_room_persistent = {json.dumps(room_settings.persistent)}',
+            f'metadata/gamemaker_room_volume = {json.dumps(RoomSceneRootFields(room.raw_data, room.yy_path).volume)}',
             f'metadata/gamemaker_parent_room = {json.dumps(room.parent_room)}',
             f'metadata/gamemaker_inherit_layers = {json.dumps(room.inherit_layers)}',
             f'metadata/gamemaker_inherit_creation_order = {json.dumps(room.inherit_creation_order)}',
             f'metadata/gamemaker_view_settings = {json.dumps(room.view_settings)}',
-            f'metadata/gamemaker_view_count = {json.dumps(len(room.views))}',
-            f'metadata/gamemaker_physics_world = {json.dumps(bool(physics_settings.get("PhysicsWorld", False)))}',
-            f'metadata/gamemaker_physics_gravity_x = {json.dumps(physics_settings.get("PhysicsWorldGravityX", 0.0))}',
-            f'metadata/gamemaker_physics_gravity_y = {json.dumps(physics_settings.get("PhysicsWorldGravityY", 10.0))}',
-            f'metadata/gamemaker_physics_pixels_to_meters = {json.dumps(physics_settings.get("PhysicsWorldPixToMetres", 0.1))}',
+            f'metadata/gamemaker_view_count = {json.dumps(room_value_length(room.views))}',
+            f'metadata/gamemaker_physics_world = {json.dumps(physics_settings.physics_world)}',
+            f'metadata/gamemaker_physics_gravity_x = {json.dumps(physics_settings.gravity_x)}',
+            f'metadata/gamemaker_physics_gravity_y = {json.dumps(physics_settings.gravity_y)}',
+            f'metadata/gamemaker_physics_pixels_to_meters = {json.dumps(physics_settings.pixels_to_meters)}',
             f'metadata/gamemaker_source_yy_path = {json.dumps(room.yy_path)}',
             f'metadata/gamemaker_creation_code_file = {json.dumps(room.creation_code_file)}',
             f'metadata/gamemaker_creation_code_source_path = {json.dumps(room_creation_code.source_path)}',
@@ -628,8 +621,8 @@ class RoomConverter(BaseConverter):
         if self.diagnostics is None:
             return
         for layer in _iter_room_effect_layers(room.layers):
-            layer_name = layer.get("%Name") or layer.get("name")
-            effect_type = layer.get("effectType")
+            layer_name = RoomLayerFields(layer, room.yy_path).effect_name
+            effect_type = RoomLayerFields(layer, room.yy_path).effect_type
             self.diagnostics.add(
                 "warning",
                 "GM2GD-RESOURCE-UNSUPPORTED",
@@ -751,8 +744,8 @@ class RoomConverter(BaseConverter):
             return source_cache[cache_key]
 
         output_path = self._room_output_path(room)
-        width = room.room_settings.get("Width", 1024)
-        height = room.room_settings.get("Height", 768)
+        width = RoomSettingsFields(room.room_settings, room.yy_path).width
+        height = RoomSettingsFields(room.room_settings, room.yy_path).height
         try:
             room_script = self._generate_room_script(
                 room,

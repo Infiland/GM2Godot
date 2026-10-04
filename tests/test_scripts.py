@@ -25,7 +25,8 @@ from src.conversion.script_functions import (
     modern_script_function_declarations,
     modern_script_structure,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
+from src.conversion.gamemaker_json import decode_gamemaker_json
 
 
 SNAP_BUFFER_READ_YAML_FIXTURE = (
@@ -37,7 +38,7 @@ SNAP_BUFFER_READ_YAML_FIXTURE = (
 )
 
 
-def _write_json(path: Path, data: dict[str, object]) -> None:
+def _write_json(path: Path, data: JsonObject) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
@@ -47,7 +48,7 @@ def _write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _resource_entry(kind: str, name: str) -> dict[str, object]:
+def _resource_entry(kind: str, name: str) -> JsonObject:
     return {
         "id": {
             "name": name,
@@ -56,7 +57,7 @@ def _resource_entry(kind: str, name: str) -> dict[str, object]:
     }
 
 
-def _extension_yy(name: str) -> dict[str, object]:
+def _extension_yy(name: str) -> JsonObject:
     return {
         "%Name": name,
         "name": name,
@@ -324,7 +325,7 @@ class TestScriptConverter(unittest.TestCase):
             *,
             timeline_script_stem: str | None = None,
             godot_path: str = "",
-        ) -> JsonDict:
+        ) -> JsonObject:
             nonlocal running
             result = original_metadata(
                 registry_converter,
@@ -463,7 +464,7 @@ class TestScriptConverter(unittest.TestCase):
                 "resourceType": "GMProject",
             },
         )
-        script_metadata: dict[str, object] = {
+        script_metadata: JsonObject = {
             "%Name": "scr_declared",
             "name": "scr_declared",
             "parent": {
@@ -668,8 +669,10 @@ class TestScriptConverter(unittest.TestCase):
     def test_script_body_uses_caller_instance_scope(self) -> None:
         self._write_project()
         project_path = self.gm_dir / "ScriptTest.yyp"
-        project = json.loads(project_path.read_text(encoding="utf-8"))
-        resources = cast(list[object], project["resources"])
+        project = decode_gamemaker_json(project_path.read_text(encoding="utf-8"), source_path=str(project_path)).value
+        assert isinstance(project, dict)
+        resources = project["resources"]
+        assert isinstance(resources, list)
         resources.append(_resource_entry("scripts", "scr_move"))
         _write_json(project_path, project)
         _write_json(
@@ -1214,8 +1217,10 @@ class TestScriptConverter(unittest.TestCase):
     def test_converts_scripts_with_mapped_extension_calls(self) -> None:
         self._write_project()
         project_path = self.gm_dir / "ScriptTest.yyp"
-        project = json.loads(project_path.read_text(encoding="utf-8"))
-        resources = cast(list[object], project["resources"])
+        project = decode_gamemaker_json(project_path.read_text(encoding="utf-8"), source_path=str(project_path)).value
+        assert isinstance(project, dict)
+        resources = project["resources"]
+        assert isinstance(resources, list)
         resources.append(_resource_entry("extensions", "AdSDK"))
         _write_json(project_path, project)
         _write_json(self.gm_dir / "extensions" / "AdSDK" / "AdSDK.yy", _extension_yy("AdSDK"))
@@ -1293,8 +1298,10 @@ class TestScriptConverter(unittest.TestCase):
     def test_converts_multi_function_script_assets_and_declared_registry_names(self) -> None:
         self._write_project()
         project_path = self.gm_dir / "ScriptTest.yyp"
-        project = json.loads(project_path.read_text(encoding="utf-8"))
-        resources = cast(list[object], project["resources"])
+        project = decode_gamemaker_json(project_path.read_text(encoding="utf-8"), source_path=str(project_path)).value
+        assert isinstance(project, dict)
+        resources = project["resources"]
+        assert isinstance(resources, list)
         resources.append(_resource_entry("scripts", "ending"))
         _write_json(project_path, project)
         _write_json(

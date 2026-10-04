@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 from os import PathLike
-from typing import Any, Callable, Protocol, TypeAlias
+from typing import Callable, Protocol, TypeAlias
 
 
-JsonDict: TypeAlias = dict[str, Any]
-JsonList: TypeAlias = list[Any]
-JsonValue: TypeAlias = Any
 StrPath: TypeAlias = str | PathLike[str]
 
 LogCallback: TypeAlias = Callable[[str], None]

@@ -698,7 +698,9 @@ class TestSharedYYBoundary(unittest.TestCase):
         result = self.converter._read_yy_file(self.path)
         self.assertIsNotNone(result)
         assert result is not None
-        self.assertTrue(math.isnan(result["n"]))
+        nan_value = result["n"]
+        assert isinstance(nan_value, float)
+        self.assertTrue(math.isnan(nan_value))
         self.assertEqual((result["p"], result["m"], result["overflow"]), (math.inf, -math.inf, math.inf))
         self.assertIs(result["b"], True)
 

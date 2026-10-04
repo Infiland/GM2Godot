@@ -13,6 +13,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Mapping, cast
 
+from src.conversion.json_values import JsonObject
 from src.conversion.anchored_artifacts import VerifiedDirectory, modes_match
 from src.conversion.conversion_artifact_generation import (
     is_conversion_generation_auxiliary,
@@ -96,7 +97,7 @@ class GenerationInventoryOwner:
                 f"Generation inventory owner names an unknown converter: {self.name!r}"
             )
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> JsonObject:
         return {
             "class": self.owner_class,
             "name": self.name,
@@ -175,7 +176,7 @@ class GenerationInventoryEntry:
                 f"Generation inventory mode is invalid: {self.mode!r}"
             )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JsonObject:
         return {
             "path": self.path,
             "kind": self.kind,
@@ -185,7 +186,7 @@ class GenerationInventoryEntry:
             "mode": self.mode,
         }
 
-    def to_generated_file_dict(self) -> dict[str, object]:
+    def to_generated_file_dict(self) -> JsonObject:
         """Render the backward-compatible format-v2 generated-files view."""
 
         return {
@@ -256,7 +257,7 @@ class GenerationInventory:
                 f"{GENERATION_INVENTORY_MAX_BYTES} canonical bytes."
             )
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> JsonObject:
         return {
             "format_version": GENERATION_INVENTORY_FORMAT_VERSION,
             "entries": [entry.to_dict() for entry in self.entries],

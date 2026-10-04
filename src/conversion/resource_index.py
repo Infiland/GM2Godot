@@ -1,11 +1,17 @@
 import copy
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, ClassVar, cast
+from typing import ClassVar
 
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
+from src.conversion.room_metadata import (
+    capture_room_creation_code_value, capture_room_index_fields,
+    iter_room_field_values, room_object_at_get,
+    room_inherited_reference_name, room_inherited_item_key,
+)
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectResourceReference,
@@ -18,19 +24,17 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.type_defs import (
     ConversionRunning,
-    JsonDict,
-    JsonList,
     LogCallback,
     ProgressCallback,
 )
 
 
-def _empty_json_dict() -> JsonDict:
-    return cast(JsonDict, {})
+def _empty_json_dict() -> JsonObject:
+    return {}
 
 
-def _empty_json_list() -> JsonList:
-    return cast(JsonList, [])
+def _empty_json_list() -> JsonArray:
+    return []
 
 
 @dataclass(frozen=True)
@@ -58,19 +62,19 @@ class IndexedRoom:
     yyp_path: str
     godot_path: str
     subfolder: str = ""
-    room_settings: JsonDict = field(default_factory=_empty_json_dict)
-    physics_settings: JsonDict = field(default_factory=_empty_json_dict)
-    view_settings: JsonDict = field(default_factory=_empty_json_dict)
-    views: JsonList = field(default_factory=_empty_json_list)
-    layers: JsonList = field(default_factory=_empty_json_list)
-    instance_creation_order: JsonList = field(default_factory=_empty_json_list)
-    parent_room: JsonDict | None = None
+    room_settings: JsonValue = field(default_factory=_empty_json_dict)
+    physics_settings: JsonValue = field(default_factory=_empty_json_dict)
+    view_settings: JsonValue = field(default_factory=_empty_json_dict)
+    views: JsonValue = field(default_factory=_empty_json_list)
+    layers: JsonValue = field(default_factory=_empty_json_list)
+    instance_creation_order: JsonValue = field(default_factory=_empty_json_list)
+    parent_room: JsonValue = None
     creation_code_file: str = ""
     inherit_code: bool = False
     inherit_creation_order: bool = False
     inherit_layers: bool = False
     is_dnd: bool = False
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -109,7 +113,7 @@ class GameMakerResourceIndex(BaseConverter):
                          update_log_callback, compact_logging,
                          max_workers=max_workers, diagnostics=diagnostics)
         self.yyp_path: str | None = None
-        self.yyp_data: JsonDict | None = None
+        self.yyp_data: JsonObject | None = None
         self.project_manifest: GameMakerProjectManifest | None = None
         self.resources: dict[str, dict[str, IndexedResource]] = self._empty_resources()
         self.rooms: dict[str, IndexedRoom] = {}
@@ -457,12 +461,12 @@ class GameMakerResourceIndex(BaseConverter):
             )
             return
         extension_name = str(data.get("name") or data.get("%Name") or name)
-        for extension_file in data.get("files", []):
+        for extension_file in iter_room_field_values(data.get("files", [])):
             if not isinstance(extension_file, dict):
                 continue
-            file_data = cast(JsonDict, extension_file)
+            file_data = extension_file
             file_name = str(file_data.get("filename") or file_data.get("name") or "")
-            for function_data in file_data.get("functions", []):
+            for function_data in iter_room_field_values(file_data.get("functions", [])):
                 if not isinstance(function_data, dict):
                     continue
                 function = self._parse_extension_function(
@@ -470,7 +474,7 @@ class GameMakerResourceIndex(BaseConverter):
                     yy_path,
                     yyp_path,
                     file_name,
-                    cast(JsonDict, function_data),
+                    function_data,
                 )
                 if function is not None:
                     self.extension_functions[function.function_name] = function
@@ -481,7 +485,7 @@ class GameMakerResourceIndex(BaseConverter):
         yy_path: str,
         yyp_path: str,
         file_name: str,
-        function_data: JsonDict,
+        function_data: JsonObject,
     ) -> IndexedExtensionFunction | None:
         function_name = function_data.get("name") or function_data.get("functionName")
         external_name = function_data.get("externalName") or function_data.get("external_name")
@@ -501,18 +505,18 @@ class GameMakerResourceIndex(BaseConverter):
         )
 
     @staticmethod
-    def _extension_arg_count(function_data: JsonDict) -> int | None:
+    def _extension_arg_count(function_data: JsonObject) -> int | None:
         raw_arg_count = function_data.get("argCount")
         if raw_arg_count is None:
             raw_arg_count = function_data.get("argc")
         if raw_arg_count is not None and not isinstance(raw_arg_count, bool):
             try:
-                return int(raw_arg_count)
+                return int(raw_arg_count) if isinstance(raw_arg_count, (str, int, float)) else None
             except (TypeError, ValueError):
                 return None
         args = function_data.get("args")
         if isinstance(args, list):
-            return len(cast(list[Any], args))
+            return len(args)
         return None
 
     def _parse_indexed_rooms(self) -> None:
@@ -529,7 +533,7 @@ class GameMakerResourceIndex(BaseConverter):
             )
             return None
 
-        raw_creation_code_file = data.get("creationCodeFile")
+        raw_creation_code_file = capture_room_creation_code_value(data)
         creation_code_file = (
             raw_creation_code_file
             if isinstance(raw_creation_code_file, str)
@@ -551,24 +555,25 @@ class GameMakerResourceIndex(BaseConverter):
                 field="creationCodeFile",
             )
 
+        fields = capture_room_index_fields(data, source_context=resource.yy_path)
         return IndexedRoom(
             name=resource.name,
             yy_path=resource.yy_path,
             yyp_path=resource.yyp_path,
             godot_path=resource.godot_path,
             subfolder=resource.subfolder,
-            room_settings=data.get("roomSettings") or {},
-            physics_settings=data.get("physicsSettings") or {},
-            view_settings=data.get("viewSettings") or {},
-            views=data.get("views") or [],
-            layers=data.get("layers") or [],
-            instance_creation_order=data.get("instanceCreationOrder") or [],
-            parent_room=data.get("parentRoom"),
+            room_settings=fields.room_settings,
+            physics_settings=fields.physics_settings,
+            view_settings=fields.view_settings,
+            views=fields.views,
+            layers=fields.layers,
+            instance_creation_order=fields.instance_creation_order,
+            parent_room=fields.parent_room,
             creation_code_file=creation_code_file,
-            inherit_code=bool(data.get("inheritCode", False)),
-            inherit_creation_order=bool(data.get("inheritCreationOrder", False)),
-            inherit_layers=bool(data.get("inheritLayers", False)),
-            is_dnd=bool(data.get("isDnd", False)),
+            inherit_code=fields.inherit_code,
+            inherit_creation_order=fields.inherit_creation_order,
+            inherit_layers=fields.inherit_layers,
+            is_dnd=fields.is_dnd,
             raw_data=data,
         )
 
@@ -626,7 +631,7 @@ class GameMakerResourceIndex(BaseConverter):
             parent.physics_settings,
             "inheritPhysicsSettings",
         )
-        inherit_views = bool(child.view_settings.get("inheritViewSettings", False))
+        inherit_views = bool(room_object_at_get(child.view_settings).get("inheritViewSettings", False))
         view_settings = self._inherit_settings(
             child.view_settings,
             parent.view_settings,
@@ -662,26 +667,30 @@ class GameMakerResourceIndex(BaseConverter):
         )
 
     @staticmethod
-    def _inherit_settings(child_settings: JsonDict, parent_settings: JsonDict, flag: str) -> JsonDict:
-        if bool(child_settings.get(flag, False)):
+    def _inherit_settings(child_settings: JsonValue, parent_settings: JsonValue, flag: str) -> JsonValue:
+        if bool(room_object_at_get(child_settings).get(flag, False)):
             inherited = copy.deepcopy(parent_settings)
+            if not isinstance(inherited, dict):
+                if isinstance(inherited, list):
+                    raise TypeError("list indices must be integers or slices, not str")
+                raise TypeError(f"'{type(inherited).__name__}' object does not support item assignment")
             inherited[flag] = True
             return inherited
         return copy.deepcopy(child_settings)
 
-    def _merge_layers(self, parent_layers: JsonList, child_layers: JsonList) -> JsonList:
+    def _merge_layers(self, parent_layers: JsonValue, child_layers: JsonValue) -> JsonArray:
         merged = self._dict_items_copy(parent_layers)
-        by_key = {self._item_key(layer): index for index, layer in enumerate(merged)}
+        by_key = {self._item_key(room_object_at_get(layer)): index for index, layer in enumerate(merged)}
         for child_layer in self._dict_items_copy(child_layers):
-            key = self._item_key(child_layer)
+            key = self._item_key(room_object_at_get(child_layer))
             if key and key in by_key:
                 parent_layer = merged[by_key[key]]
-                merged[by_key[key]] = self._merge_layer(parent_layer, child_layer)
+                merged[by_key[key]] = self._merge_layer(room_object_at_get(parent_layer), room_object_at_get(child_layer))
             else:
                 merged.append(child_layer)
-        return cast(JsonList, merged)
+        return merged
 
-    def _merge_layer(self, parent_layer: JsonDict, child_layer: JsonDict) -> JsonDict:
+    def _merge_layer(self, parent_layer: JsonObject, child_layer: JsonObject) -> JsonObject:
         merged = copy.deepcopy(parent_layer)
         merged.update(copy.deepcopy(child_layer))
 
@@ -691,34 +700,34 @@ class GameMakerResourceIndex(BaseConverter):
             merged["visible"] = copy.deepcopy(parent_layer["visible"])
         if child_layer.get("inheritSubLayers") is True:
             merged["layers"] = self._merge_layers(
-                cast(JsonList, parent_layer.get("layers") or []),
-                cast(JsonList, child_layer.get("layers") or []),
+                parent_layer.get("layers") or [],
+                child_layer.get("layers") or [],
             )
         if "instances" in parent_layer or "instances" in child_layer:
             merged["instances"] = self._merge_named_items(
-                cast(JsonList, parent_layer.get("instances") or []),
-                cast(JsonList, child_layer.get("instances") or []),
+                parent_layer.get("instances") or [],
+                child_layer.get("instances") or [],
             )
         if "assets" in parent_layer or "assets" in child_layer:
             merged["assets"] = self._merge_named_items(
-                cast(JsonList, parent_layer.get("assets") or []),
-                cast(JsonList, child_layer.get("assets") or []),
+                parent_layer.get("assets") or [],
+                child_layer.get("assets") or [],
             )
         return merged
 
-    def _merge_named_items(self, parent_items: JsonList, child_items: JsonList) -> JsonList:
+    def _merge_named_items(self, parent_items: JsonValue, child_items: JsonValue) -> JsonArray:
         merged = self._dict_items_copy(parent_items)
-        by_key = {self._item_key(item): index for index, item in enumerate(merged)}
+        by_key = {self._item_key(room_object_at_get(item)): index for index, item in enumerate(merged)}
         for child_item in self._dict_items_copy(child_items):
-            key = self._item_key(child_item)
+            key = self._item_key(room_object_at_get(child_item))
             if key and key in by_key:
                 parent_item = merged[by_key[key]]
                 merged_item = copy.deepcopy(parent_item)
-                merged_item.update(copy.deepcopy(child_item))
+                room_object_at_get(merged_item).update(copy.deepcopy(room_object_at_get(child_item)))
                 merged[by_key[key]] = merged_item
             else:
                 merged.append(child_item)
-        return cast(JsonList, merged)
+        return merged
 
     def _inherited_creation_code_file(self, parent: IndexedRoom) -> str:
         if not parent.creation_code_file:
@@ -742,35 +751,18 @@ class GameMakerResourceIndex(BaseConverter):
         return resolved.source_path
 
     @staticmethod
-    def _room_reference_name(reference: JsonDict | None) -> str:
-        if not isinstance(reference, dict):
-            return ""
-        name = reference.get("name")
-        if isinstance(name, str) and name:
-            return name
-        path = reference.get("path")
-        if isinstance(path, str) and path:
-            return os.path.splitext(os.path.basename(path))[0]
-        return ""
+    def _room_reference_name(reference: JsonValue) -> str:
+        return room_inherited_reference_name(reference)
 
     @staticmethod
-    def _dict_items_copy(value: JsonList) -> list[JsonDict]:
-        return [copy.deepcopy(cast(JsonDict, item)) for item in value if isinstance(item, dict)]
+    def _dict_items_copy(value: JsonValue) -> JsonArray:
+        return [copy.deepcopy(item) for item in iter_room_field_values(value) if isinstance(item, dict)]
 
     @staticmethod
-    def _item_key(item: JsonDict) -> str:
-        for key in ("inheritedItemId", "%Name", "name"):
-            value = item.get(key)
-            if isinstance(value, str) and value:
-                return value
-            if isinstance(value, dict):
-                nested_value = cast(JsonDict, value)
-                name = nested_value.get("name")
-                if isinstance(name, str) and name:
-                    return name
-        return ""
+    def _item_key(item: JsonObject) -> str:
+        return room_inherited_item_key(item)
 
-    def _apply_yyp_room_order(self, yyp_data: JsonDict) -> None:
+    def _apply_yyp_room_order(self, yyp_data: JsonObject) -> None:
         if "RoomOrderNodes" not in yyp_data:
             self.used_room_order_fallback = True
             self._safe_log(
@@ -780,9 +772,12 @@ class GameMakerResourceIndex(BaseConverter):
             return
 
         ordered: list[str] = []
-        for room_node in yyp_data.get("RoomOrderNodes", []):
-            room_id = room_node.get("roomId", {})
+        for room_node in iter_room_field_values(yyp_data.get("RoomOrderNodes", [])):
+            room_id = room_object_at_get(room_node).get("roomId", {})
+            room_id = room_object_at_get(room_id)
             name = room_id.get("name") or self._name_from_yyp_path(room_id.get("path", ""))
+            if isinstance(name, (dict, list)):
+                raise TypeError(f"unhashable type: '{type(name).__name__}'")
             if name in self.rooms and name not in ordered:
                 ordered.append(name)
 
@@ -857,8 +852,10 @@ class GameMakerResourceIndex(BaseConverter):
         return yyp_path.split("/", 1)[0]
 
     @staticmethod
-    def _name_from_yyp_path(yyp_path: str) -> str:
+    def _name_from_yyp_path(yyp_path: JsonValue) -> str:
         if not yyp_path:
             return ""
+        if not isinstance(yyp_path, str):
+            raise TypeError(f"expected str, bytes or os.PathLike object, not {type(yyp_path).__name__}")
         filename = os.path.basename(yyp_path)
         return os.path.splitext(filename)[0]

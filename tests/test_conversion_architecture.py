@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import ast
 import json
 import inspect
 import math
@@ -8,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import FrozenInstanceError, asdict, astuple, fields
 from pathlib import Path
@@ -39,7 +41,7 @@ from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
 )
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
 from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
-from src.conversion.json_values import JsonArray, JsonObject
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.path_metadata import GameMakerPathMetadata, PathMetadataPoint
 from src.conversion.resource_models import (
     FontModel,
@@ -1084,8 +1086,6 @@ class TestSoundResourceModelBoundary(unittest.TestCase):
                 "src.conversion.resource_models._read_lenient_json_file", side_effect=AssertionError("generic sound reader"),
             ), patch("src.conversion.resource_models._base_kwargs", side_effect=AssertionError("legacy sound base")), patch(
                 "src.conversion.resource_models._subfolder_from_raw_data", side_effect=AssertionError("raw sound parent"),
-            ), patch("src.conversion.resource_models._string_value", side_effect=AssertionError("raw soundFile")), patch(
-                "src.conversion.resource_models._named_reference", side_effect=AssertionError("raw audioGroupId"),
             ), patch("src.conversion.sound_metadata.project_sound_conversion_fields", side_effect=AssertionError("conversion projection")):
                 models = parse_gamemaker_resource_models(directory)
 
@@ -1827,6 +1827,97 @@ class TestSharedResourceAcquisitionModels(unittest.TestCase):
             second = model_type("asset", "kind", "type", "asset.yy", "asset.yy", 0)
             self.assertIsNone(first.metadata)
             self.assertIsNot(first.raw_data, second.raw_data)
+
+
+class TestFinalJsonResourceConsumers(unittest.TestCase):
+    def _write_resources(
+        self, root: Path, entries: tuple[tuple[str, str, str, JsonObject], ...],
+    ) -> None:
+        resources: JsonArray = []
+        for kind, name, resource_type, data in entries:
+            relative = f"{kind}/{name}/{name}.yy"
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data), encoding="utf-8")
+            resources.append({"id": {"name": name, "path": relative}, "resourceType": resource_type})
+        (root / "project.yyp").write_text(json.dumps({"resources": resources, "resourceType": "GMProject"}), encoding="utf-8")
+
+    def test_room_aggregate_consumes_staged_summary_without_changing_raw_data(self) -> None:
+        from src.conversion.room_metadata import RoomSummaryFields
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_resources(root, (("rooms", "room", "GMRoom", {
+                "roomSettings": {"Width": 1, "Height": 2}, "unknown": {"next": [None, True]},
+            }),))
+            fields = RoomSummaryFields(211, 307, True, True, "typed_parent", {}, source_context="view")
+            with patch("src.conversion.resource_models.project_room_summary_fields", return_value=fields) as projection:
+                models = parse_gamemaker_resource_models(directory)
+            room = models.rooms[0]
+            self.assertEqual((room.width, room.height, room.persistent, room.inherit_layers, room.parent_room_name),
+                             (211, 307, True, True, "typed_parent"))
+            self.assertIsNot(room.raw_data, fields.raw_data)
+            self.assertEqual(room.raw_data["unknown"], {"next": [None, True]})
+            self.assertEqual(projection.call_args.kwargs["source_context"], str(root / "rooms/room/room.yy"))
+            self.assertEqual(models.diagnostics, ())
+
+    def test_aggregate_strict_counts_do_not_borrow_timeline_aliases_or_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_resources(root, (
+                ("sequences", "sequence", "GMSequence", {"tracks": [{}, None, [], False, {"future": None}]}),
+                ("timelines", "timeline", "GMTimeline", {"momentList": [None, {}, 2, {}], "moments": [{}, {}, {}]}),
+            ))
+            models = parse_gamemaker_resource_models(directory)
+            self.assertEqual((models.sequences[0].track_count, models.timelines[0].moment_count), (2, 2))
+            with patch("src.conversion.resource_models.sequence_track_count", return_value=7), patch(
+                "src.conversion.resource_models.timeline_moment_count", return_value=11,
+            ):
+                projected = parse_gamemaker_resource_models(directory)
+            self.assertEqual((projected.sequences[0].track_count, projected.timelines[0].moment_count), (7, 11))
+
+    def test_room_layer_summary_is_consumed_before_advancing_preorder_iterator(self) -> None:
+        from src.conversion.room_metadata import RoomLayerSummaryFields, iter_room_layer_summary_fields
+        from src.conversion.resource_models import RoomLayerModel
+        events: list[str] = []
+        def observed(value: JsonValue, *, source_context: str) -> Iterator[RoomLayerSummaryFields]:
+            for layer_fields in iter_room_layer_summary_fields(value, source_context=source_context):
+                yield layer_fields
+                events.append("advance:" + layer_fields.name)
+        def construct(room_name: str, name: str, resource_type: str, depth: int | None,
+                      order: int, raw_data: JsonObject) -> RoomLayerModel:
+            events.append("construct:" + name)
+            return RoomLayerModel(room_name, name, resource_type, depth, order, raw_data)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_resources(root, (("rooms", "room", "GMRoom", {
+                "layers": [{"name": "Parent", "depth": True, "layers": [{"name": "Child", "depth": 9}]}],
+            }),))
+            with patch("src.conversion.resource_models.iter_room_layer_summary_fields", side_effect=observed), patch(
+                "src.conversion.resource_models.RoomLayerModel", side_effect=construct,
+            ):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual(events, ["construct:Parent", "advance:Parent", "construct:Child", "advance:Child"])
+            self.assertEqual([(layer.name, layer.depth, layer.order) for layer in models.rooms[0].layers],
+                             [("Parent", True, 0), ("Child", 9, 0)])
+
+    def test_room_sequence_timeline_constructor_prefixes_remain_compatible(self) -> None:
+        from src.conversion.resource_models import RoomModel, SequenceModel, TimelineModel
+        prefix = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data")
+        for model, suffix in ((RoomModel, ("width", "height", "persistent", "inherit_layers", "parent_room_name", "layers")),
+                              (SequenceModel, ("track_count",)), (TimelineModel, ("moment_count",))):
+            with self.subTest(model=model.__name__):
+                self.assertEqual(tuple(inspect.signature(model).parameters), prefix + suffix)
+                self.assertEqual(model.__bases__, (ResourceModel,))
+
+    def test_legacy_json_aliases_cannot_reenter_production_imports(self) -> None:
+        from src.conversion import type_defs
+        retired = {"JsonDict", "JsonList", "JsonValue", "Any"}
+        self.assertTrue(all(not hasattr(type_defs, name) for name in retired))
+        for path in (Path(PROJECT_ROOT) / "src").rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "src.conversion.type_defs":
+                    self.assertTrue(retired.isdisjoint(alias.name for alias in node.names), str(path))
 
 
 if __name__ == "__main__":

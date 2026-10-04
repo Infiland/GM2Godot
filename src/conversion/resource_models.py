@@ -13,6 +13,12 @@ from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamema
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_tileset_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.room_metadata import (
+    capture_room_summary_settings, iter_room_layer_summary_fields,
+    project_room_summary_fields,
+)
+from src.conversion.sequence_metadata import sequence_track_count
+from src.conversion.timeline_metadata import timeline_moment_count
 from src.conversion.object_metadata import GameMakerObjectMetadata, parse_gamemaker_object_metadata
 from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
 from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
@@ -389,15 +395,16 @@ def _parse_resource_model(
             metadata=metadata,
         ), ()
     if kind == "rooms":
-        room_settings = _dict_value(raw_data.get("roomSettings"))
+        room_settings = capture_room_summary_settings(raw_data, source_context=yy_path)
         layers = _parse_room_layers(reference.name, raw_data.get("layers"))
+        fields = project_room_summary_fields(raw_data, room_settings, source_context=yy_path)
         return RoomModel(
             **base,
-            width=_int_value(room_settings.get("Width")),
-            height=_int_value(room_settings.get("Height")),
-            persistent=bool(room_settings.get("persistent", False)),
-            inherit_layers=bool(raw_data.get("inheritLayers", False)),
-            parent_room_name=_named_reference(raw_data.get("parentRoom")),
+            width=fields.width,
+            height=fields.height,
+            persistent=fields.persistent,
+            inherit_layers=fields.inherit_layers,
+            parent_room_name=fields.parent_room_name,
             layers=layers,
         ), ()
     if kind == "scripts":
@@ -432,12 +439,12 @@ def _parse_resource_model(
     if kind == "sequences":
         return SequenceModel(
             **base,
-            track_count=len(_dict_list(raw_data.get("tracks"))),
+            track_count=sequence_track_count(raw_data),
         ), ()
     if kind == "timelines":
         return TimelineModel(
             **base,
-            moment_count=len(_dict_list(raw_data.get("momentList"))),
+            moment_count=timeline_moment_count(raw_data),
         ), ()
     return ResourceModel(**base), ()
 
@@ -714,30 +721,17 @@ def _subfolder_from_raw_data(raw_data: JsonObject) -> str:
 
 
 def _parse_room_layers(room_name: str, raw_layers: JsonValue) -> tuple[RoomLayerModel, ...]:
-    layers: list[RoomLayerModel] = []
-    for index, layer in enumerate(_dict_list(raw_layers)):
-        layers.append(
-            RoomLayerModel(
-                room_name=room_name,
-                name=_string_value(layer.get("%Name")) or _string_value(layer.get("name")) or "Layer",
-                resource_type=_layer_resource_type(layer),
-                depth=_optional_int_value(layer.get("depth")),
-                order=index,
-                raw_data=layer,
-            )
+    return tuple(
+        RoomLayerModel(
+            room_name=room_name,
+            name=fields.name,
+            resource_type=fields.resource_type,
+            depth=fields.depth,
+            order=fields.order,
+            raw_data=fields.raw_data,
         )
-        layers.extend(_parse_room_layers(room_name, layer.get("layers") or layer.get("children")))
-    return tuple(layers)
-
-
-def _layer_resource_type(layer: JsonObject) -> str:
-    resource_type = layer.get("resourceType")
-    if isinstance(resource_type, str) and resource_type:
-        return resource_type
-    for key in layer:
-        if key.startswith("$GMR"):
-            return key[1:]
-    return "UnknownLayer"
+        for fields in iter_room_layer_summary_fields(raw_layers, source_context=room_name)
+    )
 
 
 def _first_existing_neighbor(
@@ -804,36 +798,3 @@ def _source_path_diagnostic(
         resource_name=reference.name,
         resource_kind=reference.kind,
     )
-
-
-def _named_reference(value: JsonValue) -> str | None:
-    if not isinstance(value, dict):
-        return None
-    name = value.get("name")
-    return name if isinstance(name, str) and name else None
-
-
-def _dict_value(value: JsonValue) -> JsonObject:
-    return value if isinstance(value, dict) else {}
-
-
-def _dict_list(value: JsonValue) -> list[JsonObject]:
-    if not isinstance(value, list):
-        return []
-    result: list[JsonObject] = []
-    for item in value:
-        if isinstance(item, dict):
-            result.append(item)
-    return result
-
-
-def _string_value(value: JsonValue) -> str:
-    return value if isinstance(value, str) else ""
-
-
-def _int_value(value: JsonValue) -> int:
-    return value if isinstance(value, int) else 0
-
-
-def _optional_int_value(value: JsonValue) -> int | None:
-    return value if isinstance(value, int) else None

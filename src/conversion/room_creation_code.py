@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol, cast
+from typing import Callable, Protocol
 
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     is_safe_project_source_component,
     resolve_project_sidecar_source_path,
 )
-from src.conversion.type_defs import JsonDict, JsonList, LogCallback
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.room_metadata import RoomInstanceFields, iter_room_field_values, room_creation_order_name
+from src.conversion.type_defs import LogCallback
 
 
 CreationCodeSourceResolver = Callable[[str, str], str | None]
@@ -34,7 +36,7 @@ class RoomCreationCodeRoom(Protocol):
     def inherit_code(self) -> bool: ...
 
     @property
-    def instance_creation_order(self) -> JsonList: ...
+    def instance_creation_order(self) -> JsonValue: ...
 
 
 ROOM_EXECUTION_ORDER = [
@@ -104,7 +106,7 @@ def resolve_room_creation_code(
 
 def resolve_instance_creation_code(
     room: RoomCreationCodeRoom,
-    instance: JsonDict,
+    instance: JsonObject,
     warn_callback: LogCallback | None = None,
     *,
     gm_project_path: str | None = None,
@@ -112,7 +114,7 @@ def resolve_instance_creation_code(
 ) -> CreationCodeMetadata:
     """Resolve per-instance creation-code metadata without transpiling GML."""
     instance_name = _instance_name(instance)
-    has_code = bool(instance.get("hasCreationCode", False))
+    has_code = RoomInstanceFields(instance, "").has_creation_code
     source_path = ""
     path_rejected = False
     if has_code:
@@ -181,10 +183,9 @@ def resolve_instance_creation_code(
 
 def instance_creation_order_names(room: RoomCreationCodeRoom) -> list[str]:
     names: list[str] = []
-    for entry in room.instance_creation_order:
+    for entry in iter_room_field_values(room.instance_creation_order):
         if isinstance(entry, dict):
-            entry_dict = cast(JsonDict, entry)
-            name = entry_dict.get("%Name") or entry_dict.get("name")
+            name = room_creation_order_name(entry)
             if isinstance(name, str) and name:
                 names.append(name)
     return names
@@ -283,6 +284,5 @@ def _warn_source_path_rejection(
     )
 
 
-def _instance_name(instance: JsonDict) -> str:
-    name = instance.get("%Name") or instance.get("name")
-    return name if isinstance(name, str) and name else "Instance"
+def _instance_name(instance: JsonObject) -> str:
+    return RoomInstanceFields(instance, "").name

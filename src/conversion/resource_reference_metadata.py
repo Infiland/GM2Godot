@@ -28,6 +28,41 @@ class AssetNameDeclaration:
     raw_id: JsonObject
 
 
+@dataclass(frozen=True)
+class TilesetResourceDeclaration:
+    name: str
+    path: str
+    path_value: JsonValue
+    raw_resource: JsonObject
+    raw_id: JsonObject
+
+
+def capture_tileset_resource_declaration(resource: JsonObject) -> TilesetResourceDeclaration | None:
+    """Read one declaration at the owner's original filtered iteration stage."""
+    resource_id = resource.get("id", {})
+    if not isinstance(resource_id, dict):
+        return None
+    raw_path = resource_id.get("path", "")
+    path = raw_path.replace("\\", "/") if isinstance(raw_path, str) else ""
+    resource_type = resource.get("resourceType")
+    id_resource_type = resource_id.get("resourceType")
+    is_tileset = (
+        path.partition("/")[0].casefold() == "tilesets"
+        or resource_type == "GMTileSet"
+        or id_resource_type == "GMTileSet"
+    )
+    if not is_tileset:
+        return None
+    raw_name = resource_id.get("name", "")
+    name = (
+        raw_name if isinstance(raw_name, str) and raw_name
+        else os.path.splitext(os.path.basename(path))[0]
+    )
+    if not name:
+        return None
+    return TilesetResourceDeclaration(name, path, raw_path, resource, resource_id)
+
+
 def capture_registry_resource_declaration(resource_id: JsonObject) -> RegistryResourceDeclaration | None:
     """Capture only an accepted path and then its optional declared name.
 

@@ -3,9 +3,15 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Sized
-from typing import cast
 
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.particle_metadata import (
+    ParticleSystemDescriptor,
+    ParticleTypeDescriptor,
+    ParticleEmitterDescriptor,
+    ParticleSpawnDescriptor,
+    ParticleRegionDescriptor,
+)
 
 
 PARTICLE_DESCRIPTOR_FORMAT_VERSION = 1
@@ -36,7 +42,7 @@ UNSUPPORTED_PARTICLE_MODIFIERS = (
 )
 
 
-def normalize_particle_system_asset(raw_data: JsonDict) -> JsonDict:
+def normalize_particle_system_asset(raw_data: JsonObject) -> JsonObject:
     """Return one deterministic runtime descriptor for a GameMaker asset."""
 
     raw_emitters = _dict_list(raw_data.get("emitters"))
@@ -50,7 +56,7 @@ def normalize_particle_system_asset(raw_data: JsonDict) -> JsonDict:
         _normalize_particle_type(item, index, embedded_emitter=False)
         for index, item in enumerate(raw_types)
     ]
-    emitters: list[JsonDict] = []
+    emitters: list[JsonObject] = []
     modern_embedded_types = not raw_types
     for index, emitter in enumerate(raw_emitters):
         if modern_embedded_types:
@@ -67,22 +73,22 @@ def normalize_particle_system_asset(raw_data: JsonDict) -> JsonDict:
         emitters.append(_normalize_emitter(emitter, index, type_index))
 
     draw_order_value = _integer(raw_data.get("drawOrder"), 0)
-    return {
-        "descriptor_format_version": PARTICLE_DESCRIPTOR_FORMAT_VERSION,
-        "name": _string(raw_data.get("name") or raw_data.get("%Name"), ""),
-        "xorigin": _number(raw_data.get("xorigin"), 0.0),
-        "yorigin": _number(raw_data.get("yorigin"), 0.0),
-        "draw_order": "old_to_new" if draw_order_value == 0 else "new_to_old",
-        "draw_order_value": draw_order_value,
-        "types": types,
-        "emitters": emitters,
-        "unsupported_modifiers": list(
+    return ParticleSystemDescriptor(
+        descriptor_format_version=PARTICLE_DESCRIPTOR_FORMAT_VERSION,
+        name=_string(raw_data.get("name") or raw_data.get("%Name"), ""),
+        xorigin=_number(raw_data.get("xorigin"), 0.0),
+        yorigin=_number(raw_data.get("yorigin"), 0.0),
+        draw_order="old_to_new" if draw_order_value == 0 else "new_to_old",
+        draw_order_value=draw_order_value,
+        types=types,
+        emitters=emitters,
+        unsupported_modifiers=list(
             particle_system_unsupported_modifier_fields(raw_data)
         ),
-    }
+    ).to_json()
 
 
-def particle_system_unsupported_modifier_fields(raw_data: JsonDict) -> tuple[str, ...]:
+def particle_system_unsupported_modifier_fields(raw_data: JsonObject) -> tuple[str, ...]:
     """Return authored legacy modifier categories that contain behavior."""
 
     return tuple(
@@ -95,7 +101,7 @@ def particle_system_unsupported_modifier_fields(raw_data: JsonDict) -> tuple[str
 def render_particle_system_resource(
     name: str,
     source_path: str,
-    descriptor: JsonDict,
+    descriptor: JsonObject,
 ) -> str:
     """Render a loadable Godot Resource carrying the stable descriptor."""
 
@@ -117,11 +123,11 @@ def render_particle_system_resource(
 
 
 def _normalize_particle_type(
-    raw_type: JsonDict,
+    raw_type: JsonObject,
     index: int,
     *,
     embedded_emitter: bool,
-) -> JsonDict:
+) -> JsonObject:
     name = _string(
         raw_type.get("name") or raw_type.get("%Name"),
         f"particle_type_{index}",
@@ -169,123 +175,123 @@ def _normalize_particle_type(
             life_min,
         ),
     )
-    return {
-        "name": name,
-        "shape": shape,
-        "texture_index": texture_index,
-        "sprite": sprite_name or None,
-        "sprite_frame": _number_alias(
+    return ParticleTypeDescriptor(
+        name=name,
+        shape=shape,
+        texture_index=texture_index,
+        sprite=sprite_name or None,
+        sprite_frame=_number_alias(
             raw_type,
             ("spriteFrame", "frame", "headPosition"),
             0.0,
         ),
-        "sprite_animate": _boolean_alias(
+        sprite_animate=_boolean_alias(
             raw_type,
             ("spriteAnimate", "sprite_animate", "animate"),
             False,
         ),
-        "sprite_stretch": _boolean_alias(
+        sprite_stretch=_boolean_alias(
             raw_type,
             ("spriteStretch", "sprite_stretch", "stretch"),
             False,
         ),
-        "sprite_random": _boolean_alias(
+        sprite_random=_boolean_alias(
             raw_type,
             ("spriteRandom", "sprite_random", "random"),
             False,
         ),
-        "size_min": size_min,
-        "size_max": size_max,
-        "size_increase": size_increase,
-        "size_wiggle": size_wiggle,
-        "scale_x": _number_alias(raw_type, ("scaleX", "scale_x", "xscale"), 1.0),
-        "scale_y": _number_alias(raw_type, ("scaleY", "scale_y", "yscale"), 1.0),
-        "life_min": life_min,
-        "life_max": life_max,
-        "speed_min": _number_alias(raw_type, ("speedMin", "speed_min"), 0.0),
-        "speed_max": _number_alias(raw_type, ("speedMax", "speed_max"), 0.0),
-        "speed_increase": _number_alias(
+        size_min=size_min,
+        size_max=size_max,
+        size_increase=size_increase,
+        size_wiggle=size_wiggle,
+        scale_x=_number_alias(raw_type, ("scaleX", "scale_x", "xscale"), 1.0),
+        scale_y=_number_alias(raw_type, ("scaleY", "scale_y", "yscale"), 1.0),
+        life_min=life_min,
+        life_max=life_max,
+        speed_min=_number_alias(raw_type, ("speedMin", "speed_min"), 0.0),
+        speed_max=_number_alias(raw_type, ("speedMax", "speed_max"), 0.0),
+        speed_increase=_number_alias(
             raw_type,
             ("speedIncrease", "speedIncr", "speed_incr"),
             0.0,
         ),
-        "speed_wiggle": _number_alias(
+        speed_wiggle=_number_alias(
             raw_type,
             ("speedWiggle", "speed_wiggle"),
             0.0,
         ),
-        "direction_min": _number_alias(
+        direction_min=_number_alias(
             raw_type,
             ("directionMin", "dirMin", "direction_min", "dir_min"),
             0.0,
         ),
-        "direction_max": _number_alias(
+        direction_max=_number_alias(
             raw_type,
             ("directionMax", "dirMax", "direction_max", "dir_max"),
             0.0,
         ),
-        "direction_increase": _number_alias(
+        direction_increase=_number_alias(
             raw_type,
             ("directionIncrease", "dirIncr", "direction_incr", "dir_incr"),
             0.0,
         ),
-        "direction_wiggle": _number_alias(
+        direction_wiggle=_number_alias(
             raw_type,
             ("directionWiggle", "dirWiggle", "direction_wiggle", "dir_wiggle"),
             0.0,
         ),
-        "gravity_amount": _number_alias(
+        gravity_amount=_number_alias(
             raw_type,
             ("gravityForce", "gravityAmount", "gravity_amount", "grav_amount"),
             0.0,
         ),
-        "gravity_direction": _number_alias(
+        gravity_direction=_number_alias(
             raw_type,
             ("gravityDirection", "gravity_direction", "grav_dir"),
             270.0,
         ),
-        "orientation_min": _number_alias(
+        orientation_min=_number_alias(
             raw_type,
             ("orientationMin", "orientation_min", "ang_min"),
             0.0,
         ),
-        "orientation_max": _number_alias(
+        orientation_max=_number_alias(
             raw_type,
             ("orientationMax", "orientation_max", "ang_max"),
             0.0,
         ),
-        "orientation_increase": _number_alias(
+        orientation_increase=_number_alias(
             raw_type,
             ("orientationIncrease", "orientation_incr", "ang_incr"),
             0.0,
         ),
-        "orientation_wiggle": _number_alias(
+        orientation_wiggle=_number_alias(
             raw_type,
             ("orientationWiggle", "orientation_wiggle", "ang_wiggle"),
             0.0,
         ),
-        "orientation_relative": _boolean_alias(
+        orientation_relative=_boolean_alias(
             raw_type,
             ("orientationRelative", "orientation_relative", "ang_relative"),
             False,
         ),
-        "colours": colours,
-        "alphas": alphas,
-        "blend_additive": _boolean_alias(
+        colours=colours,
+        alphas=alphas,
+        blend_additive=_boolean_alias(
             raw_type,
             ("additiveBlend", "blendAdditive", "blend_additive", "additive"),
             False,
         ),
-        "spawn_on_death": _spawn_descriptor(raw_type, "Death"),
-        "spawn_on_update": _spawn_descriptor(raw_type, "Update"),
-    }
+        spawn_on_death=_spawn_descriptor(raw_type, "Death"),
+        spawn_on_update=_spawn_descriptor(raw_type, "Update"),
+    ).to_json()
 
 
 def _normalize_emitter(
-    emitter: JsonDict,
+    emitter: JsonObject,
     index: int,
     type_index: int,
-) -> JsonDict:
+) -> JsonObject:
     center_x = _number_alias(emitter, ("regionX",), 0.0)
     center_y = _number_alias(emitter, ("regionY",), 0.0)
     width = abs(_number_alias(emitter, ("regionW",), 0.0))
@@ -302,59 +308,59 @@ def _normalize_emitter(
         ("emitCount", "streamNumber", "burstNumber", "number"),
         0.0,
     )
-    return {
-        "name": _string(
+    return ParticleEmitterDescriptor(
+        name=_string(
             emitter.get("name") or emitter.get("%Name"),
             f"emitter_{index}",
         ),
-        "type_index": type_index,
-        "enabled": _boolean(emitter.get("enabled"), True),
-        "mode": mode,
-        "mode_value": _integer(raw_mode, 0 if mode == "stream" else 1),
-        "number": number,
-        "relative": _boolean(emitter.get("relative"), False),
-        "region": {
-            "xmin": xmin,
-            "xmax": xmax,
-            "ymin": ymin,
-            "ymax": ymax,
-            "shape": _emitter_shape_name(emitter.get("shape")),
-            "distribution": _distribution_name(emitter.get("distribution")),
-        },
-        "delay_min": _number_alias(
+        type_index=type_index,
+        enabled=_boolean(emitter.get("enabled"), True),
+        mode=mode,
+        mode_value=_integer(raw_mode, 0 if mode == "stream" else 1),
+        number=number,
+        relative=_boolean(emitter.get("relative"), False),
+        region=ParticleRegionDescriptor(
+            xmin=xmin,
+            xmax=xmax,
+            ymin=ymin,
+            ymax=ymax,
+            shape=_emitter_shape_name(emitter.get("shape")),
+            distribution=_distribution_name(emitter.get("distribution")),
+        ).to_json(),
+        delay_min=_number_alias(
             emitter,
             ("emitDelayMin", "delayMin", "delay_min"),
             0.0,
         ),
-        "delay_max": _number_alias(
+        delay_max=_number_alias(
             emitter,
             ("emitDelayMax", "delayMax", "delay_max"),
             0.0,
         ),
-        "delay_unit": _integer_alias(
+        delay_unit=_integer_alias(
             emitter,
             ("emitDelayUnits", "delayUnits", "delay_unit"),
             0,
         ),
-        "interval_min": _number_alias(
+        interval_min=_number_alias(
             emitter,
             ("emitIntervalMin", "intervalMin", "interval_min"),
             0.0,
         ),
-        "interval_max": _number_alias(
+        interval_max=_number_alias(
             emitter,
             ("emitIntervalMax", "intervalMax", "interval_max"),
             0.0,
         ),
-        "interval_unit": _integer_alias(
+        interval_unit=_integer_alias(
             emitter,
             ("emitIntervalUnits", "intervalUnits", "interval_unit"),
             0,
         ),
-    }
+    ).to_json()
 
 
-def _particle_colours(raw_type: JsonDict) -> tuple[list[int], list[float]]:
+def _particle_colours(raw_type: JsonObject) -> tuple[list[int], list[float]]:
     modern_keys = ("startColour", "midColour", "endColour")
     if any(key in raw_type for key in modern_keys):
         packed_values = [_packed_colour(raw_type.get(key)) for key in modern_keys]
@@ -365,7 +371,7 @@ def _particle_colours(raw_type: JsonDict) -> tuple[list[int], list[float]]:
 
     raw_colours = raw_type.get("colours")
     colours = (
-        [_integer(value, 0xFFFFFF) & 0xFFFFFF for value in cast(list[object], raw_colours)]
+        [_integer(value, 0xFFFFFF) & 0xFFFFFF for value in raw_colours]
         if isinstance(raw_colours, list)
         else [
             _integer_alias(raw_type, ("colour1", "color1"), 0xFFFFFF)
@@ -376,7 +382,7 @@ def _particle_colours(raw_type: JsonDict) -> tuple[list[int], list[float]]:
     alphas = (
         [
             min(1.0, max(0.0, _number(value, 1.0)))
-            for value in cast(list[object], raw_alphas)
+            for value in raw_alphas
         ]
         if isinstance(raw_alphas, list)
         else [
@@ -389,17 +395,17 @@ def _particle_colours(raw_type: JsonDict) -> tuple[list[int], list[float]]:
     return colours or [0xFFFFFF], alphas or [1.0]
 
 
-def _spawn_descriptor(raw_type: JsonDict, suffix: str) -> JsonDict:
+def _spawn_descriptor(raw_type: JsonObject, suffix: str) -> JsonObject:
     prefix = f"spawnOn{suffix}"
-    return {
-        "count": _number(raw_type.get(f"{prefix}Count"), 0.0),
-        "id": raw_type.get(f"{prefix}Id"),
-        "preset": raw_type.get(f"{prefix}GMPreset"),
-    }
+    return ParticleSpawnDescriptor(
+        count=_number(raw_type.get(f"{prefix}Count"), 0.0),
+        id=raw_type.get(f"{prefix}Id"),
+        preset=raw_type.get(f"{prefix}GMPreset"),
+    ).to_json()
 
 
 def _particle_type_index(
-    emitter: JsonDict,
+    emitter: JsonObject,
     fallback: int,
     type_count: int,
 ) -> int:
@@ -410,7 +416,7 @@ def _particle_type_index(
     return fallback if fallback < type_count else -1
 
 
-def _shape_name(value: object, default: str) -> str:
+def _shape_name(value: JsonValue, default: str) -> str:
     if isinstance(value, str):
         normalized = value.casefold().removeprefix("pt_shape_")
         return normalized if normalized in PARTICLE_SHAPES else default
@@ -418,7 +424,7 @@ def _shape_name(value: object, default: str) -> str:
     return PARTICLE_SHAPES[index] if 0 <= index < len(PARTICLE_SHAPES) else default
 
 
-def _emitter_shape_name(value: object) -> str:
+def _emitter_shape_name(value: JsonValue) -> str:
     if isinstance(value, str):
         normalized = value.casefold().removeprefix("ps_shape_")
         if normalized in EMITTER_SHAPES:
@@ -427,7 +433,7 @@ def _emitter_shape_name(value: object) -> str:
     return EMITTER_SHAPES[index] if 0 <= index < len(EMITTER_SHAPES) else "rectangle"
 
 
-def _distribution_name(value: object) -> str:
+def _distribution_name(value: JsonValue) -> str:
     if isinstance(value, str):
         normalized = value.casefold().removeprefix("ps_distr_")
         if normalized in EMITTER_DISTRIBUTIONS:
@@ -438,7 +444,7 @@ def _distribution_name(value: object) -> str:
     return "linear"
 
 
-def _emitter_mode(value: object) -> str:
+def _emitter_mode(value: JsonValue) -> str:
     if isinstance(value, str):
         normalized = value.casefold().removeprefix("ps_mode_")
         if normalized in {"stream", "burst"}:
@@ -446,27 +452,27 @@ def _emitter_mode(value: object) -> str:
     return "burst" if _integer(value, 0) == 1 else "stream"
 
 
-def _reference_name(value: object) -> str:
+def _reference_name(value: JsonValue) -> str:
     if isinstance(value, str):
         return value
     if not isinstance(value, dict):
         return ""
-    name = cast(dict[object, object], value).get("name")
+    name = value.get("name")
     return name if isinstance(name, str) else ""
 
 
-def _dict_list(value: object) -> list[JsonDict]:
+def _dict_list(value: JsonValue) -> list[JsonObject]:
     if not isinstance(value, list):
         return []
     return [
-        cast(JsonDict, item)
-        for item in cast(list[object], value)
+        item
+        for item in value
         if isinstance(item, dict)
     ]
 
 
 def _number_alias(
-    data: JsonDict,
+    data: JsonObject,
     keys: tuple[str, ...],
     default: float,
 ) -> float:
@@ -477,7 +483,7 @@ def _number_alias(
 
 
 def _integer_alias(
-    data: JsonDict,
+    data: JsonObject,
     keys: tuple[str, ...],
     default: int,
 ) -> int:
@@ -488,7 +494,7 @@ def _integer_alias(
 
 
 def _boolean_alias(
-    data: JsonDict,
+    data: JsonObject,
     keys: tuple[str, ...],
     default: bool,
 ) -> bool:
@@ -498,7 +504,7 @@ def _boolean_alias(
     return default
 
 
-def _number(value: object, default: float) -> float:
+def _number(value: JsonValue, default: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return default
     try:
@@ -508,7 +514,7 @@ def _number(value: object, default: float) -> float:
     return number if math.isfinite(number) else default
 
 
-def _integer(value: object, default: int) -> int:
+def _integer(value: JsonValue, default: int) -> int:
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return default
     try:
@@ -517,7 +523,7 @@ def _integer(value: object, default: int) -> int:
         return default
 
 
-def _boolean(value: object, default: bool) -> bool:
+def _boolean(value: JsonValue, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
@@ -531,15 +537,15 @@ def _boolean(value: object, default: bool) -> bool:
     return default
 
 
-def _string(value: object, default: str) -> str:
+def _string(value: JsonValue, default: str) -> str:
     return value if isinstance(value, str) and value else default
 
 
-def _packed_colour(value: object) -> int:
+def _packed_colour(value: JsonValue) -> int:
     return _integer(value, 0xFFFFFFFF) & 0xFFFFFFFF
 
 
-def _contains_authored_value(value: object) -> bool:
+def _contains_authored_value(value: JsonValue) -> bool:
     if value is None or value is False:
         return False
     if isinstance(value, str):

@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeAlias, cast
 
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
 
 GODOT_VALIDATION_REPORT_RELATIVE_PATH = os.path.join(
     "gm2godot", "godot_validation_report.json"
@@ -250,7 +250,7 @@ class GodotOutputIssue:
     severity: GodotOutputIssueSeverity
     line: str
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "severity": self.severity,
             "line": self.line,
@@ -273,7 +273,7 @@ class GodotValidationReport:
     boot_frames: int = 0
     output_issues: tuple[GodotOutputIssue, ...] = ()
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "format_version": 1,
             "status": self.status,

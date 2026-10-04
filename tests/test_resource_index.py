@@ -1,16 +1,20 @@
 import json
+import copy
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from typing import Iterable
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom, IndexedResource
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.type_defs import LogCallback, StrPath
 from src.conversion.diagnostics import DiagnosticCollector
 
 
@@ -694,6 +698,7 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         room = index.get_room("r_trailing")
 
         assert room is not None
+        assert isinstance(room.room_settings, dict)
         self.assertEqual(room.room_settings["Width"], 640)
         self.assertEqual(room.room_settings["Height"], 480)
 
@@ -1046,6 +1051,75 @@ class TestGameMakerResourceIndex(unittest.TestCase):
 
         self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "rooms")))
 
+
+
+class _RoomCaptureIndex(GameMakerResourceIndex):
+    def __init__(self, data: JsonObject, callback: LogCallback = print) -> None:
+        super().__init__(".", ".", log_callback=callback)
+        self.data = data
+
+    def _read_yy_file(self, yy_path: StrPath) -> JsonObject | None:
+        return self.data
+
+    def capture(self) -> IndexedRoom | None:
+        return self._parse_room(IndexedResource("rooms", "r", "r.yy", "rooms/r/r.yy", "res://r.tscn"))
+
+    @staticmethod
+    def inherited_settings(child: JsonValue, parent: JsonValue) -> JsonValue:
+        return GameMakerResourceIndex._inherit_settings(child, parent, "inheritRoomSettings")
+
+    @staticmethod
+    def extension_arguments(data: JsonObject) -> int | None:
+        return GameMakerResourceIndex._extension_arg_count(data)
+
+
+class TestTypedRoomIndexConsumption(unittest.TestCase):
+    def test_creation_code_rejection_callback_runs_before_remaining_capture(self) -> None:
+        data: JsonObject = {"creationCodeFile": [1], "roomSettings": {"Width": 1}}
+        replacement: JsonObject = {"Width": 99}
+        messages: list[str] = []
+        def mutate(message: str) -> None:
+            messages.append(message)
+            data["roomSettings"] = replacement
+        room = _RoomCaptureIndex(data, mutate).capture()
+        assert room is not None
+        self.assertEqual(room.creation_code_file, "")
+        self.assertIs(room.room_settings, replacement)
+        self.assertTrue(any("creationCodeFile" in message for message in messages))
+        self.assertIs(room.raw_data, data)
+
+    def test_truthy_malformed_settings_layers_and_parent_remain_honest(self) -> None:
+        data: JsonObject = {"roomSettings": "bad", "physicsSettings": 4, "views": {"wrong": 1}, "layers": "layers", "parentRoom": ["parent"]}
+        room = _RoomCaptureIndex(data).capture()
+        assert room is not None
+        self.assertEqual(room.room_settings, "bad")
+        self.assertEqual(room.physics_settings, 4)
+        self.assertIs(room.views, data["views"])
+        self.assertEqual(room.layers, "layers")
+        self.assertIs(room.parent_room, data["parentRoom"])
+
+    def test_inheritance_unused_parent_and_child_copy_are_preserved(self) -> None:
+        child: JsonObject = {"inheritRoomSettings": False, "extra": {"a": 1}}
+        result = _RoomCaptureIndex.inherited_settings(child, None)
+        self.assertEqual(result, child)
+        self.assertIsNot(result, child)
+        assert isinstance(result, dict)
+        self.assertIsNot(result["extra"], child["extra"])
+
+    def test_inheritance_parent_assignment_fails_after_original_deepcopy(self) -> None:
+        child: JsonObject = {"inheritRoomSettings": True}
+        with patch("src.conversion.resource_index.copy.deepcopy", wraps=copy.deepcopy) as copied:
+            with self.assertRaisesRegex(TypeError, "list indices must be integers or slices, not str"):
+                _RoomCaptureIndex.inherited_settings(child, [])
+        self.assertEqual(copied.call_count, 1)
+        self.assertEqual(copied.call_args.args, ([],))
+
+    def test_extension_arg_count_keeps_fallback_and_overflow_policy(self) -> None:
+        self.assertEqual(_RoomCaptureIndex.extension_arguments({"argCount": True, "args": [1, 2]}), 2)
+        self.assertEqual(_RoomCaptureIndex.extension_arguments({"argCount": None, "argc": "3"}), 3)
+        self.assertIsNone(_RoomCaptureIndex.extension_arguments({"argCount": [], "args": [1]}))
+        with self.assertRaises(OverflowError):
+            _RoomCaptureIndex.extension_arguments({"argCount": float("inf")})
 
 if __name__ == "__main__":
     unittest.main()

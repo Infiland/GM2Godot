@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import threading
 import unittest
-from typing import cast, overload
+from typing import overload
 from unittest.mock import DEFAULT, MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,14 +20,13 @@ from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
-from src.conversion.type_defs import JsonDict
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 
 
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             parent_path: str = "folders/Objects.yy",
-                            event_list: list[JsonDict] | None = None,
+                            event_list: list[JsonObject] | None = None,
                             parent_object_name: str | None = None,
                             persistent: bool = False) -> str:
     """Build a GameMaker object .yy file string."""
@@ -53,7 +52,8 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
     for evt in event_list:
         collision_id = "null"
         if evt.get("collisionObjectId") is not None:
-            col = cast(JsonDict, evt["collisionObjectId"])
+            col = evt["collisionObjectId"]
+            assert isinstance(col, dict)
             collision_id = '{{"name": "{name}", "path": "objects/{name}/{name}.yy",}}'.format(name=col["name"])
         entry = (
             '{{"isDnD":{isDnD},"eventNum":{eventNum},"eventType":{eventType},'
@@ -472,7 +472,7 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
         shutil.rmtree(self.gm_dir)
         shutil.rmtree(self.godot_dir)
 
-    def _write_yyp_resources(self, resources: list[JsonDict]) -> None:
+    def _write_yyp_resources(self, resources: list[JsonObject]) -> None:
         with open(
             os.path.join(self.gm_dir, "Test.yyp"),
             "w",
@@ -489,16 +489,13 @@ class TestObjectConverterYYPFiltering(unittest.TestCase):
             )
 
     @staticmethod
-    def _object_resource(name: str, path: str | None = None) -> JsonDict:
-        return cast(
-            JsonDict,
-            {
-                "id": {
-                    "name": name,
-                    "path": path or f"objects/{name}/{name}.yy",
-                }
-            },
-        )
+    def _object_resource(name: str, path: str | None = None) -> JsonObject:
+        return {
+            "id": {
+                "name": name,
+                "path": path or f"objects/{name}/{name}.yy",
+            }
+        }
 
     def test_only_listed_objects_converted(self):
         converter = ObjectConverter(
@@ -1482,7 +1479,7 @@ class TestScriptGeneration(unittest.TestCase):
         )
 
     def _setup_object(self, name: str, sprite_name: str | None = None,
-                      event_list: list[JsonDict] | None = None,
+                      event_list: list[JsonObject] | None = None,
                       parent_object_name: str | None = None,
                       persistent: bool = False,
                       create_empty_event_sources: bool = True) -> None:

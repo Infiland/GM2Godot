@@ -9,7 +9,7 @@ from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text,
 )
 from src.conversion.included_file_paths import IncludedFilePathAssignment
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
 
 
 INCLUDED_FILE_REGISTRY_RELATIVE_PATH = os.path.join(
@@ -30,8 +30,8 @@ class IncludedFileRegistryEntry:
     byte_count: int | None = None
     content_sha256: str | None = None
 
-    def to_godot_dict(self) -> JsonDict:
-        payload: JsonDict = {
+    def to_godot_dict(self) -> JsonObject:
+        payload: JsonObject = {
             "logical_path": self.logical_path,
             "canonical_path": self.canonical_path,
             "assigned_path": self.assigned_path,

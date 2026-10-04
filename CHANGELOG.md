@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.31 - 2026-10-04
+
+- Complete the Included Files ownership refactor with dedicated planning, source access, worker, staging, locking, publication, recovery and driver modules behind the stable converter facade.
+- Split Included Files tests by responsibility with shared fixtures and explicit native workflow selectors; enforce the complete dependency graph and transaction boundaries while preserving generated output and recovery behavior.
+
 ## 0.8.30 - 2026-10-04
 
 - Separate included-files source snapshots, guarded filesystem mutations, canonical record I/O and recorded cleanup into dedicated owners while preserving transaction and recovery behavior.

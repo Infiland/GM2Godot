@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.30 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.31 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -267,13 +267,13 @@ Included Files transaction changes must retain the subprocess hard-exit recovery
 
 ```bash
 ./venv/bin/python -m unittest \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_format_v1_records_recover_at_every_publication_boundary \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_changed_generation_size_preflight_precedes_payload_staging \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_changed_ten_thousand_entry_preflight_stays_below_cap \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_ten_thousand_entry_compact_records_publish_and_recover_below_cap \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_subprocess_interruption_recovers_every_publication_boundary \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_format_v1_records_recover_at_every_publication_boundary \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_changed_generation_size_preflight_precedes_payload_staging \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_changed_ten_thousand_entry_preflight_stays_below_cap \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_ten_thousand_entry_compact_records_publish_and_recover_below_cap \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_committed_cleanup_recovery_is_idempotent_at_every_owned_boundary \
+  tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction.test_temporary_record_cleanup_tombstones_resume_after_hard_exit
 ```
 
 The publication tests stop the child process at every forward transaction phase from the staged journal through commit-marker retirement, then require both format-v1 and format-v2 recovery to select one complete generation. The size tests require byte-exact preflight before payload staging and keep the larger record for a changed 10,000-file generation below the unchanged 16 MiB cap. The two cleanup tests independently hard-exit after quarantine or removal for owned backup, staging, stable-record, and temporary-record state. Run the native Windows Included Files workflow when changing lock, move, junction, read-only, or cleanup behavior; modeled `os.name` tests are not a substitute for NTFS and Win32 coverage. Preserve the public `res://included_files/` and registry paths, reject unknown reserved-path state, and keep the documented prohibition on conversion alongside a live game or non-cooperating writer.
@@ -292,22 +292,22 @@ Worker-scheduling changes must also retain the deterministic 10,000-source submi
 
 ```bash
 ./venv/bin/python -m unittest \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_worker_window_bounds_ten_thousand_sources \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_changed_generation_stops_admission_after_worker_failure \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_unchanged_receipts_stop_admission_after_worker_failure \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_cancellation_stops_worker_admission_within_window \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_worker_counts_produce_identical_output_and_diagnostics
+  tests.test_included_files_workers.TestIncludedFilesManagedRootTransaction.test_worker_window_bounds_ten_thousand_sources \
+  tests.test_included_files_workers.TestIncludedFilesManagedRootTransaction.test_changed_generation_stops_admission_after_worker_failure \
+  tests.test_included_files_workers.TestIncludedFilesManagedRootTransaction.test_unchanged_receipts_stop_admission_after_worker_failure \
+  tests.test_included_files_workers.TestIncludedFilesManagedRootTransaction.test_cancellation_stops_worker_admission_within_window \
+  tests.test_included_files_workers.TestIncludedFilesManagedRootTransaction.test_worker_counts_produce_identical_output_and_diagnostics
 ```
 
 Included Files tree-traversal changes must retain the deterministic depth probe on both the descriptor and path-fallback implementations, byte-equivalent snapshots, and deep directory/ancestor swap rejection:
 
 ```bash
 ./venv/bin/python -m unittest \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_deep_tree_capture_binding_work_scales_linearly \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_deep_directory_swap_is_not_followed_during_tree_capture \
-  tests.test_included_files.TestIncludedFilesManagedRootTransaction.test_fallback_deep_directory_swap_during_scan_is_detected_before_hashing
+  tests.test_included_files_state_contracts.TestIncludedFilesManagedRootTransaction.test_deep_tree_capture_binding_work_scales_linearly \
+  tests.test_included_files_transactions.TestIncludedFilesManagedRootTransaction.test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent \
+  tests.test_included_files_state_contracts.TestIncludedFilesManagedRootTransaction.test_descriptor_tree_capture_rejects_deep_ancestor_swap \
+  tests.test_included_files_state_contracts.TestIncludedFilesManagedRootTransaction.test_deep_directory_swap_is_not_followed_during_tree_capture \
+  tests.test_included_files_state_contracts.TestIncludedFilesManagedRootTransaction.test_fallback_deep_directory_swap_during_scan_is_detected_before_hashing
 ```
 
 The depth probe exercises 25, 50, 100, and 200 nested directories, requires at most `16 * depth + 64` binding checks, and limits each doubling to 2.25x work. Run the native Windows Included Files workflow for path-fallback and junction coverage; POSIX-only descriptor results do not substitute for the Windows path.

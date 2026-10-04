@@ -7,7 +7,7 @@ from typing import TextIO
 
 
 EXACT_TEST_NAME = (
-    "tests.test_included_files.TestIncludedFilesManagedRootTransaction."
+    "tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction."
     "test_ten_thousand_entry_compact_records_publish_and_recover_below_cap"
 )
 REQUIRE_ENVIRONMENT_VARIABLE = (

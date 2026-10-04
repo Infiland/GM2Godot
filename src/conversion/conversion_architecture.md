@@ -332,3 +332,33 @@ directives. It also removed all 30 legacy underscore-prefixed facade exports—t
 supported public exports, their order, identities, and callable signatures. The
 former staged allowlist is now the zero-violation gate above; do not add an
 exception or expose an underscore name merely to bypass it.
+
+
+### Included Files transaction ownership
+
+`included_files.IncludedFilesConverter` remains the public `BaseConverter`
+subclass with its existing constructor, mutable state and method signatures.
+Its thin methods delegate to the planning, source access, copy, diagnostics,
+generation matching and driver owners through finite receiver protocols and
+noninstantiated operation classes in `included_files_parts.converter_ports` and
+the role owners. The same instance supplies every
+original private and inherited callback, so class and instance patches still
+reach the operational call site.
+
+The driver coordinates staging, locking, worker admission, recovery and
+publication. Those owners depend on record lifecycle, transaction state and
+cleanup, then the existing snapshot, record, native filesystem and path
+owners. The dependency graph is acyclic, and owners do not import the public
+facade. Descriptor and handle ownership, delayed phase observers, cancellation
+and cleanup policies remain at their original operation boundaries.
+
+The facade's compatibility names are ordinary initial references to owner
+objects. Operational calls use their actual owners; no late facade forwarding
+or duplicate controller is involved. Private moved definitions have honest
+owner module identities, without a legacy private pickle guarantee.
+
+Included Files tests are grouped by transaction state, recovery, locking,
+staging, generation matching, worker admission and file publication. Shared
+fixture support contains no test method and is imported only as a module.
+The original concrete case names, native runtime and skip requirements remain
+selected through explicit one-to-one workflow and scale-gate mappings.

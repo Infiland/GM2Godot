@@ -1,9 +1,9 @@
 # Included Files ownership
 
 `src.conversion.included_files.IncludedFilesConverter` remains the caller entry
-point. The facade currently also owns conversion orchestration, bounded workers
-and the transaction. The records, helpers, native filesystem and state split establish
-fourteen internal owners; the facade still needs the remaining orchestration split.
+point. Its constructor, state, entry point and callable signatures stay stable.
+Its thin methods delegate to operation owners using the same converter instance.
+Thirty internal modules own the models, typed contracts and operations.
 
 The landed dependency direction is:
 
@@ -19,7 +19,13 @@ native filesystem / stat metadata / paths / models -> source_snapshots
 source_snapshots / native filesystem / phase_observer -> guarded_mutations
 source_snapshots / native filesystem / recovery_codec -> record_io
 source_snapshots / guarded_mutations / native filesystem / phase_observer -> recorded_cleanup
-owners -> remaining included_files orchestration
+models / typed converter ports -> planning / source_access / diagnostics / copy_worker
+constants -> worker_pool
+snapshots / records / native filesystem -> staging / locking / file_publication
+snapshots / records / cleanup -> transaction_state / record_lifecycle / transaction_cleanup
+transaction state / lifecycle / cleanup -> recovery / publisher
+planning / source access / workers / staging / locking / recovery / publisher -> driver
+operation owners -> thin included_files facade
 ```
 
 Package init has no imports. `models` and `constants` depend only on the standard
@@ -55,7 +61,7 @@ record schemas, key order and error precedence remain unchanged.
 and the owned Windows cleanup-parent resource contract. `native_filesystem`
 provides the typed concrete composition. It stores no platform choice or bound
 native callable: each operation reads its actual native owner's export when
-called. The facade uses this interface at the existing operation stages.
+called. Transaction owners use this interface at the existing operation stages.
 
 `native_posix` owns descriptor-relative operations, mount checks, exclusive
 rename, directory synchronization and output metadata. `native_windows` owns
@@ -87,28 +93,43 @@ operation stages. The move preserves public API and observable behavior while
 making internal ownership explicit; it does not provide a second implementation
 or dynamic forwarding module.
 
-The remaining target direction is: records/constants, validation/codec and
-typed native filesystem owners -> source snapshots/planning/locking/workers ->
-record I/O/staging/recorded cleanup
--> rollback/committed cleanup -> recovery/publication -> converter driver ->
-thin facade. Recovery and publication must not import each other, and record
-I/O must not import cleanup. Native operations must preserve no-follow,
-mount-boundary, hard-link, no-replace, ownership and durability guarantees.
-Orchestration will compose the typed interface without selecting a platform
-early or taking ownership of borrowed descriptors.
+`planning` owns declarations and logical source planning. `source_access` owns
+source discovery, confined reads and unchanged-source receipts; `copy_worker`
+owns one payload copy. `diagnostics` preserves reporting order and the converter
+collector. `worker_pool` owns bounded admission and cancellation;
+`generation_matching` compares previous output with the current source plan.
 
-Existing transaction/security test IDs and assertions remain, with private
-fault-injection sites following the moved owners. Existing native workflow
-selectors remain, with the native-owner and state-owner test modules added to the Windows
-transaction job. Runtime pins and generated-output fixtures remain unchanged.
-Focused owner tests enforce the dependency direction and exercise live native
-delegation, late platform selection, borrowed descriptors and real Windows
-binding pinning, close and active-error handling;
-state-owner tests also check bounded canonical records and durable quarantine
-observer replacement; the existing transaction, recovery, scale and Godot tests remain authoritative
-for their wider contracts. Required verification includes zero-warning global
-typing, Ruff, relevant tests, the full suite after shared-boundary changes,
-native Windows transaction checks and pinned Godot output validation.
+`staging`, `locking` and `file_publication` retain their original stages.
+`record_lifecycle`, `transaction_state` and `transaction_cleanup` coordinate
+durable records and owned output generations. `recovery` and `publisher` depend
+on those owners and do not import each other. The driver coordinates operations
+without importing POSIX or Win32 implementations. Native operations preserve
+no-follow, mount-boundary, hard-link, no-replace, ownership and durability
+contracts. Borrowed descriptors remain borrowed.
 
-Issue #798 remains open until the remaining 42 helpers, converter method
-owners, thin facade and matching test split are complete.
+Six finite receiver contracts in `converter_ports` describe consumed methods
+and state. Typed operation classes provide a scope for protected methods;
+their unbound methods receive the original converter directly. These classes
+are never instantiated. Dynamic calls retain subclass overrides, class and
+instance patches, cancellation and resource accounting. There is no second
+controller or callback dictionary.
+
+The paired tests are grouped into basic conversion, file publication, generation
+matching, locking, recovery, staging, state contracts, transactions and worker
+admission. `tests.included_files_support` contains shared fixtures with no test
+methods or concrete-case reexports. Existing cases and assertions stay intact;
+private fault-injection sites follow their actual operation owners.
+
+Native workflow selectors follow the exact old-to-new case map. Windows selects
+all seven transaction groups and file publication; its scale job retains the
+single 10,000-entry case. The twelve explicit macOS cases retain their order.
+Runtime pins, N01 selectors and generated-output fixtures stay unchanged.
+
+Full-graph architecture coverage rejects cycles, facade backedges and direct
+native/publication calls from orchestration. Existing owner tests exercise live
+native delegation, late platform selection, borrowed descriptors, real Windows
+bindings, bounded records and durable quarantine observers. Transaction,
+recovery, scale and Godot tests remain authoritative for their wider contracts.
+Required verification includes zero-warning global typing, Ruff, relevant tests,
+the full suite after shared-boundary changes, native Windows transaction checks
+and pinned Godot output validation.

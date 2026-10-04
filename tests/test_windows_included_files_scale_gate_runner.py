@@ -30,7 +30,7 @@ class TestWindowsIncludedFilesScaleGateRunner(unittest.TestCase):
     def test_target_is_the_exact_ten_thousand_entry_case(self) -> None:
         self.assertEqual(
             scale_gate.EXACT_TEST_NAME,
-            "tests.test_included_files.TestIncludedFilesManagedRootTransaction."
+            "tests.test_included_files_recovery.TestIncludedFilesManagedRootTransaction."
             "test_ten_thousand_entry_compact_records_publish_and_recover_below_cap",
         )
 

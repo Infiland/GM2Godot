@@ -13,7 +13,7 @@ import sys
 import tempfile
 from contextlib import ExitStack
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
 
@@ -42,63 +42,60 @@ from src.conversion.project_source_paths import (
     ResolvedProjectSourcePath,
 )
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.included_files_parts.constants import (
+    INCLUDED_FILES_ROOT_NAME as _INCLUDED_FILES_ROOT_NAME,
+    INCLUDED_FILES_STAGE_PREFIX as _INCLUDED_FILES_STAGE_PREFIX,
+    INCLUDED_FILES_LOCK_NAME as _INCLUDED_FILES_LOCK_NAME,
+    INCLUDED_FILES_LOCK_TEMP_PREFIX as _INCLUDED_FILES_LOCK_TEMP_PREFIX,
+    INCLUDED_FILES_LOCK_CLEANUP_PREFIX as _INCLUDED_FILES_LOCK_CLEANUP_PREFIX,
+    INCLUDED_FILES_JOURNAL_NAME as _INCLUDED_FILES_JOURNAL_NAME,
+    INCLUDED_FILES_COMMIT_NAME as _INCLUDED_FILES_COMMIT_NAME,
+    INCLUDED_FILES_JOURNAL_TEMP_PREFIX as _INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
+    INCLUDED_FILES_COMMIT_TEMP_PREFIX as _INCLUDED_FILES_COMMIT_TEMP_PREFIX,
+    INCLUDED_FILES_STAGE_MARKER_NAME as _INCLUDED_FILES_STAGE_MARKER_NAME,
+    INCLUDED_FILES_CLEANUP_PREFIX as _INCLUDED_FILES_CLEANUP_PREFIX,
+    INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION as _INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION,
+    INCLUDED_FILES_RECOVERY_FORMAT_VERSION as _INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+    INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION as _INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION,
+    INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER as _INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER,
+    INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES as _INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+    INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES as _INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES,
+    INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS as _INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS,
+    INCLUDED_FILES_RECOVERY_INTEGER_MAX as _INCLUDED_FILES_RECOVERY_INTEGER_MAX,
+    INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256 as _INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256,
+    INCLUDED_FILES_LOCK_CONTENT as _INCLUDED_FILES_LOCK_CONTENT,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedFileSource as _IncludedFileSource,
+    DeclaredIncludedFile as _DeclaredIncludedFile,
+    IncludedFileConversionPlan as _IncludedFileConversionPlan,
+    PathIdentity as _PathIdentity,
+    PathFingerprint as _PathFingerprint,
+    PathHandleBinding as _PathHandleBinding,
+    HandleState as _HandleState,
+    IncludedSourceFingerprint as _IncludedSourceFingerprint,
+    IncludedSourceDirectoryIdentity as _IncludedSourceDirectoryIdentity,
+    IncludedCleanupFileState as _IncludedCleanupFileState,
+    IncludedPayloadReceipt as _IncludedPayloadReceipt,
+    IncludedCopyReceipt as _IncludedCopyReceipt,
+    IncludedSourceBinding as _IncludedSourceBinding,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedGenerationMatch as _IncludedGenerationMatch,
+    IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt,
+    IncludedTreeEntry as _IncludedTreeEntry,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    IncludedTreeDescriptorBinding as _IncludedTreeDescriptorBinding,
+    IncludedTreePathBinding as _IncludedTreePathBinding,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedRecoveryRecordSizes as _IncludedRecoveryRecordSizes,
+    IncludedOutputSetTransaction as _IncludedOutputSetTransaction,
+    IncludedRecoveryJournal as _IncludedRecoveryJournal,
+    IncludedCommitMarker as _IncludedCommitMarker,
+    IncludedProjectLock as _IncludedProjectLock,
+    IncludedOutputSetCancelled as _IncludedOutputSetCancelled,
+)
 
 
-@dataclass(frozen=True)
-class _IncludedFileSource:
-    filesystem_path: str
-    relative_path: str
-    owner_source_path: str
-
-
-@dataclass(frozen=True)
-class _DeclaredIncludedFile:
-    name: str
-    source_path: str | None
-    owner_source_path: str
-    manifest_field: str | None
-
-
-@dataclass(frozen=True)
-class _IncludedFileConversionPlan:
-    requested_keys: tuple[str, ...]
-    available_files: tuple[_IncludedFileSource, ...]
-    skipped_keys: tuple[str, ...]
-
-
-_PathIdentity = tuple[int, int]
-_PathFingerprint = tuple[int, int, int, int, int, int]
-_PathHandleBinding = tuple[int, int, int, int, int, int]
-_HandleState = tuple[int, int, int, int, int, int, int]
-_IncludedSourceFingerprint = tuple[int, int, int, int, int, int]
-_IncludedSourceDirectoryIdentity = tuple[str, _PathIdentity]
-_IncludedCleanupFileState = tuple[int, str, _PathFingerprint]
-_INCLUDED_FILES_ROOT_NAME = "included_files"
-_INCLUDED_FILES_STAGE_PREFIX = ".gm2godot-included-files-"
-_INCLUDED_FILES_LOCK_NAME = ".gm2godot-included-files.lock"
-_INCLUDED_FILES_LOCK_TEMP_PREFIX = ".gm2godot-included-files-lock."
-_INCLUDED_FILES_LOCK_CLEANUP_PREFIX = ".gm2godot-included-files-lock-cleanup."
-_INCLUDED_FILES_JOURNAL_NAME = ".gm2godot-included-files-transaction.json"
-_INCLUDED_FILES_COMMIT_NAME = ".gm2godot-included-files-commit.json"
-_INCLUDED_FILES_JOURNAL_TEMP_PREFIX = ".gm2godot-included-files-journal."
-_INCLUDED_FILES_COMMIT_TEMP_PREFIX = ".gm2godot-included-files-commit."
-_INCLUDED_FILES_STAGE_MARKER_NAME = ".gm2godot-included-files-stage.json"
-_INCLUDED_FILES_CLEANUP_PREFIX = ".gm2godot-included-cleanup."
-_INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION = 1
-_INCLUDED_FILES_RECOVERY_FORMAT_VERSION = 2
-_INCLUDED_FILES_STAGE_MARKER_FORMAT_VERSION = 1
-_INCLUDED_FILES_WORKER_WINDOW_MULTIPLIER = 2
-# The canonical cap is a parser-memory safety boundary, not a scaling knob.
-# Format v2 removes repeated field names and uses fixed-width integer metadata
-# so its exact serialized size can be preflighted before payload staging.
-_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES = 16 * 1024 * 1024
-_INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES = 100_000
-_INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS = 16
-_INCLUDED_FILES_RECOVERY_INTEGER_MAX = (
-    1 << (_INCLUDED_FILES_RECOVERY_INTEGER_HEX_DIGITS * 4)
-) - 1
-_INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256 = "0" * 64
-_INCLUDED_FILES_LOCK_CONTENT = b"GM2Godot Included Files lock v1\n"
 _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
     {
         "CON",
@@ -183,180 +180,6 @@ def _run_bounded_included_worker_phase(
         executor.shutdown(wait=True, cancel_futures=True)
 
 
-@dataclass(frozen=True)
-class _IncludedPayloadReceipt:
-    source_fingerprint: _IncludedSourceFingerprint
-    byte_count: int
-    sha256: str
-
-
-@dataclass(frozen=True)
-class _IncludedCopyReceipt:
-    payload: _IncludedPayloadReceipt
-    output_fingerprint: _PathFingerprint
-    output_ctime_ns: int
-    output_handle_state: _HandleState
-
-    @property
-    def source_fingerprint(self) -> _IncludedSourceFingerprint:
-        return self.payload.source_fingerprint
-
-    @property
-    def byte_count(self) -> int:
-        return self.payload.byte_count
-
-    @property
-    def sha256(self) -> str:
-        return self.payload.sha256
-
-
-@dataclass(frozen=True)
-class _IncludedSourceBinding:
-    filesystem_path: str
-    canonical_path: str
-    directory_identities: tuple[_IncludedSourceDirectoryIdentity, ...]
-    lexical_state: _HandleState
-    path_state: _HandleState
-    handle_state: _HandleState
-
-
-@dataclass(frozen=True)
-class _IncludedNoOpSourceReceipt:
-    logical_path: str
-    assigned_path: str
-    binding: _IncludedSourceBinding
-    byte_count: int
-    sha256: str
-
-
-@dataclass(frozen=True)
-class _IncludedGenerationMatch:
-    unchanged: bool
-    source_receipts: tuple[_IncludedNoOpSourceReceipt, ...]
-
-
-@dataclass(frozen=True)
-class _IncludedGenerationContentReceipt:
-    transaction_id: str
-    generation_identity: _PathIdentity
-    stage_container_identity: _PathIdentity
-    source: _IncludedNoOpSourceReceipt
-    staged_output_path: str
-    public_output_path: str
-    output: _IncludedCopyReceipt
-
-
-@dataclass(frozen=True)
-class _IncludedTreeEntry:
-    relative_path: str
-    kind: str
-    fingerprint: _PathFingerprint
-    ctime_ns: int | None
-    content_sha256: str | None
-
-
-@dataclass(frozen=True)
-class _IncludedTreeSnapshot:
-    root_fingerprint: _PathFingerprint | None
-    entries: tuple[_IncludedTreeEntry, ...]
-
-    @property
-    def identity(self) -> _PathIdentity | None:
-        if self.root_fingerprint is None:
-            return None
-        return self.root_fingerprint[:2]
-
-
-@dataclass(frozen=True)
-class _IncludedTreeDescriptorBinding:
-    parent_fd: int
-    name: str
-    fingerprint: _PathFingerprint
-    display_path: str
-
-
-@dataclass(frozen=True)
-class _IncludedTreePathBinding:
-    path: str
-    identity: _PathIdentity
-
-
-@dataclass(frozen=True)
-class _IncludedRegistrySnapshot:
-    directory_identity: _PathIdentity | None
-    file_identity: _PathIdentity | None
-    file_mode: int | None
-    content: bytes | None
-
-
-@dataclass(frozen=True)
-class _IncludedRecoveryRecordSizes:
-    journal_bytes: int
-    commit_bytes: int
-
-
-@dataclass(frozen=True)
-class _IncludedOutputSetTransaction:
-    project_identity: _PathIdentity
-    stage_container_path: str
-    stage_container_identity: _PathIdentity
-    staged_container_snapshot: _IncludedTreeSnapshot
-    staged_root_path: str
-    staged_root_snapshot: _IncludedTreeSnapshot
-    staged_registry_path: str
-    staged_registry_identity: _PathIdentity
-    staged_registry_mode: int
-    staged_registry_content: bytes
-    previous_root_snapshot: _IncludedTreeSnapshot
-    previous_registry_snapshot: _IncludedRegistrySnapshot
-    recovery_record_sizes: _IncludedRecoveryRecordSizes | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
-    publication_transaction_id: str | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
-    content_receipts: tuple[_IncludedGenerationContentReceipt, ...] = field(
-        default=(),
-        compare=False,
-        repr=False,
-    )
-
-
-@dataclass(frozen=True)
-class _IncludedRecoveryJournal:
-    format_version: int
-    transaction_id: str
-    transaction: _IncludedOutputSetTransaction
-    root_backup_path: str
-    registry_backup_path: str
-    registry_directory_path: str
-    registry_directory_identity: _PathIdentity
-    registry_directory_created: bool
-
-
-@dataclass(frozen=True)
-class _IncludedCommitMarker:
-    format_version: int
-    transaction_id: str
-    project_identity: _PathIdentity
-    root_identity: _PathIdentity
-    root_snapshot_sha256: str
-    registry_directory_identity: _PathIdentity
-    registry_identity: _PathIdentity
-    registry_content_sha256: str
-
-
-@dataclass
-class _IncludedProjectLock:
-    file_descriptor: int
-    path: str
-    windows: bool
-
-
 def _windows_included_file_locking(
     file_descriptor: int,
     mode: int,
@@ -368,10 +191,6 @@ def _windows_included_file_locking(
         getattr(msvcrt, "locking"),
     )
     locking(file_descriptor, mode, 1)
-
-
-class _IncludedOutputSetCancelled(Exception):
-    """Signal cancellation while a reversible output-set commit is active."""
 
 
 _DIRECTORY_OPEN_FLAGS = (

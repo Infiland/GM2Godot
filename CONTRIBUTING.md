@@ -118,6 +118,8 @@ Use the matching companion from the table for another host, with its exact inter
 
 Run Python tests from the repository root with `./venv/bin/python -m unittest` or module-qualified unittest selectors. The event-mapping test package uses normal package imports and does not add the repository to `sys.path`.
 
+Godot smoke tests can use `tests.godot_test_support` for live binary discovery, UTF-8 fixture writes, and the standard headless scene invocation. The shared runner returns the process result and propagates timeouts; each test owns its assertions and skip policy. Tests requiring different working directories, environments, launch flags or lifecycle handling keep those policies locally.
+
 ```bash
 ./venv/bin/python -m unittest discover -s tests/conversion/events -t . -v
 ./venv/bin/python -m unittest tests.conversion.events.test_create_event

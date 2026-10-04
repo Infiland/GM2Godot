@@ -20,6 +20,7 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import (
     generated_nested_resource_path,
 )
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     is_safe_project_source_component,
@@ -28,6 +29,12 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.tileset_metadata import (
+    GameMakerTilesetSpriteReference,
+    parse_gamemaker_tileset_metadata,
+    parse_gamemaker_tileset_sprite_reference,
+    project_tileset_conversion_fields,
+)
 
 
 class TilesetData(TypedDict):
@@ -306,39 +313,49 @@ class TileSetConverter(BaseConverter):
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            data = decode_gamemaker_json(content, source_path=yy_path).value
+            if not isinstance(data, dict):
+                raise AttributeError(
+                    f"'{type(data).__name__}' object has no attribute 'get'",
+                    name="get",
+                    obj=data,
+                )
 
             sprite_reference = self._resolve_sprite_reference(
                 tileset_name,
                 resolved_tileset.source_path,
-                data.get('spriteId'),
+                parse_gamemaker_tileset_sprite_reference(
+                    data,
+                    source_context=yy_path,
+                ),
             )
             sprite_name = ""
             sprite_path = ""
             sprite_reference_field = "spriteId"
             if sprite_reference is not None:
                 sprite_name, sprite_path, sprite_reference_field = sprite_reference
+            metadata = parse_gamemaker_tileset_metadata(data, source_context=yy_path)
+            fields = project_tileset_conversion_fields(metadata)
             return {
                 "source_path": resolved_tileset.source_path,
                 "sprite_name": sprite_name,
                 "sprite_path": sprite_path,
                 "sprite_reference_field": sprite_reference_field,
-                "tileWidth": int(data.get('tileWidth', 16)),
-                "tileHeight": int(data.get('tileHeight', 16)),
-                "tilehsep": int(data.get('tilehsep', 0)),
-                "tilevsep": int(data.get('tilevsep', 0)),
-                "tilexoff": int(data.get('tilexoff', 0)),
-                "tileyoff": int(data.get('tileyoff', 0)),
-                "tile_count": int(data.get('tile_count', 0)),
-                "out_columns": int(data.get('out_columns', 0)),
-                "tileAnimationFrames": _json_dict_list(data.get("tileAnimationFrames")),
-                "tileAnimationSpeed": _float(data.get("tileAnimationSpeed"), 15.0),
-                "brushes": _json_dict_list(data.get("brushes")),
-                "autoTileSets": _json_dict_list(data.get("autoTileSets")),
-                "tileSetCollisions": _json_dict_list(data.get("tileSetCollisions")),
-                "out_tilehborder": int(data.get("out_tilehborder", 0)),
-                "out_tilevborder": int(data.get("out_tilevborder", 0)),
+                "tileWidth": fields.tile_width,
+                "tileHeight": fields.tile_height,
+                "tilehsep": fields.tile_hsep,
+                "tilevsep": fields.tile_vsep,
+                "tilexoff": fields.tile_xoff,
+                "tileyoff": fields.tile_yoff,
+                "tile_count": fields.tile_count,
+                "out_columns": fields.out_columns,
+                "tileAnimationFrames": fields.tile_animation_frames,
+                "tileAnimationSpeed": fields.tile_animation_speed,
+                "brushes": fields.brushes,
+                "autoTileSets": fields.auto_tile_sets,
+                "tileSetCollisions": fields.tile_set_collisions,
+                "out_tilehborder": fields.out_tile_hborder,
+                "out_tilevborder": fields.out_tile_vborder,
             }
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             return None
@@ -347,11 +364,12 @@ class TileSetConverter(BaseConverter):
         self,
         tileset_name: str,
         tileset_source_path: str,
-        raw_sprite_id: object,
+        reference: GameMakerTilesetSpriteReference,
     ) -> tuple[str, str, str] | None:
+        raw_sprite_id = reference.raw_value
         if raw_sprite_id is None:
             return None
-        if not isinstance(raw_sprite_id, dict):
+        if not reference.is_object:
             self._reject_sprite_reference(
                 tileset_name,
                 tileset_source_path,
@@ -361,9 +379,8 @@ class TileSetConverter(BaseConverter):
             )
             return None
 
-        sprite_id = cast(JsonDict, raw_sprite_id)
-        if "path" in sprite_id:
-            raw_path = sprite_id.get("path")
+        if reference.path_present:
+            raw_path = reference.path_value
             if not isinstance(raw_path, str) or not raw_path:
                 self._reject_sprite_reference(
                     tileset_name,
@@ -394,7 +411,7 @@ class TileSetConverter(BaseConverter):
             )[0]
             return sprite_name, resolved.source_path, "spriteId.path"
 
-        raw_name = sprite_id.get("name")
+        raw_name = reference.name_value
         if not isinstance(raw_name, str) or not self._valid_reference_component(
             raw_name
         ):
@@ -1042,24 +1059,6 @@ class TileSetConverter(BaseConverter):
     def convert_all(self) -> None:
         self._reset_resource_outcomes()
         self.convert_tilesets()
-
-
-def _json_dict_list(value: object) -> list[JsonDict]:
-    if not isinstance(value, list):
-        return []
-    items: list[JsonDict] = []
-    for item in cast(list[object], value):
-        if isinstance(item, dict):
-            items.append(cast(JsonDict, item))
-    return items
-
-
-def _float(value: object, default: float) -> float:
-    if isinstance(value, bool):
-        return float(int(value))
-    if isinstance(value, int | float):
-        return float(value)
-    return default
 
 
 def _format_number(value: float) -> str:

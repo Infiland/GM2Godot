@@ -10,6 +10,7 @@ from src.conversion.font_metadata import GameMakerFontMetadata, parse_gamemaker_
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_font_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_sound_json
+from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_tileset_json
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject
 from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
@@ -21,6 +22,7 @@ from src.conversion.project_source_paths import (
     validate_project_resource_source_path,
 )
 from src.conversion.sound_metadata import GameMakerSoundMetadata, parse_gamemaker_sound_metadata
+from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
 from src.conversion.type_defs import JsonDict, JsonList
 
 
@@ -130,6 +132,7 @@ class TileSetModel(ResourceModel):
     sprite_name: str | None = None
     tile_width: int = 0
     tile_height: int = 0
+    metadata: GameMakerTilesetMetadata | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -339,6 +342,8 @@ def _parse_resource_model(
         return _parse_font_resource_model(reference, yy_path, resolved_yy.source_path)
     if reference.kind == "sounds":
         return _parse_sound_resource_model(reference, yy_path, resolved_yy.source_path)
+    if reference.kind == "tilesets":
+        return _parse_tileset_resource_model(reference, yy_path, resolved_yy.source_path)
     raw_data = _read_lenient_json_file(yy_path)
     if raw_data is None:
         return None, (
@@ -416,13 +421,6 @@ def _parse_resource_model(
             vertex_path=vertex_path,
             fragment_path=fragment_path,
         ), vertex_diagnostics + fragment_diagnostics
-    if kind == "tilesets":
-        return TileSetModel(
-            **base,
-            sprite_name=_named_reference(raw_data.get("spriteId")),
-            tile_width=_int_value(raw_data.get("tileWidth")),
-            tile_height=_int_value(raw_data.get("tileHeight")),
-        ), ()
     if kind == "sequences":
         return SequenceModel(
             **base,
@@ -434,6 +432,61 @@ def _parse_resource_model(
             moment_count=len(_dict_list(raw_data.get("momentList"))),
         ), ()
     return ResourceModel(**base), ()
+
+
+def _parse_tileset_resource_model(
+    reference: ProjectResourceReference,
+    yy_path: str,
+    source_path: str,
+) -> tuple[TileSetModel | None, tuple[ResourceModelDiagnostic, ...]]:
+    raw_data = _read_tileset_json_file(yy_path)
+    if raw_data is None:
+        return None, (
+            ResourceModelDiagnostic(
+                severity="warning",
+                code="GM2GD-RESOURCE-YY-MISSING",
+                message=f"Could not parse GameMaker resource .yy: {yy_path}",
+                source_path=yy_path,
+                resource_name=reference.name,
+                resource_kind=reference.kind,
+            ),
+        )
+    metadata = parse_gamemaker_tileset_metadata(raw_data, source_context=yy_path)
+    return TileSetModel(
+        name=reference.name,
+        kind=reference.kind,
+        resource_type=reference.resource_type,
+        yy_path=yy_path,
+        yyp_path=source_path,
+        order=reference.order,
+        subfolder=_tileset_subfolder(metadata.parent_path),
+        raw_data=metadata.raw_data,
+        sprite_name=metadata.sprite_name,
+        tile_width=metadata.tile_width,
+        tile_height=metadata.tile_height,
+        metadata=metadata,
+    ), ()
+
+
+def _read_tileset_json_file(path: str) -> JsonObject | None:
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            source = file.read()
+        data = decode_gamemaker_tileset_json(source, source_path=path).value
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
+def _tileset_subfolder(parent_path: str) -> str:
+    if parent_path.startswith("folders/"):
+        parent_path = parent_path[len("folders/"):]
+    if parent_path.endswith(".yy"):
+        parent_path = parent_path[:-len(".yy")]
+    parts = parent_path.split("/")
+    if len(parts) <= 1:
+        return ""
+    return generated_subfolder_path("/".join(parts[1:]))
 
 
 def _parse_sound_resource_model(

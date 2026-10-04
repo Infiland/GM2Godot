@@ -2,6 +2,7 @@
 
 import os
 import json
+import math
 import sys
 import shutil
 import tempfile
@@ -19,6 +20,9 @@ from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
 from src.conversion.tilesets import TileSetConverter, TilesetData
 
 
@@ -1655,6 +1659,363 @@ class TestTileSetGeneratedPathCollisions(unittest.TestCase):
         finally:
             shutil.rmtree(gm_dir)
             shutil.rmtree(godot_dir)
+
+
+class TestTypedTilesetMetadataIntegration(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.relative_source = "tilesets/declared/renamed.yy"
+        self.yy_path = os.path.join(self.gm_dir, *self.relative_source.split("/"))
+        os.makedirs(os.path.dirname(self.yy_path))
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+        self.converter = TileSetConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            conversion_running=lambda: True,
+            diagnostics=self.diagnostics,
+        )
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_data(self, value: JsonValue) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as source_file:
+            json.dump(value, source_file)
+
+    def _parse(self) -> TilesetData | None:
+        return self.converter._parse_tileset_yy("ts_typed", self.relative_source)
+
+    def test_real_decoder_retains_literal_rewrite_and_public_field_order(self) -> None:
+        source = (
+            '{"tileWidth":"32", "tileHeight":17.9, "tilehsep":true,'
+            '"tileAnimationFrames":[{"text":"a,}",},], "tileAnimationSpeed":"9",}'
+        )
+        with open(self.yy_path, "w", encoding="utf-8") as source_file:
+            source_file.write(source)
+        with patch("src.conversion.tilesets.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            result = self._parse()
+        assert result is not None
+        self.assertEqual(
+            list(result),
+            [
+                "source_path", "sprite_name", "sprite_path", "sprite_reference_field",
+                "tileWidth", "tileHeight", "tilehsep", "tilevsep", "tilexoff", "tileyoff",
+                "tile_count", "out_columns", "tileAnimationFrames", "tileAnimationSpeed",
+                "brushes", "autoTileSets", "tileSetCollisions", "out_tilehborder", "out_tilevborder",
+            ],
+        )
+        self.assertEqual(TilesetData.__module__, "src.conversion.tilesets")
+        self.assertEqual(result["source_path"], self.relative_source)
+        self.assertEqual((result["tileWidth"], result["tileHeight"], result["tilehsep"]), (32, 17, 1))
+        self.assertEqual(result["tileAnimationSpeed"], 15.0)
+        self.assertEqual(result["tileAnimationFrames"], [{"text": "a}"}])
+        decoder.assert_called_once_with(source, source_path=self.yy_path)
+
+    def test_legal_nonobject_files_preserve_builtin_get_attribute_errors(self) -> None:
+        values: tuple[JsonValue, ...] = (None, False, True, 23, -0.0, "text", [], [1, {"x": 2}])
+        for value in values:
+            with self.subTest(value=value):
+                self._write_data(value)
+                with self.assertRaises(AttributeError) as expected:
+                    getattr(value, "get")
+                with self.assertRaises(AttributeError) as actual:
+                    self._parse()
+                self.assertEqual(str(actual.exception), str(expected.exception))
+                self.assertEqual(actual.exception.name, "get")
+                self.assertEqual(actual.exception.obj, value)
+                self.assertIs(type(actual.exception.obj), type(value))
+        self.assertEqual(self.diagnostics.diagnostics(), ())
+
+    def test_nonobject_error_retains_actual_decoded_object_identity(self) -> None:
+        value: JsonValue = [None, {"child": [3]}]
+        self._write_data({})
+        with patch("src.conversion.gamemaker_json.json.loads", return_value=value):
+            with self.assertRaises(AttributeError) as caught:
+                self._parse()
+        self.assertIs(caught.exception.obj, value)
+        self.assertEqual(caught.exception.name, "get")
+
+    def test_reference_callback_runs_before_numeric_capture(self) -> None:
+        root: JsonObject = {"spriteId": ["bad reference"], "tileWidth": "invalid", "tileHeight": None}
+        self._write_data({})
+        order: list[str] = []
+
+        def reject_callback(message: str) -> None:
+            self.logs.append(message)
+            order.append("callback")
+            root["tileWidth"] = "48"
+            root["tileHeight"] = "24"
+
+        def capture(data: JsonObject, *, source_context: str) -> GameMakerTilesetMetadata:
+            order.append("metadata")
+            self.assertIs(data, root)
+            self.assertEqual(source_context, self.yy_path)
+            return parse_gamemaker_tileset_metadata(data, source_context=source_context)
+
+        self.converter.log_callback = reject_callback
+        with (
+            patch("src.conversion.gamemaker_json.json.loads", return_value=root),
+            patch("src.conversion.tilesets.parse_gamemaker_tileset_metadata", side_effect=capture),
+        ):
+            result = self._parse()
+        assert result is not None
+        self.assertEqual((result["tileWidth"], result["tileHeight"]), (48, 24))
+        self.assertEqual(order, ["callback", "metadata"])
+        rejection = self.diagnostics.diagnostics()[0]
+        self.assertEqual((rejection.source_path, rejection.manifest_entry), (self.relative_source, "spriteId"))
+
+    def test_present_invalid_path_never_uses_valid_legacy_name(self) -> None:
+        values: tuple[JsonValue, ...] = (None, "", 7, [], {})
+        for value in values:
+            with self.subTest(value=value):
+                self._write_data({"spriteId": {"path": value, "name": "s_safe"}})
+                result = self._parse()
+                assert result is not None
+                self.assertEqual((result["sprite_name"], result["sprite_path"]), ("", ""))
+                self.assertEqual(result["sprite_reference_field"], "spriteId")
+        self.assertEqual(
+            [item.manifest_entry for item in self.diagnostics.diagnostics()],
+            ["spriteId.path"] * len(values),
+        )
+
+    def test_declared_sprite_path_and_legacy_name_keep_distinct_authority(self) -> None:
+        self._write_data({"spriteId": {"name": "ignored", "path": "sprites/custom/actual.yy"}})
+        result = self._parse()
+        assert result is not None
+        self.assertEqual(
+            (result["sprite_name"], result["sprite_path"], result["sprite_reference_field"]),
+            ("actual", "sprites/custom/actual.yy", "spriteId.path"),
+        )
+        self._write_data({"spriteId": {"name": "s_legacy"}})
+        result = self._parse()
+        assert result is not None
+        self.assertEqual(
+            (result["sprite_name"], result["sprite_path"], result["sprite_reference_field"]),
+            ("s_legacy", "sprites/s_legacy/s_legacy.yy", "spriteId.name"),
+        )
+
+    def test_primary_source_is_opened_once_before_projection(self) -> None:
+        self._write_data({"tileWidth": 42})
+        reads: list[str] = []
+        real_open = open
+
+        def track_open(path: str, mode: str = "r", *, encoding: str | None = None):
+            reads.append(path)
+            return real_open(path, mode, encoding=encoding)
+
+        def capture(data: JsonObject, *, source_context: str) -> GameMakerTilesetMetadata:
+            self.assertEqual(reads, [self.yy_path])
+            return parse_gamemaker_tileset_metadata(data, source_context=source_context)
+
+        with (
+            patch("src.conversion.tilesets.open", side_effect=track_open, create=True),
+            patch("src.conversion.tilesets.parse_gamemaker_tileset_metadata", side_effect=capture),
+        ):
+            result = self._parse()
+        assert result is not None
+        self.assertEqual(result["tileWidth"], 42)
+        self.assertEqual(reads, [self.yy_path])
+
+    def test_live_reread_uses_current_declared_source(self) -> None:
+        decoy = os.path.join(self.gm_dir, "tilesets", "ts_typed", "ts_typed.yy")
+        os.makedirs(os.path.dirname(decoy))
+        with open(decoy, "w", encoding="utf-8") as source_file:
+            source_file.write('{"tileWidth":99}')
+        self._write_data({"tileWidth": 16})
+        first = self._parse()
+        self._write_data({"tileWidth": 64})
+        second = self._parse()
+        assert first is not None and second is not None
+        self.assertEqual((first["tileWidth"], second["tileWidth"]), (16, 64))
+        self.assertEqual(first["source_path"], self.relative_source)
+        self.assertEqual(second["source_path"], self.relative_source)
+
+    def test_decoder_caught_errors_return_none_without_projection(self) -> None:
+        self._write_data({})
+        errors = (
+            OSError("read"), json.JSONDecodeError("bad", "{", 0), KeyError("missing"),
+            TypeError("type"), ValueError("value"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"),
+        )
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                with (
+                    patch("src.conversion.tilesets.decode_gamemaker_json", side_effect=error),
+                    patch("src.conversion.tilesets.parse_gamemaker_tileset_metadata") as metadata,
+                ):
+                    self.assertIsNone(self._parse())
+                    metadata.assert_not_called()
+        self.assertEqual(self.diagnostics.diagnostics(), ())
+
+    def test_decoder_uncaught_errors_preserve_exact_instance(self) -> None:
+        self._write_data({})
+        errors = (
+            AttributeError("attribute"), OverflowError("overflow"), RecursionError("depth"),
+            RuntimeError("runtime"), KeyboardInterrupt("cancel"), SystemExit("exit"),
+        )
+        for error in errors:
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.tilesets.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        self._parse()
+                self.assertIs(caught.exception, error)
+
+    def test_resolver_remains_outside_parse_catch(self) -> None:
+        error = ValueError("owner containment failure")
+        with (
+            patch.object(self.converter, "_resolve_tileset_yy_source", side_effect=error),
+            patch("src.conversion.tilesets.decode_gamemaker_json") as decoder,
+        ):
+            with self.assertRaises(ValueError) as caught:
+                self._parse()
+            decoder.assert_not_called()
+        self.assertIs(caught.exception, error)
+
+    def test_reference_and_projection_keep_original_catch_boundaries(self) -> None:
+        self._write_data({})
+        for target in (
+            "src.conversion.tilesets.TileSetConverter._resolve_sprite_reference",
+            "src.conversion.tilesets.project_tileset_conversion_fields",
+        ):
+            with self.subTest(target=target):
+                with patch(target, side_effect=TypeError("caught")):
+                    self.assertIsNone(self._parse())
+                error = RuntimeError("propagate unchanged")
+                with patch(target, side_effect=error):
+                    with self.assertRaises(RuntimeError) as caught:
+                        self._parse()
+                self.assertIs(caught.exception, error)
+
+    def test_real_invalid_utf8_and_malformed_json_return_none(self) -> None:
+        for contents in (b"\xff", b'{"tileWidth":', b'{"tileWidth":null}'):
+            with self.subTest(contents=contents):
+                with open(self.yy_path, "wb") as source_file:
+                    source_file.write(contents)
+                self.assertIsNone(self._parse())
+        self.assertEqual(self.diagnostics.diagnostics(), ())
+
+    def test_rejected_source_is_not_decoded(self) -> None:
+        self._write_data({})
+        for source in ("objects/o_wrong/o_wrong.yy", "../outside.yy", "bad\0path.yy"):
+            with self.subTest(source=source):
+                with patch("src.conversion.tilesets.decode_gamemaker_json") as decoder:
+                    self.assertIsNone(self.converter._parse_tileset_yy("ts_typed", source))
+                    decoder.assert_not_called()
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_filtered_lists_keep_shared_children_and_fresh_mutable_lists(self) -> None:
+        child: JsonObject = {"unknown": {"points": [1, 2]}}
+        source_list: list[JsonValue] = [None, child, 3, child]
+        root: JsonObject = {
+            "tileAnimationFrames": source_list, "brushes": source_list,
+            "autoTileSets": source_list, "tileSetCollisions": source_list,
+        }
+        self._write_data({})
+        with patch("src.conversion.gamemaker_json.json.loads", return_value=root):
+            result = self._parse()
+        assert result is not None
+        lists = [result["tileAnimationFrames"], result["brushes"], result["autoTileSets"], result["tileSetCollisions"]]
+        self.assertEqual(len({id(value) for value in lists}), 4)
+        for value in lists:
+            self.assertIsNot(value, source_list)
+            self.assertEqual(len(value), 2)
+            self.assertIs(value[0], child)
+            self.assertIs(value[1], child)
+        child["later"] = True
+        self.assertTrue(result["brushes"][0]["later"])
+
+    def test_deep_unknown_data_and_shared_children_survive_validated_boundary(self) -> None:
+        child: JsonObject = {"leaf": 1}
+        deep: JsonValue = child
+        for _ in range(1500):
+            deep = [deep]
+        root: JsonObject = {"unknown": deep, "tileAnimationFrames": [child, child]}
+        self._write_data({})
+        with patch("src.conversion.gamemaker_json.json.loads", return_value=root):
+            result = self._parse()
+        assert result is not None
+        self.assertIs(result["tileAnimationFrames"][0], child)
+        self.assertIs(result["tileAnimationFrames"][1], child)
+
+    def test_invalid_injected_graph_is_caught_before_reference_callbacks(self) -> None:
+        cycle: JsonObject = {"spriteId": ["would reject"]}
+        cycle["unknown"] = cycle
+        values: tuple[object, ...] = (cycle, {"unknown": object()}, {1: "invalid key"})
+        self._write_data({})
+        for value in values:
+            with self.subTest(kind=type(value).__name__):
+                with patch("src.conversion.gamemaker_json.json.loads", return_value=value):
+                    self.assertIsNone(self._parse())
+        self.assertEqual(self.logs, [])
+        self.assertEqual(self.diagnostics.diagnostics(), ())
+
+    def test_ordered_coercion_preserves_first_caught_or_uncaught_failure(self) -> None:
+        cases: tuple[tuple[JsonObject, type[Exception] | None], ...] = (
+            ({"tileWidth": None, "tileHeight": float("inf")}, None),
+            ({"tileWidth": float("nan"), "tileHeight": float("inf")}, None),
+            ({"tileWidth": float("inf"), "tileHeight": None}, OverflowError),
+            ({"tileWidth": 16, "tileHeight": float("inf"), "tilehsep": None}, OverflowError),
+            ({"tilehsep": None, "tileAnimationSpeed": 10**1000}, None),
+            ({"tileAnimationSpeed": 10**1000, "out_tilehborder": None}, OverflowError),
+        )
+        for value, expected in cases:
+            with self.subTest(keys=list(value)):
+                self._write_data(value)
+                if expected is None:
+                    self.assertIsNone(self._parse())
+                else:
+                    with self.assertRaises(expected):
+                        self._parse()
+
+    def test_native_speed_and_integer_provenance_remain_distinct(self) -> None:
+        cases: tuple[tuple[JsonValue, float], ...] = ((True, 1.0), (False, 0.0), (12.5, 12.5), ("12.5", 15.0))
+        for speed, expected in cases:
+            with self.subTest(speed=speed):
+                self._write_data({"tileWidth": 10**1000, "tileHeight": False, "tileAnimationSpeed": speed})
+                result = self._parse()
+                assert result is not None
+                self.assertEqual(result["tileWidth"], 10**1000)
+                self.assertIs(type(result["tileWidth"]), int)
+                self.assertEqual(result["tileHeight"], 0)
+                self.assertEqual(result["tileAnimationSpeed"], expected)
+        self._write_data({"tileAnimationSpeed": -0.0})
+        result = self._parse()
+        assert result is not None
+        self.assertEqual(math.copysign(1.0, result["tileAnimationSpeed"]), -1.0)
+
+    def test_nonfinite_speed_copies_real_png_before_render_failure_and_preserves_tres(self) -> None:
+        _make_sprite_for_tileset(self.gm_dir, "s_typed", width=16, height=16)
+        source_image = os.path.join(
+            self.gm_dir, "sprites", "s_typed", "layers",
+            "aaaaaaaa-0000-0000-0000-000000000001", "bbbbbbbb-0000-0000-0000-000000000001.png",
+        )
+        output_dir = os.path.join(self.godot_dir, "tilesets", "ts_typed")
+        os.makedirs(output_dir)
+        tres_path = os.path.join(output_dir, "ts_typed.tres")
+        png_path = os.path.join(output_dir, "ts_typed.png")
+        sentinel = b"previous tres remains"
+        for speed, expected in ((float("nan"), ValueError), (float("inf"), OverflowError), (-float("inf"), OverflowError)):
+            with self.subTest(speed=speed):
+                self._write_data({"spriteId": {"name": "s_typed"}, "tileAnimationSpeed": speed})
+                with open(tres_path, "wb") as output_file:
+                    output_file.write(sentinel)
+                with open(png_path, "wb") as output_file:
+                    output_file.write(b"old png")
+                with (
+                    patch("src.conversion.tilesets.shutil.copy2", wraps=shutil.copy2) as copied,
+                    patch("builtins.open", wraps=open) as opened,
+                ):
+                    with self.assertRaises(expected):
+                        self.converter._process_tileset("ts_typed", tileset_source_path=self.relative_source)
+                copied.assert_called_once_with(source_image, png_path)
+                self.assertFalse(any(call.args and call.args[0] == tres_path for call in opened.call_args_list))
+                with open(tres_path, "rb") as output_file:
+                    self.assertEqual(output_file.read(), sentinel)
+                with open(png_path, "rb") as output_file, open(source_image, "rb") as source_file:
+                    self.assertEqual(output_file.read(), source_file.read())
 
 
 if __name__ == "__main__":

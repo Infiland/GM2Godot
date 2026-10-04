@@ -113,6 +113,26 @@ function, preserving the path and font patch seams. Generic resource readers,
 registry sound planning, remaining legacy aliases and numeric-finiteness policy
 remain unfinished #797 work.
 
+### Tileset metadata boundary
+
+`tileset_metadata` captures known tileset inputs for the primary declaration
+converter and the tileset branch of `resource_models`, retaining decoded JSON
+identities. The aggregate consumes only strict sprite-name, native-int dimension
+and parent-path summaries; it neither resolves sprite references nor requests
+the converter's ordered projection. Its tileset decoder alias is the same shared
+function, with the other family aliases unchanged. The existing acquisition
+catch and missing-resource warning remain, while capture, subfolder and model
+construction stay outside that catch.
+
+`TileSetModel` keeps its original eleven-field prefix, module, defaults, repr and
+equality, adding an optional metadata carrier excluded from repr/equality.
+Reflection includes that carrier and its primitive presence/value captures.
+The converter retains reference validation before numeric capture so rejection
+callbacks can affect later values, and preserves its ordered conversions and
+late rendering failures. Its inherited fresh parent reader and nested sprite
+reader remain unchanged. Generic readers, registry tileset planning, legacy
+aliases and numeric-finiteness policy remain unfinished #797 work.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

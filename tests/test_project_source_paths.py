@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     project_gml_source_paths,

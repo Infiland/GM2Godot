@@ -15,8 +15,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from src.conversion import converter as converter_module
-from src.conversion import managed_output_publisher as publisher_module
+from src.conversion import converter as converter_module, managed_output_publisher as publisher_module
 from src.conversion.conversion_manifest import (
     CONVERSION_MANIFEST_RELATIVE_PATH,
 )
@@ -27,12 +26,12 @@ from src.conversion.godot_validation import (
 )
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.managed_resource_outputs import (
-    managed_resource_outputs,
     managed_gamemaker_resource_outputs,
-    timeline_action_script_paths,
-    timeline_json_action_script_paths,
+    managed_resource_outputs,
     reconcile_timeline_action_outputs,
     reconcile_timeline_json_outputs,
+    timeline_action_script_paths,
+    timeline_json_action_script_paths,
 )
 
 

@@ -7,7 +7,6 @@ from src.conversion.shader_translation import (
     translate_gamemaker_shader,
 )
 
-
 VERTEX_PREAMBLE = """\
 attribute vec3 in_Position;
 attribute vec4 in_Colour;

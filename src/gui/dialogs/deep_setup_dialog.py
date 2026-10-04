@@ -22,10 +22,10 @@ from PySide6.QtWidgets import (
 
 from src.deep.credentials import save_credential
 from src.deep.install import ExtensionManager, opencode_path
-from src.deep.opencode import install_opencode
 from src.deep.models import ModelCatalog
-from src.gui.widgets.deep_model_picker import DeepModelPicker
+from src.deep.opencode import install_opencode
 from src.deep.settings import DeepSettings, load_settings, save_settings
+from src.gui.widgets.deep_model_picker import DeepModelPicker
 
 
 class SetupTask(QThread):

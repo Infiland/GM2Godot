@@ -13,7 +13,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.conversion.gml_transpiler import category_issue_numbers, get_gml_api_entry
 
-
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "part2"
 CATALOG_PATH = FIXTURE_ROOT / "fixtures.json"
 REQUIRED_BUCKETS = {

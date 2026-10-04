@@ -8,11 +8,12 @@ from src.conversion.event_mapping import is_input_event, map_event, map_input_ev
 from src.conversion.events.base import EventMapping
 from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
-from src.conversion.gml_transpiler_parts.constants import GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+from src.conversion.gml_transpiler_parts.constants import (
+    GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+)
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.json_values import JsonObject
 from src.conversion.object_metadata import gamemaker_event_integer
-
 
 _CodeBodies: TypeAlias = Mapping[str, str]
 _MapEvent: TypeAlias = Callable[[JsonObject], EventMapping | None]

@@ -361,7 +361,9 @@ def duplicate_runtime_symbols() -> dict[str, tuple[RuntimeProvidedSymbol, ...]]:
 
 
 def runtime_api_index() -> dict[str, RuntimeAPIIndexEntry]:
-    from src.conversion.gml_transpiler_parts.gml_api_manifest import iter_gml_api_entries
+    from src.conversion.gml_transpiler_parts.gml_api_manifest import (
+        iter_gml_api_entries,
+    )
 
     symbol_index = runtime_symbol_index()
     entries: dict[str, RuntimeAPIIndexEntry] = {}

@@ -1,24 +1,23 @@
 # pyright: reportPrivateUsage=false
 from __future__ import annotations
 
-from contextlib import nullcontext
 import ctypes
 import errno
 import gc
 import inspect
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
+import unittest
+from contextlib import nullcontext
+from pathlib import Path
 from types import FrameType, SimpleNamespace
 from typing import Any, Callable
-import unittest
 from unittest import mock
 
 from scripts import _anchored_output as anchored
-
 
 PRIVATE_ROOT = ".gm2godot-receipt-staging"
 

@@ -11,7 +11,6 @@ from src.conversion.object_metadata import (
     capture_gamemaker_event_type,
 )
 
-
 _GML_EVENT_NAMES: dict[JsonScalar, str] = {
     0: "Create",
     1: "Destroy",

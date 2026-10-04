@@ -11,8 +11,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from src.conversion.json_values import JsonArray, JsonObject
 from src.conversion.gml_transpiler import iter_gml_api_entries
+from src.conversion.json_values import JsonArray, JsonObject
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.resource_models import parse_gamemaker_resource_models

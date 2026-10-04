@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
 
 import os
-import sys
 import shutil
+import sys
 import unittest
 from typing import Callable
 from unittest.mock import patch
@@ -11,13 +11,17 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.included_files_parts import phase_observer as _included_phases
 from src.conversion import included_files as included_files_module
-from src.conversion.included_files_parts import native_posix as _included_posix, constants as _included_constants, path_validation as _included_paths
 from src.conversion.conversion_outcome import ConversionCounts
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import publisher as _included_publisher
-from src.conversion.included_files_parts import staging as _included_staging
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    file_publication as _included_file_publication,
+    native_posix as _included_posix,
+    path_validation as _included_paths,
+    phase_observer as _included_phases,
+    publisher as _included_publisher,
+    staging as _included_staging,
+)
 from tests import included_files_support as _included_support
 
 

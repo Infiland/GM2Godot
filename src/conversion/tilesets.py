@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import os
 import json
-import shutil
+import os
 import posixpath
+import shutil
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict, cast
 
-from src.localization import get_localized
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
@@ -16,27 +15,38 @@ from src.conversion.asset_output_paths import (
 )
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.generated_paths import (
     generated_nested_resource_path,
 )
-from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject
 from src.conversion.project_manifest import load_gamemaker_project_manifest
-from src.conversion.sprite_metadata import capture_sprite_atlas_frame, select_sprite_atlas_layer
 from src.conversion.project_source_paths import (
-    is_safe_project_source_component,
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
+    is_safe_project_source_component,
     validate_project_resource_source_path,
 )
-from src.conversion.json_values import JsonObject
-from src.conversion.resource_reference_metadata import capture_tileset_resource_declaration
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.resource_reference_metadata import (
+    capture_tileset_resource_declaration,
+)
+from src.conversion.sprite_metadata import (
+    capture_sprite_atlas_frame,
+    select_sprite_atlas_layer,
+)
 from src.conversion.tileset_metadata import (
     GameMakerTilesetSpriteReference,
     parse_gamemaker_tileset_metadata,
     parse_gamemaker_tileset_sprite_reference,
     project_tileset_conversion_fields,
 )
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
+from src.localization import get_localized
 
 
 class TilesetData(TypedDict):

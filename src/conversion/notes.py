@@ -17,7 +17,12 @@ from src.conversion.project_source_paths import (
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
 from src.localization import get_localized
 
 

@@ -24,7 +24,6 @@ from src.conversion.gml_runtime_parts.manifest import (
 )
 from src.conversion.gml_transpiler_parts.gml_api_manifest import iter_gml_api_entries
 
-
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"
 

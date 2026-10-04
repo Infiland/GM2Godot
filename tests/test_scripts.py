@@ -17,17 +17,16 @@ from src.conversion.asset_registry import (
 )
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.scripts import (
-    SCRIPT_REGISTRY_RELATIVE_PATH,
-    ScriptConverter,
-)
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject
 from src.conversion.script_functions import (
     modern_script_function_declarations,
     modern_script_structure,
 )
-from src.conversion.json_values import JsonObject
-from src.conversion.gamemaker_json import decode_gamemaker_json
-
+from src.conversion.scripts import (
+    SCRIPT_REGISTRY_RELATIVE_PATH,
+    ScriptConverter,
+)
 
 SNAP_BUFFER_READ_YAML_FIXTURE = (
     Path(__file__).parent

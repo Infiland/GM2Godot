@@ -1,11 +1,20 @@
 """Included Files copy worker ownership."""
 
 from __future__ import annotations
+
 import posixpath
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, IncludedCopyReceipt as _IncludedCopyReceipt, IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import file_publication as _included_file_publication
+
+from src.conversion.included_files_parts import (
+    file_publication as _included_file_publication,
+    path_validation as _included_paths,
+)
 from src.conversion.included_files_parts.converter_ports import IncludedCopyWorkerPort
+from src.conversion.included_files_parts.models import (
+    IncludedCopyReceipt as _IncludedCopyReceipt,
+    IncludedFileSource as _IncludedFileSource,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+)
+
 
 class IncludedCopyWorkerOperations(IncludedCopyWorkerPort):
     def _process_file(

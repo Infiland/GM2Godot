@@ -13,8 +13,8 @@ from .expression_models import (
     DSMapAccess as _DSMapAccess,
     Expression as _Expression,
     FunctionLiteral as _FunctionLiteral,
-    Grouped as _Grouped,
     GMLExpression,
+    Grouped as _Grouped,
     Index as _Index,
     Member as _Member,
     NewCall as _NewCall,
@@ -26,11 +26,11 @@ from .expression_models import (
 )
 from .lexical import is_verbatim_string_start, read_verbatim_string
 from .shared_models import (
-    AssignmentOperator,
     DEFAULT_SCOPE_CONTEXT as _DEFAULT_SCOPE_CONTEXT,
-    GMLTranspileError,
+    AssignmentOperator,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
+    GMLTranspileError,
     ScopeContext,
     ScopeContext as _ScopeContext,
     Token,

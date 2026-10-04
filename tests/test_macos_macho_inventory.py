@@ -2,24 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterator
-from contextlib import contextmanager
 import errno
-import plistlib
-from io import BytesIO
 import os
-from pathlib import Path
+import plistlib
 import stat
 import struct
 import tempfile
-from typing import BinaryIO
-import unittest
 import unicodedata
-from unittest import mock
+import unittest
 import zipfile
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
+from io import BytesIO
+from pathlib import Path
+from typing import BinaryIO
+from unittest import mock
 
 from scripts import verify_macos_bundle_metadata as verifier
-
 
 ZIP_POLICY = {
     "CFBundleIdentifier": "land.infi.gm2godot",

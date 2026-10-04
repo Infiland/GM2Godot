@@ -8,30 +8,43 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TypedDict
 
-# Import localization manager
-from src.localization import get_localized
-from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
+from src.conversion.asset_output_paths import (
+    build_asset_output_paths,
+    resource_filesystem_path,
+)
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonObject
-from src.conversion.sound_metadata import (
-    parse_gamemaker_sound_metadata,
-    project_sound_conversion_fields,
+from src.conversion.generated_paths import (
+    generated_path_segment,
+    generated_resource_stem,
+    generated_subfolder_path,
 )
-from src.conversion.generated_paths import generated_path_segment, generated_resource_stem, generated_subfolder_path
+from src.conversion.json_values import JsonObject
+from src.conversion.project_godot import format_godot_string
 from src.conversion.project_manifest import (
     ProjectManifestDiagnostic,
     load_gamemaker_project_manifest,
 )
-from src.conversion.project_godot import format_godot_string
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     resolve_project_filesystem_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.sound_metadata import (
+    parse_gamemaker_sound_metadata,
+    project_sound_conversion_fields,
+)
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
+
+# Import localization manager
+from src.localization import get_localized
 
 
 class SoundData(TypedDict):

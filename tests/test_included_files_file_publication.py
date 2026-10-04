@@ -1,9 +1,9 @@
 # pyright: reportPrivateUsage=false
 
 import os
+import shutil
 import stat
 import sys
-import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -12,13 +12,18 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.included_files_parts import native_posix as _included_posix, constants as _included_constants, stat_metadata as _included_metadata
-from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import locking as _included_locking
+from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    file_publication as _included_file_publication,
+    locking as _included_locking,
+    native_posix as _included_posix,
+    stat_metadata as _included_metadata,
+)
 from tests import included_files_support as _included_support
+
 _included_files_transaction_debris = _included_support.included_files_transaction_debris
 
 

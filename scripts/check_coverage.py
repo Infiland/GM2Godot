@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
 import fnmatch
 import json
-from pathlib import Path, PurePosixPath
 import sys
+from dataclasses import dataclass
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
+from pathlib import Path, PurePosixPath
 from typing import Sequence, cast
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_POLICY_PATH = PROJECT_ROOT / "coverage-policy.json"

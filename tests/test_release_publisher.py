@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import copy
-from dataclasses import dataclass
 import hashlib
 import json
-from pathlib import Path
 import tempfile
-from typing import Literal, cast
 import unittest
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, cast
 from unittest.mock import patch
 
 from scripts import release_publisher as publisher_module
-
 
 REPOSITORY = "Infiland/GM2Godot"
 TAG = "v0.7.18"

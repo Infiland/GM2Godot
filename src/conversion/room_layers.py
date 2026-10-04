@@ -8,19 +8,28 @@ from typing import NamedTuple, Protocol
 from src.conversion.architecture_policy import layer_policy_metadata_lines
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.room_metadata import (
- RoomLayerFields, RoomInstanceFields, RoomAssetFields,
- RoomViewFields, RoomViewSettingsFields, RoomSettingsFields, RoomNamedReferenceFields,
- capture_room_render_layer_name, capture_room_layer_header, capture_optional_room_metadata,
- iter_room_field_values, room_creation_order_name, room_object_items, room_item_name_value,
-)
 from src.conversion.room_creation_code import (
     CreationCodeSourceResolver,
     resolve_instance_creation_code,
 )
-from src.conversion.type_defs import LogCallback
+from src.conversion.room_metadata import (
+    RoomAssetFields,
+    RoomInstanceFields,
+    RoomLayerFields,
+    RoomNamedReferenceFields,
+    RoomSettingsFields,
+    RoomViewFields,
+    RoomViewSettingsFields,
+    capture_optional_room_metadata,
+    capture_room_layer_header,
+    capture_room_render_layer_name,
+    iter_room_field_values,
+    room_creation_order_name,
+    room_item_name_value,
+    room_object_items,
+)
 from src.conversion.tileset_metadata import select_tileset_room_layout
-
+from src.conversion.type_defs import LogCallback
 
 KNOWN_LAYER_TYPES = {
     "GMRInstanceLayer",

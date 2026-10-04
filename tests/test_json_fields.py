@@ -24,7 +24,13 @@ from src.conversion.json_fields import (
     required_object,
     required_string,
 )
-from src.conversion.json_values import JsonObject, JsonPath, JsonValue, JsonValueError, validate_json_value
+from src.conversion.json_values import (
+    JsonObject,
+    JsonPath,
+    JsonValue,
+    JsonValueError,
+    validate_json_value,
+)
 
 
 class _RequiredAccessor(Protocol):

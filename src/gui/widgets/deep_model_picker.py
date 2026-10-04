@@ -6,9 +6,22 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QFormLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QWidget,
+)
 
-from src.deep.models import DiscoveredModel, ModelCatalog, discover_models, preferred_go_model
+from src.deep.models import (
+    DiscoveredModel,
+    ModelCatalog,
+    discover_models,
+    preferred_go_model,
+)
 from src.deep.settings import DeepSettings
 
 

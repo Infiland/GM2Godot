@@ -13,4 +13,8 @@ select = [
   "E7",
   "E9",
   "F",
+  "I",
 ]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true

@@ -1,21 +1,25 @@
-import json
 import copy
+import json
 import os
 import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 from typing import Iterable
+from unittest.mock import patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom, IndexedResource
-from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.type_defs import LogCallback, StrPath
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.resource_index import (
+    GameMakerResourceIndex,
+    IndexedResource,
+    IndexedRoom,
+)
+from src.conversion.type_defs import LogCallback, StrPath
 
 
 def _write_file(path: str, content: str) -> None:

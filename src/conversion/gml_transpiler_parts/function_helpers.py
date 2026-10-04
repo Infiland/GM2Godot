@@ -18,6 +18,7 @@ from .shared_models import (
     StaticDeclaration as _StaticDeclaration,
 )
 
+
 def _emit_static_initialization_lines(
     static_scope_name: str | None,
     static_scope_id: str | None,

@@ -5,15 +5,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     is_safe_project_source_component,
     resolve_project_sidecar_source_path,
 )
-from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.room_metadata import RoomInstanceFields, iter_room_field_values, room_creation_order_name
+from src.conversion.room_metadata import (
+    RoomInstanceFields,
+    iter_room_field_values,
+    room_creation_order_name,
+)
 from src.conversion.type_defs import LogCallback
-
 
 CreationCodeSourceResolver = Callable[[str, str], str | None]
 

@@ -1,30 +1,30 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import tempfile
+import unittest
 from collections.abc import Mapping
 from contextlib import redirect_stderr
-import hashlib
 from io import StringIO
-import json
 from pathlib import Path
-import tempfile
 from typing import cast
-import unittest
 from unittest.mock import patch
 
 from scripts import release_publisher as publisher_module
 from tests.test_release_publisher import (
     API_ORIGIN,
     ASSET_ORDER,
-    FaultKind,
     FOREIGN_RELEASE_ID,
     OWNED_RELEASE_ID,
     PAYLOAD_ORDER,
     RELEASE_NAME,
     REPOSITORY,
-    ScriptedTransport,
     TAG,
     TARGET_SHA,
     UPLOAD_ORIGIN,
+    FaultKind,
+    ScriptedTransport,
     VisibilityScriptedTransport,
 )
 

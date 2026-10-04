@@ -1,22 +1,24 @@
 from __future__ import annotations
+
 import os
 import posixpath
 import stat
 from typing import Callable, cast
+
+from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.included_files_parts.models import (
-    PathIdentity as _PathIdentity,
-    PathFingerprint as _PathFingerprint,
-    PathHandleBinding as _PathHandleBinding,
     HandleState as _HandleState,
-    IncludedSourceFingerprint as _IncludedSourceFingerprint,
     IncludedCleanupFileState as _IncludedCleanupFileState,
     IncludedCopyReceipt as _IncludedCopyReceipt,
-    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
     IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedSourceFingerprint as _IncludedSourceFingerprint,
     IncludedTreeEntry as _IncludedTreeEntry,
     IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathFingerprint as _PathFingerprint,
+    PathHandleBinding as _PathHandleBinding,
+    PathIdentity as _PathIdentity,
 )
-from src.conversion.included_file_paths import IncludedFilePathAssignment
 
 
 def _directory_identity_from_fd(directory_fd: int) -> _PathIdentity:

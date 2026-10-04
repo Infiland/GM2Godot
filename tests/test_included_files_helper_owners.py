@@ -19,7 +19,6 @@ from src.conversion.included_files_parts import (
     stat_metadata,
 )
 
-
 _STDLIB_ROOTS = frozenset({
     "__future__", "base64", "binascii", "dataclasses", "hashlib", "json",
     "os", "posixpath", "stat", "typing",

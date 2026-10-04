@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
-from dataclasses import FrozenInstanceError, fields, is_dataclass
 import inspect
-from pathlib import Path
 import subprocess
 import sys
+import unittest
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError, fields, is_dataclass
+from pathlib import Path
 from typing import (
     Final,
     Iterable,
@@ -18,7 +19,6 @@ from typing import (
     get_origin,
     get_type_hints,
 )
-import unittest
 
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
@@ -39,13 +39,11 @@ from src.conversion.gml_transpiler_parts.statement_models import (
     GMLStatementRequest,
     GMLStatementResult,
 )
-
 from tests.gml_facade_contract_support import (
     facade_reexports_from_source,
     literal_all_exports,
     runtime_phase_contract,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"

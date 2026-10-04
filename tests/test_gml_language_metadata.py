@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from collections.abc import Sequence, Set
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType, ModuleType
 from typing import Any, Final, cast, get_args, get_origin
-import unittest
 
 from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
 from src.conversion.gml_transpiler_parts.shared_models import BuiltinVariableMetadata
 from tests.gml_facade_contract_support import runtime_phase_contract
-
 
 PUBLIC_NAMES = (
     "EOF",

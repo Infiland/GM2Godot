@@ -11,7 +11,6 @@ from src.conversion.atomic_generated_text import (
 from src.conversion.included_file_paths import IncludedFilePathAssignment
 from src.conversion.json_values import JsonObject
 
-
 INCLUDED_FILE_REGISTRY_RELATIVE_PATH = os.path.join(
     "gm2godot",
     "gml_included_file_registry.gd",

@@ -5,10 +5,16 @@ import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
-from src.conversion.asset_output_paths import build_asset_output_paths, resource_filesystem_path
+from src.conversion.asset_output_paths import (
+    build_asset_output_paths,
+    resource_filesystem_path,
+)
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.generated_paths import generated_resource_stem, generated_subfolder_path
+from src.conversion.generated_paths import (
+    generated_resource_stem,
+    generated_subfolder_path,
+)
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
@@ -25,7 +31,12 @@ from src.conversion.shader_translation import (
     ShaderTranslationIssue,
     translate_gamemaker_shader,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
 from src.localization import get_localized
 
 

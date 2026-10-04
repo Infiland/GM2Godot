@@ -12,9 +12,14 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import get_type_hints
 
-from src.conversion import included_file_paths, included_files, project_manifest, project_source_paths, type_defs
+from src.conversion import (
+    included_file_paths,
+    included_files,
+    project_manifest,
+    project_source_paths,
+    type_defs,
+)
 from src.conversion.included_files_parts import constants, models
-
 
 # These are the exact finite aliases in the reviewed extraction proposal.
 MODEL_ALIASES = (

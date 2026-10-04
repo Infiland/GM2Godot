@@ -8,26 +8,26 @@ source/job provenance externally; this verifier checks their internal bindings.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
-from email.parser import BytesParser
-from email.policy import compat32
 import hashlib
 import importlib.util
 import itertools
 import json
 import ntpath
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
-from types import MappingProxyType
-from typing import Any, BinaryIO, Callable, cast
 import unicodedata
 import zipfile
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from email.parser import BytesParser
+from email.policy import compat32
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any, BinaryIO, Callable, cast
 
 HOSTS: Mapping[str, Mapping[str, str]] = MappingProxyType({
     'linux-x64': MappingProxyType(dict(python_version='3.12.13', sys_platform='linux', os_name='posix', system='Linux', machine='x86_64', seed='constraints/requirements-linux-py312.lock', companion='constraints/requirements-linux-x64-py312.wheels.lock')),

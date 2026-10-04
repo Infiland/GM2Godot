@@ -1,17 +1,31 @@
 from __future__ import annotations
+
 import os
 import posixpath
 import stat
 import sys
 from contextlib import ExitStack
-from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity, PathFingerprint as _PathFingerprint, IncludedCleanupFileState as _IncludedCleanupFileState, IncludedTreeEntry as _IncludedTreeEntry, IncludedTreeSnapshot as _IncludedTreeSnapshot
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
-from src.conversion.included_files_parts.filesystem_operations import IncludedCleanupParentBinding as _IncludedCleanupParentBinding
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import guarded_mutations as _included_mutations
-from src.conversion.included_files_parts import phase_observer as _included_phases
+
+from src.conversion.included_files_parts import (
+    guarded_mutations as _included_mutations,
+    path_validation as _included_paths,
+    phase_observer as _included_phases,
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.filesystem_operations import (
+    IncludedCleanupParentBinding as _IncludedCleanupParentBinding,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedCleanupFileState as _IncludedCleanupFileState,
+    IncludedTreeEntry as _IncludedTreeEntry,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathFingerprint as _PathFingerprint,
+    PathIdentity as _PathIdentity,
+)
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
 
 
 def _included_cleanup_file_state(

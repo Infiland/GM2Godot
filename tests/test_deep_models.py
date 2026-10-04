@@ -12,7 +12,13 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
-from src.deep.models import DiscoveredModel, ModelCatalog, discover_models, parse_catalog, preferred_go_model
+from src.deep.models import (
+    DiscoveredModel,
+    ModelCatalog,
+    discover_models,
+    parse_catalog,
+    preferred_go_model,
+)
 from src.deep.settings import DeepSettings
 from src.gui.dialogs.deep_resume_dialog import DeepResumeDialog
 from src.gui.widgets.deep_model_picker import DeepModelPicker

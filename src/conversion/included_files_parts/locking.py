@@ -1,18 +1,28 @@
 """Included Files locking ownership."""
 
 from __future__ import annotations
+
 import os
 import secrets
 import stat
-from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity, IncludedProjectLock as _IncludedProjectLock
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import guarded_mutations as _included_mutations
-from src.conversion.included_files_parts import record_io as _included_records
-from src.conversion.included_files_parts import recorded_cleanup as _included_cleanup
+
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    guarded_mutations as _included_mutations,
+    path_validation as _included_paths,
+    record_io as _included_records,
+    recorded_cleanup as _included_cleanup,
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedProjectLock as _IncludedProjectLock,
+    PathIdentity as _PathIdentity,
+)
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
+
 
 def _after_included_lock_initialization_phase(_phase: str) -> None:
     """Narrow test seam around durable project-lock initialization."""

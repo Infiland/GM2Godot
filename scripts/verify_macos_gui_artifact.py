@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
 import ctypes
-from dataclasses import dataclass
 import errno
 import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import select
 import signal
@@ -20,10 +17,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType, TracebackType
 from typing import Callable, Literal, Protocol, cast
-import zipfile
-
 
 APP_NAME = "GM2Godot.app"
 MAIN_PATH = "Contents/MacOS/GM2Godot"

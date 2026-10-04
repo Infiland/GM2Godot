@@ -16,8 +16,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from scripts import capture_conversion_parity as parity
-from scripts import run_required_unittest as runner
+from scripts import capture_conversion_parity as parity, run_required_unittest as runner
 from scripts._anchored_output import AnchoredOutputError
 
 ROOT = Path(__file__).resolve().parents[1]

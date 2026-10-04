@@ -9,7 +9,6 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.event_mapping import map_event
 from src.conversion.script_generator import generate_script_content
 
-
 WALLPAPER_EVENTS = [
     (79, "_on_wallpaper_config", "Other_79.gml"),
     (81, "_on_wallpaper_subscription_data", "Other_81.gml"),

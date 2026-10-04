@@ -13,7 +13,6 @@ from .lexical import (
 )
 from .shared_models import GMLTranspileError, Token
 
-
 _GML_SIMPLE_ESCAPES = {
     '"': '"',
     "\\": "\\",

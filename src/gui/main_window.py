@@ -1,32 +1,24 @@
+import multiprocessing
 import os
-from typing import Any, cast
 import platform
 import threading
 import webbrowser
-import multiprocessing
+from typing import Any, cast
 
-from PySide6.QtCore import QThread, QTimer, Signal, Slot, QObject, QUrl
-from PySide6.QtGui import QCloseEvent, QIcon, QDesktopServices
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QMessageBox, QDialog, QTextBrowser, QPushButton, QTabWidget, QLabel
+from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon
+from PySide6.QtWidgets import (
+    QDialog,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QTextBrowser,
+    QVBoxLayout,
+    QWidget,
+)
 
-from src.deep.jobs import DeepJob, pending_jobs
-from src.deep.settings import load_settings
-from src.deep.progress import DeepProgress
-from src.gui.panels.deep_progress_panel import DeepProgressPanel
-from src.gui.run_timer import RunTimer
-from src.gui.icons import AppIcons
-from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker, ConversionWorkerResult, DeepConversionWorker
-from src.gui.panels.path_panel import PathPanel
-from src.gui.panels.action_panel import ActionPanel
-from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
-from src.gui.panels.progress_panel import ProgressPanel
-from src.gui.panels.info_bar import InfoBar
-from src.gui.dialogs.settings_dialog import SettingsDialog
-from src.gui.dialogs.deep_resume_dialog import DeepResumeDialog
-from src.gui.dialogs.about_dialog import AboutDialog
-from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
-from src.gui.dialogs.language_dialog import LanguageDialog
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.conversion.project_godot import (
@@ -35,11 +27,32 @@ from src.conversion.project_godot import (
     GodotProjectDestinationState,
     inspect_godot_project_destination,
 )
-from src.version import get_version
-from src.localization import get_localized, get_localized_list
-from src.update_checker import UpdateChecker
-from src.update_checker import UpdateInfo
+from src.deep.jobs import DeepJob, pending_jobs
+from src.deep.progress import DeepProgress
+from src.deep.settings import load_settings
+from src.gui.dialogs.about_dialog import AboutDialog
+from src.gui.dialogs.deep_resume_dialog import DeepResumeDialog
+from src.gui.dialogs.language_dialog import LanguageDialog
+from src.gui.dialogs.release_notes_dialog import ReleaseNotesDialog
+from src.gui.dialogs.settings_dialog import SettingsDialog
 from src.gui.dialogs.update_dialog import UpdateDialog
+from src.gui.icons import AppIcons
+from src.gui.panels.action_panel import ActionPanel
+from src.gui.panels.console_panel import ConsoleLogStyle, ConsolePanel
+from src.gui.panels.deep_progress_panel import DeepProgressPanel
+from src.gui.panels.info_bar import InfoBar
+from src.gui.panels.path_panel import PathPanel
+from src.gui.panels.progress_panel import ProgressPanel
+from src.gui.run_timer import RunTimer
+from src.gui.setting_value import SettingValue
+from src.gui.workers import (
+    ConversionWorker,
+    ConversionWorkerResult,
+    DeepConversionWorker,
+)
+from src.localization import get_localized, get_localized_list
+from src.update_checker import UpdateChecker, UpdateInfo
+from src.version import get_version
 
 
 class UpdateCheckWorker(QObject):

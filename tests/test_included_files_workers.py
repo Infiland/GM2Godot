@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
 
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -15,13 +15,16 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion import included_files as included_files_module
-from src.conversion.included_files import IncludedFilesConverter
-from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import worker_pool as _included_worker_pool
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
+from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts import (
+    file_publication as _included_file_publication,
+    worker_pool as _included_worker_pool,
+)
 from tests import included_files_support as _included_support
+
 _included_files_transaction_debris = _included_support.included_files_transaction_debris
 
 

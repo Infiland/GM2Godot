@@ -6,7 +6,6 @@ from typing import Iterable, Literal, TypeAlias
 
 from src.conversion.json_values import JsonObject
 
-
 ConversionTerminalState: TypeAlias = Literal[
     "success",
     "partial",

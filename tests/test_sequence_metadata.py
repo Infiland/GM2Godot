@@ -6,8 +6,15 @@ from unittest.mock import patch
 
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.sequence_assets import normalize_sequence_asset, render_sequence_resource
-from src.conversion.sequence_metadata import SequenceChannel, SequenceDescriptor, sequence_track_count
+from src.conversion.sequence_assets import (
+    normalize_sequence_asset,
+    render_sequence_resource,
+)
+from src.conversion.sequence_metadata import (
+    SequenceChannel,
+    SequenceDescriptor,
+    sequence_track_count,
+)
 
 
 def _objects(value: JsonValue) -> list[JsonObject]:

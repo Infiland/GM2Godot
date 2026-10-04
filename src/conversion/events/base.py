@@ -3,7 +3,6 @@ from typing import Callable, TypeAlias
 
 from src.conversion.json_values import JsonObject, JsonScalar
 
-
 EventKey: TypeAlias = tuple[JsonScalar, JsonScalar]
 EventHandler: TypeAlias = Callable[[JsonObject, str], "EventMapping"]
 StaticMappings: TypeAlias = dict[EventKey, "EventMapping"]

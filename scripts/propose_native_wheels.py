@@ -8,11 +8,7 @@ from exact sibling files, without modifying the import path.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Iterable, Mapping, Sequence
 import ctypes
-from dataclasses import dataclass
-from email.parser import BytesParser
-from email.message import Message
 import hashlib
 import importlib
 import importlib.metadata
@@ -20,7 +16,6 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import re
 import signal
@@ -29,9 +24,14 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from email.message import Message
+from email.parser import BytesParser
+from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
-import zipfile
 
 MAX_TEXT_BYTES = 1_048_576
 MAX_COMMAND_SECONDS = 900

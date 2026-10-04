@@ -6,8 +6,8 @@ import stat
 import sys
 from typing import Callable, cast
 
-from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity
 from src.conversion.included_files_parts import stat_metadata as _included_metadata
+from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity
 
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY

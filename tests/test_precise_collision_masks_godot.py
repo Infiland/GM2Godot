@@ -15,7 +15,6 @@ from PIL import Image
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sprites import SpriteConverter
 
-
 _EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
     Path(__file__).parent

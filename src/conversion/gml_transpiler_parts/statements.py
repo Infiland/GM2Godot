@@ -24,13 +24,6 @@ from .expression_api import (
     uses_direct_builtin_instance_members,
     uses_direct_member_access,
 )
-from .lexical_api import (
-    is_plain_identifier,
-    reject_asset_identifier_name,
-    sanitize_gdscript_identifier,
-    tokenize_gml_expression,
-    validate_gml_identifier,
-)
 from .expression_models import (
     ArrayRefAccess as _ArrayRefAccess,
     Call as _Call,
@@ -42,6 +35,13 @@ from .expression_models import (
     Member as _Member,
     Name as _Name,
     StructAccess as _StructAccess,
+)
+from .lexical_api import (
+    is_plain_identifier,
+    reject_asset_identifier_name,
+    sanitize_gdscript_identifier,
+    tokenize_gml_expression,
+    validate_gml_identifier,
 )
 from .shared_models import (
     GMLTranspileError,

@@ -1,8 +1,8 @@
-import os
 # pyright: reportPrivateUsage=false
 import json
-import sys
+import os
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -13,15 +13,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.objects import ObjectConverter, ObjectProcessResult
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
-from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.events.base import EventMapping
 from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.objects import ObjectConverter, ObjectProcessResult
 
 
 def _make_object_yy_content(name: str, sprite_name: str | None = None,

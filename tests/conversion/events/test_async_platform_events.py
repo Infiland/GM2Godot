@@ -9,7 +9,6 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.event_mapping import map_event
 from src.conversion.script_generator import generate_script_content
 
-
 ASYNC_PLATFORM_EVENTS = [
     (66, "_on_async_in_app_purchase", "Other_66.gml"),
     (67, "_on_async_cloud_save", "Other_67.gml"),

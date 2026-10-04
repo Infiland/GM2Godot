@@ -1,7 +1,7 @@
 import json
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -11,10 +11,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.notes import NoteConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.notes import NoteConverter
 
 
 class TestableNoteConverter(NoteConverter):

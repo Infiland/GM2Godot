@@ -15,12 +15,11 @@ from src.conversion.asset_registry import (
     render_asset_registry_script,
 )
 from src.conversion.gml_runtime import write_gml_runtime
+from src.conversion.json_values import JsonObject, JsonValue, validate_json_value
 from src.conversion.sequence_assets import (
     normalize_sequence_asset,
     render_sequence_resource,
 )
-from src.conversion.json_values import JsonObject, JsonValue, validate_json_value
-
 
 AUTHORED_SEQUENCE_FIXTURE = (
     Path(__file__).parent / "fixtures" / "authored_sequences" / "fixture.json"

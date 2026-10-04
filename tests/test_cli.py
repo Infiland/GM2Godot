@@ -6,8 +6,8 @@ import inspect
 import io
 import json
 import os
-import signal
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -25,16 +25,16 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src import cli
-from src.conversion.converter import Converter
+from src.conversion.conversion_manifest import (
+    CONVERSION_ATTEMPT_RELATIVE_PATH,
+    CONVERSION_MANIFEST_RELATIVE_PATH,
+)
 from src.conversion.conversion_outcome import (
     ConversionCounts,
     ConversionOutcome,
     ConversionStepLedger,
 )
-from src.conversion.conversion_manifest import (
-    CONVERSION_ATTEMPT_RELATIVE_PATH,
-    CONVERSION_MANIFEST_RELATIVE_PATH,
-)
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
@@ -43,7 +43,6 @@ from src.conversion.diagnostics import (
 from src.conversion.godot_validation import GodotValidationReport
 from src.conversion.project_godot import ConversionPreflightError
 from src.version import get_version
-
 
 EXPECTED_LTS_MANUAL_ROOT = "https://manual.gamemaker.io/lts/en/"
 MONTHLY_MANUAL_PATH = "/monthly/en/"

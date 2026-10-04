@@ -2,8 +2,8 @@
 
 import json
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -15,13 +15,14 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
+
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
-from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.resource_index import GameMakerResourceIndex
 from src.conversion.sprites import (
     AnimationData,
     CollisionData,

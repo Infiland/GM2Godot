@@ -15,10 +15,10 @@ from src.conversion import managed_output_workspace as workspace_module
 from src.conversion.anchored_artifacts import VerifiedDirectory
 from src.conversion.managed_output_workspace import (
     DESTINATION_LOCK_NAME,
-    ManagedOutputWorkspace,
     WORKSPACE_PARENT_MARKER_NAME,
     WORKSPACE_PARENT_NAME,
     WORKSPACE_STAGE_MARKER_NAME,
+    ManagedOutputWorkspace,
 )
 
 

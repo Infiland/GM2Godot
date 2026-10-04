@@ -15,8 +15,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src import cli
-from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
-
+from src.conversion.godot_validation import (
+    find_godot_binary,
+    validate_generated_godot_project,
+)
 
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "golden" / "basic_scripts"
 SNAPSHOT_PATH = FIXTURE_ROOT / "expected_snapshot.json"

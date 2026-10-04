@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass, field
 import functools
 import os
-from pathlib import Path
 import secrets
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Literal, cast
-
 
 DWORD = ctypes.c_uint32
 BOOLEAN = ctypes.c_ubyte

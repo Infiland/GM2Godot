@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-
 import hashlib as hashlib
 import os
 import posixpath as posixpath
 import secrets as secrets
 import stat as stat
 import tempfile as tempfile
-
-
 from concurrent.futures import (
     FIRST_COMPLETED as FIRST_COMPLETED,
     Future as Future,
@@ -24,8 +21,6 @@ from typing import (
     TypeVar as TypeVar,
 )
 
-
-from src.localization import get_localized as get_localized
 from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text as atomic_write_confined_generated_text,
 )
@@ -36,7 +31,50 @@ from src.conversion.included_file_paths import (
     canonical_included_file_lookup_path as canonical_included_file_lookup_path,
     plan_included_file_paths as plan_included_file_paths,
 )
-from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH as INCLUDED_FILE_REGISTRY_RELATIVE_PATH
+from src.conversion.included_file_registry import (
+    INCLUDED_FILE_REGISTRY_RELATIVE_PATH as INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
+)
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    copy_worker as _included_copy_worker,
+    diagnostics as _included_diagnostics,
+    driver as _included_driver,
+    file_publication as _included_file_publication,
+    generation_matching as _included_generation_matching,
+    guarded_mutations as _included_mutations,
+    locking as _included_locking,
+    models as _included_models,
+    native_posix as _included_posix,
+    native_windows as _included_windows,
+    path_validation as _included_paths,
+    phase_observer as _included_phases,
+    planning as _included_planning,
+    publisher as _included_publisher,
+    record_io as _included_records,
+    record_lifecycle as _included_record_lifecycle,
+    recorded_cleanup as _included_cleanup,
+    recovery as _included_recovery,
+    recovery_codec as _included_codec,
+    source_access as _included_source_access,
+    source_snapshots as _included_snapshots,
+    staging as _included_staging,
+    stat_metadata as _included_metadata,
+    transaction_cleanup as _included_transaction_cleanup,
+    transaction_state as _included_transaction_state,
+    worker_pool as _included_worker_pool,
+)
+from src.conversion.included_files_parts.models import (
+    DeclaredIncludedFile as _DeclaredIncludedFile,
+    IncludedCopyReceipt as _IncludedCopyReceipt,
+    IncludedFileConversionPlan as _IncludedFileConversionPlan,
+    IncludedFileSource as _IncludedFileSource,
+    IncludedGenerationMatch as _IncludedGenerationMatch,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedSourceBinding as _IncludedSourceBinding,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathIdentity as _PathIdentity,
+)
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
@@ -46,39 +84,14 @@ from src.conversion.project_source_paths import (
     ProjectSourcePathError as ProjectSourcePathError,
     ResolvedProjectSourcePath,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, DeclaredIncludedFile as _DeclaredIncludedFile, IncludedFileConversionPlan as _IncludedFileConversionPlan, PathIdentity as _PathIdentity, IncludedCopyReceipt as _IncludedCopyReceipt, IncludedSourceBinding as _IncludedSourceBinding, IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt, IncludedGenerationMatch as _IncludedGenerationMatch, IncludedTreeSnapshot as _IncludedTreeSnapshot, IncludedRegistrySnapshot as _IncludedRegistrySnapshot
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
+from src.localization import get_localized as get_localized
 
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import recovery_codec as _included_codec
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts import models as _included_models
-from src.conversion.included_files_parts import native_posix as _included_posix
-from src.conversion.included_files_parts import native_windows as _included_windows
-
-
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import guarded_mutations as _included_mutations
-from src.conversion.included_files_parts import record_io as _included_records
-from src.conversion.included_files_parts import recorded_cleanup as _included_cleanup
-from src.conversion.included_files_parts import phase_observer as _included_phases
-
-from src.conversion.included_files_parts import copy_worker as _included_copy_worker
-from src.conversion.included_files_parts import diagnostics as _included_diagnostics
-from src.conversion.included_files_parts import driver as _included_driver
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import generation_matching as _included_generation_matching
-from src.conversion.included_files_parts import locking as _included_locking
-from src.conversion.included_files_parts import planning as _included_planning
-from src.conversion.included_files_parts import publisher as _included_publisher
-from src.conversion.included_files_parts import record_lifecycle as _included_record_lifecycle
-from src.conversion.included_files_parts import recovery as _included_recovery
-from src.conversion.included_files_parts import source_access as _included_source_access
-from src.conversion.included_files_parts import staging as _included_staging
-from src.conversion.included_files_parts import transaction_cleanup as _included_transaction_cleanup
-from src.conversion.included_files_parts import transaction_state as _included_transaction_state
-from src.conversion.included_files_parts import worker_pool as _included_worker_pool
 _run_bounded_included_worker_phase = _included_worker_pool.run_bounded_included_worker_phase
 _included_stage_container_snapshot = _included_staging.included_stage_container_snapshot
 _before_included_registry_directory_binding_check = _included_staging.before_included_registry_directory_binding_check

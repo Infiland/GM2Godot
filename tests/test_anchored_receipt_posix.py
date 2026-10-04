@@ -3,17 +3,16 @@ from __future__ import annotations
 
 import errno
 import os
-from pathlib import Path
 import stat
 import sys
 import tempfile
+import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-import unittest
 from unittest import mock
 
 from scripts import _anchored_output as anchored
-
 
 PAYLOAD = b'{"status":"verified"}\n'
 

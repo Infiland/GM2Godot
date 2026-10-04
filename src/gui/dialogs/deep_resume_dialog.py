@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QLabel,
     QPushButton,
-    QSpinBox,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )

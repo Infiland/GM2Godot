@@ -6,13 +6,12 @@ from collections.abc import Sized
 
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.particle_metadata import (
+    ParticleEmitterDescriptor,
+    ParticleRegionDescriptor,
+    ParticleSpawnDescriptor,
     ParticleSystemDescriptor,
     ParticleTypeDescriptor,
-    ParticleEmitterDescriptor,
-    ParticleSpawnDescriptor,
-    ParticleRegionDescriptor,
 )
-
 
 PARTICLE_DESCRIPTOR_FORMAT_VERSION = 1
 

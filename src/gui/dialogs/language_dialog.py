@@ -5,7 +5,12 @@ import sys
 from typing import Any, cast
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QWidget,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.localization import get_localized

@@ -10,10 +10,12 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping, Protocol
 
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.gml_transpiler_parts.extension_functions import (
     EXTENSION_FUNCTION_MAPPING_FILENAME,
     load_gml_extension_function_mappings,
 )
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
@@ -21,8 +23,6 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.type_defs import LogCallback
 
 EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join(

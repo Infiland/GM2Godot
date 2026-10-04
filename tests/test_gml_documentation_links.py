@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 import unittest
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from src.conversion.gml_runtime import runtime_api_index
@@ -17,7 +17,6 @@ from src.conversion.gml_transpiler import (
 from src.conversion.gml_transpiler_parts.gml_api_manifest import (
     GAMEMAKER_LTS_MANUAL_ROOT,
 )
-
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures"
 EVIDENCE_TOPICS_PATH = FIXTURE_ROOT / "gamemaker_lts_2026_evidence_topics.txt"

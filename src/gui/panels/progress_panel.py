@@ -2,13 +2,12 @@ import colorsys
 from typing import Literal, TypeAlias
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QFont, QPaintEvent
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
+from PySide6.QtGui import QColor, QFont, QPainter, QPaintEvent
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from src.conversion.conversion_outcome import ConversionTerminalState
 from src.gui.theme import THEME
 from src.localization import get_localized
-
 
 ProgressPresentationState: TypeAlias = Literal["running"] | ConversionTerminalState
 

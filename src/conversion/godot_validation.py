@@ -6,8 +6,8 @@ import json
 import os
 import re
 import select
-import signal
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile

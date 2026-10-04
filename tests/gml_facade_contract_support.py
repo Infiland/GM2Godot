@@ -9,14 +9,13 @@ from types import MappingProxyType, ModuleType
 from typing import Final, cast, get_type_hints
 
 import src.conversion.gml_transpiler_parts.constants as constants
-import src.conversion.gml_transpiler_parts.lexical_api as lexical_api
 import src.conversion.gml_transpiler_parts.expression_api as expression_api
-import src.conversion.gml_transpiler_parts.statement_api as statement_api
-import src.conversion.gml_transpiler_parts.shared_models as shared_models
 import src.conversion.gml_transpiler_parts.expression_models as expression_models
+import src.conversion.gml_transpiler_parts.lexical_api as lexical_api
 import src.conversion.gml_transpiler_parts.result_models as result_models
+import src.conversion.gml_transpiler_parts.shared_models as shared_models
+import src.conversion.gml_transpiler_parts.statement_api as statement_api
 import src.conversion.gml_transpiler_parts.statement_models as statement_models
-
 from tests.gml_transpiler_architecture_support import (
     ImportEdge,
     literal_string,

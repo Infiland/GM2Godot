@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from src.localization import get_localized
 

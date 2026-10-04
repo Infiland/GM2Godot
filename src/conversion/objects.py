@@ -1,24 +1,24 @@
 # pyright: reportPrivateUsage=false
+import json
 import os
 import posixpath
 import re
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-from src.localization import get_localized
-from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
     resource_sibling_path,
 )
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.events.base import EventMapping
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.generated_paths import (
     generated_nested_resource_path,
 )
@@ -43,31 +43,36 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     tokenize_gml_source,
 )
 from src.conversion.gml_transpiler_parts.shared_models import Token
-from src.conversion.project_source_paths import (
-    is_safe_project_source_component,
-    ProjectSourcePathError,
-    ResolvedProjectSourcePath,
-    project_gml_source_paths,
-    resolve_project_source_path,
-    validate_project_resource_source_path,
-)
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_manifest import (
     ProjectManifestDiagnostic,
     load_gamemaker_project_manifest,
 )
-from src.conversion.project_enums import collect_project_enum_values
-from src.conversion.project_macros import collect_project_macro_values
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    is_safe_project_source_component,
+    project_gml_source_paths,
+    resolve_project_source_path,
+    validate_project_resource_source_path,
+)
+from src.conversion.resource_reference_metadata import capture_asset_name_declaration
 from src.conversion.script_generator import (
     ObjectRuntimeConfig,
     SpriteRuntimeConfig,
     _valid_instance_variables,
     generate_script_content,
 )
-from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
-from src.conversion.resource_reference_metadata import capture_asset_name_declaration
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
+from src.localization import get_localized
 
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"

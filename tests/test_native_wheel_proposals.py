@@ -10,19 +10,18 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
 import time
+import unittest
+import zipfile
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Callable, TypedDict, cast
-import unittest
 from unittest import mock
-import zipfile
-
 
 PRODUCER_PATH = Path(__file__).resolve().parents[1] / "scripts/propose_native_wheels.py"
 SOURCE_ROOT = Path(os.environ.get("GM2GODOT_PROPOSAL_SOURCE_ROOT", str(PRODUCER_PATH.parents[1]))).resolve()

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import ast
+import inspect
+import unittest
 from collections.abc import Callable
 from dataclasses import FrozenInstanceError, fields, is_dataclass
-import inspect
 from pathlib import Path
-from typing import Final, Iterable, get_args, get_origin, get_type_hints, cast
-import unittest
+from typing import Final, Iterable, cast, get_args, get_origin, get_type_hints
 
 from src.conversion.gml_transpiler import (
     transpile_gml_condition as facade_transpile_gml_condition,
@@ -48,9 +48,10 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     StaticDeclaration,
     Token,
 )
-
-from tests.gml_facade_contract_support import literal_all_exports, runtime_phase_contract
-
+from tests.gml_facade_contract_support import (
+    literal_all_exports,
+    runtime_phase_contract,
+)
 
 PARTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts"
 FACADE_PATH = PARTS_PATH.parent / "gml_transpiler.py"

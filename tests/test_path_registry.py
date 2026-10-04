@@ -12,8 +12,8 @@ from unittest.mock import patch
 from src.conversion.json_values import JsonValueError
 from src.conversion.path_registry import (
     build_path_registry_entries,
-    render_path_scene,
     render_path_registry_script,
+    render_path_scene,
     write_path_registry,
 )
 

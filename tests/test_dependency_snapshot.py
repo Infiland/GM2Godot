@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 import copy
 import errno
-from io import StringIO
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
+import unittest
 from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
 from types import ModuleType
 from typing import Any, cast
-import unittest
 from unittest import mock
 
 from scripts import build_dependency_snapshot as snapshotter
-
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 SCANNED = "2026-09-02T12:34:56Z"

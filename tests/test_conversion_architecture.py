@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
 import ast
-import json
 import inspect
+import json
 import math
+import os
 import shutil
 import sys
 import tempfile
@@ -16,16 +16,13 @@ from pathlib import Path
 from unittest.mock import mock_open, patch
 
 from src.conversion import resource_models
-from src.conversion.font_metadata import GameMakerFontMetadata
-from src.conversion.sound_metadata import GameMakerSoundMetadata
-from src.conversion.object_metadata import GameMakerObjectMetadata
-from src.conversion.sprite_metadata import GameMakerSpriteMetadata
-from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
 from src.conversion.conversion_plan import (
     build_conversion_plan,
     group_conversion_plan,
     validate_conversion_step_graph,
 )
+from src.conversion.font_metadata import GameMakerFontMetadata
+from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 from src.conversion.gml_transpiler_parts.asset_lowering import (
     asset_argument_indices,
     first_argument_is_script_asset,
@@ -40,8 +37,8 @@ from src.conversion.gml_transpiler_parts.gml_function_dispatch import (
     validate_gml_function_arity,
 )
 from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
-from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 from src.conversion.json_values import JsonArray, JsonObject, JsonValue
+from src.conversion.object_metadata import GameMakerObjectMetadata
 from src.conversion.path_metadata import GameMakerPathMetadata, PathMetadataPoint
 from src.conversion.resource_models import (
     FontModel,
@@ -51,7 +48,12 @@ from src.conversion.resource_models import (
     TileSetModel,
     parse_gamemaker_resource_models,
 )
-
+from src.conversion.sound_metadata import GameMakerSoundMetadata
+from src.conversion.sprite_metadata import GameMakerSpriteMetadata
+from src.conversion.tileset_metadata import (
+    GameMakerTilesetMetadata,
+    parse_gamemaker_tileset_metadata,
+)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RESOURCE_MATRIX_PATH = os.path.join(
@@ -1876,8 +1878,11 @@ class TestFinalJsonResourceConsumers(unittest.TestCase):
             self.assertEqual((projected.sequences[0].track_count, projected.timelines[0].moment_count), (7, 11))
 
     def test_room_layer_summary_is_consumed_before_advancing_preorder_iterator(self) -> None:
-        from src.conversion.room_metadata import RoomLayerSummaryFields, iter_room_layer_summary_fields
         from src.conversion.resource_models import RoomLayerModel
+        from src.conversion.room_metadata import (
+            RoomLayerSummaryFields,
+            iter_room_layer_summary_fields,
+        )
         events: list[str] = []
         def observed(value: JsonValue, *, source_context: str) -> Iterator[RoomLayerSummaryFields]:
             for layer_fields in iter_room_layer_summary_fields(value, source_context=source_context):
@@ -1901,7 +1906,11 @@ class TestFinalJsonResourceConsumers(unittest.TestCase):
                              [("Parent", True, 0), ("Child", 9, 0)])
 
     def test_room_sequence_timeline_constructor_prefixes_remain_compatible(self) -> None:
-        from src.conversion.resource_models import RoomModel, SequenceModel, TimelineModel
+        from src.conversion.resource_models import (
+            RoomModel,
+            SequenceModel,
+            TimelineModel,
+        )
         prefix = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data")
         for model, suffix in ((RoomModel, ("width", "height", "persistent", "inherit_layers", "parent_room_name", "layers")),
                               (SequenceModel, ("track_count",)), (TimelineModel, ("moment_count",))):

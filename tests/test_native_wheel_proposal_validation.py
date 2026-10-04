@@ -1,8 +1,6 @@
 """Synthetic bounded original archives exercise policy, never claim native proof."""
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
 import copy
 import errno
 import hashlib
@@ -10,17 +8,19 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import subprocess
 import sys
 import tempfile
+import unittest
+import zipfile
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, BinaryIO, cast
-import unittest
 from unittest.mock import patch
-import zipfile
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/verify_native_wheel_proposal.py'
 REPOSITORY = SCRIPT.parents[1]

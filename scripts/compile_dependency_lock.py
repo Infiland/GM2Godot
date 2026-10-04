@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 import os
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 
 
 def _is_inherited_python_or_pip_setting(name: str) -> bool:

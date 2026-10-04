@@ -3,8 +3,8 @@
 import json
 import math
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -15,19 +15,21 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.localization import get_localized
-from src.conversion.sounds import SoundConverter, SoundData
-from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.sound_metadata import SoundConversionFields, parse_gamemaker_sound_metadata
-from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
 )
+from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.sound_metadata import (
+    SoundConversionFields,
+    parse_gamemaker_sound_metadata,
+)
+from src.conversion.sounds import SoundConverter, SoundData
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
-
+from src.localization import get_localized
 
 SoundYY: TypeAlias = dict[str, object]
 

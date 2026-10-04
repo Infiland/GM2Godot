@@ -1,13 +1,13 @@
 import webbrowser
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QEvent
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QCursor, QEnterEvent, QIcon, QMouseEvent
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from src.gui.theme import THEME
-from src.version import get_version
 from src.localization import get_localized
+from src.version import get_version
 
 
 class ClickableLabel(QLabel):

@@ -3,8 +3,8 @@
 import json
 import math
 import os
-import sys
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -15,13 +15,6 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.fonts import FontConverter, FontData, _find_system_font
-from src.conversion.font_metadata import (
-    FontConversionFields,
-    parse_gamemaker_font_metadata,
-)
-from src.conversion.json_values import JsonObject, JsonValue, JsonValueError
-from src.localization import get_localized
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
@@ -29,7 +22,13 @@ from src.conversion.asset_output_paths import (
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
-
+from src.conversion.font_metadata import (
+    FontConversionFields,
+    parse_gamemaker_font_metadata,
+)
+from src.conversion.fonts import FontConverter, FontData, _find_system_font
+from src.conversion.json_values import JsonObject, JsonValue, JsonValueError
+from src.localization import get_localized
 
 FontYY: TypeAlias = dict[str, object]
 

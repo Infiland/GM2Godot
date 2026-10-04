@@ -1,14 +1,23 @@
 import multiprocessing
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QCheckBox, QComboBox, QPushButton, QWidget, QSpinBox,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
-from src.gui.dialogs.deep_setup_dialog import DeepSetupDialog
-from src.gui.theme import THEME
-from src.gui.setting_value import SettingValue
 from src.conversion.converter import CONVERSION_CATEGORIES
+from src.gui.dialogs.deep_setup_dialog import DeepSetupDialog
+from src.gui.setting_value import SettingValue
+from src.gui.theme import THEME
 from src.localization import get_localized, get_localized_dict, get_localized_list
 
 

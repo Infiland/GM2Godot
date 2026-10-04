@@ -1,7 +1,6 @@
 from src.conversion.events.base import EventMapping, EventTypeHandlers, StaticMappings
 from src.conversion.json_values import JsonObject
 
-
 STATIC_MAPPINGS: StaticMappings = {
     (0, 0): EventMapping("_ready", "", 0, "Create_0.gml"),
     (1, 0): EventMapping("_on_destroy", "", 10, "Destroy_0.gml"),

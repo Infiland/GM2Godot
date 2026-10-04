@@ -12,7 +12,10 @@ from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.project_manifest import GameMakerProjectManifest
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.resource_models import (
-    GameMakerResourceModels, ObjectModel, ProjectModel, SpriteModel,
+    GameMakerResourceModels,
+    ObjectModel,
+    ProjectModel,
+    SpriteModel,
 )
 from src.deep.host_snapshot import build_host_snapshot, write_host_snapshot
 from src.deep.snapshot_resources import inventory_resources

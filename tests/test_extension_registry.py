@@ -14,22 +14,22 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+import src.conversion.extension_registry as extension_registry
+from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
     ExtensionEntry,
-    extension_entry_from_yy,
     build_extension_entries,
+    extension_entry_from_yy,
     extension_stub_relative_script_path,
     extension_stub_resource_path,
     render_extension_compatibility_report,
     render_extension_stub_script,
     write_extension_compatibility_outputs,
 )
-from src.conversion.json_values import JsonObject
 from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
-from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.json_values import JsonObject
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
-import src.conversion.extension_registry as extension_registry
 
 
 def _write_file(path: str, content: str) -> None:

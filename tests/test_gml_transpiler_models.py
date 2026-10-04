@@ -1,29 +1,20 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
-import unittest
 
 from src.conversion.gml_transpiler import (
-    GMLTranspileError as FacadeGMLTranspileError,
     GMLExtensionFunction as FacadeGMLExtensionFunction,
     GMLExtensionFunctionMapping as FacadeGMLExtensionFunctionMapping,
-    GMLPreprocessResult as FacadeGMLPreprocessResult,
     GMLPreprocessorDiagnostic as FacadeGMLPreprocessorDiagnostic,
+    GMLPreprocessResult as FacadeGMLPreprocessResult,
     GMLSourceDiagnostic as FacadeGMLSourceDiagnostic,
     GMLSourceMap as FacadeGMLSourceMap,
     GMLSourceMapEntry as FacadeGMLSourceMapEntry,
+    GMLTranspileError as FacadeGMLTranspileError,
     GMLTranspileResult as FacadeGMLTranspileResult,
-)
-from src.conversion.gml_transpiler_parts.extension_functions import (
-    GMLExtensionFunction as ExtensionGMLExtensionFunction,
-    GMLExtensionFunctionMapping as ExtensionGMLExtensionFunctionMapping,
-)
-from src.conversion.gml_transpiler_parts.source_map import (
-    GMLSourceDiagnostic as SourceMapGMLSourceDiagnostic,
-    GMLSourceMap as SourceMapGMLSourceMap,
-    GMLSourceMapEntry as SourceMapGMLSourceMapEntry,
 )
 from src.conversion.gml_transpiler_parts.expression_models import (
     ArrayLiteral,
@@ -53,9 +44,13 @@ from src.conversion.gml_transpiler_parts.expression_models import (
     Ternary,
     Unary,
 )
+from src.conversion.gml_transpiler_parts.extension_functions import (
+    GMLExtensionFunction as ExtensionGMLExtensionFunction,
+    GMLExtensionFunctionMapping as ExtensionGMLExtensionFunctionMapping,
+)
 from src.conversion.gml_transpiler_parts.result_models import (
-    GMLPreprocessResult,
     GMLPreprocessorDiagnostic,
+    GMLPreprocessResult,
     GMLSourceDiagnostic,
     GMLSourceMap,
     GMLSourceMapEntry,
@@ -63,9 +58,9 @@ from src.conversion.gml_transpiler_parts.result_models import (
     SourceDiagnosticSeverity,
 )
 from src.conversion.gml_transpiler_parts.shared_models import (
+    DEFAULT_SCOPE_CONTEXT,
     AssignmentOperator,
     BuiltinVariableMetadata,
-    DEFAULT_SCOPE_CONTEXT,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
@@ -75,14 +70,17 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     StaticDeclaration,
     Token,
 )
+from src.conversion.gml_transpiler_parts.source_map import (
+    GMLSourceDiagnostic as SourceMapGMLSourceDiagnostic,
+    GMLSourceMap as SourceMapGMLSourceMap,
+    GMLSourceMapEntry as SourceMapGMLSourceMapEntry,
+)
 from src.conversion.gml_transpiler_parts.statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
     GMLStatementResult,
 )
-
 from tests.gml_facade_contract_support import runtime_phase_contract
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PARTS_PATH = PROJECT_ROOT / "src" / "conversion" / "gml_transpiler_parts"

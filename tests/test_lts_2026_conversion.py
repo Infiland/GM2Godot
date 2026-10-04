@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
-from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.conversion_outcome import ConversionOutcome
+from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
 from src.conversion.godot_validation import (
     GodotValidationReport,
@@ -22,7 +22,6 @@ from src.conversion.godot_validation import (
     write_godot_validation_report,
 )
 from src.gui.setting_value import SettingValue
-
 
 REQUIRE_FIXTURES_ENV = "GM2GODOT_REQUIRE_LTS_FIXTURES"
 OUTPUT_ROOT_ENV = "LTS_FIXTURE_OUTPUT_ROOT"

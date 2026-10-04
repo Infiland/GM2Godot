@@ -24,7 +24,6 @@ from src.conversion.godot_validation import (
     validate_generated_godot_project,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_MATRIX_PATH = (
     PROJECT_ROOT / "tests" / "fixtures" / "part2" / "projects" / "resource_matrix"

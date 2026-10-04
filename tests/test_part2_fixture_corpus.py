@@ -14,11 +14,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
+from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH
-
 
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "part2"
 CORPUS_PATH = FIXTURE_ROOT / "corpus.json"

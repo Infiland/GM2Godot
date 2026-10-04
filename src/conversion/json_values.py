@@ -2,7 +2,6 @@
 
 from typing import Literal, TypeGuard, cast
 
-
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | JsonArray | JsonObject
 type JsonArray = list[JsonValue]

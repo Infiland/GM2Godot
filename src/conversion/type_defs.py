@@ -3,7 +3,6 @@ from __future__ import annotations
 from os import PathLike
 from typing import Callable, Protocol, TypeAlias
 
-
 StrPath: TypeAlias = str | PathLike[str]
 
 LogCallback: TypeAlias = Callable[[str], None]

@@ -38,7 +38,6 @@ from src.conversion.managed_output_workspace import (
     ManagedOutputWorkspace,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "golden" / "basic_scripts"
 _DIGEST_A = "sha256:" + ("a" * 64)

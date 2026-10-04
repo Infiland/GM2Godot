@@ -5,11 +5,13 @@ import os
 import sys
 from typing import Any, cast
 
+from src.application_resources import application_resource_base, language_preference_read_path
+
 
 def get_base_path() -> str:
     if getattr(sys, 'frozen', False):
         return cast(str, getattr(sys, '_MEIPASS'))
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return application_resource_base(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def _load_language_value(path: str, key: str) -> object | None:
     with open(path, 'r', encoding='utf-8') as file:
@@ -19,7 +21,7 @@ def _load_language_value(path: str, key: str) -> object | None:
 
 def _get_localized_raw(key: str) -> object | None:
     base_path = get_base_path()
-    lang_file = os.path.join(base_path, 'Current Language')
+    lang_file = language_preference_read_path(base_path)
     with open(lang_file, 'r', encoding='utf-8') as file:
         language = file.readline().strip()
 

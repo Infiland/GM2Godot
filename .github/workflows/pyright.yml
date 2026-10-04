@@ -45,11 +45,12 @@ jobs:
             pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.lock \
-            -r requirements.txt 'pyright[nodejs]==1.1.411'
+            -r requirements.txt 'pyright[nodejs]==1.1.411' setuptools
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.lock \
             --mode subset \
             --require pip \
+            --require setuptools \
             --require Pillow \
             --require markdown2 \
             --require requests \

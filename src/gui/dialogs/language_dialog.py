@@ -13,13 +13,21 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.application_resources import (
+    application_resource_base,
+    is_packaged_application_base,
+    language_preference_read_path,
+    language_preference_write_path,
+)
 from src.localization import get_localized
 
 
 def _base_path() -> str:
     if getattr(sys, 'frozen', False):
         return cast(str, getattr(sys, '_MEIPASS'))
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    return application_resource_base(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    )
 
 
 class LanguageDialog(QDialog):
@@ -56,7 +64,7 @@ class LanguageDialog(QDialog):
 
         current_key = ""
         try:
-            with open(os.path.join(base, "Current Language"), "r", encoding="utf-8") as f:
+            with open(language_preference_read_path(base), "r", encoding="utf-8") as f:
                 current_key = f.read().strip()
         except Exception:
             pass
@@ -80,9 +88,12 @@ class LanguageDialog(QDialog):
         lang_code = self._language_keys[idx] if idx < len(self._language_keys) else "eng"
 
         try:
-            with open(os.path.join(base, "Current Language"), "w", encoding="utf-8") as f:
+            with open(language_preference_write_path(base), "w", encoding="utf-8") as f:
                 f.write(lang_code)
         except Exception:
             pass
 
-        os.execl(sys.executable, sys.executable, *sys.argv)
+        if is_packaged_application_base(base):
+            os.execl(sys.executable, sys.executable, "-m", "main", *sys.argv[1:])
+        else:
+            os.execl(sys.executable, sys.executable, *sys.argv)

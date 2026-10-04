@@ -5,11 +5,13 @@ from typing import cast
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap
 
+from src.application_resources import application_resource_base
+
 
 def _base_path() -> str:
     if getattr(sys, 'frozen', False):
         return cast(str, getattr(sys, '_MEIPASS'))
-    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return application_resource_base(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
 class AppIcons:

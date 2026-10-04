@@ -1,3 +1,54 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "GM2Godot"
+dynamic = ["version"]
+description = "Convert GameMaker Studio 2 projects and assets to Godot"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+  "Pillow==12.3.0",
+  "markdown2==2.5.5",
+  "requests==2.34.2",
+  "urllib3==2.8.0",
+  "PySide6==6.11.1",
+  "keyring==25.7.0",
+]
+
+[project.urls]
+Repository = "https://github.com/Infiland/GM2Godot"
+Issues = "https://github.com/Infiland/GM2Godot/issues"
+Documentation = "https://github.com/Infiland/GM2Godot/wiki"
+
+[project.scripts]
+gm2godot = "main:main"
+
+[project.gui-scripts]
+gm2godot-gui = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
+namespaces = true
+
+[tool.setuptools.dynamic]
+version = {attr = "src.version.VERSION"}
+
+[tool.setuptools.package-data]
+"src.conversion.gml_runtime_parts" = ["segments/*.gd"]
+"src.application_assets" = ["Current Language", "img/*.png", "Languages/*.json"]
+
+[tool.setuptools.cmdclass]
+build_py = "scripts.build_application_assets.BuildApplicationAssets"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 120

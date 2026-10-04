@@ -635,6 +635,45 @@ MACOS_METADATA_SCRIPT = (
 )
 
 
+MAIN_QUALITY_JOB = (
+    "  main-quality:\n"
+    "    needs: [get-version, release-state-preflight, build]\n"
+    "    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}\n"
+    "    runs-on: ubuntu-latest\n"
+    "    timeout-minutes: 95\n"
+    "    permissions:\n"
+    "      actions: read\n"
+    "      contents: read\n"
+    "    steps:\n"
+    "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n"
+    "        with:\n"
+    "          ref: ${{ github.sha }}\n"
+    "          fetch-depth: 1\n"
+    "          persist-credentials: false\n"
+    "\n"
+    "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n"
+    "        with:\n"
+    "          python-version: '3.12'\n"
+    "\n"
+    "      - name: Require every main quality workflow\n"
+    "        env:\n"
+    "          GH_TOKEN: ${{ github.token }}\n"
+    "        run: python -m scripts.check_main_quality --output \"$RUNNER_TEMP/main-quality.json\"\n"
+    "\n"
+)
+
+
+def _main_quality_policy_errors(content: str, publisher: str) -> tuple[str, ...]:
+    errors: list[str] = []
+    if content.count("\n  main-quality:\n") != 1:
+        errors.append("one main quality gate is required")
+    elif _workflow_job_section(content, "main-quality") != MAIN_QUALITY_JOB:
+        errors.append("main quality requires exact readonly dependencies, source and bounded checker")
+    if "    needs: [get-version, release-state-preflight, build, main-quality]\n" not in publisher:
+        errors.append("publisher must depend on the successful aggregate quality gate")
+    return tuple(errors)
+
+
 def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
     """Keep both native lanes, fatal package gates and separate retained proofs."""
 
@@ -643,6 +682,7 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         return ("exact build and publisher jobs are required",)
     build = _workflow_job_section(content, "build")
     publisher = _workflow_job_section(content, "release")
+    errors.extend(_main_quality_policy_errors(content, publisher))
     matrix_marker = "        include:\n"
     if build.count(matrix_marker) != 1 or build.count("    runs-on:") != 1:
         return ("one explicit native matrix is required",)
@@ -794,7 +834,8 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         "    if: ${{ !cancelled() && github.event_name != 'pull_request' && "
         "github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && "
         "needs.get-version.outputs.tag_exists == 'false' && "
-        "needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}"
+        "needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && "
+        "needs.main-quality.result == 'success' }}"
     )
     if re.findall(r"(?m)^    if:.*$", publisher) != [expected_publisher_guard]:
         errors.append("publication requires main, successful native builds/preflight and an absent tag")
@@ -4638,7 +4679,7 @@ class TestCIWorkflows(unittest.TestCase):
         workflow = PROJECT_ROOT / ".github" / "workflows" / "release.yml"
         content = workflow.read_text(encoding="utf-8")
         script = _workflow_run_script(content, "Check if tag already exists")
-        build_job = content[content.index("  build:"):content.index("  release:")]
+        build_job = _workflow_job_section(content, "build")
         release_job = content[content.index("  release:"):]
         absence_guard = "needs.get-version.outputs.tag_exists == 'false'"
         build_job_conditions = [
@@ -4658,7 +4699,7 @@ class TestCIWorkflows(unittest.TestCase):
             "needs.get-version.result == 'success' && "
             f"{absence_guard} && "
             "needs.release-state-preflight.result == 'success' && "
-            "needs.build.result == 'success' }}"
+            "needs.build.result == 'success' && needs.main-quality.result == 'success' }}"
         )
 
         self.assertIn("set -euo pipefail", script)
@@ -4707,7 +4748,7 @@ class TestCIWorkflows(unittest.TestCase):
             )
         ]
         release_job = content[content.index("  release:"):]
-        build_job = content[content.index(build_marker):content.index("  release:")]
+        build_job = _workflow_job_section(content, "build")
         preflight_script = _workflow_run_script(
             content,
             "Check for incomplete release state",
@@ -4835,7 +4876,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertNotIn("existing-release-integrity", build_job)
         self.assertNotIn("always()", build_job)
         self.assertIn(
-            "needs: [get-version, release-state-preflight, build]",
+            "needs: [get-version, release-state-preflight, build, main-quality]",
             release_job,
         )
         self.assertNotIn("existing-release-integrity", release_job)
@@ -4895,6 +4936,23 @@ class TestCIWorkflows(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, release_job)
 
+        for workflow_name in (
+            "tests.yml", "pyright.yml", "code-health.yml", "godot-smoke.yml",
+            "tcc-conversion-test.yml", "native-wheel-proposals.yml", "dependency-locks.yml",
+        ):
+            with self.subTest(main_quality_workflow=workflow_name):
+                workflow_source = (PROJECT_ROOT / ".github/workflows" / workflow_name).read_text(
+                    encoding="utf-8"
+                )
+                push_header = re.search(
+                    r"(?m)^  push:\n(?:(?:    .*|)\n)*", workflow_source,
+                )
+                self.assertIsNotNone(push_header)
+                assert push_header is not None
+                self.assertIn("main", push_header.group(0))
+                self.assertNotRegex(push_header.group(0), r"(?m)^    (?:paths|paths-ignore):")
+                self.assertNotIn("workflow_run:", workflow_source)
+
     def test_pyright_targets_supported_python_3_12(self) -> None:
         config = json.loads(
             (PROJECT_ROOT / "pyrightconfig.json").read_text(encoding="utf-8")
@@ -4918,7 +4976,7 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertNotIn("ubuntu-latest", content)
 
         release = (workflow_dir / "release.yml").read_text(encoding="utf-8")
-        release_build = release[release.index("  build:"):release.index("  release:")]
+        release_build = _workflow_job_section(release, "build")
         for native_tuple in (
             "          - os: windows-2025\n"
             "            name: windows\n"
@@ -7468,6 +7526,7 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertEqual(_macos_release_build_policy_errors(release), ())
         build = _workflow_job_section(release, "build")
+        publisher = _workflow_job_section(release, "release")
         arm_start = build.index("          - os: macos-26\n")
         intel_start = build.index("          - os: macos-26-intel\n")
         linux_start = build.index("          - os: ubuntu-24.04\n")
@@ -7509,14 +7568,42 @@ class TestCIWorkflows(unittest.TestCase):
                 '--zip "$GITHUB_WORKSPACE/dist/${{ matrix.name }}/GM2Godot.app"',
             ),
             "publisher guard bypassed": release.replace(
-                "    if: ${{ !cancelled() && github.event_name != 'pull_request'",
-                "    if: ${{ always() && github.event_name != 'pull_request'", 1
+                publisher, publisher.replace(
+                    "    if: ${{ !cancelled() && github.event_name != 'pull_request'",
+                    "    if: ${{ always() && github.event_name != 'pull_request'", 1,
+                ), 1,
             ),
             "publisher condition weakened": release.replace(
-                "github.ref == 'refs/heads/main' && needs.get-version.result",
-                "github.ref == 'refs/heads/main' || needs.get-version.result", 1
+                publisher, publisher.replace(
+                    "github.ref == 'refs/heads/main' && needs.get-version.result",
+                    "github.ref == 'refs/heads/main' || needs.get-version.result", 1,
+                ), 1,
             ),
         }
+        mutations.update({
+            "missing aggregate gate": release.replace(MAIN_QUALITY_JOB, "", 1),
+            "gate waits on its own publisher": release.replace(
+                MAIN_QUALITY_JOB, MAIN_QUALITY_JOB.replace(
+                    "needs: [get-version, release-state-preflight, build]",
+                    "needs: [get-version, release-state-preflight, release]", 1,
+                ), 1,
+            ),
+            "gate token can write": release.replace(
+                MAIN_QUALITY_JOB, MAIN_QUALITY_JOB.replace("actions: read", "actions: write", 1), 1,
+            ),
+            "gate checker bypassed": release.replace(
+                MAIN_QUALITY_JOB, MAIN_QUALITY_JOB.replace(
+                    "run: python -m scripts.check_main_quality", "run: true #", 1,
+                ), 1,
+            ),
+            "publisher quality need removed": release.replace(
+                "needs: [get-version, release-state-preflight, build, main-quality]",
+                "needs: [get-version, release-state-preflight, build]", 1,
+            ),
+            "publisher quality condition removed": release.replace(
+                " && needs.main-quality.result == 'success'", "", 1,
+            ),
+        })
         for name in (
             MACOS_NATIVE_RUNTIME_STEP, MACOS_NATIVE_TEST_STEP, "Verify macOS bundle metadata", MACOS_GUI_STEP,
             "Upload macOS artifacts", MACOS_PROOF_STEP,

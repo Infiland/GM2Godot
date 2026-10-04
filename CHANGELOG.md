@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.28 - 2026-10-04
+
+- Separate included-files path validation, metadata checks and recovery codecs into dedicated owners, preserving conversion output and transaction guarantees.
+- Keep recovery formats and canonical bytes unchanged; verify late owner calls, shared size limits, borrowed descriptors and acyclic helper dependencies.
+
 ## 0.8.27 - 2026-10-04
 
 - Move included-files transaction records and constants into dedicated modules, preserving the converter API, helper patch points, and transaction behavior.

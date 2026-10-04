@@ -1240,9 +1240,7 @@ def _contains_gml_undefined(expr: _Expression) -> bool:
         return any(_contains_gml_undefined(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
-    if isinstance(expr, _StructAccess):
-        return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
-    if isinstance(expr, _DSMapAccess):
+    if isinstance(expr, (_StructAccess, _DSMapAccess)):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.key)
     if isinstance(expr, _DSListAccess):
         return _contains_gml_undefined(expr.target) or _contains_gml_undefined(expr.index)
@@ -1280,9 +1278,7 @@ def _contains_gml_nan(expr: _Expression) -> bool:
         return any(_contains_gml_nan(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
-    if isinstance(expr, _StructAccess):
-        return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
-    if isinstance(expr, _DSMapAccess):
+    if isinstance(expr, (_StructAccess, _DSMapAccess)):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.key)
     if isinstance(expr, _DSListAccess):
         return _contains_gml_nan(expr.target) or _contains_gml_nan(expr.index)
@@ -1323,9 +1319,7 @@ def _contains_gml_pointer(expr: _Expression) -> bool:
         return any(_contains_gml_pointer(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.index)
-    if isinstance(expr, _StructAccess):
-        return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
-    if isinstance(expr, _DSMapAccess):
+    if isinstance(expr, (_StructAccess, _DSMapAccess)):
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.key)
     if isinstance(expr, _DSListAccess):
         return _contains_gml_pointer(expr.target) or _contains_gml_pointer(expr.index)
@@ -1363,9 +1357,7 @@ def _contains_gml_handle(expr: _Expression) -> bool:
         return any(_contains_gml_handle(field_value) for _field_name, field_value in expr.fields)
     if isinstance(expr, _Index):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.index)
-    if isinstance(expr, _StructAccess):
-        return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
-    if isinstance(expr, _DSMapAccess):
+    if isinstance(expr, (_StructAccess, _DSMapAccess)):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.key)
     if isinstance(expr, _DSListAccess):
         return _contains_gml_handle(expr.target) or _contains_gml_handle(expr.index)

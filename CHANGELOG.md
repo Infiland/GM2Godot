@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.38 - 2026-10-04
+
+- Combine identical GML accessor branches in special-value detection and array assignment without changing emitted code.
+
 ## 0.8.37 - 2026-10-04
 
 - Give CLI signal installation, restoration and cancellation state a dedicated typed session owner while preserving live bindings, summaries, reports and error precedence.

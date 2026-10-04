@@ -11,9 +11,10 @@ import threading
 from collections.abc import Callable
 from contextlib import redirect_stdout
 from dataclasses import dataclass, replace
-from types import FrameType
+from types import FrameType as FrameType
 from typing import Sequence, TypedDict, cast
 
+from src.cli_conversion_session import ConversionSession, SignalHandler
 from src.cli_report_lifecycle import (
     ConversionReportLifecycle,
     ConversionReportState,
@@ -131,6 +132,21 @@ class CLIReportOperations:
         return _write_external_conversion_reports
 
 
+
+class CLISignalOperations:
+    """Read current CLI signal bindings at their original operation stages."""
+
+    @property
+    def sigint(self) -> int:
+        return signal.SIGINT
+
+    @property
+    def get_signal_handler(self) -> Callable[[int], SignalHandler]:
+        return signal.getsignal
+
+    @property
+    def set_signal_handler(self) -> Callable[[int, SignalHandler], SignalHandler]:
+        return signal.signal
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
@@ -326,49 +342,29 @@ def _run_convert(args: argparse.Namespace) -> int:
     running.set()
     previous_sigint = signal.getsignal(signal.SIGINT)
     handler_installed = threading.current_thread() is threading.main_thread()
-    sigint_handler_restored = False
-    sigint_received = False
-    managed_generation_decided = False
     terminal_summary_phase = "idle"
     report_lifecycle_state = ConversionReportState(external_report_dir=args.report_dir)
 
     class _TerminalSummaryInterrupted(Exception):
         pass
 
-    def request_cancellation(_signum: int, _frame: FrameType | None) -> None:
-        nonlocal sigint_received
-        if managed_generation_decided or terminal_summary_phase in {
-            "committing",
-            "committed",
-        }:
-            # Once the managed generation decision starts, cancellation cannot
-            # imply rollback. The buffered line also remains single-publication.
-            return
-        if sigint_received:
-            raise KeyboardInterrupt
-        sigint_received = True
-        running.clear()
-        if terminal_summary_phase == "preparing":
-            raise _TerminalSummaryInterrupted
+    class _TerminalSummaryValues:
+        @property
+        def terminal_summary_phase(self) -> str:
+            return terminal_summary_phase
 
-    def restore_sigint_handler() -> None:
-        nonlocal sigint_handler_restored
-        if not handler_installed or sigint_handler_restored:
-            return
-        try:
-            signal.signal(signal.SIGINT, previous_sigint)
-        except KeyboardInterrupt:
-            sigint_handler_restored = (
-                signal.getsignal(signal.SIGINT) == previous_sigint
-            )
-            if terminal_summary_phase != "committed":
-                raise
-        else:
-            sigint_handler_restored = True
+    session = ConversionSession(
+        running,
+        previous_sigint,
+        handler_installed,
+        _TerminalSummaryValues(),
+        CLISignalOperations(),
+        _TerminalSummaryInterrupted,
+    )
+    restore_sigint_handler = session.restore_sigint_handler
 
     try:
-        if handler_installed:
-            signal.signal(signal.SIGINT, request_cancellation)
+        session.install_sigint_handler()
 
         try:
             managed_report_relative = _managed_report_relative_path(
@@ -411,12 +407,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             getattr(converter, "managed_output_transactional", False)
         )
         def observe_cancellation(current: ConversionOutcome) -> ConversionOutcome:
-            if (
-                sigint_received
-                and not managed_generation_decided
-                and current.state != "cancelled"
-            ):
-                current = replace(current, state="cancelled")
+            current = session.observe_cancellation(current)
             converter.diagnostics.set_outcome(current)
             return current
 
@@ -447,7 +438,7 @@ def _run_convert(args: argparse.Namespace) -> int:
             runtime_error = error
         finally:
             if transactional_conversion:
-                managed_generation_decided = True
+                session.managed_generation_decided = True
 
         if preflight_error is not None:
             diagnostic = converter.diagnostics.add(
@@ -673,12 +664,7 @@ def _run_convert(args: argparse.Namespace) -> int:
                 return exit_code
             raise
     finally:
-        if handler_installed and not sigint_handler_restored:
-            try:
-                signal.signal(signal.SIGINT, previous_sigint)
-            except KeyboardInterrupt:
-                if terminal_summary_phase != "committed":
-                    raise
+        session.finally_restore_sigint_handler()
 
 
 def _failed_conversion_outcome(

@@ -2,8 +2,8 @@
 
 `src.conversion.included_files.IncludedFilesConverter` remains the caller entry
 point. The facade currently also owns conversion orchestration, bounded workers
-and the transaction. The records, helpers and native filesystem split establish
-nine internal owners; the facade still needs the remaining orchestration split.
+and the transaction. The records, helpers, native filesystem and state split establish
+fourteen internal owners; the facade still needs the remaining orchestration split.
 
 The landed dependency direction is:
 
@@ -15,6 +15,10 @@ path_validation / stat_metadata -> recovery_codec
 models / stat_metadata -> native_posix
 filesystem_operations / models / path_validation / stat_metadata -> native_windows
 filesystem_operations / native_posix / native_windows / stat_metadata -> native_filesystem
+native filesystem / stat metadata / paths / models -> source_snapshots
+source_snapshots / native filesystem / phase_observer -> guarded_mutations
+source_snapshots / native filesystem / recovery_codec -> record_io
+source_snapshots / guarded_mutations / native filesystem / phase_observer -> recorded_cleanup
 owners -> remaining included_files orchestration
 ```
 
@@ -64,6 +68,16 @@ validation streams and Windows cleanup-parent bindings retain their original
 ownership. Lock release continues to use the platform flag captured at lock
 acquisition.
 
+`source_snapshots` owns confined source and output-tree observation, inventories
+and descriptor/path bindings. `guarded_mutations` owns confined creation, rename,
+quarantine and removal. `record_io` owns bounded record reads and exclusive
+canonical record writes. `recorded_cleanup` owns receipt-verified cleanup and
+resumable tombstones. `phase_observer` owns the existing durable-phase observer,
+looked up at the original phase boundaries. These owners share the existing
+typed native filesystem composition; no lower owner imports the converter.
+Record I/O does not import cleanup. Borrowed descriptors and Windows bindings
+remain borrowed through success and injected errors.
+
 Each moved definition retains its private spelling and has a finite named
 internal export. The facade keeps explicit aliases to those same objects for
 existing private imports. Operational calls use the actual owner's namespace;
@@ -85,15 +99,16 @@ early or taking ownership of borrowed descriptors.
 
 Existing transaction/security test IDs and assertions remain, with private
 fault-injection sites following the moved owners. Existing native workflow
-selectors remain, with the new native-owner test module added to the Windows
+selectors remain, with the native-owner and state-owner test modules added to the Windows
 transaction job. Runtime pins and generated-output fixtures remain unchanged.
 Focused owner tests enforce the dependency direction and exercise live native
 delegation, late platform selection, borrowed descriptors and real Windows
 binding pinning, close and active-error handling;
-the existing transaction, recovery, scale and Godot tests remain authoritative
+state-owner tests also check bounded canonical records and durable quarantine
+observer replacement; the existing transaction, recovery, scale and Godot tests remain authoritative
 for their wider contracts. Required verification includes zero-warning global
 typing, Ruff, relevant tests, the full suite after shared-boundary changes,
 native Windows transaction checks and pinned Godot output validation.
 
-Issue #798 remains open until source/planning/staging and transaction owners,
-the driver, thin facade and matching test split are complete.
+Issue #798 remains open until the remaining 42 helpers, converter method
+owners, thin facade and matching test split are complete.

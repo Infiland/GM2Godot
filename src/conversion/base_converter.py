@@ -23,7 +23,8 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
 )
 from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.json_values import JsonObject
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
 class BaseConverter(ABC):
@@ -361,7 +362,7 @@ class BaseConverter(ABC):
         with self._lock:
             self._log_progress(item_name, current, total)
 
-    def _read_yy_file(self, yy_path: StrPath) -> JsonDict | None:
+    def _read_yy_file(self, yy_path: StrPath) -> JsonObject | None:
         """Read and parse a GameMaker .yy file, cleaning trailing commas."""
         try:
             resolved = resolve_project_filesystem_source_path(

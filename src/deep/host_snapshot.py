@@ -11,6 +11,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from src.conversion.json_values import JsonArray, JsonObject
 from src.conversion.gml_transpiler import iter_gml_api_entries
 from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.resource_index import GameMakerResourceIndex
@@ -19,7 +20,7 @@ from src.deep.snapshot_resources import inventory_resources
 from src.version import get_version
 
 
-def build_host_snapshot(source_path: str) -> dict[str, object]:
+def build_host_snapshot(source_path: str) -> JsonObject:
     """Describe source resources and converter capabilities without converting."""
     source = Path(source_path).resolve(strict=True)
     if source.is_file() and source.suffix.casefold() == ".yyp":
@@ -34,7 +35,7 @@ def build_host_snapshot(source_path: str) -> dict[str, object]:
         index.build()
     models = parse_gamemaker_resource_models(str(source))
     inventory = inventory_resources(source, manifest, models, index)
-    entries: list[dict[str, object]] = [
+    entries: JsonArray = [
         {
             "name": entry.name, "category": entry.category, "status": entry.status,
             "issueNumber": entry.issue_number, "ownerModule": entry.owner_module,

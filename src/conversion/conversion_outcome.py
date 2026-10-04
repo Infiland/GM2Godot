@@ -4,7 +4,7 @@ import threading
 from dataclasses import dataclass, field, replace
 from typing import Iterable, Literal, TypeAlias
 
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
 
 
 ConversionTerminalState: TypeAlias = Literal[
@@ -65,7 +65,7 @@ class ConversionCounts:
             failed=self.failed + other.failed,
         )
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "requested": self.requested,
             "executed": self.executed,
@@ -208,7 +208,7 @@ class ConversionStepLedger:
         self._validate_active_transition(step_name, "fail")
         return replace(self, failed=(*self.failed, step_name))
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "requested": list(self.requested),
             "executed": list(self.executed),
@@ -287,7 +287,7 @@ class ConversionOutcome:
                 "Successful conversion outcomes cannot include failure context."
             )
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "state": self.state,
             "converters": self.converters.to_dict(),

@@ -21,7 +21,7 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.resource_index import IndexedRoom
 from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonValueError
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue, JsonValueError
 from src.conversion.tileset_metadata import select_tileset_room_layout
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
@@ -82,15 +82,15 @@ def _make_yyp(
 
 def _make_room_yy(name: str, parent_path: str = "folders/Rooms.yy", width: int = 1024,
                   height: int = 768, persistent: bool = False, volume: float = 1.0,
-                  physics_world: bool = False, layers: list[dict[str, Any]] | None = None,
-                  instance_creation_order: list[dict[str, Any]] | None = None,
+                  physics_world: bool = False, layers: list[JsonObject] | None = None,
+                  instance_creation_order: list[JsonObject] | None = None,
                   creation_code_file: str = "", inherit_code: bool = False,
                   is_dnd: bool = False, inherit_creation_order: bool = False,
-                  inherit_layers: bool = False, parent_room: dict[str, Any] | None = None,
+                  inherit_layers: bool = False, parent_room: JsonObject | None = None,
                   inherit_room_settings: bool = False,
                   inherit_physics_settings: bool = False,
-                  views: list[dict[str, Any]] | None = None,
-                  view_settings: dict[str, Any] | None = None) -> str:
+                  views: list[JsonObject] | None = None,
+                  view_settings: JsonObject | None = None) -> str:
     persistent_value = "true" if persistent else "false"
     physics_world_value = "true" if physics_world else "false"
     inherit_code_value = "true" if inherit_code else "false"
@@ -2495,6 +2495,76 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         with self.assertRaises(OverflowError):
             self._serialize_layout()
 
+
+
+class TestTypedRoomConsumerStages(unittest.TestCase):
+    @staticmethod
+    def room(**values: JsonValue) -> IndexedRoom:
+        return IndexedRoom(
+            name="r", yy_path="rooms/r/r.yy", yyp_path="rooms/r/r.yy",
+            godot_path="res://rooms/r/r.tscn",
+            room_settings=values.get("settings", {}),
+            view_settings=values.get("view_settings", {}),
+            views=values.get("views", []),
+            layers=values.get("layers", []),
+        )
+
+    def test_layer_warning_precedes_live_transform_reads(self) -> None:
+        layer: JsonObject = {"name": "Mystery", "resourceType": "unsupported", "x": 1}
+        room = self.room(layers=[layer])
+        messages: list[str] = []
+        def warn(message: str) -> None:
+            messages.append(message)
+            layer["x"] = 42
+        result = serialize_room_layers(room, warn_callback=warn)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("position = Vector2(42, 0)", result.node_lines)
+        self.assertIn("metadata/gamemaker_layer_x = 42", result.node_lines)
+
+    def test_truthy_malformed_resource_type_fails_at_membership_after_name(self) -> None:
+        layer: JsonObject = {"name": "Known", "resourceType": ["wrong"]}
+        with self.assertRaisesRegex(TypeError, "unhashable type: 'list'"):
+            serialize_room_layers(self.room(layers=[layer]))
+
+    def test_direct_nonarray_layers_preserve_native_iteration_vs_get_failure(self) -> None:
+        self.assertEqual(serialize_room_layers(self.room(layers="ab")).node_lines, [])
+        with self.assertRaisesRegex(TypeError, "'int' object is not iterable"):
+            serialize_room_layers(self.room(layers=4))
+        with self.assertRaises(AttributeError) as caught:
+            serialize_room_layers(self.room(view_settings=7))
+        self.assertEqual(caught.exception.name, "get")
+        self.assertEqual(caught.exception.obj, 7)
+
+    def test_multiple_view_warning_precedes_geometry_reads(self) -> None:
+        first: JsonObject = {"visible": True, "xview": 0, "wview": 100, "hview": 50}
+        second: JsonObject = {"visible": True}
+        views: JsonArray = [first, second]
+        room = self.room(view_settings={"enableViews": True}, views=views)
+        def warn(_message: str) -> None:
+            first["xview"] = 20
+        result = serialize_room_layers(room, warn_callback=warn)
+        self.assertIn("position = Vector2(70, 25)", result.node_lines)
+
+    def test_instance_creation_resolver_callback_precedes_transform_reads(self) -> None:
+        instance: JsonObject = {"name": "i", "hasCreationCode": True, "x": 1}
+        room = self.room(layers=[{"resourceType": "GMRInstanceLayer", "instances": [instance]}])
+        calls: list[tuple[str, str]] = []
+        def resolve(source: str, field: str) -> str | None:
+            calls.append((source, field))
+            instance["x"] = 18
+            return None
+        result = serialize_room_layers(room, creation_code_source_resolver=resolve)
+        self.assertEqual(calls, [("InstanceCreationCode_i.gml", "layers[].instances[].name")])
+        self.assertIn("position = Vector2(18, 0)", result.node_lines)
+
+    def test_coordinate_nonfinite_and_huge_int_policies_remain_distinct(self) -> None:
+        room = self.room(layers=[{"resourceType": "GMRInstanceLayer", "x": float("nan"), "y": -0.0}])
+        result = serialize_room_layers(room)
+        self.assertIn("position = Vector2(nan, 0)", result.node_lines)
+        with self.assertRaises(OverflowError):
+            serialize_room_layers(self.room(layers=[{"x": 10 ** 5000}]))
+        with self.assertRaises(OverflowError):
+            serialize_room_layers(self.room(layers=[{"depth": float("inf")}]))
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,15 +11,14 @@ from src.conversion.event_mapping import (
     EventMapping, map_event as _map_event, is_input_event,
     INPUT_MERGED_MAPPING, map_input_event,
 )
-from src.conversion.type_defs import JsonDict
-from src.conversion.json_values import JsonValue
+from src.conversion.json_values import JsonObject, JsonValue
 
 
-def map_event(event: JsonDict) -> EventMapping:
+def map_event(event: JsonObject) -> EventMapping:
     return cast(EventMapping, _map_event(event))
 
 
-def map_event_optional(event: JsonDict) -> EventMapping | None:
+def map_event_optional(event: JsonObject) -> EventMapping | None:
     return _map_event(event)
 
 

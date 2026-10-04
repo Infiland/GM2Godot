@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import cast
 
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.project_manifest import GameMakerProjectManifest
@@ -13,31 +12,31 @@ from src.conversion.resource_models import (
     ObjectModel,
     RoomModel,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 
 
-def _mapping(value: object) -> JsonDict:
-    return cast(JsonDict, value) if isinstance(value, dict) else {}
+def _mapping(value: JsonValue) -> JsonObject:
+    return value if isinstance(value, dict) else {}
 
 
-def _rows(value: object) -> list[JsonDict]:
+def _rows(value: JsonValue) -> list[JsonObject]:
     if not isinstance(value, list):
         return []
-    return [cast(JsonDict, row) for row in cast(list[object], value) if isinstance(row, dict)]
+    return [row for row in value if isinstance(row, dict)]
 
 
-def _text(value: object) -> str | None:
+def _text(value: JsonValue) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def _number(value: object) -> int | float | None:
+def _number(value: JsonValue) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return value if math.isfinite(value) else None
 
 
-def _events(model: ObjectModel) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+def _events(model: ObjectModel) -> JsonArray:
+    rows: JsonArray = []
     for event in _rows(model.raw_data.get("eventList")):
         mapping = map_input_event(event) if is_input_event(event) else map_event(event)
         rows.append({
@@ -47,7 +46,7 @@ def _events(model: ObjectModel) -> list[dict[str, object]]:
     return rows
 
 
-def _instances(room: IndexedRoom) -> list[dict[str, object]]:
+def _instances(room: IndexedRoom) -> JsonArray:
     names = [_text(row.get("name")) or _text(row.get("%Name")) for row in _rows(room.instance_creation_order)]
     order = {name: position for position, name in enumerate(names) if name}
     rows = [instance for layer in _rows(room.layers)
@@ -60,7 +59,7 @@ def _instances(room: IndexedRoom) -> list[dict[str, object]]:
     } for row in rows]
 
 
-def _room(room: IndexedRoom, model: RoomModel | None, ordered: bool) -> dict[str, object]:
+def _room(room: IndexedRoom, model: RoomModel | None, ordered: bool) -> JsonObject:
     return {
         "name": room.name,
         "width": model.width if model else 0, "height": model.height if model else 0,
@@ -77,22 +76,22 @@ def _room(room: IndexedRoom, model: RoomModel | None, ordered: bool) -> dict[str
     }
 
 
-def _resource_files(source: Path, yy_path: str) -> list[str]:
+def _resource_files(source: Path, yy_path: str) -> JsonArray:
     path = Path(yy_path)
     if not path.is_absolute():
         path = source / path
     if not path.resolve().is_relative_to(source) or not path.is_file():
         return []
     # Resource sidecars include event GML, sprite frames, shader stages, and data.
-    return sorted(str(child) for child in path.parent.rglob("*")
-                  if child.is_file() and not child.is_symlink() and child.resolve().is_relative_to(source))
+    return [name for name in sorted(str(child) for child in path.parent.rglob("*")
+                  if child.is_file() and not child.is_symlink() and child.resolve().is_relative_to(source))]
 
 
 def inventory_resources(
     source: Path, manifest: GameMakerProjectManifest,
     models: GameMakerResourceModels, index: GameMakerResourceIndex,
-) -> dict[str, object]:
-    resources: list[dict[str, object]] = []
+) -> JsonObject:
+    resources: JsonArray = []
     for reference in manifest.resources:
         indexed = index.get_resource(reference.kind, reference.name)
         resources.append({
@@ -102,7 +101,7 @@ def inventory_resources(
             "godotPath": indexed.godot_path if indexed else None,
         })
     room_models = {model.name: model for model in models.rooms}
-    extensions: dict[str, list[dict[str, object]]] = {}
+    extensions: dict[str, JsonArray] = {}
     for function in index.get_extension_functions().values():
         extensions.setdefault(function.extension_name, []).append({
             "name": function.function_name, "externalName": function.external_name or None,
@@ -128,12 +127,20 @@ def inventory_resources(
         "shaders": [{"name": model.name, "vertexPath": model.vertex_path, "fragmentPath": model.fragment_path}
                     for model in models.shaders],
         "extensions": [{"name": name, "functions": functions} for name, functions in sorted(extensions.items())],
-        "diagnostics": [
-            {"severity": item.severity, "code": item.code, "message": item.message,
-             "sourcePath": item.source.path if item.source else None}
-            for item in manifest.diagnostics
-        ] + [
-            {"severity": item.severity, "code": item.code, "message": item.message, "sourcePath": item.source_path}
-            for item in models.diagnostics
-        ],
+        "diagnostics": _inventory_diagnostics(manifest, models),
     }
+
+
+def _inventory_diagnostics(
+    manifest: GameMakerProjectManifest, models: GameMakerResourceModels,
+) -> JsonArray:
+    project_diagnostics: JsonArray = [
+        {"severity": item.severity, "code": item.code, "message": item.message,
+         "sourcePath": item.source.path if item.source else None}
+        for item in manifest.diagnostics
+    ]
+    resource_diagnostics: JsonArray = [
+        {"severity": item.severity, "code": item.code, "message": item.message, "sourcePath": item.source_path}
+        for item in models.diagnostics
+    ]
+    return project_diagnostics + resource_diagnostics

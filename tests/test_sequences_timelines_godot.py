@@ -8,7 +8,6 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
-from typing import cast
 
 from src.conversion.asset_registry import (
     AssetRegistryConverter,
@@ -20,7 +19,7 @@ from src.conversion.sequence_assets import (
     normalize_sequence_asset,
     render_sequence_resource,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonValue, validate_json_value
 
 
 AUTHORED_SEQUENCE_FIXTURE = (
@@ -87,12 +86,31 @@ def _write_registry(project_dir: Path) -> None:
     _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
 
 
-def _authored_sequence_descriptors() -> tuple[JsonDict, JsonDict]:
+def _json_object(value: JsonValue) -> JsonObject:
+    assert isinstance(value, dict)
+    return value
+
+
+def _json_objects(value: JsonValue) -> list[JsonObject]:
+    assert isinstance(value, list)
+    result: list[JsonObject] = []
+    for item in value:
+        assert isinstance(item, dict)
+        result.append(item)
+    return result
+
+
+def _json_array(value: JsonValue) -> list[JsonValue]:
+    assert isinstance(value, list)
+    return value
+
+
+def _authored_sequence_descriptors() -> tuple[JsonObject, JsonObject]:
     with AUTHORED_SEQUENCE_FIXTURE.open(encoding="utf-8") as fixture_file:
-        fixture = cast(JsonDict, json.load(fixture_file))
-    root, root_issues = normalize_sequence_asset(cast(JsonDict, fixture["root"]))
+        fixture = _json_object(validate_json_value(json.load(fixture_file), source_path=str(AUTHORED_SEQUENCE_FIXTURE)))
+    root, root_issues = normalize_sequence_asset(_json_object(fixture["root"]))
     nested, nested_issues = normalize_sequence_asset(
-        cast(JsonDict, fixture["nested"])
+        _json_object(fixture["nested"])
     )
     if root_issues or nested_issues:
         raise AssertionError((root_issues, nested_issues))
@@ -101,7 +119,7 @@ def _authored_sequence_descriptors() -> tuple[JsonDict, JsonDict]:
 
 def _write_authored_registry(project_dir: Path) -> None:
     root, nested = _authored_sequence_descriptors()
-    fps_sequence = cast(JsonDict, json.loads(json.dumps(root)))
+    fps_sequence = _json_object(validate_json_value(json.loads(json.dumps(root)), source_path="normalized sequence roundtrip"))
     fps_sequence["name"] = "seq_fps"
     fps_sequence["length"] = 10.0
     fps_sequence["playback_speed"] = 4.0
@@ -109,11 +127,11 @@ def _write_authored_registry(project_dir: Path) -> None:
     fps_sequence["tracks"] = []
     fps_sequence["moments"] = []
     fps_sequence["broadcasts"] = []
-    loop_sequence = cast(JsonDict, json.loads(json.dumps(fps_sequence)))
+    loop_sequence = _json_object(validate_json_value(json.loads(json.dumps(fps_sequence)), source_path="normalized sequence roundtrip"))
     loop_sequence["name"] = "seq_loop"
     loop_sequence["length"] = 4.0
     loop_sequence["loopmode"] = 1
-    pingpong_sequence = cast(JsonDict, json.loads(json.dumps(loop_sequence)))
+    pingpong_sequence = _json_object(validate_json_value(json.loads(json.dumps(loop_sequence)), source_path="normalized sequence roundtrip"))
     pingpong_sequence["name"] = "seq_pingpong"
     pingpong_sequence["loopmode"] = 2
     entries = [
@@ -746,33 +764,33 @@ class TestAuthoredSequenceDescriptor(unittest.TestCase):
         self.assertEqual(root["playback_speed"], 2.0)
         self.assertEqual(root["playback_speed_type"], 1)
         self.assertEqual(
-            [track["kind"] for track in root["tracks"]],
+            [track["kind"] for track in _json_objects(root["tracks"])],
             ["sprite", "instance", "audio", "text", "sequence"],
         )
         self.assertEqual(
-            root["tracks"][0]["parameters"][0]["interpolation"],
+            _json_objects(_json_objects(root["tracks"])[0]["parameters"])[0]["interpolation"],
             1,
         )
         self.assertEqual(
-            root["tracks"][0]["parameters"][2]["keyframes"][0]["values"][0],
+            _json_array(_json_objects(_json_objects(_json_objects(root["tracks"])[0]["parameters"])[2]["keyframes"])[0]["values"])[0],
             [1.0, 1.0, 0.0, 0.0],
         )
         self.assertEqual(
-            root["tracks"][2]["parameters"][1]["effect_type"],
+            _json_objects(_json_objects(root["tracks"])[2]["parameters"])[1]["effect_type"],
             "gain",
         )
         self.assertEqual(
-            [moment["script"] for moment in root["moments"]],
+            [moment["script"] for moment in _json_objects(root["moments"])],
             ["seq_moment_a", "seq_moment_b"],
         )
         self.assertEqual(
-            [event["message"] for event in root["broadcasts"]],
+            [event["message"] for event in _json_objects(root["broadcasts"])],
             ["first", "second"],
         )
-        self.assertEqual(nested["tracks"][0]["keyframes"][0]["asset"], "spr_nested")
+        self.assertEqual(_json_objects(_json_objects(nested["tracks"])[0]["keyframes"])[0]["asset"], "spr_nested")
 
     def test_unsupported_tracks_keys_and_curves_fail_closed_with_paths(self) -> None:
-        raw: JsonDict = {
+        raw: JsonObject = {
             "name": "seq_unsupported",
             "length": 10,
             "tracks": [
@@ -852,8 +870,8 @@ class TestAuthoredSequenceDescriptor(unittest.TestCase):
         descriptor, issues = normalize_sequence_asset(raw)
 
         self.assertFalse(descriptor["complete"])
-        self.assertEqual(descriptor["tracks"][0]["keyframes"], [])
-        self.assertEqual(descriptor["tracks"][0]["parameters"][0]["keyframes"], [])
+        self.assertEqual(_json_objects(_json_objects(descriptor["tracks"])[0]["keyframes"]), [])
+        self.assertEqual(_json_objects(_json_objects(_json_objects(descriptor["tracks"])[0]["parameters"])[0]["keyframes"]), [])
         self.assertEqual(
             {issue.code for issue in issues},
             {

@@ -43,7 +43,7 @@ from src.conversion.included_file_paths import (
     plan_included_file_paths,
 )
 from src.conversion.project_manifest import load_gamemaker_project_manifest
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonArray, JsonObject
 
 CONVERSION_MANIFEST_RELATIVE_PATH = os.path.join("gm2godot", "conversion_manifest.json")
 CONVERSION_ATTEMPT_RELATIVE_PATH = os.path.join("gm2godot", "conversion_attempt.json")
@@ -71,7 +71,7 @@ class GeneratedFileEntry:
     kind: str
     sha256: str
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "path": self.path,
             "kind": self.kind,
@@ -297,7 +297,7 @@ def build_conversion_manifest(
     conversion_outcome: ConversionOutcome,
     generation_inventory: GenerationInventory | None = None,
     generation_root_path: str | None = None,
-) -> JsonDict:
+) -> JsonObject:
     enabled_converter_keys = _normalized_enabled_converter_keys(enabled_converters)
     _validate_canonical_outcome(
         conversion_outcome,
@@ -346,9 +346,9 @@ def _build_conversion_manifest(
     conversion_outcome: ConversionOutcome,
     asset_entries: tuple[AssetRegistryEntry, ...],
     generation_inventory: GenerationInventory,
-) -> JsonDict:
+) -> JsonObject:
     project_manifest = load_gamemaker_project_manifest(gm_project_path, target_platform=target_platform)
-    generated_files = [
+    generated_files: JsonArray = [
         GeneratedFileEntry(
             path=entry.path,
             kind=entry.kind,
@@ -392,7 +392,7 @@ def _build_conversion_manifest(
     }
 
 
-def _conversion_record(outcome: ConversionOutcome) -> JsonDict:
+def _conversion_record(outcome: ConversionOutcome) -> JsonObject:
     return {
         **outcome.to_dict(),
         "cancelled": outcome.state == "cancelled",
@@ -501,7 +501,7 @@ def _conversion_attempt_payload(
     manifest_updated: bool,
     current_output_status: str,
     manifest_digest: str | None,
-) -> JsonDict:
+) -> JsonObject:
     return {
         "format_version": 1,
         "attempt": _conversion_record(attempt_outcome),
@@ -583,7 +583,7 @@ def _owned_temporary_artifact_target(filename: str) -> str | None:
     return None
 
 
-def _serialize_json(payload: JsonDict) -> bytes:
+def _serialize_json(payload: JsonObject) -> bytes:
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
@@ -652,8 +652,8 @@ def _file_fingerprint(path_stat: os.stat_result) -> FileFingerprint:
     )
 
 
-def _path_diagnostics(entries: tuple[AssetRegistryEntry, ...]) -> list[JsonDict]:
-    diagnostics: list[JsonDict] = []
+def _path_diagnostics(entries: tuple[AssetRegistryEntry, ...]) -> JsonArray:
+    diagnostics: JsonArray = []
     paths_by_casefold: dict[str, list[AssetRegistryEntry]] = {}
     base_paths_by_casefold: dict[str, list[tuple[AssetRegistryEntry, str]]] = {}
     included_collision_components = _included_file_collision_components(entries)
@@ -786,7 +786,7 @@ def _base_generated_path(entry: AssetRegistryEntry) -> str:
     return entry.godot_path
 
 
-def _unsafe_segments(res_path: str) -> list[str]:
+def _unsafe_segments(res_path: str) -> JsonArray:
     segments = res_path_segments(res_path)
     return [
         segment

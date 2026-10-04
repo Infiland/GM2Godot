@@ -25,7 +25,15 @@ from src.conversion.godot_validation import (
     find_godot_binary,
     validate_generated_godot_project,
 )
-from src.conversion.managed_resource_outputs import managed_resource_outputs
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.managed_resource_outputs import (
+    managed_resource_outputs,
+    managed_gamemaker_resource_outputs,
+    timeline_action_script_paths,
+    timeline_json_action_script_paths,
+    reconcile_timeline_action_outputs,
+    reconcile_timeline_json_outputs,
+)
 
 
 class _Setting:
@@ -757,3 +765,70 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTypedManagedGameMakerOutputs(unittest.TestCase):
+    def test_typed_route_has_same_exact_timeline_path_plan(self) -> None:
+        data: JsonObject = {"moments": [None, {"actions": [{"kind": "gml", "script_path": "res://gm2godot/timelines/b.gd"}, {"kind": "gml", "script_path": "res://gm2godot/timelines/a.gd"}, {"kind": "script", "script_path": "ignored"}, None]}]}
+        self.assertEqual(timeline_json_action_script_paths(data), ("gm2godot/timelines/a.gd", "gm2godot/timelines/b.gd"))
+        self.assertEqual(managed_gamemaker_resource_outputs("timelines", "", data), managed_resource_outputs("timelines", "", data))
+
+    def test_typed_reconciliation_deepcopies_unknown_and_preserves_shared_children(self) -> None:
+        child: JsonObject = {"deep": [None, False, {"value": 2}]}
+        action: JsonObject = {"kind": "gml", "script_path": "res://gm2godot/timelines/missing.gd", "unknown": child}
+        data: JsonObject = {"moments": [{"actions": [action]}], "unknown": child}
+        result, missing = reconcile_timeline_json_outputs(data, [])
+        assert result is not None
+        moments = result["moments"]
+        assert isinstance(moments, list)
+        moment = moments[0]
+        assert isinstance(moment, dict)
+        actions = moment["actions"]
+        assert isinstance(actions, list)
+        copied_action = actions[0]
+        assert isinstance(copied_action, dict)
+        self.assertEqual(missing, ("gm2godot/timelines/missing.gd",))
+        self.assertNotIn("script_path", copied_action)
+        self.assertIn("script_path", action)
+        self.assertIsNot(result["unknown"], child)
+        self.assertIs(copied_action["unknown"], result["unknown"])
+
+    def test_general_mapping_contract_retains_non_json_python_descendants(self) -> None:
+        marker = {1, 2}
+        data: dict[str, object] = {"unknown": marker, "moments": []}
+        result, missing = reconcile_timeline_action_outputs(data, [])
+        assert result is not None
+        self.assertEqual(result["unknown"], marker)
+        self.assertIsNot(result["unknown"], marker)
+        self.assertEqual(missing, ())
+        self.assertEqual(timeline_action_script_paths(data), ())
+
+    def test_available_generator_runs_before_typed_metadata_copy(self) -> None:
+        action: JsonObject = {"kind": "gml", "script_path": "res://gm2godot/timelines/old.gd"}
+        data: JsonObject = {"moments": [{"actions": [action]}]}
+        def available():
+            action["script_path"] = "res://gm2godot/timelines/new.gd"
+            yield "gm2godot/timelines/new.gd"
+        result, missing = reconcile_timeline_json_outputs(data, available())
+        self.assertEqual(missing, ())
+        self.assertEqual(result, data)
+
+    def test_invalid_timeline_path_has_same_planning_and_reconciliation_policy(self) -> None:
+        data: JsonObject = {"moments": [{"actions": [{"kind": "gml", "script_path": "res://outside.gd"}]}]}
+        for planner in (timeline_action_script_paths, timeline_json_action_script_paths):
+            with self.subTest(planner=planner.__name__):
+                with self.assertRaises(ValueError):
+                    planner(data)
+        typed, typed_missing = reconcile_timeline_json_outputs(data, [])
+        general, general_missing = reconcile_timeline_action_outputs(data, [])
+        self.assertEqual(typed, general)
+        self.assertEqual(typed_missing, ("res://outside.gd",))
+        self.assertEqual(typed_missing, general_missing)
+
+    def test_non_timeline_planning_does_not_traverse_unknown_json(self) -> None:
+        unknown: JsonValue = None
+        for _ in range(400):
+            unknown = [unknown]
+        data: JsonObject = {"moments": True, "unknown": unknown}
+        self.assertEqual(managed_gamemaker_resource_outputs("unsupported", "invalid", data).required_paths, ())
+        self.assertEqual(managed_gamemaker_resource_outputs("shaders", "res://shaders/a.gdshader", data).required_paths, ("shaders/a.gdshader",))

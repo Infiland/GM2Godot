@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.26 - 2026-10-04
+
+- Finish the GameMaker JSON migration with consumed typed room, sequence, timeline and particle views, preserving each owner's field defaults, numeric rules and callback order.
+- Remove the unbounded legacy JSON aliases and redundant transport casts; keep unknown source fields in recursive JSON raw metadata.
+- Type generated reports and Deep inventory snapshots recursively while retaining their existing formats and conversion output.
+
 ## 0.8.25 - 2026-10-04
 
 - Route the remaining GameMaker resource reads through the shared validated JSON boundary and consume typed sprite, object and resource-reference views, including existing animation-curve and extension models.

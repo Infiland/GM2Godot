@@ -28,7 +28,9 @@ from src.conversion.project_source_paths import (
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.json_values import JsonObject
+from src.conversion.resource_reference_metadata import capture_tileset_resource_declaration
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 from src.conversion.tileset_metadata import (
     GameMakerTilesetSpriteReference,
     parse_gamemaker_tileset_metadata,
@@ -50,11 +52,11 @@ class TilesetData(TypedDict):
     tileyoff: int
     tile_count: int
     out_columns: int
-    tileAnimationFrames: list[JsonDict]
+    tileAnimationFrames: list[JsonObject]
     tileAnimationSpeed: float
-    brushes: list[JsonDict]
-    autoTileSets: list[JsonDict]
-    tileSetCollisions: list[JsonDict]
+    brushes: list[JsonObject]
+    autoTileSets: list[JsonObject]
+    tileSetCollisions: list[JsonObject]
     out_tilehborder: int
     out_tilevborder: int
 
@@ -129,34 +131,15 @@ class TileSetConverter(BaseConverter):
         resources = manifest.raw_data.get('resources', [])
         if not isinstance(resources, list):
             return valid_tilesets
-        for index, resource in enumerate(cast(list[object], resources)):
+        for index, resource in enumerate(resources):
             if not isinstance(resource, dict):
                 continue
-            resource_data = cast(JsonDict, resource)
-            raw_id = resource_data.get('id', {})
-            if not isinstance(raw_id, dict):
+            declaration = capture_tileset_resource_declaration(resource)
+            if declaration is None:
                 continue
-            res_id = cast(JsonDict, raw_id)
-            raw_path = res_id.get('path', '')
-            path = raw_path.replace('\\', '/') if isinstance(raw_path, str) else ""
-            resource_type = resource_data.get('resourceType')
-            id_resource_type = res_id.get('resourceType')
-            is_tileset = (
-                path.partition('/')[0].casefold() == 'tilesets'
-                or resource_type == "GMTileSet"
-                or id_resource_type == "GMTileSet"
-            )
-            if not is_tileset:
-                continue
-
-            raw_name = res_id.get('name', '')
-            name = (
-                raw_name
-                if isinstance(raw_name, str) and raw_name
-                else os.path.splitext(os.path.basename(path))[0]
-            )
-            if not name:
-                continue
+            raw_path = declaration.path_value
+            path = declaration.path
+            name = declaration.name
             field = f"resources[{index}].id.path"
             self._yyp_declared_tilesets.setdefault(
                 name,

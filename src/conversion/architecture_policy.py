@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Iterable, TypeAlias, cast
+from typing import Iterable, TypeAlias
 
 from src.conversion.anchored_artifacts import (
     ArtifactReceipt,
@@ -19,7 +19,11 @@ from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
+from src.conversion.room_metadata import (
+    RoomArchitectureLayerFields, RoomPhysicsSettingsFields, RoomViewFields,
+    RoomViewSettingsFields, iter_room_field_values, room_strict_layer_resource_type,
+)
 
 ARCHITECTURE_POLICY_RELATIVE_PATH = os.path.join("gm2godot", "architecture_policy.json")
 ARCHITECTURE_POLICY_VERSION = 1
@@ -31,7 +35,7 @@ LAYER_HIERARCHY_POLICY_ID = "gm_layer_depth_node2d"
 GUI_LAYER_POLICY_ID = "gm_gui_canvas_layer"
 DEPTH_MAPPING_POLICY_ID = "gamemaker_depth_to_negative_z_index"
 
-GODOT_ARCHITECTURE_SOURCES: dict[str, str] = {
+GODOT_ARCHITECTURE_SOURCES: JsonObject = {
     "autoload": "https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html",
     "canvas_layer": "https://docs.godotengine.org/en/stable/tutorials/2d/canvas_layers.html",
     "physics_2d": "https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html",
@@ -101,7 +105,7 @@ class ArchitectureFeatures:
     has_network_code: bool = False
     has_buffer_file_code: bool = False
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "room_count": self.room_count,
             "has_views": self.has_views,
@@ -308,12 +312,12 @@ def build_architecture_policy_report(
     *,
     target_platform: str,
     enabled_converters: Iterable[str],
-) -> JsonDict:
+) -> JsonObject:
     features = inspect_architecture_features(gm_project_path)
     return {
         "format_version": ARCHITECTURE_POLICY_VERSION,
         "target_platform": target_platform,
-        "enabled_converters": sorted(set(enabled_converters)),
+        "enabled_converters": [key for key in sorted(set(enabled_converters))],
         "documentation_sources": GODOT_ARCHITECTURE_SOURCES,
         "project_features": features.to_dict(),
         "room_root": room_root_policy(),
@@ -347,7 +351,7 @@ def inspect_architecture_features(gm_project_path: str) -> ArchitectureFeatures:
         has_background_layers=any(_room_has_layer(room, "GMRBackgroundLayer") for room in rooms),
         has_scrolling_or_tiled_backgrounds=any(_room_has_scrolling_background(room) for room in rooms),
         has_effect_layers=any(_room_has_layer(room, "GMREffectLayer") for room in rooms),
-        has_physics_world=any(bool(room.physics_settings.get("PhysicsWorld", False)) for room in rooms),
+        has_physics_world=any(RoomPhysicsSettingsFields(room.physics_settings, source_context=room.yy_path).physics_world for room in rooms),
         has_draw_code=_matches(script_text, _DRAW_RE),
         has_surface_code=_matches(script_text, _SURFACE_RE),
         has_collision_code=_matches(script_text, _COLLISION_RE),
@@ -362,7 +366,7 @@ def inspect_architecture_features(gm_project_path: str) -> ArchitectureFeatures:
     )
 
 
-def room_root_policy() -> JsonDict:
+def room_root_policy() -> JsonObject:
     return {
         "id": ROOM_ROOT_POLICY_ID,
         "godot_node": "Node2D",
@@ -373,7 +377,7 @@ def room_root_policy() -> JsonDict:
     }
 
 
-def layer_hierarchy_policy() -> JsonDict:
+def layer_hierarchy_policy() -> JsonObject:
     return {
         "id": LAYER_HIERARCHY_POLICY_ID,
         "layer_node": "Node2D",
@@ -390,7 +394,7 @@ def layer_hierarchy_policy() -> JsonDict:
     }
 
 
-def renderer_backend_policy(features: ArchitectureFeatures) -> JsonDict:
+def renderer_backend_policy(features: ArchitectureFeatures) -> JsonObject:
     if features.has_surface_code:
         mode = "surface_viewport"
         fidelity = "high"
@@ -415,7 +419,7 @@ def renderer_backend_policy(features: ArchitectureFeatures) -> JsonDict:
     }
 
 
-def collision_backend_policy(features: ArchitectureFeatures) -> JsonDict:
+def collision_backend_policy(features: ArchitectureFeatures) -> JsonObject:
     if features.has_physics_world:
         mode = "godot_physics_world_bridge"
         rationale = "Rooms with GameMaker physics enabled are routed through Godot 2D physics primitives plus compatibility metadata."
@@ -443,7 +447,7 @@ def collision_backend_policy(features: ArchitectureFeatures) -> JsonDict:
     }
 
 
-def audio_backend_policy(features: ArchitectureFeatures) -> JsonDict:
+def audio_backend_policy(features: ArchitectureFeatures) -> JsonObject:
     active = features.has_audio_code or features.has_sound_assets
     return {
         "domain": "audio",
@@ -456,7 +460,7 @@ def audio_backend_policy(features: ArchitectureFeatures) -> JsonDict:
     }
 
 
-def file_buffer_network_policy(features: ArchitectureFeatures) -> JsonDict:
+def file_buffer_network_policy(features: ArchitectureFeatures) -> JsonObject:
     network_mode = "gm_async_socket_wrappers" if features.has_network_code else "runtime_network_idle"
     return {
         "domain": "file_buffer_network",
@@ -471,7 +475,7 @@ def file_buffer_network_policy(features: ArchitectureFeatures) -> JsonDict:
     }
 
 
-def runtime_manager_policy() -> list[JsonDict]:
+def runtime_manager_policy() -> JsonArray:
     return [
         {
             "name": definition.name,
@@ -485,8 +489,8 @@ def runtime_manager_policy() -> list[JsonDict]:
     ]
 
 
-def signal_queue_policy() -> list[JsonDict]:
-    policies: list[JsonDict] = []
+def signal_queue_policy() -> JsonArray:
+    policies: JsonArray = []
     for definition in runtime_manager_definitions():
         for signal_name in definition.queued_godot_signals:
             policies.append({
@@ -577,18 +581,17 @@ def _matches(value: str, pattern: re.Pattern[str]) -> bool:
 
 
 def _room_has_visible_views(room: IndexedRoom) -> bool:
-    if not bool(room.view_settings.get("enableViews", False)):
+    if not RoomViewSettingsFields(room.view_settings, source_context=room.yy_path).enable_views:
         return False
     return _room_visible_view_count(room) > 0
 
 
 def _room_visible_view_count(room: IndexedRoom) -> int:
     visible_count = 0
-    for view in room.views:
+    for view in iter_room_field_values(room.views):
         if not isinstance(view, dict):
             continue
-        typed_view = cast(JsonDict, view)
-        if bool(typed_view.get("visible", False)):
+        if RoomViewFields(view, source_context=room.yy_path).visible:
             visible_count += 1
     return visible_count
 
@@ -601,36 +604,30 @@ def _room_has_scrolling_background(room: IndexedRoom) -> bool:
     for layer in _iter_layers(room.layers):
         if _layer_resource_type(layer) != "GMRBackgroundLayer":
             continue
-        if any(bool(layer.get(key, False)) for key in ("htiled", "vtiled", "stretch")):
+        fields = RoomArchitectureLayerFields(layer, source_context=room.yy_path)
+        if fields.htiled or fields.vtiled or fields.stretch:
             return True
-        if _number(layer.get("hspeed")) != 0.0 or _number(layer.get("vspeed")) != 0.0:
+        if _number(fields.hspeed) != 0.0 or _number(fields.vspeed) != 0.0:
             return True
     return False
 
 
-def _iter_layers(layers: object) -> Iterable[JsonDict]:
+def _iter_layers(layers: JsonValue) -> Iterable[JsonObject]:
     if not isinstance(layers, list):
         return
-    for item in cast(list[object], layers):
+    for item in layers:
         if not isinstance(item, dict):
             continue
-        layer = cast(JsonDict, item)
+        layer = item
         yield layer
         children = layer.get("layers") or layer.get("children")
         yield from _iter_layers(children)
 
 
-def _layer_resource_type(layer: JsonDict) -> str:
-    resource_type = layer.get("resourceType")
-    if isinstance(resource_type, str) and resource_type:
-        return resource_type
-    for key in layer:
-        if key.startswith("$GMR"):
-            return key[1:]
-    return "UnknownLayer"
+def _layer_resource_type(layer: JsonObject) -> str:
+    return room_strict_layer_resource_type(layer)
 
-
-def _number(value: object) -> float:
+def _number(value: JsonValue) -> float:
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):

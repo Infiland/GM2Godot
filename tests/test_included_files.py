@@ -24,6 +24,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from src.conversion.included_files_parts import source_snapshots as _included_snapshots
+from src.conversion.included_files_parts import guarded_mutations as _included_mutations
+from src.conversion.included_files_parts import record_io as _included_records
+from src.conversion.included_files_parts import recorded_cleanup as _included_cleanup
+from src.conversion.included_files_parts import phase_observer as _included_phases
 from src.conversion import included_files as included_files_module
 from src.conversion.included_files_parts import (
     native_posix as _included_posix,
@@ -349,7 +354,7 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
             previous_registry = registry_file.read()
         with open(self.test_file, "w", encoding="utf-8") as source_file:
             source_file.write("updated content")
-        original_move = included_files_module._move_exact_included_file
+        original_move = _included_mutations.move_exact_included_file
 
         def publish_then_fail(
             source: str,
@@ -380,8 +385,8 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
                 raise OSError("registry publication failed")
 
         with patch.object(
-            included_files_module,
-            "_move_exact_included_file",
+            _included_mutations,
+            'move_exact_included_file',
             side_effect=publish_then_fail,
         ):
             with self.assertRaisesRegex(
@@ -475,7 +480,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
             patch.object(included_files_module.os, "name", "nt")
         )
         cleanup_context.enter_context(
-            patch.object(included_files_module.sys, "platform", "win32")
+            patch.object(_included_windows.sys, "platform", "win32")
         )
         cleanup_context.enter_context(
             patch.object(
@@ -549,7 +554,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         parent_stat = os.lstat(cleanup_directory)
         streamed_bytes = 0
         largest_chunk = 0
-        original_read = included_files_module._read_included_validation_chunk
+        original_read = _included_snapshots.read_included_validation_chunk
 
         def count_streamed_bytes(opened_file: BinaryIO) -> bytes:
             nonlocal streamed_bytes, largest_chunk
@@ -565,13 +570,13 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 return_value=not force_fallback,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_validation_chunk",
+                _included_snapshots,
+                'read_included_validation_chunk',
                 side_effect=count_streamed_bytes,
             ),
             patch.object(
-                included_files_module,
-                "_included_regular_file_state",
+                _included_snapshots,
+                'included_regular_file_state',
                 side_effect=AssertionError(
                     "cleanup used the whole-content file-state helper"
                 ),
@@ -586,7 +591,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 'sync_included_directory',
             ),
         ):
-            warnings = included_files_module._cleanup_recorded_included_file(
+            warnings = _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 hashlib.sha256(content).hexdigest(),
@@ -723,7 +728,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         self._mark_native_windows_tree_read_only(
             transaction.staged_root_path
         )
-        staged_root_snapshot = included_files_module._capture_included_tree(
+        staged_root_snapshot = _included_snapshots.capture_included_tree(
             transaction.staged_root_path,
             expected_parent_identity=transaction.stage_container_identity,
         )
@@ -777,6 +782,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path = sys.argv[1:]
@@ -785,7 +791,7 @@ def stop_after_phase(phase: str) -> None:
     if phase == "generation-committed":
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -850,7 +856,7 @@ IncludedFilesConverter(
             ):
                 continue
             record_path = os.path.join(project_path, name)
-            record = included_files_module._read_included_recovery_record(
+            record = _included_records.read_included_recovery_record(
                 record_path,
                 project_identity,
             )
@@ -922,14 +928,14 @@ IncludedFilesConverter(
                 self.godot_dir
             )
         )
-        journal_record = included_files_module._read_included_recovery_record(
+        journal_record = _included_records.read_included_recovery_record(
             os.path.join(
                 self.godot_dir,
                 _included_constants.INCLUDED_FILES_JOURNAL_NAME,
             ),
             project_identity,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             os.path.join(
                 self.godot_dir,
                 _included_constants.INCLUDED_FILES_COMMIT_NAME,
@@ -1045,7 +1051,7 @@ IncludedFilesConverter(
         opened_stat = os.lstat(os.path.join(self.datafiles_dir, "test-mount-id"))
 
         with (
-            patch.object(included_files_module.sys, "platform", "linux"),
+            patch.object(_included_posix.sys, "platform", "linux"),
             patch(
                 "builtins.open",
                 mock_open(read_data="pos:\t0\nflags:\t0100000\nmnt_id:\t41\n"),
@@ -1103,7 +1109,7 @@ IncludedFilesConverter(
             ),
             self.assertRaisesRegex(OSError, "mount inspection failure"),
         ):
-            included_files_module._capture_included_tree(root_path)
+            _included_snapshots.capture_included_tree(root_path)
 
         self.assertGreaterEqual(opened_parent_fd, 0)
         with self.assertRaises(OSError):
@@ -1135,7 +1141,7 @@ IncludedFilesConverter(
             ),
             self.assertRaisesRegex(OSError, "mount boundary"),
         ):
-            included_files_module._capture_included_tree(
+            _included_snapshots.capture_included_tree(
                 root_path,
                 expected_parent_identity=(
                     project_stat.st_dev,
@@ -1151,7 +1157,7 @@ IncludedFilesConverter(
         os.makedirs(root_path)
         with open(os.path.join(root_path, "payload.txt"), "wb") as payload_file:
             payload_file.write(b"payload")
-        snapshot = included_files_module._capture_included_tree(root_path)
+        snapshot = _included_snapshots.capture_included_tree(root_path)
         payload = _included_codec.included_tree_snapshot_payload(snapshot)
         entries = payload["entries"]
         self.assertIsInstance(entries, list)
@@ -1178,7 +1184,7 @@ IncludedFilesConverter(
         with open(sentinel_path, "wb") as sentinel_file:
             sentinel_file.write(b"late mount sentinel")
         project_stat = os.lstat(self.godot_dir)
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=(project_stat.st_dev, project_stat.st_ino),
         )
@@ -1192,7 +1198,7 @@ IncludedFilesConverter(
             "ismount",
             side_effect=modeled_mountpoint,
         ):
-            warnings = included_files_module._cleanup_recorded_included_tree(
+            warnings = _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 (project_stat.st_dev, project_stat.st_ino),
@@ -1227,7 +1233,7 @@ IncludedFilesConverter(
 
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = (project_stat.st_dev, project_stat.st_ino)
-                snapshot = included_files_module._capture_included_tree(
+                snapshot = _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=project_identity,
                 )
@@ -1237,10 +1243,10 @@ IncludedFilesConverter(
                 )
                 os.rename(nested_path, published_path)
                 cleanup_file_state = (
-                    included_files_module._included_cleanup_file_state
+                    _included_cleanup.included_cleanup_file_state
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
 
                 with (
@@ -1251,18 +1257,18 @@ IncludedFilesConverter(
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
                     patch.object(
-                        included_files_module,
-                        "_included_cleanup_file_state",
+                        _included_cleanup,
+                        'included_cleanup_file_state',
                         wraps=cleanup_file_state,
                     ) as file_state_mock,
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_mock,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -1298,7 +1304,7 @@ IncludedFilesConverter(
 
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -1317,24 +1323,24 @@ IncludedFilesConverter(
             bindings.append(binding)
             return binding
 
-        cleanup_file_state = included_files_module._included_cleanup_file_state
+        cleanup_file_state = _included_cleanup.included_cleanup_file_state
         cleanup_directory_state = (
-            included_files_module._included_cleanup_directory_state
+            _included_cleanup.included_cleanup_directory_state
         )
         with (
             self._modeled_windows_cleanup_context(open_binding),
             patch.object(
-                included_files_module,
-                "_included_cleanup_file_state",
+                _included_cleanup,
+                'included_cleanup_file_state',
                 wraps=cleanup_file_state,
             ) as file_state_mock,
             patch.object(
-                included_files_module,
-                "_included_cleanup_directory_state",
+                _included_cleanup,
+                'included_cleanup_directory_state',
                 wraps=cleanup_directory_state,
             ) as directory_state_mock,
         ):
-            warnings = included_files_module._cleanup_recorded_included_tree(
+            warnings = _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -1386,12 +1392,12 @@ IncludedFilesConverter(
 
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = project_stat.st_dev, project_stat.st_ino
-                snapshot = included_files_module._capture_included_tree(
+                snapshot = _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=project_identity,
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
                 bindings: list[_ModeledWindowsCleanupParentBinding] = []
 
@@ -1406,13 +1412,13 @@ IncludedFilesConverter(
                 with (
                     self._modeled_windows_cleanup_context(open_binding),
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_capture,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -1463,12 +1469,12 @@ IncludedFilesConverter(
 
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = project_stat.st_dev, project_stat.st_ino
-                snapshot = included_files_module._capture_included_tree(
+                snapshot = _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=project_identity,
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
                 bindings: list[_ModeledWindowsCleanupParentBinding] = []
 
@@ -1483,13 +1489,13 @@ IncludedFilesConverter(
                 with (
                     self._modeled_windows_cleanup_context(open_binding),
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_capture,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -1556,12 +1562,12 @@ IncludedFilesConverter(
 
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = project_stat.st_dev, project_stat.st_ino
-                snapshot = included_files_module._capture_included_tree(
+                snapshot = _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=project_identity,
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
                 bindings: list[_ModeledWindowsCleanupParentBinding] = []
                 maximum_live_bindings = 0
@@ -1582,13 +1588,13 @@ IncludedFilesConverter(
                 with (
                     self._modeled_windows_cleanup_context(open_binding),
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_capture,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -1670,7 +1676,7 @@ IncludedFilesConverter(
                     'included_descriptor_paths_supported',
                     return_value=False,
                 ):
-                    snapshot = included_files_module._capture_included_tree(
+                    snapshot = _included_snapshots.capture_included_tree(
                         root_path,
                         expected_parent_identity=project_identity,
                     )
@@ -1701,7 +1707,7 @@ IncludedFilesConverter(
                     _included_windows.verify_windows_included_cleanup_parent_binding
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
                 with (
                     self._modeled_windows_cleanup_context(binding_opener),
@@ -1711,13 +1717,13 @@ IncludedFilesConverter(
                         wraps=verify_parent_binding,
                     ) as parent_binding_verifier,
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_capture,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -1795,7 +1801,7 @@ IncludedFilesConverter(
             'included_descriptor_paths_supported',
             return_value=False,
         ):
-            snapshot = included_files_module._capture_included_tree(
+            snapshot = _included_snapshots.capture_included_tree(
                 root_path,
                 expected_parent_identity=project_identity,
             )
@@ -1823,7 +1829,7 @@ IncludedFilesConverter(
             previous_recursion_limit = sys.getrecursionlimit()
             sys.setrecursionlimit(modeled_recursion_limit)
             try:
-                warnings = included_files_module._cleanup_recorded_included_tree(
+                warnings = _included_cleanup.cleanup_recorded_included_tree(
                     root_path,
                     snapshot,
                     project_identity,
@@ -1852,7 +1858,7 @@ IncludedFilesConverter(
 
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -1875,12 +1881,12 @@ IncludedFilesConverter(
         with (
             self._modeled_windows_cleanup_context(open_binding),
             patch.object(
-                included_files_module,
-                "_before_included_transaction_rename_fallback",
+                _included_mutations,
+                'before_included_transaction_rename_fallback',
                 side_effect=record_live_bindings,
             ),
         ):
-            warnings = included_files_module._cleanup_recorded_included_tree(
+            warnings = _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -1924,7 +1930,7 @@ IncludedFilesConverter(
 
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -1960,7 +1966,7 @@ IncludedFilesConverter(
             self._modeled_windows_cleanup_context(open_binding),
             self.assertRaisesRegex(OSError, "cleanup parent changed"),
         ):
-            included_files_module._cleanup_recorded_included_tree(
+            _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -1999,7 +2005,7 @@ IncludedFilesConverter(
 
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -2034,13 +2040,13 @@ IncludedFilesConverter(
         with (
             self._modeled_windows_cleanup_context(open_binding),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=interrupt_after_quarantine,
             ),
             self.assertRaises(RuntimeError) as raised,
         ):
-            included_files_module._cleanup_recorded_included_tree(
+            _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -2086,7 +2092,7 @@ IncludedFilesConverter(
             owned_file.write(b"recorded nested content\n")
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -2117,13 +2123,13 @@ IncludedFilesConverter(
         with (
             self._modeled_windows_cleanup_context(open_binding),
             patch.object(
-                included_files_module,
-                "_before_included_transaction_rename_fallback",
+                _included_mutations,
+                'before_included_transaction_rename_fallback',
                 side_effect=change_parent_before_move,
             ),
             self.assertRaisesRegex(OSError, "cleanup parent changed"),
         ):
-            included_files_module._cleanup_recorded_included_tree(
+            _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -2180,12 +2186,12 @@ IncludedFilesConverter(
 
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = project_stat.st_dev, project_stat.st_ino
-                snapshot = included_files_module._capture_included_tree(
+                snapshot = _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=project_identity,
                 )
                 capture_ancestors = (
-                    included_files_module._capture_fallback_directory_ancestors
+                    _included_snapshots.capture_fallback_directory_ancestors
                 )
                 supports_without_chmod = set(os.supports_fd)
                 supports_without_chmod.discard(os.chmod)
@@ -2206,7 +2212,7 @@ IncludedFilesConverter(
                         return_value=False,
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
-                    patch.object(included_files_module.sys, "platform", "win32"),
+                    patch.object(_included_windows.sys, "platform", "win32"),
                     patch.object(
                         included_files_module.os,
                         "supports_fd",
@@ -2228,17 +2234,17 @@ IncludedFilesConverter(
                         side_effect=self._open_modeled_windows_validation_stream,
                     ),
                     patch.object(
-                        included_files_module,
-                        "_capture_fallback_directory_ancestors",
+                        _included_snapshots,
+                        'capture_fallback_directory_ancestors',
                         wraps=capture_ancestors,
                     ) as ancestor_capture,
                     patch.object(
-                        included_files_module,
-                        "_before_included_fallback_chmod_open",
+                        _included_mutations,
+                        'before_included_fallback_chmod_open',
                     ) as chmod_open,
                 ):
                     warnings = (
-                        included_files_module._cleanup_recorded_included_tree(
+                        _included_cleanup.cleanup_recorded_included_tree(
                             root_path,
                             snapshot,
                             project_identity,
@@ -2273,7 +2279,7 @@ IncludedFilesConverter(
 
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -2307,7 +2313,7 @@ IncludedFilesConverter(
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(_included_windows.sys, "platform", "win32"),
             patch.object(
                 included_files_module.os,
                 "supports_fd",
@@ -2346,13 +2352,13 @@ IncludedFilesConverter(
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=interrupt_after_readonly_clear,
             ),
             self.assertRaises(RuntimeError) as raised,
         ):
-            included_files_module._cleanup_recorded_included_tree(
+            _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -2395,7 +2401,7 @@ IncludedFilesConverter(
             owned_file.write(b"recorded owned content\n")
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -2428,7 +2434,7 @@ IncludedFilesConverter(
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(_included_windows.sys, "platform", "win32"),
             patch.object(
                 _included_windows.WindowsIncludedCleanupParentBinding,
                 "open",
@@ -2445,13 +2451,13 @@ IncludedFilesConverter(
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
-                included_files_module,
-                "_before_included_transaction_rename_fallback",
+                _included_mutations,
+                'before_included_transaction_rename_fallback',
                 side_effect=change_parent_before_move,
             ),
             self.assertRaisesRegex(OSError, "cleanup parent changed"),
         ):
-            included_files_module._cleanup_recorded_included_tree(
+            _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -2498,7 +2504,7 @@ IncludedFilesConverter(
             owned_file.write(b"owned payload")
         project_stat = os.lstat(self.godot_dir)
         project_identity = (project_stat.st_dev, project_stat.st_ino)
-        snapshot = included_files_module._capture_included_tree(
+        snapshot = _included_snapshots.capture_included_tree(
             root_path,
             expected_parent_identity=project_identity,
         )
@@ -2507,7 +2513,7 @@ IncludedFilesConverter(
         replacement_path = os.path.join(nested_path, "payload.txt")
         nested_normalized = os.path.normcase(os.path.abspath(nested_path))
         cleanup_directory_state = (
-            included_files_module._included_cleanup_directory_state
+            _included_cleanup.included_cleanup_directory_state
         )
         replacement_created = False
 
@@ -2546,12 +2552,12 @@ IncludedFilesConverter(
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_included_cleanup_directory_state",
+                _included_cleanup,
+                'included_cleanup_directory_state',
                 side_effect=create_replacement_after_absence,
             ),
         ):
-            warnings = included_files_module._cleanup_recorded_included_tree(
+            warnings = _included_cleanup.cleanup_recorded_included_tree(
                 root_path,
                 snapshot,
                 project_identity,
@@ -2618,7 +2624,7 @@ IncludedFilesConverter(
                     ),
                     self.assertRaisesRegex(OSError, "mount boundary"),
                 ):
-                    included_files_module._remove_owned_included_tree(
+                    _included_mutations.remove_owned_included_tree(
                         root_path,
                         (root_stat.st_dev, root_stat.st_ino),
                         expected_parent_identity=(
@@ -2702,7 +2708,7 @@ IncludedFilesConverter(
                 ),
                 self.assertRaisesRegex(OSError, "mount boundary"),
             ):
-                included_files_module._capture_included_tree(
+                _included_snapshots.capture_included_tree(
                     root_path,
                     expected_parent_identity=(
                         project_stat.st_dev,
@@ -2878,6 +2884,7 @@ IncludedFilesConverter(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path, requested_phase = sys.argv[1:]
@@ -2886,7 +2893,7 @@ def stop_after_phase(current_phase: str) -> None:
     if current_phase == requested_phase:
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -2954,8 +2961,8 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                phase,
+                _included_snapshots if phase in ("_capture_included_tree", "_capture_included_registry") else included_files_module,
+                phase[1:] if phase in ("_capture_included_tree", "_capture_included_registry") else phase,
                 side_effect=primary_error,
             ),
             patch.object(
@@ -3186,7 +3193,7 @@ IncludedFilesConverter(
         primary_error = SystemExit("stage cleanup interrupted")
         release_error = KeyboardInterrupt("release interrupted")
         original_release = included_files_module._release_included_project_lock
-        original_remove = included_files_module._remove_owned_included_tree
+        original_remove = _included_mutations.remove_owned_included_tree
 
         def cancel_copy(*_arguments: object) -> None:
             self.running.clear()
@@ -3200,8 +3207,8 @@ IncludedFilesConverter(
         with (
             patch.object(converter, "_process_file", side_effect=cancel_copy),
             patch.object(
-                included_files_module,
-                "_remove_owned_included_tree",
+                _included_mutations,
+                'remove_owned_included_tree',
                 side_effect=primary_error,
             ) as remove_stage,
             patch.object(
@@ -3926,8 +3933,8 @@ included_files_module._acquire_included_project_lock(
             )
 
         with patch.object(
-            included_files_module,
-            "_read_included_lock_initialization_payload",
+            _included_records,
+            'read_included_lock_initialization_payload',
             side_effect=AssertionError(
                 "oversized lock initialization payload was read"
             ),
@@ -3997,8 +4004,8 @@ included_files_module._acquire_included_project_lock(
                         64,
                     ),
                     patch.object(
-                        included_files_module,
-                        "_read_included_recovery_record_payload",
+                        _included_records,
+                        'read_included_recovery_record_payload',
                         side_effect=AssertionError(
                             "oversized recovery payload was read"
                         ),
@@ -4057,8 +4064,8 @@ included_files_module._acquire_included_project_lock(
                 64,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_recovery_record_payload",
+                _included_records,
+                'read_included_recovery_record_payload',
                 side_effect=AssertionError(
                     "oversized recovery payload was read"
                 ),
@@ -4109,8 +4116,8 @@ included_files_module._acquire_included_project_lock(
                 64,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_recovery_record_payload",
+                _included_records,
+                'read_included_recovery_record_payload',
                 side_effect=AssertionError(
                     "oversized recovery payload was read"
                 ),
@@ -4516,8 +4523,8 @@ included_files_module._acquire_included_project_lock(
                 side_effect=capture_commit,
             ),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=interrupt_after_commit,
             ),
             self.assertRaisesRegex(
@@ -4540,11 +4547,11 @@ included_files_module._acquire_included_project_lock(
             self.godot_dir,
             _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
-        journal_record = included_files_module._read_included_recovery_record(
+        journal_record = _included_records.read_included_recovery_record(
             journal_path,
             project_identity,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             commit_path,
             project_identity,
         )
@@ -4639,8 +4646,8 @@ included_files_module._acquire_included_project_lock(
                 side_effect=trace_sync,
             ),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=trace_phase,
             ),
         ):
@@ -4683,8 +4690,8 @@ included_files_module._acquire_included_project_lock(
                 side_effect=trace_sync,
             ),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=trace_phase,
             ),
         ):
@@ -4732,6 +4739,7 @@ included_files_module._acquire_included_project_lock(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path, requested_phase = sys.argv[1:]
@@ -4740,7 +4748,7 @@ def stop_after_phase(phase: str) -> None:
     if phase == requested_phase:
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -5042,6 +5050,7 @@ IncludedFilesConverter(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path = sys.argv[1:]
@@ -5050,7 +5059,7 @@ def stop_after_phase(phase: str) -> None:
     if phase == "new-registry-published":
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -5401,6 +5410,7 @@ IncludedFilesConverter(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path = sys.argv[1:]
@@ -5409,7 +5419,7 @@ def stop_after_phase(phase: str) -> None:
     if phase == "generation-committed":
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -5423,6 +5433,7 @@ IncludedFilesConverter(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 
 godot_path, requested_role, requested_action, requested_path = sys.argv[1:]
 matches = 0
@@ -5441,7 +5452,7 @@ def stop_after_phase(phase: str) -> None:
     if matches == 1:
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 project_identity = included_files_module._ensure_included_output_project_root(
     godot_path
 )
@@ -5659,8 +5670,8 @@ finally:
                             raise CommitInterrupted()
 
                     with patch.object(
-                        included_files_module,
-                        "_after_included_transaction_phase",
+                        _included_phases,
+                        'after_included_transaction_phase',
                         side_effect=stop_after_commit,
                     ):
                         with self.assertRaises(CommitInterrupted):
@@ -5676,7 +5687,7 @@ finally:
                         _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                     )
                     journal_record = (
-                        included_files_module._read_included_recovery_record(
+                        _included_records.read_included_recovery_record(
                             journal_path,
                             project_identity,
                         )
@@ -5838,6 +5849,7 @@ finally:
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 from src.conversion.included_files import IncludedFilesConverter
 
 gm_path, godot_path = sys.argv[1:]
@@ -5846,7 +5858,7 @@ def stop_after_phase(phase: str) -> None:
     if phase == "generation-committed":
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 IncludedFilesConverter(
     gm_path,
     godot_path,
@@ -5896,11 +5908,11 @@ IncludedFilesConverter(
             self.godot_dir,
             _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
-        journal_record = included_files_module._read_included_recovery_record(
+        journal_record = _included_records.read_included_recovery_record(
             journal_path,
             project_identity,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             commit_path,
             project_identity,
         )
@@ -5989,11 +6001,11 @@ IncludedFilesConverter(
             self.godot_dir,
             _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
-        journal_record = included_files_module._read_included_recovery_record(
+        journal_record = _included_records.read_included_recovery_record(
             journal_path,
             project_identity,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             commit_path,
             project_identity,
         )
@@ -6126,7 +6138,7 @@ IncludedFilesConverter(
             self.godot_dir,
             _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             commit_path,
             project_identity,
         )
@@ -6170,16 +6182,16 @@ IncludedFilesConverter(
             patch.object(included_files_module.os, "stat") as stat_call,
             patch.object(included_files_module.os, "lstat") as lstat_call,
             patch.object(
-                included_files_module,
-                "_cleanup_recorded_included_tree",
+                _included_cleanup,
+                'cleanup_recorded_included_tree',
             ) as cleanup_tree,
             patch.object(
-                included_files_module,
-                "_move_exact_included_file",
+                _included_mutations,
+                'move_exact_included_file',
             ) as move_file,
             patch.object(
-                included_files_module,
-                "_move_exact_included_directory",
+                _included_mutations,
+                'move_exact_included_directory',
             ) as move_directory,
             self.assertRaisesRegex(OSError, "Windows-ambiguous"),
         ):
@@ -6219,16 +6231,16 @@ IncludedFilesConverter(
                 patch.object(included_files_module.os, "stat") as stat_call,
                 patch.object(included_files_module.os, "lstat") as lstat_call,
                 patch.object(
-                    included_files_module,
-                    "_move_exact_included_file",
+                    _included_mutations,
+                    'move_exact_included_file',
                 ) as move_file,
                 patch.object(
-                    included_files_module,
-                    "_move_exact_included_directory",
+                    _included_mutations,
+                    'move_exact_included_directory',
                 ) as move_directory,
                 self.assertRaisesRegex(OSError, "Windows-ambiguous"),
             ):
-                included_files_module._cleanup_recorded_included_tree(
+                _included_cleanup.cleanup_recorded_included_tree(
                     cleanup_root,
                     self._recovery_cleanup_snapshot(relative_path),
                     (7, 8),
@@ -6312,16 +6324,16 @@ IncludedFilesConverter(
                 patch.object(included_files_module.os, "stat") as stat_call,
                 patch.object(included_files_module.os, "lstat") as lstat_call,
                 patch.object(
-                    included_files_module,
-                    "_move_exact_included_file",
+                    _included_mutations,
+                    'move_exact_included_file',
                 ) as move_file,
                 patch.object(
-                    included_files_module,
-                    "_move_exact_included_directory",
+                    _included_mutations,
+                    'move_exact_included_directory',
                 ) as move_directory,
                 self.assertRaisesRegex(OSError, "Windows-ambiguous"),
             ):
-                included_files_module._cleanup_recorded_included_tree(
+                _included_cleanup.cleanup_recorded_included_tree(
                     cleanup_root,
                     self._recovery_cleanup_snapshot(relative_path),
                     (7, 8),
@@ -6346,7 +6358,7 @@ IncludedFilesConverter(
             self.godot_dir,
             _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
-        commit_record = included_files_module._read_included_recovery_record(
+        commit_record = _included_records.read_included_recovery_record(
             commit_path,
             project_identity,
         )
@@ -6465,7 +6477,7 @@ IncludedFilesConverter(
         )
         canonical_records: list[tuple[str, str, bytes]] = []
         for record_kind, stable_name, temporary_prefix in record_specs:
-            record = included_files_module._read_included_recovery_record(
+            record = _included_records.read_included_recovery_record(
                 os.path.join(self.godot_dir, stable_name),
                 project_identity,
             )
@@ -6509,6 +6521,8 @@ IncludedFilesConverter(
 import os
 import sys
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import source_snapshots as included_source_snapshots
+from src.conversion.included_files_parts import phase_observer as included_phase_observer
 
 project_path, record_path, requested_phase = sys.argv[1:]
 project_identity = included_files_module._ensure_included_output_project_root(
@@ -6523,9 +6537,9 @@ def stop_after_phase(phase: str) -> None:
     if phase == requested_phase:
         os._exit(86)
 
-included_files_module._after_included_transaction_phase = stop_after_phase
+included_phase_observer.after_included_transaction_phase = stop_after_phase
 try:
-    record_state = included_files_module._included_regular_file_state(
+    record_state = included_source_snapshots.included_regular_file_state(
         record_path,
         expected_parent_identity=project_identity,
     )
@@ -6686,7 +6700,7 @@ os._exit(88)
             included_files_module._read_included_payload_chunk
         )
         original_validation_read = (
-            included_files_module._read_included_validation_chunk
+            _included_snapshots.read_included_validation_chunk
         )
         read_bytes = 0
 
@@ -6711,8 +6725,8 @@ os._exit(88)
                 side_effect=count_payload_read,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_validation_chunk",
+                _included_snapshots,
+                'read_included_validation_chunk',
                 side_effect=count_validation_read,
             ),
         ):
@@ -6727,8 +6741,8 @@ os._exit(88)
                 side_effect=count_payload_read,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_validation_chunk",
+                _included_snapshots,
+                'read_included_validation_chunk',
                 side_effect=count_validation_read,
             ),
             patch.object(
@@ -6751,8 +6765,8 @@ os._exit(88)
                 side_effect=count_payload_read,
             ),
             patch.object(
-                included_files_module,
-                "_read_included_validation_chunk",
+                _included_snapshots,
+                'read_included_validation_chunk',
                 side_effect=count_validation_read,
             ),
         ):
@@ -6828,8 +6842,7 @@ os._exit(88)
             self.fail("changed-generation receipts lost their boundaries")
         receipt = transaction.content_receipts[0]
         captured_snapshot = (
-            included_files_module
-            ._capture_included_tree_from_generation_receipts(
+            _included_snapshots.capture_included_tree_from_generation_receipts(
                 transaction.staged_root_path,
                 expected_parent_identity=(
                     transaction.stage_container_identity
@@ -6919,7 +6932,7 @@ os._exit(88)
                     "generation.*receipt|receipt.*binding",
                 ),
             ):
-                included_files_module._capture_included_tree_from_generation_receipts(
+                _included_snapshots.capture_included_tree_from_generation_receipts(
                     transaction.staged_root_path,
                     expected_parent_identity=(
                         transaction.stage_container_identity
@@ -6931,7 +6944,7 @@ os._exit(88)
                     ),
                     receipts=(forged_receipt,),
                 )
-        included_files_module._remove_owned_included_tree(
+        _included_mutations.remove_owned_included_tree(
             transaction.stage_container_path,
             transaction.stage_container_identity,
             expected_parent_identity=transaction.project_identity,
@@ -7146,7 +7159,7 @@ os._exit(88)
             self.gm_dir,
             "external-staged-payload.txt",
         )
-        original_capture = included_files_module._capture_included_tree
+        original_capture = _included_snapshots.capture_included_tree
         hardlink_created = False
 
         def capture_with_hardlink(
@@ -7181,8 +7194,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_capture_included_tree",
+                _included_snapshots,
+                'capture_included_tree',
                 side_effect=capture_with_hardlink,
             ),
             self.assertRaisesRegex(OSError, "multiple hard links"),
@@ -7612,7 +7625,7 @@ os._exit(88)
             "fstat",
             side_effect=(handle_stat, handle_stat),
         ):
-            digest = included_files_module._digest_included_regular_file(
+            digest = _included_snapshots.digest_included_regular_file(
                 staged_path,
                 path_stat,
             )
@@ -7639,7 +7652,7 @@ os._exit(88)
             ),
         ):
             content = (
-                included_files_module._read_opened_included_bounded_record_payload(
+                _included_records.read_opened_included_bounded_record_payload(
                     record_file,
                     path_stat,
                     record_path,
@@ -7676,7 +7689,7 @@ os._exit(88)
             ),
             self.assertRaisesRegex(OSError, "changed while hashing"),
         ):
-            included_files_module._digest_included_regular_file(
+            _included_snapshots.digest_included_regular_file(
                 staged_path,
                 path_stat,
             )
@@ -8087,7 +8100,7 @@ os._exit(88)
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
-            patch.object(included_files_module.sys, "platform", "win32"),
+            patch.object(_included_windows.sys, "platform", "win32"),
             patch.object(
                 _included_windows,
                 'windows_included_transaction_api',
@@ -8153,7 +8166,7 @@ os._exit(88)
             "included_files",
             "payload.txt",
         )
-        original_read = included_files_module._read_included_validation_chunk
+        original_read = _included_snapshots.read_included_validation_chunk
         blocked_paths: set[str] = set()
 
         def observe_write_sharing(opened_file: BinaryIO) -> bytes:
@@ -8166,8 +8179,8 @@ os._exit(88)
             return original_read(opened_file)
 
         with patch.object(
-            included_files_module,
-            "_read_included_validation_chunk",
+            _included_snapshots,
+            'read_included_validation_chunk',
             side_effect=observe_write_sharing,
         ):
             converter.convert_all()
@@ -8199,7 +8212,7 @@ os._exit(88)
                 "fstat",
                 side_effect=(opened_stat, opened_stat),
             ):
-                digest = included_files_module._digest_included_regular_file_at(
+                digest = _included_snapshots.digest_included_regular_file_at(
                     parent_fd,
                     "staged.bin",
                     path_stat,
@@ -8215,7 +8228,7 @@ os._exit(88)
                 ),
                 self.assertRaisesRegex(OSError, "changed while hashing"),
             ):
-                included_files_module._digest_included_regular_file_at(
+                _included_snapshots.digest_included_regular_file_at(
                     parent_fd,
                     "staged.bin",
                     path_stat,
@@ -8448,7 +8461,7 @@ os._exit(88)
             INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
         )
         registry_directory = os.path.dirname(final_registry_path)
-        original_move = included_files_module._move_exact_included_file
+        original_move = _included_mutations.move_exact_included_file
         publication_failed = False
 
         def publish_then_fail(
@@ -8482,8 +8495,8 @@ os._exit(88)
                 raise OSError("injected first registry publication failure")
 
         with patch.object(
-            included_files_module,
-            "_move_exact_included_file",
+            _included_mutations,
+            'move_exact_included_file',
             side_effect=publish_then_fail,
         ), self.assertRaisesRegex(
             OSError,
@@ -8513,10 +8526,10 @@ os._exit(88)
             INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
         )
         original_verify_tree = (
-            included_files_module._verify_included_tree_snapshot
+            _included_snapshots.verify_included_tree_snapshot
         )
         original_file_state_at = (
-            included_files_module._included_regular_file_state_at
+            _included_snapshots.included_regular_file_state_at
         )
         injected = False
         appeared_registry_read_attempts: list[str] = []
@@ -8563,13 +8576,13 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_verify_included_tree_snapshot",
+                _included_snapshots,
+                'verify_included_tree_snapshot',
                 side_effect=inject_registry_before_prepare,
             ),
             patch.object(
-                included_files_module,
-                "_included_regular_file_state_at",
+                _included_snapshots,
+                'included_regular_file_state_at',
                 side_effect=record_registry_state_attempt,
             ),
             self.assertRaisesRegex(
@@ -8689,8 +8702,8 @@ os._exit(88)
             )
             if _included_posix.included_descriptor_paths_supported()
             else patch.object(
-                included_files_module,
-                "_before_included_transaction_rename_fallback",
+                _included_mutations,
+                'before_included_transaction_rename_fallback',
                 side_effect=inject_unknown_destination_fallback,
             )
         )
@@ -8750,7 +8763,7 @@ os._exit(88)
         parked_backup = os.path.join(self.godot_dir, ".parked-old-root")
         swapped_backup_path: str | None = None
         cleanup_recorded_tree = (
-            included_files_module._cleanup_recorded_included_tree
+            _included_cleanup.cleanup_recorded_included_tree
         )
 
         def swap_cleanup_root(
@@ -8774,8 +8787,8 @@ os._exit(88)
             )
 
         with patch.object(
-            included_files_module,
-            "_cleanup_recorded_included_tree",
+            _included_cleanup,
+            'cleanup_recorded_included_tree',
             side_effect=swap_cleanup_root,
         ):
             converter.convert_all()
@@ -8824,7 +8837,7 @@ os._exit(88)
         )
         self._write("new.txt", "new")
         cleanup_recorded_tree = (
-            included_files_module._cleanup_recorded_included_tree
+            _included_cleanup.cleanup_recorded_included_tree
         )
         sentinel_path: str | None = None
 
@@ -8851,8 +8864,8 @@ os._exit(88)
             )
 
         with patch.object(
-            included_files_module,
-            "_cleanup_recorded_included_tree",
+            _included_cleanup,
+            'cleanup_recorded_included_tree',
             side_effect=inject_unknown_stage_content,
         ):
             converter.convert_all()
@@ -8878,7 +8891,7 @@ os._exit(88)
         converter = self._converter(max_workers=1)
         self._write("new.txt", "new")
         cleanup_recorded_tree = (
-            included_files_module._cleanup_recorded_included_tree
+            _included_cleanup.cleanup_recorded_included_tree
         )
         sentinel_path: str | None = None
         cancellation_injected = False
@@ -8913,13 +8926,13 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=cancel_after_journal,
             ),
             patch.object(
-                included_files_module,
-                "_cleanup_recorded_included_tree",
+                _included_cleanup,
+                'cleanup_recorded_included_tree',
                 side_effect=inject_unknown_stage_content,
             ),
         ):
@@ -8946,7 +8959,7 @@ os._exit(88)
         converter = self._converter(max_workers=1)
         self._write("new.txt", "new")
         cleanup_recorded_tree = (
-            included_files_module._cleanup_recorded_included_tree
+            _included_cleanup.cleanup_recorded_included_tree
         )
         sentinel_path: str | None = None
 
@@ -8978,13 +8991,13 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=fail_after_journal,
             ),
             patch.object(
-                included_files_module,
-                "_cleanup_recorded_included_tree",
+                _included_cleanup,
+                'cleanup_recorded_included_tree',
                 side_effect=inject_unknown_stage_content,
             ),
             self.assertRaisesRegex(OSError, "injected commit failure"),
@@ -9050,11 +9063,11 @@ os._exit(88)
             swapped = True
 
         with patch.object(
-            included_files_module,
-            "_before_included_transaction_rename",
+            _included_mutations,
+            'before_included_transaction_rename',
             side_effect=swap_source,
         ), self.assertRaisesRegex(OSError, "restored without loss"):
-            included_files_module._move_exact_included_file(
+            _included_mutations.move_exact_included_file(
                 source_path,
                 destination_path,
                 (source_stat.st_dev, source_stat.st_ino),
@@ -9112,11 +9125,11 @@ os._exit(88)
             swapped = True
 
         with patch.object(
-            included_files_module,
-            "_before_included_transaction_rename",
+            _included_mutations,
+            'before_included_transaction_rename',
             side_effect=swap_cleanup_file,
         ), self.assertRaisesRegex(OSError, "restored without loss"):
-            included_files_module._cleanup_recorded_included_file(
+            _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 hashlib.sha256(b"owned cleanup file").hexdigest(),
@@ -9169,7 +9182,7 @@ os._exit(88)
 
         streamed_bytes = 0
         largest_chunk = 0
-        original_read = included_files_module._read_included_validation_chunk
+        original_read = _included_snapshots.read_included_validation_chunk
 
         def count_streamed_bytes(opened_file: BinaryIO) -> bytes:
             nonlocal streamed_bytes, largest_chunk
@@ -9182,20 +9195,20 @@ os._exit(88)
         try:
             with (
                 patch.object(
-                    included_files_module,
-                    "_read_included_validation_chunk",
+                    _included_snapshots,
+                    'read_included_validation_chunk',
                     side_effect=count_streamed_bytes,
                 ),
                 patch.object(
-                    included_files_module,
-                    "_included_regular_file_state",
+                    _included_snapshots,
+                    'included_regular_file_state',
                     side_effect=AssertionError(
                         "cleanup used the whole-content file-state helper"
                     ),
                 ),
             ):
                 warnings = (
-                    included_files_module._cleanup_recorded_included_file(
+                    _included_cleanup.cleanup_recorded_included_file(
                         owned_path,
                         (owned_stat.st_dev, owned_stat.st_ino),
                         expected_digest.hexdigest(),
@@ -9319,11 +9332,11 @@ os._exit(88)
             retained_path = os.path.join(self.godot_dir, name)
 
         with patch.object(
-            included_files_module,
-            "_before_included_cleanup_remove",
+            _included_mutations,
+            'before_included_cleanup_remove',
             side_effect=swap_quarantine_before_rmdir,
         ), self.assertRaisesRegex(OSError, "recoverable directory retained"):
-            included_files_module._remove_owned_included_tree(
+            _included_mutations.remove_owned_included_tree(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 expected_parent_identity=(
@@ -9391,11 +9404,11 @@ os._exit(88)
             swapped = True
 
         with patch.object(
-            included_files_module,
-            "_before_included_registry_file_read",
+            _included_snapshots,
+            'before_included_registry_file_read',
             side_effect=swap_registry_directory,
         ), self.assertRaisesRegex(OSError, "directory changed"):
-            included_files_module._capture_included_registry(self.godot_dir)
+            _included_snapshots.capture_included_registry(self.godot_dir)
 
         self.assertTrue(swapped)
         with open(
@@ -9426,7 +9439,7 @@ os._exit(88)
             registry_file.write(b"old registry bytes")
         project_stat = os.lstat(project_path)
         project_identity = (project_stat.st_dev, project_stat.st_ino)
-        expected_snapshot = included_files_module._capture_included_registry(
+        expected_snapshot = _included_snapshots.capture_included_registry(
             project_path,
             expected_project_identity=project_identity,
         )
@@ -9440,7 +9453,7 @@ os._exit(88)
         with open(replacement_registry_path, "wb") as replacement_file:
             replacement_file.write(b"new replacement bytes")
         original_file_state_at = (
-            included_files_module._included_regular_file_state_at
+            _included_snapshots.included_regular_file_state_at
         )
         observed_registry_bytes: list[bytes] = []
 
@@ -9455,11 +9468,11 @@ os._exit(88)
             return state
 
         with patch.object(
-            included_files_module,
-            "_included_regular_file_state_at",
+            _included_snapshots,
+            'included_regular_file_state_at',
             side_effect=record_registry_read,
         ), self.assertRaisesRegex(OSError, "directory changed"):
-            included_files_module._verify_included_registry_snapshot(
+            _included_snapshots.verify_included_registry_snapshot(
                 project_path,
                 expected_snapshot,
                 expected_project_identity=project_identity,
@@ -9506,7 +9519,7 @@ os._exit(88)
             'included_descriptor_paths_supported',
             return_value=False,
         ):
-            expected_snapshot = included_files_module._capture_included_registry(
+            expected_snapshot = _included_snapshots.capture_included_registry(
                 project_path,
                 expected_project_identity=project_identity,
             )
@@ -9536,8 +9549,8 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(
-                included_files_module,
-                "_before_included_fallback_regular_file_open",
+                _included_snapshots,
+                'before_included_fallback_regular_file_open',
                 side_effect=swap_project_before_open,
             ),
             patch.object(
@@ -9547,7 +9560,7 @@ os._exit(88)
             ),
             self.assertRaises(OSError),
         ):
-            included_files_module._verify_included_registry_snapshot(
+            _included_snapshots.verify_included_registry_snapshot(
                 project_path,
                 expected_snapshot,
                 expected_project_identity=project_identity,
@@ -9669,13 +9682,13 @@ os._exit(88)
                 return_value=False,
             ),
             patch.object(
-                included_files_module,
-                "_before_included_fallback_chmod_open",
+                _included_mutations,
+                'before_included_fallback_chmod_open',
                 side_effect=swap_before_open,
             ),
             self.assertRaisesRegex(OSError, "file changed"),
         ):
-            included_files_module._chmod_exact_included_file(
+            _included_mutations.chmod_exact_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 0o444,
@@ -9740,12 +9753,12 @@ os._exit(88)
                 supports_without_chmod,
             ),
             patch.object(
-                included_files_module,
-                "_before_included_cleanup_quarantine_fallback",
+                _included_mutations,
+                'before_included_cleanup_quarantine_fallback',
                 side_effect=AssertionError("matching mode must not quarantine"),
             ),
         ):
-            included_files_module._chmod_exact_included_file(
+            _included_mutations.chmod_exact_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 0o640,
@@ -9783,12 +9796,12 @@ os._exit(88)
                 supports_without_chmod,
             ),
             patch.object(
-                included_files_module,
-                "_before_included_cleanup_quarantine_fallback",
+                _included_mutations,
+                'before_included_cleanup_quarantine_fallback',
                 side_effect=quarantined_paths.append,
             ),
         ):
-            included_files_module._chmod_exact_included_file(
+            _included_mutations.chmod_exact_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 0o400,
@@ -9857,7 +9870,7 @@ os._exit(88)
                 "recoverable quarantine retained",
             ),
         ):
-            included_files_module._cleanup_recorded_included_file(
+            _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 expected_identity,
                 hashlib.sha256(content).hexdigest(),
@@ -9890,7 +9903,7 @@ os._exit(88)
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
-            warnings = included_files_module._cleanup_recorded_included_file(
+            warnings = _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 expected_identity,
                 hashlib.sha256(content).hexdigest(),
@@ -9954,13 +9967,13 @@ os._exit(88)
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
-                included_files_module,
-                "_after_included_transaction_phase",
+                _included_phases,
+                'after_included_transaction_phase',
                 side_effect=stop_after_readonly_clear,
             ),
             self.assertRaises(SimulatedProcessExit),
         ):
-            included_files_module._cleanup_recorded_included_file(
+            _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 expected_identity,
                 hashlib.sha256(content).hexdigest(),
@@ -9989,7 +10002,7 @@ os._exit(88)
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
-            warnings = included_files_module._cleanup_recorded_included_file(
+            warnings = _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 expected_identity,
                 hashlib.sha256(content).hexdigest(),
@@ -10041,7 +10054,7 @@ os._exit(88)
                 "multiple hard links.*recoverable quarantine retained",
             ),
         ):
-            included_files_module._cleanup_recorded_included_file(
+            _included_cleanup.cleanup_recorded_included_file(
                 owned_path,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 hashlib.sha256(b"external hardlink sentinel").hexdigest(),
@@ -10101,7 +10114,7 @@ os._exit(88)
             ),
             patch.object(included_files_module.os, "name", "nt"),
         ):
-            warnings = included_files_module._cleanup_recorded_included_directory(
+            warnings = _included_cleanup.cleanup_recorded_included_directory(
                 owned_directory,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 (parent_stat.st_dev, parent_stat.st_ino),
@@ -10144,7 +10157,7 @@ os._exit(88)
                 "directory; recoverable quarantine retained",
             ),
         ):
-            included_files_module._cleanup_recorded_included_directory(
+            _included_cleanup.cleanup_recorded_included_directory(
                 owned_directory,
                 (owned_stat.st_dev, owned_stat.st_ino),
                 (parent_stat.st_dev, parent_stat.st_ino),
@@ -10264,7 +10277,7 @@ os._exit(88)
                 'open_included_tree_directory_at',
                 side_effect=swap_before_open,
             ), self.assertRaises(OSError):
-                included_files_module._capture_included_tree(scan_root)
+                _included_snapshots.capture_included_tree(scan_root)
 
             self.assertTrue(swapped)
             with open(outside_file, encoding="utf-8") as external_file:
@@ -10293,7 +10306,7 @@ os._exit(88)
         with open(outside_file, "w", encoding="utf-8") as external_file:
             external_file.write("external sentinel")
         parked_directory = os.path.join(scan_root, "parked-b")
-        original_digest = included_files_module._digest_included_regular_file
+        original_digest = _included_snapshots.digest_included_regular_file
         swapped = False
 
         def swap_after_scan(path: str) -> None:
@@ -10314,18 +10327,18 @@ os._exit(88)
                     return_value=False,
                 ),
                 patch.object(
-                    included_files_module,
-                    "_after_included_fallback_tree_directory_scan",
+                    _included_snapshots,
+                    'after_included_fallback_tree_directory_scan',
                     side_effect=swap_after_scan,
                 ),
                 patch.object(
-                    included_files_module,
-                    "_digest_included_regular_file",
+                    _included_snapshots,
+                    'digest_included_regular_file',
                     wraps=original_digest,
                 ) as digest_file,
                 self.assertRaises(OSError),
             ):
-                included_files_module._capture_included_tree(scan_root)
+                _included_snapshots.capture_included_tree(scan_root)
 
             self.assertTrue(swapped)
             digest_file.assert_not_called()
@@ -10347,7 +10360,7 @@ os._exit(88)
             (
                 "native-windows-path" if os.name == "nt" else "fallback-path",
                 False,
-                "_verify_included_tree_path_binding",
+                'verify_included_tree_path_binding',
             )
         ]
         if _included_posix.included_descriptor_paths_supported():
@@ -10356,7 +10369,7 @@ os._exit(88)
                 (
                     "descriptor",
                     True,
-                    "_verify_included_tree_descriptor_binding",
+                    'verify_included_tree_descriptor_binding',
                 ),
             )
 
@@ -10369,7 +10382,7 @@ os._exit(88)
                         depth,
                     )
                     original_verifier = getattr(
-                        included_files_module,
+                        _included_snapshots,
                         verifier_name,
                     )
                     binding_checks = 0
@@ -10388,12 +10401,12 @@ os._exit(88)
                             return_value=descriptor_supported,
                         ),
                         patch.object(
-                            included_files_module,
+                            _included_snapshots,
                             verifier_name,
                             side_effect=count_binding,
                         ),
                     ):
-                        snapshot = included_files_module._capture_included_tree(
+                        snapshot = _included_snapshots.capture_included_tree(
                             root_path
                         )
 
@@ -10438,7 +10451,7 @@ os._exit(88)
             with open(output_path, "wb") as output_file:
                 output_file.write(content)
 
-        descriptor_snapshot = included_files_module._capture_included_tree(
+        descriptor_snapshot = _included_snapshots.capture_included_tree(
             root_path
         )
         with patch.object(
@@ -10446,7 +10459,7 @@ os._exit(88)
             'included_descriptor_paths_supported',
             return_value=False,
         ):
-            fallback_snapshot = included_files_module._capture_included_tree(
+            fallback_snapshot = _included_snapshots.capture_included_tree(
                 root_path
             )
 
@@ -10535,7 +10548,7 @@ os._exit(88)
                 ),
                 self.assertRaisesRegex(OSError, "entry changed"),
             ):
-                included_files_module._capture_included_tree(scan_root)
+                _included_snapshots.capture_included_tree(scan_root)
 
             self.assertTrue(swapped)
             with open(
@@ -11110,7 +11123,7 @@ os._exit(88)
         previous_pair = self._pair_snapshot()
         os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
         self._write("new.txt", "new")
-        original_move = included_files_module._move_exact_included_directory
+        original_move = _included_mutations.move_exact_included_directory
         final_root_path = os.path.join(self.godot_dir, "included_files")
 
         def fail_staged_root_publish(
@@ -11145,8 +11158,8 @@ os._exit(88)
             )
 
         with patch.object(
-            included_files_module,
-            "_move_exact_included_directory",
+            _included_mutations,
+            'move_exact_included_directory',
             side_effect=fail_staged_root_publish,
         ):
             with self.assertRaisesRegex(
@@ -11268,7 +11281,7 @@ os._exit(88)
         os.rmdir(os.path.join(self.datafiles_dir, "old"))
         self._write("new/nested.txt", "new payload")
         original_commit = included_files_module._commit_included_output_set
-        original_move = included_files_module._move_exact_included_file
+        original_move = _included_mutations.move_exact_included_file
         publication_failed = False
 
         def commit_with_readonly_stage(
@@ -11321,8 +11334,8 @@ os._exit(88)
                 side_effect=commit_with_readonly_stage,
             ),
             patch.object(
-                included_files_module,
-                "_move_exact_included_file",
+                _included_mutations,
+                'move_exact_included_file',
                 side_effect=publish_registry_then_fail,
             ),
             self.assertRaisesRegex(
@@ -11363,7 +11376,7 @@ os._exit(88)
         os.rmdir(os.path.join(self.datafiles_dir, "old"))
         self._write("new/nested.txt", "new payload")
         original_commit = included_files_module._commit_included_output_set
-        original_move = included_files_module._move_exact_included_file
+        original_move = _included_mutations.move_exact_included_file
         cancellation_injected = False
 
         def commit_with_readonly_stage(
@@ -11416,8 +11429,8 @@ os._exit(88)
                 side_effect=commit_with_readonly_stage,
             ),
             patch.object(
-                included_files_module,
-                "_move_exact_included_file",
+                _included_mutations,
+                'move_exact_included_file',
                 side_effect=publish_registry_then_cancel,
             ),
         ):
@@ -11612,8 +11625,8 @@ os._exit(88)
         try:
             with (
                 patch.object(
-                    included_files_module,
-                    "_before_included_transaction_rename_fallback",
+                    _included_mutations,
+                    'before_included_transaction_rename_fallback',
                     side_effect=inject_backup_junction,
                 ),
                 self.assertRaises(OSError),

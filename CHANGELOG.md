@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.30 - 2026-10-04
+
+- Separate included-files source snapshots, guarded filesystem mutations, canonical record I/O and recorded cleanup into dedicated owners while preserving transaction and recovery behavior.
+- Verify live owner calls, bounded recovery records, durable quarantine hooks and borrowed POSIX descriptors and Windows bindings; retain existing transaction and Godot coverage.
+
 ## 0.8.29 - 2026-10-04
 
 - Move included-files POSIX and Windows primitives behind a finite typed filesystem interface, preserving native flags, ownership and transaction behavior.

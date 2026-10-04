@@ -64,6 +64,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
             import sys
 
             from src.conversion import included_files as included_files_module
+            from src.conversion.included_files_parts import phase_observer as included_phase_observer
             from src.conversion.included_files import IncludedFilesConverter
 
             gm_path, godot_path = sys.argv[1:]
@@ -72,7 +73,7 @@ class TestFilesIniJsonGodotSmoke(unittest.TestCase):
                 if phase == "generation-committed":
                     os._exit(86)
 
-            included_files_module._after_included_transaction_phase = stop_after_phase
+            included_phase_observer.after_included_transaction_phase = stop_after_phase
             IncludedFilesConverter(
                 gm_path,
                 godot_path,

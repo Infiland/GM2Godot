@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.40 - 2026-10-04
+
+- Share Godot binary discovery, fixture text writing and standard headless scene invocation across six smoke-test modules while preserving their fixtures and assertions.
+- Verify live discovery priority, file-write failures and caller-controlled process results and timeouts.
+
 ## 0.8.39 - 2026-10-04
 
 - Enforce a fixed function-complexity threshold with individually reviewed removal plans and ceilings that must shrink when existing code improves.

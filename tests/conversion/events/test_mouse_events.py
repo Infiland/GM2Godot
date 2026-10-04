@@ -1,10 +1,4 @@
-import os
-import sys
 import unittest
-
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.script_generator import generate_script_content

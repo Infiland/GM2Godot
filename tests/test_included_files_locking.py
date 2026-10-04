@@ -10,8 +10,7 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
+if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion import included_files as included_files_module

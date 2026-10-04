@@ -1,6 +1,6 @@
 # Contributing and Testing
 
-> **Applies to:** GM2Godot 0.8.32 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.33 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -108,14 +108,23 @@ For Python or generated-code logic changes:
 ./venv/bin/python -m unittest
 ```
 
-CI enforces Ruff's complete `E7` and Pyflakes (`F`) rule families, plus `E9` fatal-error checks. `E7` includes the `E731` assigned-lambda and `E741` ambiguous-variable rules. Do not disable `F` or individual `F`-numbered rules globally or per file. Ruff also enforces import sorting through the `I` rule family. Keep aliased imports together with `combine-as-imports = true`, including deliberate local cycle gateways. Preserve bootstrap and environment setup before dependent imports; keep intentional local imports local. Do not add `I` ignores or sorting skips. The local configuration excludes generated `build/`, `dist/`, and `release/` output and the local `venv/` environment; CI also checks every tracked lint input without suppression or exclusion bypasses. The `E4`, `B`, and `C90` families belong to separate reviewed changes.
+CI enforces Ruff's complete `E7` and Pyflakes (`F`) rule families, plus `E9` fatal-error checks. `E7` includes the `E731` assigned-lambda and `E741` ambiguous-variable rules. Do not disable `F` or individual `F`-numbered rules globally or per file. Ruff also enforces import placement through the `E4` rule family. Keep repository-path setup in explicit conditional guards and preserve discovery before dependent imports; do not hide placement failures with new `E4` ignores. Ruff also enforces import sorting through the `I` rule family. Keep aliased imports together with `combine-as-imports = true`, including deliberate local cycle gateways. Preserve bootstrap and environment setup before dependent imports; keep intentional local imports local. Do not add `I` ignores or sorting skips. The local configuration excludes generated `build/`, `dist/`, and `release/` output and the local `venv/` environment; CI also checks every tracked lint input without suppression or exclusion bypasses. The `B` and `C90` families belong to separate reviewed changes.
+
+Run Python tests from the repository root with `./venv/bin/python -m unittest` or module-qualified unittest selectors. The event-mapping test package uses normal package imports and does not add the repository to `sys.path`.
+
+```bash
+./venv/bin/python -m unittest discover -s tests/conversion/events -t . -v
+./venv/bin/python -m unittest tests.conversion.events.test_create_event
+```
+
+Direct file execution such as `./venv/bin/python tests/conversion/events/test_create_event.py` is unsupported for this package. Use the corresponding module-qualified command. The standalone `tests/test_macos_gui_artifact_verifier.py` retains its existing native Python `-I`, `--native-architecture`, and `--output` invocation and isolated file-loading contract; it is outside this bootstrap refactor and remains covered by the same lint gate.
 
 Use the same explicit tracked-input gate as CI when reviewing exclusions and suppressions:
 
 ```bash
 git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
   xargs -0 -- ./venv/bin/python -m ruff check --isolated --target-version py312 --line-length 120 \
-    --select E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
+    --select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
 ```
 
 This command checks tracked Python source regardless of local ignores or exclusions. Ruff does not lint Python code blocks in the passed Markdown documents.

@@ -13,16 +13,8 @@ import unittest
 from typing import BinaryIO, Iterable, Mapping
 from unittest.mock import MagicMock, patch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
+if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-AUTHORED_SEQUENCE_FIXTURE = os.path.join(
-    PROJECT_ROOT,
-    "tests",
-    "fixtures",
-    "authored_sequences",
-    "fixture.json",
-)
 
 from src.conversion import asset_registry as asset_registry_module
 from src.conversion.animation_curve_registry import (
@@ -49,6 +41,14 @@ from src.conversion.json_values import JsonObject, JsonValue, validate_json_valu
 from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 from src.conversion.type_defs import StrPath
+
+AUTHORED_SEQUENCE_FIXTURE = os.path.join(
+    PROJECT_ROOT,
+    "tests",
+    "fixtures",
+    "authored_sequences",
+    "fixture.json",
+)
 
 
 def _json_object(value: JsonValue) -> JsonObject:

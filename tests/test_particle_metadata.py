@@ -5,7 +5,10 @@ from unittest.mock import patch
 
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.particle_assets import normalize_particle_system_asset, render_particle_system_resource
+from src.conversion.particle_assets import (
+    normalize_particle_system_asset,
+    render_particle_system_resource,
+)
 from src.conversion.particle_metadata import ParticleSystemDescriptor
 
 

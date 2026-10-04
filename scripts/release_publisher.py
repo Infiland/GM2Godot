@@ -8,23 +8,22 @@ to ownership receipts.
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime
 import hashlib
 import http.client
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
 import time
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
-
 
 API_VERSION = "2026-03-10"
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024

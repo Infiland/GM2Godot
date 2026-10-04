@@ -8,9 +8,16 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from src.conversion.asset_registry import AssetRegistryEntry, render_asset_registry_script
+from src.conversion.asset_registry import (
+    AssetRegistryEntry,
+    render_asset_registry_script,
+)
 from src.conversion.gml_runtime import write_gml_runtime
-from src.conversion.path_registry import PathPoint, PathRegistryEntry, render_path_registry_script
+from src.conversion.path_registry import (
+    PathPoint,
+    PathRegistryEntry,
+    render_path_registry_script,
+)
 from src.conversion.script_generator import ObjectRuntimeConfig, generate_script_content
 
 

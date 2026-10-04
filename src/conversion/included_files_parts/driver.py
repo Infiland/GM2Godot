@@ -1,27 +1,44 @@
 """Included Files driver ownership."""
 
 from __future__ import annotations
+
 import os
 import secrets
 from concurrent.futures import Future, ThreadPoolExecutor
-from src.localization import get_localized
+
 from src.conversion.atomic_generated_text import atomic_write_confined_generated_text
-from src.conversion.included_file_paths import canonical_included_file_lookup_path, plan_included_file_paths
+from src.conversion.included_file_paths import (
+    canonical_included_file_lookup_path,
+    plan_included_file_paths,
+)
 from src.conversion.included_file_registry import render_included_file_registry
-from src.conversion.project_source_paths import ProjectSourcePathError
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, PathIdentity as _PathIdentity, IncludedCopyReceipt as _IncludedCopyReceipt, IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt, IncludedTreeSnapshot as _IncludedTreeSnapshot, IncludedRegistrySnapshot as _IncludedRegistrySnapshot, IncludedOutputSetTransaction as _IncludedOutputSetTransaction, IncludedOutputSetCancelled as _IncludedOutputSetCancelled
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import recovery_codec as _included_codec
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import guarded_mutations as _included_mutations
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import locking as _included_locking
-from src.conversion.included_files_parts import publisher as _included_publisher
-from src.conversion.included_files_parts import recovery as _included_recovery
-from src.conversion.included_files_parts import staging as _included_staging
-from src.conversion.included_files_parts import worker_pool as _included_worker_pool
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    file_publication as _included_file_publication,
+    guarded_mutations as _included_mutations,
+    locking as _included_locking,
+    publisher as _included_publisher,
+    recovery as _included_recovery,
+    recovery_codec as _included_codec,
+    source_snapshots as _included_snapshots,
+    staging as _included_staging,
+    stat_metadata as _included_metadata,
+    worker_pool as _included_worker_pool,
+)
 from src.conversion.included_files_parts.converter_ports import IncludedDriverPort
+from src.conversion.included_files_parts.models import (
+    IncludedCopyReceipt as _IncludedCopyReceipt,
+    IncludedFileSource as _IncludedFileSource,
+    IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt,
+    IncludedOutputSetCancelled as _IncludedOutputSetCancelled,
+    IncludedOutputSetTransaction as _IncludedOutputSetTransaction,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathIdentity as _PathIdentity,
+)
+from src.conversion.project_source_paths import ProjectSourcePathError
+from src.localization import get_localized
+
 
 class IncludedDriverOperations(IncludedDriverPort):
     def convert_included_files(self: IncludedDriverPort) -> None:

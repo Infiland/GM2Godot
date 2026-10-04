@@ -5,34 +5,60 @@ import os
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
-from src.conversion.font_metadata import GameMakerFontMetadata, parse_gamemaker_font_metadata
-from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_font_json
-from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_resource_json
-from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_sound_json
-from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_tileset_json
+from src.conversion.font_metadata import (
+    GameMakerFontMetadata,
+    parse_gamemaker_font_metadata,
+)
+from src.conversion.gamemaker_json import (
+    decode_gamemaker_json,
+    decode_gamemaker_json as decode_gamemaker_font_json,
+    decode_gamemaker_json as decode_gamemaker_resource_json,
+    decode_gamemaker_json as decode_gamemaker_sound_json,
+    decode_gamemaker_json as decode_gamemaker_tileset_json,
+)
 from src.conversion.generated_paths import generated_subfolder_path
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.room_metadata import (
-    capture_room_summary_settings, iter_room_layer_summary_fields,
-    project_room_summary_fields,
+from src.conversion.object_metadata import (
+    GameMakerObjectMetadata,
+    parse_gamemaker_object_metadata,
 )
-from src.conversion.sequence_metadata import sequence_track_count
-from src.conversion.timeline_metadata import timeline_moment_count
-from src.conversion.object_metadata import GameMakerObjectMetadata, parse_gamemaker_object_metadata
-from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
-from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
+from src.conversion.path_metadata import (
+    GameMakerPathMetadata,
+    parse_gamemaker_path_metadata,
+)
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectResourceReference,
+    load_gamemaker_project_manifest,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_filesystem_source_path,
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
-from src.conversion.sound_metadata import GameMakerSoundMetadata, parse_gamemaker_sound_metadata
-from src.conversion.sprite_metadata import GameMakerSpriteMetadata, parse_gamemaker_sprite_metadata
-from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
-
+from src.conversion.resource_parent_metadata import (
+    parse_gamemaker_resource_parent_metadata,
+)
+from src.conversion.room_metadata import (
+    capture_room_summary_settings,
+    iter_room_layer_summary_fields,
+    project_room_summary_fields,
+)
+from src.conversion.sequence_metadata import sequence_track_count
+from src.conversion.sound_metadata import (
+    GameMakerSoundMetadata,
+    parse_gamemaker_sound_metadata,
+)
+from src.conversion.sprite_metadata import (
+    GameMakerSpriteMetadata,
+    parse_gamemaker_sprite_metadata,
+)
+from src.conversion.tileset_metadata import (
+    GameMakerTilesetMetadata,
+    parse_gamemaker_tileset_metadata,
+)
+from src.conversion.timeline_metadata import timeline_moment_count
 
 ResourceModelSeverity = Literal["info", "warning", "error"]
 

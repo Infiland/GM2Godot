@@ -117,7 +117,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Reduce broad file-level Pyright suppressions over time.
 - [x] Add Ruff or equivalent linting.
 - [ ] Add complexity checks for parser/emitter/runtime generation modules.
-- [ ] Add import sorting.
+- [x] Add import sorting.
 - [ ] Add unused code checks.
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.

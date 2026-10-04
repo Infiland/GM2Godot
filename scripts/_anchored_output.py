@@ -8,16 +8,16 @@ into their own CLI error taxonomy.
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass, field
 import errno
 import functools
 import os
-from pathlib import Path
 import secrets
 import stat
 import sys
-from typing import Any, Callable, Literal, Protocol, cast
 import weakref
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Literal, Protocol, cast
 
 
 class AnchoredOutputError(ValueError):

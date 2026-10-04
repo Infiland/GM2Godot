@@ -6,7 +6,11 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(o
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.event_mapping import INPUT_EVENT_TYPES, INPUT_MERGED_MAPPING, map_event
+from src.conversion.event_mapping import (
+    INPUT_EVENT_TYPES,
+    INPUT_MERGED_MAPPING,
+    map_event,
+)
 
 
 class TestEventRegistry(unittest.TestCase):

@@ -6,17 +6,16 @@ from dataclasses import dataclass
 
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.sequence_metadata import (
-    SequenceDescriptor,
-    SequenceAssetTrack,
-    SequenceParameterTrack,
-    SequenceAudioEffectTrack,
-    SequenceTextKey,
-    SequenceKeyframeBase,
     SequenceActionBase,
+    SequenceAssetTrack,
+    SequenceAudioEffectTrack,
     SequenceChannel,
+    SequenceDescriptor,
     SequenceEventAction,
+    SequenceKeyframeBase,
+    SequenceParameterTrack,
+    SequenceTextKey,
 )
-
 
 SEQUENCE_DESCRIPTOR_FORMAT_VERSION = 1
 

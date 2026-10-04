@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.project_manifest import GameMakerProjectManifest
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.resource_models import (
@@ -12,7 +13,6 @@ from src.conversion.resource_models import (
     ObjectModel,
     RoomModel,
 )
-from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 
 
 def _mapping(value: JsonValue) -> JsonObject:

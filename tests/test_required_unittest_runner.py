@@ -6,14 +6,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from io import StringIO
 from pathlib import Path
-from dataclasses import replace
 from typing import cast
 from unittest.mock import patch
 
-from scripts._anchored_output import AnchoredOutputError
 from scripts import run_required_unittest as runner
+from scripts._anchored_output import AnchoredOutputError
 
 
 class _RunnerFixture(unittest.TestCase):

@@ -8,13 +8,12 @@ import unittest
 from dataclasses import dataclass
 from unittest.mock import patch
 
-from src.conversion.gamemaker_json import decode_gamemaker_json
-
 from src.conversion.animation_curve_registry import (
     build_animation_curve_registry_entries,
     render_animation_curve_registry_script,
     write_animation_curve_registry,
 )
+from src.conversion.gamemaker_json import decode_gamemaker_json
 
 
 @dataclass(frozen=True)

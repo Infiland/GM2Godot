@@ -8,16 +8,15 @@ root once those actors can inspect this process or its open descriptors.
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass, field
 import errno
 import functools
 import os
-from pathlib import Path
 import secrets
 import stat
 import sys
-from typing import Callable, NoReturn, Protocol, TYPE_CHECKING
-
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Callable, NoReturn, Protocol
 
 if TYPE_CHECKING:
 

@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import copy
-from contextlib import chdir, redirect_stderr, redirect_stdout
-from dataclasses import dataclass
-from io import StringIO
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
+from contextlib import chdir, redirect_stderr, redirect_stdout
+from dataclasses import dataclass
+from io import StringIO
+from pathlib import Path
+from types import SimpleNamespace
+from typing import IO, Callable, cast
 from unittest import mock
-from typing import Callable, IO, cast
 
 from scripts import verify_dependency_environment as verifier
-
 
 PYTHON_VERSION = "3.12.13"
 PIP_VERSION = "26.2.1"

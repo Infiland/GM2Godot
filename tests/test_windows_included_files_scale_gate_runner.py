@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from io import StringIO
 import os
-from pathlib import Path
 import subprocess
 import sys
 import unittest
+from io import StringIO
+from pathlib import Path
 from unittest.mock import ANY, patch
 
 from scripts import run_windows_included_files_scale_gate as scale_gate
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

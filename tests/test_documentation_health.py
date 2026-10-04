@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import re
 import stat
 import subprocess
@@ -9,11 +8,11 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 from typing import cast
 
 from src.conversion.project_godot import MANAGED_OUTPUT_DIRECTORIES
 from src.version import get_version
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WIKI_SOURCE_DIR = PROJECT_ROOT / "docs" / "wiki"
@@ -65,7 +64,7 @@ EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E7", "E9", "F"]},
+    "lint": {"select": ["E7", "E9", "F", "I"], "isort": {"combine-as-imports": True}},
 }
 EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff
@@ -74,8 +73,8 @@ EXPECTED_RUFF_LINT_STEPS = """\
       - name: Run Ruff on every tracked lint input
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
-            xargs -0 -- python -m ruff check --isolated --target-version py312 \\
-              --select E7,E9,F --ignore-noqa --no-respect-gitignore --no-force-exclude --
+            xargs -0 -- python -m ruff check --isolated --target-version py312 --line-length 120 \\
+              --select E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
 """
 
 
@@ -384,7 +383,13 @@ class TestDocumentationHealth(unittest.TestCase):
                 self.assertIn("./venv/bin/python -m ruff check .", content)
                 self.assertIn("generated `build/`, `dist/`, and `release/` output", content)
                 self.assertIn("local `venv/` environment", content)
-                self.assertIn("The `E4`, `I`, `B`, and `C90` families belong to separate reviewed changes.", content)
+                self.assertIn("The `E4`, `B`, and `C90` families belong to separate reviewed changes.", content)
+                self.assertIn("Ruff also enforces import sorting through the `I` rule family.", content)
+                self.assertIn(
+                    "--select E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --",
+                    content,
+                )
+                self.assertIn("Ruff does not lint Python code blocks in the passed Markdown documents.", content)
 
     def _run_ruff(
         self,
@@ -440,8 +445,8 @@ class TestDocumentationHealth(unittest.TestCase):
             )
 
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--select", "E7,E9,F", "--ignore-noqa",
-                "--no-respect-gitignore", "--no-force-exclude",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E7,E9,F,I", "--ignore-noqa",
+                "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             tracked_diagnostics = self._run_ruff(bypass_path, tracked_flags, 1, cwd=temporary_path)
             self.assertEqual([diagnostic["code"] for diagnostic in tracked_diagnostics], ["E741"])
@@ -470,8 +475,8 @@ class TestDocumentationHealth(unittest.TestCase):
 
             project_flags = ("--config", str(PROJECT_ROOT / "pyproject.toml"))
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--select", "E7,E9,F", "--ignore-noqa",
-                "--no-respect-gitignore", "--no-force-exclude",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E7,E9,F,I", "--ignore-noqa",
+                "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             self.assertEqual(self._run_ruff(named_path, project_flags, 0, cwd=temporary_path), [])
             self.assertEqual(
@@ -491,6 +496,74 @@ class TestDocumentationHealth(unittest.TestCase):
                     self.assertIsInstance(diagnostic["filename"], str)
                     self.assertEqual(Path(cast(str, diagnostic["filename"])).resolve(), path.resolve())
                     self.assertEqual(diagnostic["location"], location)
+
+    def test_i_rule_rejects_unsorted_imports_and_accepts_sorted_imports(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gm2godot-i001-") as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            unsorted_path = temporary_path / "unsorted.py"
+            sorted_path = temporary_path / "sorted.py"
+            unsorted_path.write_text(
+                "import sys\nimport json\n\nprint(json.dumps(sys.version))\n",
+                encoding="utf-8",
+            )
+            sorted_path.write_text(
+                "import json\nimport sys\n\nprint(json.dumps(sys.version))\n",
+                encoding="utf-8",
+            )
+
+            project_flags = ("--config", str(PROJECT_ROOT / "pyproject.toml"))
+            diagnostics = self._run_ruff(unsorted_path, project_flags, 1, cwd=temporary_path)
+            self.assertEqual([diagnostic["code"] for diagnostic in diagnostics], ["I001"])
+            self.assertEqual(diagnostics[0]["location"], {"row": 1, "column": 1})
+            self.assertEqual(
+                Path(cast(str, diagnostics[0]["filename"])).resolve(),
+                unsorted_path.resolve(),
+            )
+            self.assertEqual(self._run_ruff(sorted_path, project_flags, 0, cwd=temporary_path), [])
+
+    def test_i_tracked_gate_rejects_local_config_and_noqa_bypasses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="gm2godot-i001-bypass-") as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            hidden_directory = temporary_path / "hidden"
+            hidden_directory.mkdir()
+            (temporary_path / ".gitignore").write_text("hidden/\n", encoding="utf-8")
+            ignore_config = temporary_path / "pyproject.toml"
+            ignore_config.write_text(
+                '[tool.ruff.lint]\nselect = ["E7", "E9", "F", "I"]\nignore = ["I001"]\n',
+                encoding="utf-8",
+            )
+            cases = (
+                ("config.py", "import sys\nimport json\n\nprint(json.dumps(sys.version))\n", 1),
+                (
+                    "inline.py",
+                    "import sys  # noqa: I001\nimport json\n\nprint(json.dumps(sys.version))\n",
+                    1,
+                ),
+                (
+                    "file.py",
+                    "# ruff: noqa: I001\nimport sys\nimport json\n\nprint(json.dumps(sys.version))\n",
+                    2,
+                ),
+            )
+            tracked_flags = (
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E7,E9,F,I", "--ignore-noqa",
+                "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
+            )
+            for name, content, import_row in cases:
+                path = hidden_directory / name
+                path.write_text(content, encoding="utf-8")
+                with self.subTest(bypass=name):
+                    self.assertEqual(
+                        self._run_ruff(path, ("--config", str(ignore_config)), 0, cwd=temporary_path),
+                        [],
+                    )
+                    diagnostics = self._run_ruff(path, tracked_flags, 1, cwd=temporary_path)
+                    self.assertEqual([diagnostic["code"] for diagnostic in diagnostics], ["I001"])
+                    self.assertEqual(diagnostics[0]["location"], {"row": import_row, "column": 1})
+                    self.assertEqual(
+                        Path(cast(str, diagnostics[0]["filename"])).resolve(),
+                        path.resolve(),
+                    )
 
     def test_dependabot_updates_actions_weekly_and_pip_security_only(self) -> None:
         dependabot = (

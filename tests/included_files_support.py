@@ -2,10 +2,10 @@
 
 import hashlib
 import os
+import shutil
 import stat
 import subprocess
 import sys
-import shutil
 import tempfile
 import threading
 import unittest
@@ -19,19 +19,25 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import guarded_mutations as _included_mutations
-from src.conversion.included_files_parts import record_io as _included_records
-from src.conversion.included_files_parts import recorded_cleanup as _included_cleanup
 from src.conversion import included_files as included_files_module
-from src.conversion.included_files_parts import native_posix as _included_posix, native_windows as _included_windows, constants as _included_constants, stat_metadata as _included_metadata, recovery_codec as _included_codec
-from src.conversion.included_files import IncludedFilesConverter
-from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.included_files_parts import file_publication as _included_file_publication
-from src.conversion.included_files_parts import locking as _included_locking
-from src.conversion.included_files_parts import recovery as _included_recovery
-from src.conversion.included_files_parts import staging as _included_staging
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
+from src.conversion.included_files import IncludedFilesConverter
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    file_publication as _included_file_publication,
+    guarded_mutations as _included_mutations,
+    locking as _included_locking,
+    native_posix as _included_posix,
+    native_windows as _included_windows,
+    record_io as _included_records,
+    recorded_cleanup as _included_cleanup,
+    recovery as _included_recovery,
+    recovery_codec as _included_codec,
+    source_snapshots as _included_snapshots,
+    staging as _included_staging,
+    stat_metadata as _included_metadata,
+)
 
 
 def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:

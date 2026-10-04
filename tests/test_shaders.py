@@ -10,12 +10,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.shaders import ShaderConverter
 from src.conversion.asset_output_paths import build_asset_output_paths
-from src.conversion.converter import Converter
 from src.conversion.conversion_outcome import ConversionCounts
+from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
+from src.conversion.shaders import ShaderConverter
 
 SAMPLE_FSH = """\
 precision highp float;

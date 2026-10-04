@@ -26,7 +26,6 @@ from .tokens import (
     tokenize_gml_source,
 )
 
-
 __all__: Final[tuple[str, ...]] = (
     "decode_gml_string_literal",
     "decode_gml_verbatim_string_literal",

@@ -14,15 +14,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.resource_index import IndexedRoom
-from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonArray, JsonObject, JsonValue, JsonValueError
-from src.conversion.tileset_metadata import select_tileset_room_layout
+from src.conversion.resource_index import IndexedRoom
+from src.conversion.room_creation_code import resolve_instance_creation_code
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
     GAMEMAKER_TILE_FLIP_BIT,
@@ -31,13 +29,15 @@ from src.conversion.room_layers import (
     GODOT_TILE_TRANSFORM_FLIP_H,
     GODOT_TILE_TRANSFORM_FLIP_V,
     GODOT_TILE_TRANSFORM_TRANSPOSE,
+    SerializedRoomLayers,
     decode_gamemaker_tile,
     decode_tile_compressed_data,
     gamemaker_tile_transform_to_godot,
     is_empty_gamemaker_tile,
     serialize_room_layers,
-    SerializedRoomLayers,
 )
+from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
+from src.conversion.tileset_metadata import select_tileset_room_layout
 
 
 def _write_file(path: str, content: str) -> None:

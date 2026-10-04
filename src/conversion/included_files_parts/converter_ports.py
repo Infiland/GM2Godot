@@ -1,25 +1,32 @@
 from __future__ import annotations
+
 import os
-from typing import BinaryIO
+from _thread import LockType
+from typing import BinaryIO, Protocol
+
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.included_file_paths import IncludedFilePathAssignment
-from src.conversion.project_manifest import GameMakerProjectManifest, ProjectManifestDiagnostic
-from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
-from src.conversion.type_defs import ConversionRunning, LogCallback, StrPath
 from src.conversion.included_files_parts.models import (
-    IncludedFileSource as _IncludedFileSource,
     DeclaredIncludedFile as _DeclaredIncludedFile,
-    IncludedFileConversionPlan as _IncludedFileConversionPlan,
-    PathIdentity as _PathIdentity,
     IncludedCopyReceipt as _IncludedCopyReceipt,
-    IncludedSourceBinding as _IncludedSourceBinding,
-    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedFileConversionPlan as _IncludedFileConversionPlan,
+    IncludedFileSource as _IncludedFileSource,
     IncludedGenerationMatch as _IncludedGenerationMatch,
-    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
     IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedSourceBinding as _IncludedSourceBinding,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathIdentity as _PathIdentity,
 )
-from typing import Protocol
-from _thread import LockType
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+)
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+)
+from src.conversion.type_defs import ConversionRunning, LogCallback, StrPath
 
 
 class IncludedCopyWorkerPort(Protocol):

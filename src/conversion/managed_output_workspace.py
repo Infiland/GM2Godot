@@ -20,7 +20,6 @@ from src.conversion.anchored_artifacts import (
     modes_match,
 )
 
-
 DESTINATION_LOCK_NAME = ".gm2godot-managed-output.lock"
 WORKSPACE_PARENT_NAME = ".gm2godot-managed-output"
 WORKSPACE_PARENT_MARKER_NAME = ".gm2godot-workspace-parent.json"

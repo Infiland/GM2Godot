@@ -1,16 +1,24 @@
 from __future__ import annotations
+
 import os
 import secrets
 import stat
 import sys
 from typing import Callable
+
+from src.conversion.included_files_parts import (
+    native_posix as _included_posix,
+    phase_observer as _included_phases,
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.filesystem_operations import (
+    IncludedCleanupParentBinding as _IncludedCleanupParentBinding,
+)
 from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import native_posix as _included_posix
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
-from src.conversion.included_files_parts.filesystem_operations import IncludedCleanupParentBinding as _IncludedCleanupParentBinding
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import phase_observer as _included_phases
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
 
 
 def _before_included_transaction_rename(

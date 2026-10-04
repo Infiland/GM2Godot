@@ -11,7 +11,13 @@ from typing import cast
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtWidgets import QApplication, QDoubleSpinBox, QLineEdit, QPushButton, QSpinBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QDoubleSpinBox,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+)
 
 from src.conversion.converter import CONVERSION_CATEGORIES
 from src.deep.install import ExtensionManager

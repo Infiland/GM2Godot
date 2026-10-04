@@ -1,11 +1,19 @@
 """Included Files diagnostics ownership."""
 
 from __future__ import annotations
+
 import posixpath
+
 from src.conversion.included_file_paths import IncludedFilePathAssignment
-from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
-from src.conversion.included_files_parts.models import DeclaredIncludedFile as _DeclaredIncludedFile
 from src.conversion.included_files_parts.converter_ports import IncludedDiagnosticsPort
+from src.conversion.included_files_parts.models import (
+    DeclaredIncludedFile as _DeclaredIncludedFile,
+)
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+)
+
 
 class IncludedDiagnosticsOperations(IncludedDiagnosticsPort):
     def _report_included_file_output_rejection(

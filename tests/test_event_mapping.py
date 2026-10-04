@@ -8,8 +8,11 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.event_mapping import (
-    EventMapping, map_event as _map_event, is_input_event,
-    INPUT_MERGED_MAPPING, map_input_event,
+    INPUT_MERGED_MAPPING,
+    EventMapping,
+    is_input_event,
+    map_event as _map_event,
+    map_input_event,
 )
 from src.conversion.json_values import JsonObject, JsonValue
 

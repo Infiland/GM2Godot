@@ -14,13 +14,12 @@ from src.conversion.tileset_metadata import (
     GameMakerTilesetMetadata,
     GameMakerTilesetSpriteReference,
     TilesetConversionFields,
+    TilesetRoomLayout,
     parse_gamemaker_tileset_metadata,
     parse_gamemaker_tileset_sprite_reference,
     project_tileset_conversion_fields,
-    TilesetRoomLayout,
     select_tileset_room_layout,
 )
-
 
 INTEGER_FIELDS = (
     ("tileWidth", "tile_width", 16),

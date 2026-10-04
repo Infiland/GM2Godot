@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
 import inspect
-from pathlib import Path
-from typing import Final, Iterable, get_args, get_origin, get_type_hints, cast
 import unittest
+from collections.abc import Callable
+from pathlib import Path
+from typing import Final, Iterable, cast, get_args, get_origin, get_type_hints
 
-from src.conversion.gml_transpiler import preprocess_gml_source as facade_preprocess_gml_source
+from src.conversion.gml_transpiler import (
+    preprocess_gml_source as facade_preprocess_gml_source,
+)
 from src.conversion.gml_transpiler_parts.lexical_api import (
     decode_gml_string_literal,
     decode_gml_verbatim_string_literal,
@@ -31,9 +33,10 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     ScopeContext,
     Token,
 )
-
-from tests.gml_facade_contract_support import literal_all_exports, runtime_phase_contract
-
+from tests.gml_facade_contract_support import (
+    literal_all_exports,
+    runtime_phase_contract,
+)
 
 PARTS_PATH = Path(__file__).resolve().parents[1] / "src" / "conversion" / "gml_transpiler_parts"
 FACADE_PATH = PARTS_PATH.parent / "gml_transpiler.py"

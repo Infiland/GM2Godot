@@ -45,6 +45,7 @@ from .utils import (
     tokens_to_source,
 )
 
+
 class _StatementParser:
     def __init__(
         self,

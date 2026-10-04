@@ -15,17 +15,18 @@ from pathlib import Path
 from typing import Callable, cast
 from unittest.mock import Mock, patch
 
+from scripts import (
+    capture_conversion_parity as parity,
+    conversion_parity_contract as contract,
+    conversion_parity_inputs as inputs,
+    conversion_parity_snapshot as snapshots,
+)
 from scripts._anchored_output import AnchoredOutputError
-from scripts import capture_conversion_parity as parity
-from scripts import conversion_parity_contract as contract
-from scripts import conversion_parity_inputs as inputs
-from scripts import conversion_parity_snapshot as snapshots
 from src import cli
-from src.conversion import managed_output_publisher as publisher
+from src.conversion import godot_validation, managed_output_publisher as publisher
 from src.conversion.generation_inventory import capture_generation_inventory
 from src.conversion.managed_output_publisher import publish_managed_output_generation
 from src.conversion.managed_output_workspace import ManagedOutputWorkspace
-from src.conversion import godot_validation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

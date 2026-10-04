@@ -1,9 +1,9 @@
 import json
 import os
 import re
-import sys
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -14,9 +14,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.project_godot import prepare_godot_project_destination
 from src.conversion.project_settings import (
     ProjectOperationResult,
     ProjectSettingsConverter,

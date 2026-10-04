@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from io import BytesIO
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from collections.abc import Callable, Mapping, Sequence
+from io import BytesIO
+from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 from scripts import wiki_publication as publication
 from tests.wiki_publication_test_support import PAGES, WIKI_BRANCH, WikiFixture

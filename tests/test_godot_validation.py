@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 # pyright: reportPrivateUsage=false
-
 import base64
 import errno
 import json
 import os
-import signal
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -25,14 +24,13 @@ from src import cli
 from src.conversion import godot_validation as godot_validation_module
 from src.conversion.godot_validation import (
     GODOT_VALIDATION_REPORT_RELATIVE_PATH,
+    _run_godot_command,
     detect_godot_output_issues,
     find_godot_binary,
     generated_godot_importable_asset_paths,
     generated_godot_resource_paths,
-    _run_godot_command,
     validate_generated_godot_project,
 )
-
 
 _PNG_1X1_WHITE = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4"

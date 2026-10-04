@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
-
 SourceDiagnosticSeverity: TypeAlias = Literal["warning", "error"]
 
 

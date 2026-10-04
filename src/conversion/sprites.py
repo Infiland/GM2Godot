@@ -1,30 +1,41 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from PIL import Image
 from collections import defaultdict
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import TypedDict
 
-from src.localization import get_localized
+from PIL import Image
+
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
-from src.conversion.project_manifest import load_gamemaker_project_manifest
-from src.conversion.resource_reference_metadata import capture_sprite_resource_declaration
-from src.conversion.sprite_metadata import (
-    parse_sprite_animation_fields,
-    parse_sprite_collision_fields,
-    parse_sprite_frame_layer_fields,
+from src.conversion.generated_paths import (
+    generated_nested_resource_path,
+    generated_resource_directory,
+    generated_resource_stem,
 )
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
-
+from src.conversion.resource_reference_metadata import (
+    capture_sprite_resource_declaration,
+)
+from src.conversion.sprite_metadata import (
+    parse_sprite_animation_fields,
+    parse_sprite_collision_fields,
+    parse_sprite_frame_layer_fields,
+)
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
+from src.localization import get_localized
 
 _MAX_PRECISE_COLLISION_RECTANGLES = 16384
 

@@ -8,15 +8,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-from src.conversion.asset_registry import AssetRegistryConverter
-from src.conversion.base_converter import BaseConverter
 from src.conversion.architecture_policy import (
     ROOM_ROOT_POLICY_ID,
     gui_canvas_layer_node_lines,
     room_root_metadata_lines,
 )
+from src.conversion.asset_registry import AssetRegistryConverter
+from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_godot import GodotProjectFile
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -24,21 +25,30 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.resource_index import GameMakerResourceIndex, IndexedRoom
 from src.conversion.room_creation_code import (
+    ROOM_EXECUTION_ORDER,
     CreationCodeMetadata,
     CreationCodeSourceResolver,
-    ROOM_EXECUTION_ORDER,
     instance_creation_order_names,
     resolve_instance_creation_code,
     resolve_room_creation_code,
 )
 from src.conversion.room_layers import godot_string, serialize_room_layers
-from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.room_metadata import (
-    RoomInstanceFields, RoomLayerFields, RoomPhysicsSettingsFields,
-    RoomSettingsFields, RoomSceneRootFields, room_object_items,
-    room_strict_layer_resource_type, room_value_length,
+    RoomInstanceFields,
+    RoomLayerFields,
+    RoomPhysicsSettingsFields,
+    RoomSceneRootFields,
+    RoomSettingsFields,
+    room_object_items,
+    room_strict_layer_resource_type,
+    room_value_length,
 )
-from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import (
+    ConversionRunning,
+    LogCallback,
+    ProgressCallback,
+    StrPath,
+)
 
 ROOM_RUNTIME_SCRIPT_RELATIVE_PATH = os.path.join("gm2godot", "gml_room_node.gd")
 ROOM_RUNTIME_SCRIPT_RESOURCE_PATH = "res://gm2godot/gml_room_node.gd"

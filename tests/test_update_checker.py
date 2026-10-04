@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
 import hashlib
 import os
-from pathlib import Path
 import stat
 import tempfile
 import unittest
+from collections.abc import Iterable, Iterator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests

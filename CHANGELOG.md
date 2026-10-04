@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.32 - 2026-10-04
+
+- Enforce Ruff import sorting locally and in the required Code Health workflow; sort existing imports while preserving bootstrap, environment setup and local import stages.
+- Document the tracked-source lint gate and test that unsorted imports cannot bypass CI through local configuration or suppression comments.
+
 ## 0.8.31 - 2026-10-04
 
 - Complete the Included Files ownership refactor with dedicated planning, source access, worker, staging, locking, publication, recovery and driver modules behind the stable converter facade.

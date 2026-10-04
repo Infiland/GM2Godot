@@ -1,13 +1,14 @@
 from __future__ import annotations
+
 import hashlib
 import os
 from typing import Any
+
+from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
+from src.conversion.included_files_parts import constants as _included_constants
 from src.conversion.included_files_parts.models import (
     IncludedRecoveryJournal as _IncludedRecoveryJournal,
 )
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_file_registry import INCLUDED_FILE_REGISTRY_RELATIVE_PATH
-
 
 _WINDOWS_RESERVED_RECOVERY_DEVICE_NAMES = frozenset(
     {

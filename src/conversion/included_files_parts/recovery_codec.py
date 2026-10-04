@@ -1,26 +1,30 @@
 from __future__ import annotations
+
 import base64
 import binascii
 import hashlib
 import json
 import os
 import stat
-from typing import Any, cast
 from dataclasses import replace
+from typing import Any, cast
+
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    path_validation as _included_paths,
+    stat_metadata as _included_metadata,
+)
 from src.conversion.included_files_parts.models import (
-    PathIdentity as _PathIdentity,
-    PathFingerprint as _PathFingerprint,
-    IncludedTreeEntry as _IncludedTreeEntry,
-    IncludedTreeSnapshot as _IncludedTreeSnapshot,
-    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
-    IncludedRecoveryRecordSizes as _IncludedRecoveryRecordSizes,
+    IncludedCommitMarker as _IncludedCommitMarker,
     IncludedOutputSetTransaction as _IncludedOutputSetTransaction,
     IncludedRecoveryJournal as _IncludedRecoveryJournal,
-    IncludedCommitMarker as _IncludedCommitMarker,
+    IncludedRecoveryRecordSizes as _IncludedRecoveryRecordSizes,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedTreeEntry as _IncludedTreeEntry,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathFingerprint as _PathFingerprint,
+    PathIdentity as _PathIdentity,
 )
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
 
 
 def _included_identity_payload(identity: _PathIdentity | None) -> list[int] | None:

@@ -20,8 +20,8 @@ from src.deep.session import DeepSession
 from src.deep.settings import DeepSettings
 from src.gui.main_window import MainWindow
 from src.gui.panels.deep_progress_panel import DeepProgressPanel
-from src.gui.run_timer import RunTimer
 from src.gui.panels.progress_panel import GradientProgressBar
+from src.gui.run_timer import RunTimer
 from src.gui.setting_value import SettingValue
 from src.gui.workers import ConversionWorker, DeepConversionWorker
 

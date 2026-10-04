@@ -1,10 +1,13 @@
 """Included Files worker pool ownership."""
 
 from __future__ import annotations
+
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Callable, Iterable, TypeVar
-from src.conversion.type_defs import ConversionRunning
+
 from src.conversion.included_files_parts import constants as _included_constants
+from src.conversion.type_defs import ConversionRunning
+
 _IncludedWorkerItem = TypeVar("_IncludedWorkerItem")
 _IncludedWorkerResult = TypeVar("_IncludedWorkerResult")
 

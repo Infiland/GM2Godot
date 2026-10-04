@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import hashlib
-
 from typing import Iterable
 
 from .lexical_api import validate_gml_identifier
@@ -12,6 +11,7 @@ from .shared_models import (
     Token,
 )
 from .utils import split_assignment, split_top_level, tokens_to_source
+
 
 def static_scope_id(
     prefix: str,

@@ -7,11 +7,6 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.json_values import JsonArray, JsonObject, JsonValue
-from src.conversion.room_metadata import (
-    capture_room_creation_code_value, capture_room_index_fields,
-    iter_room_field_values, room_object_at_get,
-    room_inherited_reference_name, room_inherited_item_key,
-)
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectResourceReference,
@@ -21,6 +16,14 @@ from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_sidecar_source_path,
     validate_project_resource_source_path,
+)
+from src.conversion.room_metadata import (
+    capture_room_creation_code_value,
+    capture_room_index_fields,
+    iter_room_field_values,
+    room_inherited_item_key,
+    room_inherited_reference_name,
+    room_object_at_get,
 )
 from src.conversion.type_defs import (
     ConversionRunning,

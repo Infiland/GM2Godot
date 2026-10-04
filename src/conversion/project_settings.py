@@ -1,24 +1,29 @@
 import json
 import os
-import shutil
 import re
+import shutil
 from dataclasses import dataclass
-from PIL import Image
-from typing import Literal, Optional, List, TypeAlias
+from typing import List, Literal, Optional, TypeAlias
 
-# Import localization manager
-from src.localization import get_localized
+from PIL import Image
+
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.project_godot import (
+    GodotProjectFile,
+    atomic_rewrite_text,
+    format_godot_string,
+)
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     load_gamemaker_project_manifest,
     unsupported_project_option_diagnostics,
 )
-from src.conversion.project_godot import GodotProjectFile, atomic_rewrite_text, format_godot_string
 from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback
 
+# Import localization manager
+from src.localization import get_localized
 
 ProjectOperationState: TypeAlias = Literal["completed", "skipped", "failed"]
 

@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 from typing import BinaryIO
 
+from src.conversion.included_files_parts import (
+    native_posix as _included_posix,
+    native_windows as _included_windows,
+    stat_metadata as _included_metadata,
+)
 from src.conversion.included_files_parts.filesystem_operations import (
     IncludedCleanupParentBinding,
     IncludedFilesystemOperations,
 )
 from src.conversion.included_files_parts.models import PathIdentity
-from src.conversion.included_files_parts import native_posix as _included_posix
-from src.conversion.included_files_parts import native_windows as _included_windows
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
 
 
 class NativeIncludedFilesystemOperations:

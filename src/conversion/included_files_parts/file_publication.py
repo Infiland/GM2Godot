@@ -1,17 +1,28 @@
 """Included Files file publication ownership."""
 
 from __future__ import annotations
+
 import hashlib
 import os
 import secrets
 import stat
 import tempfile
 from typing import BinaryIO, Callable
-from src.conversion.included_files_parts.models import IncludedPayloadReceipt as _IncludedPayloadReceipt, IncludedCopyReceipt as _IncludedCopyReceipt, IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
+
+from src.conversion.included_files_parts import (
+    path_validation as _included_paths,
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedCopyReceipt as _IncludedCopyReceipt,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedPayloadReceipt as _IncludedPayloadReceipt,
+)
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
+
 
 def _ensure_included_output_project_root(project_path: str) -> tuple[int, int]:
     os.makedirs(project_path, exist_ok=True)

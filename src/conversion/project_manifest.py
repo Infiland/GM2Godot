@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Literal
 
 from src.conversion.gamemaker_json import read_gamemaker_json
-from src.conversion.json_fields import MISSING, JsonFieldError, JsonMissing, field_value, required_string
+from src.conversion.json_fields import (
+    MISSING,
+    JsonFieldError,
+    JsonMissing,
+    field_value,
+    required_string,
+)
 from src.conversion.json_values import JsonObject, JsonPath, JsonValue
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -15,7 +21,6 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-
 
 ProjectManifestSeverity = Literal["info", "warning", "error"]
 

@@ -15,11 +15,11 @@ from typing import Any, cast
 from unittest.mock import patch
 
 from src import cli
-from src.conversion import asset_registry as asset_registry_module
 from src.conversion import (
+    asset_registry as asset_registry_module,
     conversion_artifact_generation as generation_module,
+    conversion_manifest as conversion_manifest_module,
 )
-from src.conversion import conversion_manifest as conversion_manifest_module
 from src.conversion.anchored_artifacts import ByteArtifactTransaction
 from src.conversion.architecture_policy import ARCHITECTURE_POLICY_RELATIVE_PATH
 from src.conversion.asset_registry import (

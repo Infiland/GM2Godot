@@ -29,7 +29,11 @@ from src.conversion.diagnostics import DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH
 from src.deep.jobs import DeepJob
 from src.deep.settings import DeepSettings
 from src.gui.setting_value import SettingValue
-from src.gui.workers import ConversionWorker, ConversionWorkerResult, DeepConversionWorker
+from src.gui.workers import (
+    ConversionWorker,
+    ConversionWorkerResult,
+    DeepConversionWorker,
+)
 
 
 class _FakeConverter:

@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass
 from typing import Callable, Iterable, Literal, Mapping, cast
 
+from src.conversion import managed_output_workspace as workspace_module
 from src.conversion.anchored_artifacts import (
     PathIdentity,
     VerifiedDirectory,
@@ -43,8 +44,6 @@ from src.conversion.managed_output_workspace import (
     WORKSPACE_PARENT_NAME,
     ManagedOutputWorkspace,
 )
-from src.conversion import managed_output_workspace as workspace_module
-
 
 MANAGED_OUTPUT_JOURNAL_NAME = ".gm2godot-managed-output-transaction.json"
 MANAGED_OUTPUT_POINTER_NAME = ".gm2godot-managed-output-generation.json"

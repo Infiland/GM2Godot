@@ -1,12 +1,26 @@
 """Included Files planning ownership."""
 
 from __future__ import annotations
+
 import os
 import posixpath
-from src.conversion.project_manifest import GameMakerProjectManifest, ProjectManifestDiagnostic, load_gamemaker_project_manifest
-from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, DeclaredIncludedFile as _DeclaredIncludedFile, IncludedFileConversionPlan as _IncludedFileConversionPlan
+
 from src.conversion.included_files_parts.converter_ports import IncludedPlanningPort
+from src.conversion.included_files_parts.models import (
+    DeclaredIncludedFile as _DeclaredIncludedFile,
+    IncludedFileConversionPlan as _IncludedFileConversionPlan,
+    IncludedFileSource as _IncludedFileSource,
+)
+from src.conversion.project_manifest import (
+    GameMakerProjectManifest,
+    ProjectManifestDiagnostic,
+    load_gamemaker_project_manifest,
+)
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+)
+
 
 class IncludedPlanningOperations(IncludedPlanningPort):
     def _included_file_conversion_plan(self: IncludedPlanningPort) -> _IncludedFileConversionPlan:

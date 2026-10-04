@@ -1,11 +1,24 @@
 """Included Files generation matching ownership."""
 
 from __future__ import annotations
+
 from src.conversion.included_file_paths import IncludedFilePathAssignment
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, PathIdentity as _PathIdentity, IncludedGenerationMatch as _IncludedGenerationMatch, IncludedTreeSnapshot as _IncludedTreeSnapshot, IncludedRegistrySnapshot as _IncludedRegistrySnapshot, IncludedOutputSetCancelled as _IncludedOutputSetCancelled
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts.converter_ports import IncludedGenerationMatchingPort
+from src.conversion.included_files_parts import (
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.converter_ports import (
+    IncludedGenerationMatchingPort,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedFileSource as _IncludedFileSource,
+    IncludedGenerationMatch as _IncludedGenerationMatch,
+    IncludedOutputSetCancelled as _IncludedOutputSetCancelled,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathIdentity as _PathIdentity,
+)
+
 
 def _before_included_unchanged_source_revalidation() -> None:
     """Narrow test seam before the second stable source-content pass."""

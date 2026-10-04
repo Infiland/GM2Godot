@@ -13,9 +13,11 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
-from src.conversion import converter as converter_module
-from src.conversion import managed_output_publisher as publisher_module
-from src.conversion import scripts as scripts_module
+from src.conversion import (
+    converter as converter_module,
+    managed_output_publisher as publisher_module,
+    scripts as scripts_module,
+)
 from src.conversion.architecture_policy import publish_architecture_policy_report
 from src.conversion.conversion_manifest import (
     CONVERSION_ATTEMPT_RELATIVE_PATH,

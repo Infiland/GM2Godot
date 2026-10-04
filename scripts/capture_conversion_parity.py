@@ -14,13 +14,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TextIO, cast
 
-from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
+from scripts._anchored_output import (
+    AnchoredOutputError,
+    publish_identical_receipt_bytes,
+)
 from scripts.conversion_parity_contract import (
+    RESOURCE_MATRIX_RUNTIME_WARNINGS,
     DestinationDefinition,
     FixtureDefinition,
     ParityDefinition,
     ParityError,
-    RESOURCE_MATRIX_RUNTIME_WARNINGS,
     load_parity_definition,
     validate_runtime_warning_expectation,
     value_sha256,

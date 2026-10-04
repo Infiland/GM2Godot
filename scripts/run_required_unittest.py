@@ -12,7 +12,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, TextIO, cast
 
-from scripts._anchored_output import AnchoredOutputError, publish_identical_receipt_bytes
+from scripts._anchored_output import (
+    AnchoredOutputError,
+    publish_identical_receipt_bytes,
+)
 from scripts.conversion_parity_contract import ParityError, load_parity_definition
 from scripts.conversion_parity_inputs import validate_parity_inputs
 

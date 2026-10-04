@@ -5,12 +5,12 @@ import os
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_source_path,
 )
-from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonObject, JsonValue
 
 ANIMATION_CURVE_REGISTRY_RELATIVE_PATH = os.path.join(
     "gm2godot", "gml_animation_curve_registry.gd"

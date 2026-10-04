@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Sequence
-from contextlib import redirect_stderr
 import ctypes
 import errno
 import hashlib
@@ -12,7 +10,6 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
 import platform
 import plistlib
 import select
@@ -23,11 +20,13 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import TYPE_CHECKING, cast
 import unittest
-from unittest import mock
 import zipfile
-
+from collections.abc import Callable, Sequence
+from contextlib import redirect_stderr
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
+from unittest import mock
 
 if TYPE_CHECKING:
     from scripts import verify_macos_gui_artifact as subject

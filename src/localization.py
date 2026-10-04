@@ -5,6 +5,7 @@ import os
 import sys
 from typing import Any, cast
 
+
 def get_base_path() -> str:
     if getattr(sys, 'frozen', False):
         return cast(str, getattr(sys, '_MEIPASS'))

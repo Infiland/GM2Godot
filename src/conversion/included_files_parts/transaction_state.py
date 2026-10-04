@@ -1,13 +1,22 @@
 """Included Files transaction state ownership."""
 
 from __future__ import annotations
+
 import hashlib
 import os
-from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity, IncludedRecoveryJournal as _IncludedRecoveryJournal, IncludedCommitMarker as _IncludedCommitMarker
-from src.conversion.included_files_parts import recovery_codec as _included_codec
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import record_io as _included_records
+
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    record_io as _included_records,
+    recovery_codec as _included_codec,
+    source_snapshots as _included_snapshots,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedCommitMarker as _IncludedCommitMarker,
+    IncludedRecoveryJournal as _IncludedRecoveryJournal,
+    PathIdentity as _PathIdentity,
+)
+
 
 def _verify_included_commit_marker_generation(
     project_path: str,

@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, BinaryIO, Callable, cast
 
-from src.conversion.included_files_parts.filesystem_operations import IncludedCleanupParentBinding
+from src.conversion.included_files_parts import path_validation as _included_paths, stat_metadata as _included_metadata
+from src.conversion.included_files_parts.filesystem_operations import (
+    IncludedCleanupParentBinding,
+)
 from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
 
 _WINDOWS_GENERIC_READ = 0x80000000
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import json
 import math
+import os
 import shutil
 import sys
 import tempfile
@@ -35,7 +35,9 @@ from src.conversion.project_source_paths import (
     ResolvedProjectSourcePath,
     resolve_project_filesystem_source_path,
 )
-from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
+from src.conversion.resource_parent_metadata import (
+    parse_gamemaker_resource_parent_metadata,
+)
 
 
 class TestBaseConverterAbstract(unittest.TestCase):

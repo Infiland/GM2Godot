@@ -1,21 +1,36 @@
 """Included Files source access ownership."""
 
 from __future__ import annotations
+
 import os
 import posixpath
 import stat
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from typing import BinaryIO
+
 from src.conversion.included_file_paths import IncludedFilePathAssignment
-from src.conversion.project_source_paths import ProjectSourcePathError, ResolvedProjectSourcePath
-from src.conversion.included_files_parts.models import IncludedFileSource as _IncludedFileSource, IncludedSourceBinding as _IncludedSourceBinding, IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt, IncludedOutputSetCancelled as _IncludedOutputSetCancelled
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import recovery_codec as _included_codec
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
-from src.conversion.included_files_parts import source_snapshots as _included_snapshots
-from src.conversion.included_files_parts import worker_pool as _included_worker_pool
+from src.conversion.included_files_parts import (
+    recovery_codec as _included_codec,
+    source_snapshots as _included_snapshots,
+    stat_metadata as _included_metadata,
+    worker_pool as _included_worker_pool,
+)
 from src.conversion.included_files_parts.converter_ports import IncludedSourceAccessPort
+from src.conversion.included_files_parts.models import (
+    IncludedFileSource as _IncludedFileSource,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedOutputSetCancelled as _IncludedOutputSetCancelled,
+    IncludedSourceBinding as _IncludedSourceBinding,
+)
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+)
+
 
 class IncludedSourceAccessOperations(IncludedSourceAccessPort):
     def _open_confined_source_file(

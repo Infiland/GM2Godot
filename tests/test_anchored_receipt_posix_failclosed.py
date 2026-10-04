@@ -4,15 +4,14 @@ from __future__ import annotations
 import ctypes
 import errno
 import os
+import tempfile
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
-import tempfile
 from typing import Any
-import unittest
 from unittest import mock
 
 from scripts import _anchored_output as anchored
-
 
 PAYLOAD = b'{"status":"verified"}\n'
 

@@ -53,7 +53,7 @@ def _checkmark_path():
         return _cached_checkmark.replace("\\", "/")
 
     from PySide6.QtCore import Qt
-    from PySide6.QtGui import QPixmap, QPainter, QPen, QColor
+    from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
     size = 14
     pixmap = QPixmap(size, size)

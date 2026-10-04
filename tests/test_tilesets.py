@@ -1,10 +1,10 @@
 # pyright: reportPrivateUsage=false
 
-import os
 import json
 import math
-import sys
+import os
 import shutil
+import sys
 import tempfile
 import threading
 import unittest
@@ -16,13 +16,17 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from PIL import Image
+
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
-from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
+from src.conversion.tileset_metadata import (
+    GameMakerTilesetMetadata,
+    parse_gamemaker_tileset_metadata,
+)
 from src.conversion.tilesets import TileSetConverter, TilesetData
 
 

@@ -1,16 +1,33 @@
 from __future__ import annotations
+
 import hashlib
 import os
 import posixpath
 import stat
 from dataclasses import replace
 from typing import BinaryIO
-from src.conversion.included_files_parts.models import PathIdentity as _PathIdentity, IncludedSourceDirectoryIdentity as _IncludedSourceDirectoryIdentity, IncludedSourceBinding as _IncludedSourceBinding, IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt, IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt, IncludedTreeEntry as _IncludedTreeEntry, IncludedTreeSnapshot as _IncludedTreeSnapshot, IncludedTreeDescriptorBinding as _IncludedTreeDescriptorBinding, IncludedTreePathBinding as _IncludedTreePathBinding, IncludedRegistrySnapshot as _IncludedRegistrySnapshot
-from src.conversion.included_files_parts import path_validation as _included_paths
-from src.conversion.included_files_parts import stat_metadata as _included_metadata
-from src.conversion.included_files_parts import constants as _included_constants
-from src.conversion.included_files_parts import native_posix as _included_posix
-from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
+
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    native_posix as _included_posix,
+    path_validation as _included_paths,
+    stat_metadata as _included_metadata,
+)
+from src.conversion.included_files_parts.models import (
+    IncludedGenerationContentReceipt as _IncludedGenerationContentReceipt,
+    IncludedNoOpSourceReceipt as _IncludedNoOpSourceReceipt,
+    IncludedRegistrySnapshot as _IncludedRegistrySnapshot,
+    IncludedSourceBinding as _IncludedSourceBinding,
+    IncludedSourceDirectoryIdentity as _IncludedSourceDirectoryIdentity,
+    IncludedTreeDescriptorBinding as _IncludedTreeDescriptorBinding,
+    IncludedTreeEntry as _IncludedTreeEntry,
+    IncludedTreePathBinding as _IncludedTreePathBinding,
+    IncludedTreeSnapshot as _IncludedTreeSnapshot,
+    PathIdentity as _PathIdentity,
+)
+from src.conversion.included_files_parts.native_filesystem import (
+    filesystem as _included_fs,
+)
 
 
 def _read_included_validation_chunk(opened_file: BinaryIO) -> bytes:

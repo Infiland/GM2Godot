@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from main import (
     GUI_SMOKE_RECEIPT,
@@ -16,7 +16,6 @@ from main import (
     _configured_gui_smoke_receipt,
     _write_gui_smoke_receipt,
 )
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

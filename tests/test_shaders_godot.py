@@ -13,7 +13,6 @@ from typing import TypedDict, cast
 from src.conversion.asset_output_paths import build_asset_output_paths
 from src.conversion.shaders import ShaderConverter
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHADER_CORPUS_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "shader_corpus"
 

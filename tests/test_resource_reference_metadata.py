@@ -1,14 +1,18 @@
 import unittest
 from typing import TypeVar, overload
 
-from src.conversion.json_values import JsonArray, JsonObject, JsonValue, validate_json_value
+from src.conversion.json_values import (
+    JsonArray,
+    JsonObject,
+    JsonValue,
+    validate_json_value,
+)
 from src.conversion.resource_reference_metadata import (
     capture_asset_name_declaration,
     capture_registry_resource_declaration,
     capture_sprite_resource_declaration,
     capture_tileset_resource_declaration,
 )
-
 
 _T = TypeVar("_T")
 

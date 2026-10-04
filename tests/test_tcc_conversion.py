@@ -14,10 +14,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcome
+from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.conversion.generated_paths import generated_resource_stem
-from src.conversion.godot_validation import find_godot_binary, validate_generated_godot_project
+from src.conversion.godot_validation import (
+    find_godot_binary,
+    validate_generated_godot_project,
+)
 from src.gui.setting_value import SettingValue
 from tests.conversion_outcome_helpers import completed_conversion_step_ledger
 

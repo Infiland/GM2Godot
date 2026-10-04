@@ -18,12 +18,12 @@ from src.conversion.asset_registry import (
     AssetRegistryEntry,
     AssetRegistryPublication,
 )
-from src.conversion.conversion_outcome import ConversionOutcome
-from src.conversion.conversion_plan import build_conversion_plan, conversion_step_map
 from src.conversion.conversion_artifact_generation import (
     publish_conversion_artifact_generation,
     recover_conversion_artifact_generation,
 )
+from src.conversion.conversion_outcome import ConversionOutcome
+from src.conversion.conversion_plan import build_conversion_plan, conversion_step_map
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
@@ -42,8 +42,8 @@ from src.conversion.included_file_paths import (
     canonical_included_file_lookup_path,
     plan_included_file_paths,
 )
-from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.json_values import JsonArray, JsonObject
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 
 CONVERSION_MANIFEST_RELATIVE_PATH = os.path.join("gm2godot", "conversion_manifest.json")
 CONVERSION_ATTEMPT_RELATIVE_PATH = os.path.join("gm2godot", "conversion_attempt.json")

@@ -8,8 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Callable, cast
 
-from scripts import conversion_parity_contract as contract
-from scripts import conversion_parity_snapshot as snapshots
+from scripts import conversion_parity_contract as contract, conversion_parity_snapshot as snapshots
 
 
 def _json(value: object) -> bytes:

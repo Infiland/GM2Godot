@@ -14,15 +14,15 @@ from types import FrameType
 from typing import Sequence, TypedDict, cast
 
 from src.conversion.anchored_artifacts import ArtifactSpec, ByteArtifactTransaction
+from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.conversion_outcome import ConversionOutcome
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
-from src.conversion.conversion_manifest import CONVERSION_MANIFEST_RELATIVE_PATH
 from src.conversion.diagnostics import (
+    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     ConversionDiagnosticReportPublicationReceipt,
     ConversionDiagnosticReportSnapshot,
-    DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
-    DiagnosticSeverity,
     DiagnosticCollector,
+    DiagnosticSeverity,
     capture_conversion_diagnostic_reports,
     restore_conversion_diagnostic_reports,
 )
@@ -43,7 +43,6 @@ from src.conversion.project_godot import (
     ConversionPreflightError,
 )
 from src.version import get_version
-
 
 DEFAULT_CONVERSION_GROUPS = ("assets", "project", "wip")
 _NON_CONVERTER_SETTING_KEYS = frozenset({"sound_group_folders"})

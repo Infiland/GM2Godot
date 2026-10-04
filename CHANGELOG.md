@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.42 - 2026-10-04
+
+- Add Python distribution metadata and installed `gm2godot` and `gm2godot-gui` launchers, with bundled GDScript, icons and language assets.
+- Keep installed language preferences in the user's `~/.gm2godot` directory while retaining source and frozen application paths.
+
 ## 0.8.41 - 2026-10-04
 
 - Reuse shared Godot smoke-test utilities in 44 more compatible modules while preserving live discovery, fixture bytes, assertions and skip policies.

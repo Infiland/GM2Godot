@@ -1,0 +1,8 @@
+include README.md LICENSE requirements.txt
+include scripts/__init__.py scripts/build_application_assets.py
+# MANIFEST patterns are whitespace-delimited; ? matches the literal space here.
+include Current?Language
+recursive-include img *.png
+include Languages/*.json
+recursive-include src/conversion/gml_runtime_parts/segments *.gd
+global-exclude __pycache__ *.py[cod]

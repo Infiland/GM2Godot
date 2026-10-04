@@ -1,16 +1,16 @@
 # Installation
 
-> **Applies to:** GM2Godot 0.8.41 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.42 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
-Use a packaged release for the desktop interface, or run from source when you also need the headless CLI. The current packaging and dependency details live in the repository's [release workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml), [`requirements.txt`](https://github.com/Infiland/GM2Godot/blob/main/requirements.txt), and [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml).
+Use a packaged release for the desktop interface, run from a checkout, or install a locally built Python wheel for the GUI and headless CLI. The current packaging and dependency details live in the repository's [release workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/release.yml), [`requirements.txt`](https://github.com/Infiland/GM2Godot/blob/main/requirements.txt), and [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml).
 
 Godot is not required merely to launch GM2Godot. Install the exact [Godot 4.7.2 release](https://github.com/godotengine/godot/releases/tag/4.7.2-stable) separately to open or headlessly validate converted output.
 
 ## Install a packaged release
 
-Source `0.8.41` defines the six payloads below, plus `SHA256SUMS` as the seventh uploaded asset. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) already provides this verified download set. New source versions become downloadable after their merged `main` release gates and publication succeed. Historical generic `GM2Godot-macos.zip` and `GM2Godot-macos.dmg` assets from `0.8.15` support Apple Silicon only.
+Source `0.8.42` defines the six payloads below, plus `SHA256SUMS` as the seventh uploaded asset. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) already provides this verified download set. New source versions become downloadable after their merged `main` release gates and publication succeed. Historical generic `GM2Godot-macos.zip` and `GM2Godot-macos.dmg` assets from `0.8.15` support Apple Silicon only.
 
 Download the asset for your operating system from [GitHub Releases](https://github.com/Infiland/GM2Godot/releases). Extract downloaded archives before launching the application.
 
@@ -41,7 +41,7 @@ sudo apt-get install --yes --no-install-recommends \
 
 ### Verify a release download
 
-Releases starting with 0.7.14 include `SHA256SUMS`. The current `0.8.41` contract contains one SHA-256 digest for each of the six payloads, in lexical filename order. To verify the complete release, download all six payloads and `SHA256SUMS`—all seven assets—into one directory, then run one of these commands from that directory. The historical `0.8.15` manifest instead contains its four payload rows.
+Releases starting with 0.7.14 include `SHA256SUMS`. The current `0.8.42` contract contains one SHA-256 digest for each of the six payloads, in lexical filename order. To verify the complete release, download all six payloads and `SHA256SUMS`—all seven assets—into one directory, then run one of these commands from that directory. The historical `0.8.15` manifest instead contains its four payload rows.
 
 ```bash
 # Linux
@@ -53,13 +53,13 @@ shasum -a 256 -c SHA256SUMS
 
 On Windows, run `Get-FileHash -Algorithm SHA256 .\GM2Godot-windows.zip` in PowerShell and compare the result with the named `GM2Godot-windows.zip` line in `SHA256SUMS`. The manifest verifies the integrity of the published bytes; it is not a signature or proof of publisher identity.
 
-The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source installation.
+The packaged builds are produced as windowed applications. For the CLI commands in this Wiki, use a source checkout or a locally built Python wheel.
 
 ## Run from source
 
 Use the native, reproducible baseline for your host. Git is also required for the clone commands below.
 
-After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.41`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
+After launch, confirm that the title bar or **Help → About GM2Godot** shows version `0.8.42`. Click the version in the bottom information bar to browse the ten newest release changelogs; **Show more** appends the next ten.
 
 | Host | Python | Constraint |
 | --- | --- | --- |
@@ -153,6 +153,37 @@ The null config file and `--isolated` prevent machine-local pip settings from ch
 
 Four architecture-specific `constraints/requirements-*-py312.wheels.lock` companions capture the complete runtime and development wheel graphs. Native workflow installs enforce their hashes offline on each exact host. The source commands above remain version constrained; [Contributing and Testing](Contributing-and-Testing#native-wheel-hash-locks) explains the complete hash-enforced development install.
 
+## Install a locally built Python wheel
+
+The Python distribution supports Python 3.12 or newer. Keep the exact host
+interpreter and locked runtime dependencies from the source procedure above when
+using the reviewed native baseline. Build and metadata details are in
+[Python distribution and installed launchers](https://github.com/Infiland/GM2Godot/blob/main/docs/python-distribution.md).
+
+With that environment active, install an actual wheel built from the project.
+Replace the example path with the wheel file you built:
+
+```bash
+python -m pip install --no-deps "path/to/the-built-wheel.whl"
+python -m pip check
+gm2godot --version
+gm2godot --help
+gm2godot list-converters --format json
+```
+
+`--no-deps` keeps the prepared runtime graph. This creates the `gm2godot` console
+entry point and `gm2godot-gui` GUI entry point in the environment. `gm2godot` with
+no arguments and `gm2godot-gui` open the same desktop interface; use `gm2godot`
+for commands that print output. The installed package includes real runtime
+GDScript, icons and language catalogs, so it can run outside the checkout.
+
+The installed GUI reads its packaged language default until a user preference
+exists. Saving a language writes `~/.gm2godot/Current Language` and leaves the
+installed assets unchanged; reading the default does not create that directory.
+The installed language dialog restarts through `python -m main` with the same
+argument tail. Source and frozen applications keep their existing asset,
+language-preference and restart paths.
+
 ## Verify the source installation
 
 With the virtual environment active, check the installed checkout without starting the GUI:
@@ -162,6 +193,6 @@ python main.py --version
 python main.py list-converters
 ```
 
-The first command should print `GM2Godot 0.8.41`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
+The first command should print `GM2Godot 0.8.42`; the second should list the conversion groups and the exact converter keys accepted by `--only`. The same CLI is also available through `python -m src.cli`.
 
 Continue with [Quick Start Conversion](Quick-Start-Conversion). If launch or dependency setup fails, see [Diagnostics and Troubleshooting](Diagnostics-and-Troubleshooting).

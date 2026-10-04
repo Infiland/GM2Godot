@@ -55,6 +55,23 @@ See the [CLI guide](https://github.com/Infiland/GM2Godot/wiki/Quick-Start-Conver
 for filters and validation. [Report guidance](https://github.com/Infiland/GM2Godot/wiki/Diagnostics-and-Troubleshooting)
 explains warnings, partial results and the generated `gm2godot/` reports.
 
+## Install Python launchers from a local wheel
+
+After preparing the source environment, you can install a wheel built from this
+project in that same environment. Use the actual wheel path:
+
+```bash
+python -m pip install --no-deps "path/to/the-built-wheel.whl"
+gm2godot --version
+gm2godot --help
+```
+
+The installation creates the `gm2godot` console command and `gm2godot-gui` GUI
+launcher, with bundled GDScript, icons and language catalogs. Run `gm2godot` with
+no arguments or `gm2godot-gui` to open the GUI; use `gm2godot` for commands that
+print output. See [Python distribution and installed launchers](docs/python-distribution.md)
+for local wheel requirements and installed language preferences.
+
 ## Compatibility and optional Deep conversion
 
 Converted output is a migration starting point: review generated code and compare
@@ -68,7 +85,7 @@ conversion through a downloadable extension.
 
 ## Releases
 
-Current source version: `0.8.41`.
+Current source version: `0.8.42`.
 
 Published downloads include Windows and Linux ZIPs, plus separate macOS Apple Silicon
 and Intel ZIP/DMG pairs. See [Installation](https://github.com/Infiland/GM2Godot/wiki/Installation)

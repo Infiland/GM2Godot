@@ -5415,6 +5415,7 @@ class TestCIWorkflows(unittest.TestCase):
                             "-r",
                             "requirements.txt",
                             f"pyright[nodejs]=={PYRIGHT_VERSION}",
+                            "setuptools",
                         ),
                     ): 1,
                 }
@@ -5444,7 +5445,7 @@ class TestCIWorkflows(unittest.TestCase):
             ".github/workflows/tests.yml": Counter(
                 {
                     (LINUX_CONSTRAINT, ("pip",)): 1,
-                    (LINUX_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                    (LINUX_CONSTRAINT, ("-r", "requirements.txt", "setuptools")): 1,
                     (
                         LINUX_CONSTRAINT,
                         (
@@ -5454,9 +5455,9 @@ class TestCIWorkflows(unittest.TestCase):
                         ),
                     ): 1,
                     (MACOS_CONSTRAINT, ("pip",)): 1,
-                    (MACOS_CONSTRAINT, ("-r", "requirements.txt")): 1,
+                    (MACOS_CONSTRAINT, ("-r", "requirements.txt", "setuptools")): 1,
                     (WINDOWS_CONSTRAINT, ("pip",)): 3,
-                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt")): 3,
+                    (WINDOWS_CONSTRAINT, ("-r", "requirements.txt", "setuptools")): 3,
                 }
             ),
             "build_macos.sh": Counter(

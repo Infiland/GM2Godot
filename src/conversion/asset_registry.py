@@ -30,6 +30,7 @@ from src.conversion.fonts import (
     bundled_font_output_filename,
     resolve_system_font_source,
 )
+from src.conversion.font_metadata import capture_font_registry_bundle_fields, capture_font_registry_system_name
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_nested_resource_path,
@@ -54,6 +55,13 @@ from src.conversion.project_source_paths import (
     is_safe_project_source_component,
     resolve_project_source_path,
     validate_project_resource_source_path,
+)
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.resource_reference_metadata import capture_registry_resource_declaration
+from src.conversion.sound_metadata import (
+    capture_sound_registry_audio_group,
+    capture_sound_registry_file,
+    capture_sound_registry_metadata,
 )
 from src.conversion.script_functions import modern_script_function_names
 from src.conversion.type_defs import (
@@ -447,7 +455,7 @@ class _ProjectResource:
     name: str
     yy_path: str
     source_path: str
-    raw_data: JsonDict
+    raw_data: JsonObject
 
 
 @dataclass(frozen=True)
@@ -2591,7 +2599,7 @@ class AssetRegistryConverter(BaseConverter):
 
     def _resources_from_yyp(
         self,
-        yyp_data: JsonDict,
+        yyp_data: JsonObject,
         yyp_source_path: str,
         manifest_rejected_fields: frozenset[str],
     ) -> tuple[_ProjectResource, ...]:
@@ -2600,22 +2608,22 @@ class AssetRegistryConverter(BaseConverter):
             return ()
 
         resources: list[_ProjectResource] = []
-        for index, raw_entry in enumerate(cast(list[object], resource_entries)):
+        for index, raw_entry in enumerate(resource_entries):
             if not isinstance(raw_entry, dict):
                 continue
-            entry = cast(JsonDict, raw_entry)
+            entry = raw_entry
             raw_id = entry.get("id")
             if not isinstance(raw_id, dict):
                 continue
-            resource_id = cast(JsonDict, raw_id)
+            resource_id = raw_id
             field = f"resources[{index}].id.path"
             if field in manifest_rejected_fields:
                 continue
-            raw_path = resource_id.get("path")
-            if not isinstance(raw_path, str) or not raw_path:
+            declaration = capture_registry_resource_declaration(resource_id)
+            if declaration is None:
                 continue
-
-            raw_name = resource_id.get("name")
+            raw_path = declaration.path
+            raw_name = declaration.name_value
             name = (
                 raw_name
                 if isinstance(raw_name, str) and raw_name
@@ -3086,8 +3094,8 @@ class AssetRegistryConverter(BaseConverter):
         return ""
 
     def _sound_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
-        sound_file_reference = resource.raw_data.get("soundFile")
-        if not isinstance(sound_file_reference, str) or not sound_file_reference:
+        sound_file_reference = capture_sound_registry_file(resource.raw_data)
+        if sound_file_reference is None:
             return ""
         sound_source = self._resolve_project_source(
             sound_file_reference,
@@ -3102,7 +3110,7 @@ class AssetRegistryConverter(BaseConverter):
 
         parts = ["sounds"]
         if self.organize_sounds_by_audio_group:
-            audio_group = self._reference_name(resource.raw_data.get("audioGroupId"))
+            audio_group = capture_sound_registry_audio_group(resource.raw_data)
             parts.append(generated_path_segment(audio_group or "audiogroup_default", "audiogroup_default"))
         subfolder = self._get_subfolder_from_resource(resource)
         parts.extend(part for part in subfolder.split("/") if part)
@@ -3159,16 +3167,15 @@ class AssetRegistryConverter(BaseConverter):
         if resource.kind != "sounds":
             return {}
 
-        audio_group = self._reference_name(resource.raw_data.get("audioGroupId"))
-        sound_file = resource.raw_data.get("soundFile")
+        sound = capture_sound_registry_metadata(resource.raw_data)
         return {
-            "audio_group": audio_group or "audiogroup_default",
-            "sound_file": sound_file if isinstance(sound_file, str) else "",
-            "volume": self._metadata_float(resource.raw_data.get("volume"), 1.0),
-            "duration": self._metadata_float(resource.raw_data.get("duration"), 0.0),
-            "preload": bool(resource.raw_data.get("preload", True)),
-            "compression": self._metadata_int(resource.raw_data.get("compression"), 0),
-            "type": self._metadata_int(resource.raw_data.get("type"), 0),
+            "audio_group": sound.audio_group,
+            "sound_file": sound.sound_file,
+            "volume": sound.volume,
+            "duration": sound.duration,
+            "preload": sound.preload,
+            "compression": sound.compression,
+            "type": sound.sound_type,
         }
 
     def _texture_group_asset_metadata(self, texture_group: str) -> JsonDict:
@@ -3947,9 +3954,9 @@ class AssetRegistryConverter(BaseConverter):
 
     def _font_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         subfolder = self._get_subfolder_from_resource(resource)
-        ttf_name = resource.raw_data.get("TTFName")
-        include_ttf = bool(resource.raw_data.get("includeTTF", False))
-        if include_ttf and isinstance(ttf_name, str) and ttf_name:
+        bundle = capture_font_registry_bundle_fields(resource.raw_data)
+        ttf_name = bundle.ttf_name
+        if bundle.include_ttf and ttf_name:
             source_ttf = self._resolve_project_source(
                 ttf_name,
                 owner_source_path=resource.source_path,
@@ -3972,8 +3979,8 @@ class AssetRegistryConverter(BaseConverter):
                     suffix=suffix,
                 )
 
-        system_font_name = resource.raw_data.get("fontName")
-        if isinstance(system_font_name, str) and system_font_name:
+        system_font_name = capture_font_registry_system_name(resource.raw_data)
+        if system_font_name is not None:
             system_path = self._system_font_path(system_font_name)
             if system_path is not None:
                 extension = os.path.splitext(system_path)[1].lower()
@@ -4054,27 +4061,25 @@ class AssetRegistryConverter(BaseConverter):
         return os.path.splitext(filename)[0]
 
     @staticmethod
-    def _reference_name(value: object) -> str:
+    def _reference_name(value: JsonValue) -> str:
         if not isinstance(value, dict):
             return ""
-        reference = cast(JsonDict, value)
-        name = reference.get("name")
+        name = value.get("name")
         if isinstance(name, str):
             return name
         return ""
 
     @staticmethod
-    def _extract_tags(data: JsonDict) -> tuple[str, ...]:
+    def _extract_tags(data: JsonObject) -> tuple[str, ...]:
         tags: set[str] = set()
         for key in ("tags", "resourceTags", "tagList"):
             value = data.get(key)
             if isinstance(value, list):
-                for item in cast(list[object], value):
+                for item in value:
                     if isinstance(item, str) and item:
                         tags.add(item)
                     elif isinstance(item, dict):
-                        item_data = cast(JsonDict, item)
-                        tag_name = item_data.get("name")
+                        tag_name = item.get("name")
                         if isinstance(tag_name, str) and tag_name:
                             tags.add(tag_name)
         return tuple(sorted(tags))

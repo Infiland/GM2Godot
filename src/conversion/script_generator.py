@@ -10,19 +10,20 @@ from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
 from src.conversion.gml_transpiler_parts.constants import GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
+from src.conversion.object_metadata import gamemaker_event_integer
 
 
 _CodeBodies: TypeAlias = Mapping[str, str]
-_MapEvent: TypeAlias = Callable[[JsonDict], EventMapping | None]
-_IsInputEvent: TypeAlias = Callable[[JsonDict], bool]
+_MapEvent: TypeAlias = Callable[[JsonObject], EventMapping | None]
+_IsInputEvent: TypeAlias = Callable[[JsonObject], bool]
 _GetAdditionalFunctions: TypeAlias = Callable[[set[str]], list[EventMapping]]
 _EmitPrelude: TypeAlias = Callable[[list[str], set[str]], None]
 _WrapBody: TypeAlias = Callable[[EventMapping, str, set[str]], str]
 
-_map_event = cast(_MapEvent, map_event)
-_map_input_event = cast(_MapEvent, map_input_event)
-_is_input_event = cast(_IsInputEvent, is_input_event)
+_map_event: _MapEvent = map_event
+_map_input_event: _MapEvent = map_input_event
+_is_input_event: _IsInputEvent = is_input_event
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -574,7 +575,7 @@ def _render_collision_event_bindings_body(collision_bindings: Sequence[tuple[str
 
 
 def generate_script_content(
-    event_list: Sequence[JsonDict] | None,
+    event_list: Sequence[JsonObject] | None,
     code_bodies: _CodeBodies | None = None,
     instance_variables: Iterable[str] | None = None,
     sprite_runtime: SpriteRuntimeConfig | None = None,
@@ -624,12 +625,11 @@ def generate_script_content(
         mapping = _map_event(event)
         if mapping is not None:
             functions.append(mapping)
-            if int(event.get("eventType", -1)) == 4:
+            if gamemaker_event_integer(event.get("eventType", -1)) == 4:
                 collision_obj = event.get("collisionObjectId")
                 target_object = ""
                 if isinstance(collision_obj, dict):
-                    collision_data = cast(JsonDict, collision_obj)
-                    target_name = collision_data.get("name", "")
+                    target_name = collision_obj.get("name", "")
                     target_object = str(target_name) if target_name is not None else ""
                 collision_bindings.append((target_object, mapping.godot_func))
 

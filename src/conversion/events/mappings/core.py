@@ -1,7 +1,5 @@
-from typing import cast
-
 from src.conversion.events.base import EventMapping, EventTypeHandlers, StaticMappings
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
 
 
 STATIC_MAPPINGS: StaticMappings = {
@@ -23,27 +21,26 @@ STATIC_MAPPINGS: StaticMappings = {
 }
 
 
-def map_create_event(_event: JsonDict, gml_filename: str) -> EventMapping:
+def map_create_event(_event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping("_ready", "", 0, gml_filename)
 
 
-def map_destroy_event(_event: JsonDict, gml_filename: str) -> EventMapping:
+def map_destroy_event(_event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping("_on_destroy", "", 10, gml_filename)
 
 
-def map_cleanup_event(_event: JsonDict, gml_filename: str) -> EventMapping:
+def map_cleanup_event(_event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping("_exit_tree", "", 5, gml_filename)
 
 
-def map_alarm_event(event: JsonDict, gml_filename: str) -> EventMapping:
+def map_alarm_event(event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping(f"_on_alarm_{event.get('eventNum', 0)}", "", 11, gml_filename)
 
 
-def map_collision_event(event: JsonDict, gml_filename: str) -> EventMapping:
+def map_collision_event(event: JsonObject, gml_filename: str) -> EventMapping:
     collision_obj = event.get('collisionObjectId')
     if collision_obj and isinstance(collision_obj, dict):
-        collision_data = cast(JsonDict, collision_obj)
-        obj_name = cast(str, collision_data.get('name', 'unknown'))
+        obj_name = collision_obj.get('name', 'unknown')
         named_filename = f"Collision_{obj_name}.gml"
         fallback_filenames = () if named_filename == gml_filename else (gml_filename,)
         return EventMapping(
@@ -56,11 +53,11 @@ def map_collision_event(event: JsonDict, gml_filename: str) -> EventMapping:
     return EventMapping("_on_collision", "", 13, gml_filename)
 
 
-def map_other_event(event: JsonDict, gml_filename: str) -> EventMapping:
+def map_other_event(event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping(f"_on_other_{event.get('eventNum', 0)}", "", 14, gml_filename)
 
 
-def map_draw_event(event: JsonDict, gml_filename: str) -> EventMapping:
+def map_draw_event(event: JsonObject, gml_filename: str) -> EventMapping:
     return EventMapping(f"_on_draw_{event.get('eventNum', 0)}", "", 16, gml_filename)
 
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.25 - 2026-10-04
+
+- Route the remaining GameMaker resource reads through the shared validated JSON boundary and consume typed sprite, object and resource-reference views, including existing animation-curve and extension models.
+- Use typed font and sound registry planning at the original callback stages, retaining source validation, field defaults and generated output.
+- Continue issue #797; nested resource consumers and final legacy JSON alias retirement remain follow-up work.
+
 ## 0.8.24 - 2026-10-04
 
 - Route the shared resource reader through the validated GameMaker JSON boundary and extract typed parent metadata while preserving fresh reads, folder formatting and existing exception policies.

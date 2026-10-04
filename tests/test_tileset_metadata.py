@@ -17,6 +17,8 @@ from src.conversion.tileset_metadata import (
     parse_gamemaker_tileset_metadata,
     parse_gamemaker_tileset_sprite_reference,
     project_tileset_conversion_fields,
+    TilesetRoomLayout,
+    select_tileset_room_layout,
 )
 
 
@@ -507,3 +509,60 @@ class TestTilesetMetadata(unittest.TestCase):
         ))
         self.assertNotIn("type: ignore", source)
         self.assertNotIn("pyright: ignore", source)
+
+
+class TestTilesetRoomLayout(unittest.TestCase):
+    def test_selection_has_frozen_optional_positive_columns_only(self) -> None:
+        self.assertEqual(select_tileset_room_layout({}), TilesetRoomLayout())
+        selected = select_tileset_room_layout({"out_columns": 4})
+        self.assertEqual(selected.columns, 4)
+        self.assertEqual([field.name for field in dataclasses.fields(selected)], ["columns"])
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            setattr(selected, "columns", 5)
+
+    def test_numeric_room_policy_uses_float_then_int_and_forgiving_fallback(self) -> None:
+        for value, expected in (("4.9", 4), (4.9, 4), (True, 1), ("1e1", 10)):
+            with self.subTest(value=value):
+                self.assertEqual(select_tileset_room_layout({"out_columns": value}).columns, expected)
+        values: list[JsonValue] = [None, [], {}, "wrong", float("nan"), False, -2]
+        for value in values:
+            with self.subTest(value=value):
+                self.assertEqual(select_tileset_room_layout({"out_columns": value, "tile_count": "6.9"}).columns, 6)
+        self.assertIsNone(select_tileset_room_layout({"out_columns": -1, "tile_count": "wrong"}).columns)
+
+    def test_unused_tile_count_never_coerced_and_used_nonfinite_overflow_escapes(self) -> None:
+        for source in ('{"out_columns":3,"tile_count":Infinity}', '{"out_columns":3,"tile_count":{"invalid":[]}}'):
+            self.assertEqual(select_tileset_room_layout(_decode_metadata(source).raw_data).columns, 3)
+        for source in ('{"out_columns":Infinity,"tile_count":3}', '{"out_columns":0,"tile_count":Infinity}'):
+            with self.subTest(source=source):
+                with self.assertRaises(OverflowError):
+                    select_tileset_room_layout(_decode_metadata(source).raw_data)
+
+    def test_conversion_order_and_control_exception_identity(self) -> None:
+        seen: list[str] = []
+        error = RuntimeError("actual scalar conversion control")
+
+        class TracedFloat(str):
+            def __float__(self) -> float:
+                seen.append(str(self))
+                if self == "failure":
+                    raise error
+                return float(str(self))
+
+        self.assertEqual(select_tileset_room_layout({"out_columns": TracedFloat("2"),
+                                                     "tile_count": TracedFloat("failure")}).columns, 2)
+        self.assertEqual(seen, ["2"])
+        seen.clear()
+        with self.assertRaises(RuntimeError) as caught:
+            select_tileset_room_layout({"out_columns": TracedFloat("0"), "tile_count": TracedFloat("failure")})
+        self.assertIs(caught.exception, error)
+        self.assertEqual(seen, ["0", "failure"])
+
+    def test_layout_selection_does_not_use_unrelated_converter_projection(self) -> None:
+        data = _decode_metadata('{"out_columns":"2.8","tileWidth":null,"tileHeight":Infinity}').raw_data
+        with (
+            patch("src.conversion.tileset_metadata.project_tileset_conversion_fields",
+                  side_effect=AssertionError("different consumed view")),
+            patch("src.conversion.json_values.validate_json_value", side_effect=AssertionError("extra boundary")),
+        ):
+            self.assertEqual(select_tileset_room_layout(data).columns, 2)

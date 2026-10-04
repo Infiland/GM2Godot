@@ -45,10 +45,11 @@ deep native values iteratively.
 `project_settings` uses the same decoder only to revalidate freshly acquired
 options files; it continues to render its cached manifest. The owners retain
 their different read/decode exception boundaries and their existing diagnostics.
-Other resource readers and the legacy `type_defs` JSON aliases remain pending
-migration under #797. This first family preserves the decoder's current nonfinite
-number behavior; numeric-finiteness policy and complete legal-JSON migration are
-unfinished work, rather than guarantees of this boundary.
+All GameMaker project/resource acquisition readers now use this shared decoder.
+Their owner-local containment, catches and non-object-root handling remain
+distinct. Known nested consumers and the legacy `type_defs` JSON aliases remain
+pending migration under #797. This boundary preserves the decoder's current
+nonfinite number behavior; a finite-only numeric policy is not part of it.
 
 ### Path metadata boundary
 
@@ -58,8 +59,8 @@ path-registry producer and the path branch of `resource_models` decode through
 container identities. The aggregate derives path counts, closed state and
 subfolders from this metadata, while its existing `PathModel` keeps its original
 field prefix and adds an optional metadata carrier excluded from repr/equality.
-The inherited generic `ResourceModel.raw_data` alias remains a compatibility
-surface pending the other resource-family migrations.
+The inherited `ResourceModel.raw_data` now carries a recursive `JsonObject`;
+unknown fields remain attached by identity.
 
 The consumers keep separate containment and acquisition policies. The aggregate
 still maps its existing read/decode failures to resource diagnostics; the path
@@ -68,8 +69,8 @@ retains native numeric values without eager float/int conversion, so aggregate
 inspection does not acquire the producer's numeric failures. Registry numeric
 construction and coordinate rendering retain their existing ordering, including
 nonfinite coordinate failures after a scene is opened and nonfinite speed JSON
-serialization. Numeric-finiteness policy, other resource readers and remaining
-legacy JSON aliases are still unfinished #797 work.
+serialization. Remaining nested consumers and legacy JSON aliases are still
+unfinished #797 work.
 
 ### Font metadata boundary
 
@@ -82,7 +83,7 @@ size default of 12; the aggregate keeps its native-number-only size policy and
 default of 0. Its float conversion remains after base/subfolder evaluation and
 outside the acquisition catch, including existing huge and nonfinite behavior.
 The replaced raw font branch and its unused `_float_value` helper are removed;
-the other generic resource branches and helpers remain pending migration.
+the other generic resource branches retain their existing projections.
 
 `FontModel` keeps its original module, inheritance, field prefix, repr and
 equality, with an optional metadata carrier excluded from repr/equality.
@@ -91,8 +92,10 @@ primitive presence/value records; missing-field sentinels are transient rather
 than stored Enum values. The owners retain their different exception policies
 and source-acquisition seams. Font output fallback rereads current parent
 metadata while registry-planned destinations retain precedence. Registry font
-planning, inherited raw aliases, other families and numeric-finiteness policy
-remain unfinished #797 work.
+planning now consumes separate bundle and system-name captures at the original
+callback stages: parent-folder discovery runs before bundle capture, and a
+failed bundle resolution precedes system-name capture. The typed registry input
+retains raw identity without applying the converter's required-field coercions.
 
 ### Sound metadata boundary
 
@@ -109,9 +112,11 @@ including source-file rejection before conversion and delayed audio-group errors
 repr and equality, with an optional metadata suffix excluded from repr/equality.
 Dataclass reflection intentionally includes that suffix and the leaf's primitive
 presence/value capture. The separate sound decoder alias is the same shared
-function, preserving the path and font patch seams. Generic resource readers,
-registry sound planning, remaining legacy aliases and numeric-finiteness policy
-remain unfinished #797 work.
+function, preserving the path and font patch seams. Registry sound planning
+consumes separate file, audio-group and metadata projections with its original
+forgiving numeric defaults. File capture precedes source resolution; group
+capture follows that callback and precedes fresh folder discovery. Remaining
+nested consumers and legacy aliases are unfinished #797 work.
 
 ### Tileset metadata boundary
 
@@ -129,9 +134,36 @@ equality, adding an optional metadata carrier excluded from repr/equality.
 Reflection includes that carrier and its primitive presence/value captures.
 The converter retains reference validation before numeric capture so rejection
 callbacks can affect later values, and preserves its ordered conversions and
-late rendering failures. Its inherited fresh parent reader and nested sprite
-reader remain unchanged. Generic readers, registry tileset planning, legacy
-aliases and numeric-finiteness policy remain unfinished #797 work.
+late rendering failures. Its nested sprite reader now uses the shared decoder,
+captures each atlas frame before owner reference validation, and selects layers
+after that validation. The room layout projection retains conditional tile-count
+access after column conversion. Registry nested views and legacy aliases remain
+unfinished #797 work.
+
+### Sprite, object and reference acquisition models
+
+`sprite_metadata` and `object_metadata` provide frozen known-field views consumed
+by both converters and the aggregate model layer. `SpriteModel` and `ObjectModel`
+retain their old field prefixes and add optional metadata carriers excluded from
+repr/equality. Aggregate base and parent-folder evaluation precedes these views;
+summary fields retain their native-type policies. Sprite collision, animation,
+frame/layer and object event/reference projections retain their distinct owner
+conversion and failure stages.
+
+`resource_reference_metadata` captures registry declarations, sprite declarations
+and object asset names at their existing per-entry discovery seams. It leaves
+source containment, fallback naming and manifest rejection with those owners.
+Unknown raw fields retain recursive JSON types and container identity. Object
+events retain their existing copied sanitation step and scalar mapping keys;
+animation-curve and extension registries narrow their existing public models
+rather than adding parallel representations.
+
+Source discovery, generic aggregate resources, room layers, curves, extensions,
+object reads and tileset atlas reads share the decoder without merging their
+catch policies. Aggregate family decoder aliases remain separate patch seams
+for the same underlying function. Nested room, sequence, timeline, particle and
+registry output consumers, plus final `type_defs` alias retirement, still remain
+under #797.
 
 ### Shared resource reader and parent metadata
 
@@ -147,8 +179,8 @@ folder helper keeps virtual reader dispatch, fresh source reads, string-subclass
 behavior, formatting order and its existing exception boundaries. A captured
 `has_parent_path` flag distinguishes missing or malformed paths from a valid
 empty string, preserving the original string-method and early-return boundaries. Unknown raw
-metadata stays attached by identity. Remaining source readers, known nested
-views and legacy alias retirement are still open work under #797.
+metadata stays attached by identity. Known nested views and legacy alias
+retirement are still open work under #797.
 
 ## GML Pipeline Phases
 

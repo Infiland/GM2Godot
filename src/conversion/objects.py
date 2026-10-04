@@ -6,7 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 from src.localization import get_localized
 from src.conversion.asset_registry import AssetRegistryConverter
@@ -63,7 +63,11 @@ from src.conversion.script_generator import (
     _valid_instance_variables,
     generate_script_content,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
+from src.conversion.resource_reference_metadata import capture_asset_name_declaration
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
@@ -115,7 +119,7 @@ class ParsedObject(TypedDict):
     sprite_source_path: str | None
     parent_object_name: str | None
     parent_object_source_path: str | None
-    event_list: list[JsonDict]
+    event_list: list[JsonObject]
     solid: bool
     persistent: bool
 
@@ -554,15 +558,24 @@ class ObjectConverter(BaseConverter):
                 with open(yyp_source.filesystem_path, 'r', encoding='utf-8') as f:
                     content = f.read()
 
-                cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-                data = cast(JsonDict, json.loads(cleaned))
+                value = decode_gamemaker_json(
+                    content, source_path=yyp_source.filesystem_path
+                ).value
+                if not isinstance(value, dict):
+                    raise AttributeError(
+                        f"'{type(value).__name__}' object has no attribute 'get'",
+                        name="get", obj=value,
+                    )
+                data = value
 
                 asset_names: set[str] = set()
-                for resource in cast(list[JsonDict], data.get('resources', [])):
-                    res_id = cast(JsonDict, resource.get('id', {}))
-                    name = res_id.get('name')
-                    if isinstance(name, str) and name:
-                        asset_names.add(name)
+                resources = data.get("resources", [])
+                if not isinstance(resources, (list, dict, str)):
+                    raise TypeError(f"'{type(resources).__name__}' object is not iterable")
+                for resource in resources:
+                    declaration = capture_asset_name_declaration(resource)
+                    if declaration.name is not None:
+                        asset_names.add(declaration.name)
                 self._project_asset_names_cache = asset_names
                 return set(asset_names)
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
@@ -686,21 +699,23 @@ class ObjectConverter(BaseConverter):
 
     def _resolve_resource_reference(
         self,
-        value: object,
+        value: JsonValue,
         *,
         owner_source_path: str,
         owner_name: str,
         field: str,
         resource_kind: str,
     ) -> tuple[str, str] | None:
-        if not isinstance(value, dict):
+        reference = capture_gamemaker_object_resource_reference(
+            value, source_context=owner_source_path
+        )
+        if not reference.is_object:
             return None
 
-        reference = cast(JsonDict, value)
-        raw_path = reference.get("path")
-        raw_name = reference.get("name")
+        raw_path = reference.path_value
+        raw_name = reference.name_value
         reference_field = f"{field}.path"
-        legacy_name_reference = "path" not in reference
+        legacy_name_reference = not reference.path_present
         if legacy_name_reference:
             if not isinstance(raw_name, str) or not is_safe_project_source_component(
                 raw_name
@@ -818,22 +833,21 @@ class ObjectConverter(BaseConverter):
 
     def _sanitize_object_events(
         self,
-        raw_event_list: object,
+        raw_event_list: JsonValue,
         *,
         owner_source_path: str,
         object_name: str,
-    ) -> list[JsonDict]:
+    ) -> list[JsonObject]:
         if not isinstance(raw_event_list, list):
             return []
 
-        events: list[JsonDict] = []
-        for index, raw_event in enumerate(cast(list[object], raw_event_list)):
+        events: list[JsonObject] = []
+        for index, raw_event in enumerate(raw_event_list):
             if not isinstance(raw_event, dict):
                 continue
-            event: JsonDict = {
+            event: JsonObject = {
                 key: value
-                for key, value in cast(dict[object, object], raw_event).items()
-                if isinstance(key, str)
+                for key, value in raw_event.items()
             }
             if isinstance(event.get("collisionObjectId"), dict):
                 collision_reference = self._resolve_resource_reference(
@@ -953,8 +967,13 @@ class ObjectConverter(BaseConverter):
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            value = decode_gamemaker_json(content, source_path=yy_path).value
+            if not isinstance(value, dict):
+                raise AttributeError(
+                    f"'{type(value).__name__}' object has no attribute 'get'",
+                    name="get", obj=value,
+                )
+            data = value
 
             sprite_reference = self._resolve_resource_reference(
                 data.get("spriteId"),
@@ -1125,7 +1144,7 @@ class ObjectConverter(BaseConverter):
         self,
         object_name: str,
         object_source_path: str,
-        event_list: list[JsonDict],
+        event_list: list[JsonObject],
         inherited_event_functions: set[str] | None = None,
         asset_names: set[str] | None = None,
         project_script_instance_variables: set[str] | None = None,
@@ -1453,7 +1472,7 @@ class ObjectConverter(BaseConverter):
                 function_names.add(mapping.godot_func)
         return function_names
 
-    def _event_function_names(self, event_list: list[JsonDict]) -> set[str]:
+    def _event_function_names(self, event_list: list[JsonObject]) -> set[str]:
         function_names: set[str] = set()
         for event in event_list:
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)
@@ -1521,7 +1540,7 @@ class ObjectConverter(BaseConverter):
         self,
         object_name: str,
         object_source_path: str,
-        event_list: list[JsonDict],
+        event_list: list[JsonObject],
     ) -> bool:
         for event in event_list:
             mapping = map_input_event(event) if is_input_event(event) else map_event(event)

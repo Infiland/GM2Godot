@@ -4,13 +4,14 @@ import json
 import ntpath
 import os
 import posixpath
-import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, cast
+from typing import TYPE_CHECKING, Iterable
 
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.events.base import EventMapping
-from src.conversion.type_defs import JsonDict, JsonList, StrPath
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.type_defs import StrPath
 
 if TYPE_CHECKING:
     from src.conversion.project_manifest import ProjectResourceReference
@@ -387,21 +388,21 @@ def project_gml_source_paths(
     return tuple(sources)
 
 
-def _read_lenient_json_file(path: str) -> JsonDict | None:
+def _read_lenient_json_file(path: str) -> JsonObject | None:
     try:
         with open(path, "r", encoding="utf-8") as source_file:
             source = source_file.read()
-        value = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
+        value = decode_gamemaker_json(source, source_path=path).value
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
-    return cast(JsonDict, value) if isinstance(value, dict) else None
+    return value if isinstance(value, dict) else None
 
 
 def _resource_gml_candidates(
     project_root: str,
     resource: ProjectResourceReference,
     resolved_resource: ResolvedProjectSourcePath,
-    resource_data: JsonDict,
+    resource_data: JsonObject,
 ) -> tuple[str, ...]:
     kind = resource.kind.casefold()
     if kind == "scripts":
@@ -431,7 +432,7 @@ def _script_gml_candidate(
     project_root: str,
     resource: ProjectResourceReference,
     resolved_resource: ResolvedProjectSourcePath,
-    resource_data: JsonDict,
+    resource_data: JsonObject,
 ) -> str:
     resource_directory = posixpath.dirname(resolved_resource.source_path)
     names: list[str] = [resource.name]
@@ -462,16 +463,16 @@ def _script_gml_candidate(
 def _object_gml_candidates(
     project_root: str,
     resolved_resource: ResolvedProjectSourcePath,
-    resource_data: JsonDict,
+    resource_data: JsonObject,
 ) -> tuple[str, ...]:
     raw_events = resource_data.get("eventList")
     if not isinstance(raw_events, list):
         return ()
     candidates: list[str] = []
-    for raw_event in cast(JsonList, raw_events):
+    for raw_event in raw_events:
         if not isinstance(raw_event, dict):
             continue
-        event = cast(JsonDict, raw_event)
+        event = raw_event
         mapping = map_input_event(event) if is_input_event(event) else map_event(event)
         if mapping is None:
             continue
@@ -521,7 +522,7 @@ def _event_source_filenames(mapping: EventMapping) -> tuple[str, ...]:
 def _room_gml_candidates(
     project_root: str,
     resolved_resource: ResolvedProjectSourcePath,
-    resource_data: JsonDict,
+    resource_data: JsonObject,
 ) -> tuple[str, ...]:
     resource_directory = posixpath.dirname(resolved_resource.source_path)
     candidates: list[str] = []
@@ -558,17 +559,17 @@ def _room_gml_candidates(
     return tuple(candidates)
 
 
-def _iter_room_instances(layers: object) -> Iterable[JsonDict]:
+def _iter_room_instances(layers: JsonValue) -> Iterable[JsonObject]:
     if not isinstance(layers, list):
         return
-    for raw_layer in cast(JsonList, layers):
+    for raw_layer in layers:
         if not isinstance(raw_layer, dict):
             continue
-        layer = cast(JsonDict, raw_layer)
+        layer = raw_layer
         raw_instances = layer.get("instances")
         if isinstance(raw_instances, list):
-            for raw_instance in cast(JsonList, raw_instances):
+            for raw_instance in raw_instances:
                 if isinstance(raw_instance, dict):
-                    yield cast(JsonDict, raw_instance)
+                    yield raw_instance
         nested_layers = layer.get("layers") or layer.get("children")
         yield from _iter_room_instances(nested_layers)

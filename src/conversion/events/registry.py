@@ -5,10 +5,14 @@ from typing import Any, Iterator, cast
 
 from src.conversion.events import mappings
 from src.conversion.events.base import EventMapping, EventTypeHandlers, StaticMappings
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonScalar
+from src.conversion.object_metadata import (
+    capture_gamemaker_event_mapping_inputs,
+    capture_gamemaker_event_type,
+)
 
 
-_GML_EVENT_NAMES: dict[int, str] = {
+_GML_EVENT_NAMES: dict[JsonScalar, str] = {
     0: "Create",
     1: "Destroy",
     2: "Alarm",
@@ -56,24 +60,25 @@ def _load_mapping_registry() -> tuple[StaticMappings, EventTypeHandlers, frozens
 _STATIC_MAP, _EVENT_TYPE_HANDLERS, INPUT_EVENT_TYPES, INPUT_MERGED_MAPPING = _load_mapping_registry()
 
 
-def is_input_event(event: JsonDict) -> bool:
+def is_input_event(event: JsonObject) -> bool:
     """Check whether an event dict represents a supported input event."""
-    return event.get('eventType', -1) in INPUT_EVENT_TYPES
+    return capture_gamemaker_event_type(event) in INPUT_EVENT_TYPES
 
 
-def map_event(event: JsonDict) -> EventMapping | None:
+def map_event(event: JsonObject) -> EventMapping | None:
     """Map a GameMaker event dict to an EventMapping.
 
     Returns None for input events since they are merged into a single
     _input(event) function by the script generator.
     """
-    event_type = cast(int, event.get('eventType', -1))
-    event_num = cast(int, event.get('eventNum', 0))
+    fields = capture_gamemaker_event_mapping_inputs(event)
+    event_type = fields.type_key()
+    event_num = fields.event_num
 
     if event_type in INPUT_EVENT_TYPES:
         return None
 
-    mapping = _STATIC_MAP.get((event_type, event_num))
+    mapping = _STATIC_MAP.get(fields.event_key())
     if mapping is not None:
         return mapping
 
@@ -87,7 +92,7 @@ def map_event(event: JsonDict) -> EventMapping | None:
     return EventMapping(f"_on_event_{event_type}_{event_num}", "", 20, gml_filename)
 
 
-def map_input_event(event: JsonDict) -> EventMapping | None:
+def map_input_event(event: JsonObject) -> EventMapping | None:
     """Map an input event to its source-backed generated handler."""
     from src.conversion.events.mappings.input import map_input_event as _map_input_event
 

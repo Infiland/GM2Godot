@@ -16,6 +16,8 @@ from unittest.mock import mock_open, patch
 from src.conversion import resource_models
 from src.conversion.font_metadata import GameMakerFontMetadata
 from src.conversion.sound_metadata import GameMakerSoundMetadata
+from src.conversion.object_metadata import GameMakerObjectMetadata
+from src.conversion.sprite_metadata import GameMakerSpriteMetadata
 from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
 from src.conversion.conversion_plan import (
     build_conversion_plan,
@@ -1758,6 +1760,73 @@ class TestTilesetResourceModelBoundary(unittest.TestCase):
         self.assertIn('"present": false', json.dumps(reflected))
         with self.assertRaises(FrozenInstanceError):
             setattr(plain, "tile_width", 7)
+
+
+class TestSharedResourceAcquisitionModels(unittest.TestCase):
+    def test_sprite_and_object_models_consume_their_authoritative_views(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            resources: JsonArray = []
+            for kind, name, resource_type in (("sprites", "player", "GMSprite"), ("objects", "actor", "GMObject")):
+                relative = f"{kind}/{name}/{name}.yy"
+                source = root / relative
+                source.parent.mkdir(parents=True)
+                source.write_text('{"parent":{"path":"folders/Assets/Nested.yy"},"unknown":[null,true],}', encoding="utf-8")
+                resources.append({"id": {"name": name, "path": relative}, "resourceType": resource_type})
+            (root / "project.yyp").write_text(json.dumps({"resources": resources, "resourceType": "GMProject"}), encoding="utf-8")
+            sprite = GameMakerSpriteMetadata(width=19, height=23, origin=4)
+            obj = GameMakerObjectMetadata(sprite_name="view_sprite", parent_object_name="view_parent", event_count=3,
+                                          persistent=True, solid=True)
+            with patch("src.conversion.resource_models.parse_gamemaker_sprite_metadata", return_value=sprite), patch(
+                "src.conversion.resource_models.parse_gamemaker_object_metadata", return_value=obj,
+            ):
+                models = parse_gamemaker_resource_models(directory)
+            self.assertEqual((models.sprites[0].width, models.sprites[0].height, models.sprites[0].origin), (19, 23, 4))
+            self.assertIs(models.sprites[0].metadata, sprite)
+            self.assertEqual((models.objects[0].sprite_name, models.objects[0].parent_object_name,
+                              models.objects[0].event_count, models.objects[0].persistent, models.objects[0].solid),
+                             ("view_sprite", "view_parent", 3, True, True))
+            self.assertIs(models.objects[0].metadata, obj)
+            self.assertEqual((models.sprites[0].subfolder, models.objects[0].subfolder), ("nested", "nested"))
+
+    def test_models_keep_strict_summary_values_and_unknown_children(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sources: dict[str, JsonObject] = {
+                "sprites/player/player.yy": {"width": "12", "height": True, "origin": 2.5, "unknown": {"future": [None, []]}},
+                "objects/actor/actor.yy": {"spriteId": {"name": "player"}, "eventList": [{}, None, "future"],
+                                          "persistent": [False], "solid": {}, "unknown": {"future": [None, []]}},
+            }
+            for relative, raw in sources.items():
+                source = root / relative
+                source.parent.mkdir(parents=True)
+                source.write_text(json.dumps(raw), encoding="utf-8")
+            (root / "project.yyp").write_text(json.dumps({"resources": [
+                {"id": {"name": "player", "path": "sprites/player/player.yy"}},
+                {"id": {"name": "actor", "path": "objects/actor/actor.yy"}},
+            ]}), encoding="utf-8")
+            models = parse_gamemaker_resource_models(directory)
+            sprite, obj = models.sprites[0], models.objects[0]
+            self.assertEqual((sprite.width, sprite.height, sprite.origin), (0, True, 0))
+            self.assertIs(type(sprite.height), bool)
+            self.assertEqual((obj.sprite_name, obj.event_count, obj.persistent, obj.solid), ("player", 1, True, False))
+            assert sprite.metadata is not None and obj.metadata is not None
+            self.assertIs(sprite.metadata.raw_data, sprite.raw_data)
+            self.assertIs(obj.metadata.raw_data["unknown"], obj.raw_data["unknown"])
+
+    def test_optional_sprite_and_object_carriers_preserve_constructor_prefixes(self) -> None:
+        prefix = ("name", "kind", "resource_type", "yy_path", "yyp_path", "order", "subfolder", "raw_data")
+        cases = ((resource_models.SpriteModel, prefix + ("width", "height", "origin")),
+                 (resource_models.ObjectModel, prefix + ("sprite_name", "parent_object_name", "event_count", "persistent", "solid")))
+        for model_type, old_fields in cases:
+            self.assertEqual(tuple(inspect.signature(model_type).parameters), old_fields + ("metadata",))
+            self.assertEqual(model_type.__module__, "src.conversion.resource_models")
+            self.assertFalse(fields(model_type)[-1].compare)
+            self.assertFalse(fields(model_type)[-1].repr)
+            first = model_type("asset", "kind", "type", "asset.yy", "asset.yy", 0)
+            second = model_type("asset", "kind", "type", "asset.yy", "asset.yy", 0)
+            self.assertIsNone(first.metadata)
+            self.assertIsNot(first.raw_data, second.raw_data)
 
 
 if __name__ == "__main__":

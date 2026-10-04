@@ -17,6 +17,7 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.extension_registry import (
     EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH,
     ExtensionEntry,
+    extension_entry_from_yy,
     build_extension_entries,
     extension_stub_relative_script_path,
     extension_stub_resource_path,
@@ -24,6 +25,8 @@ from src.conversion.extension_registry import (
     render_extension_stub_script,
     write_extension_compatibility_outputs,
 )
+from src.conversion.json_values import JsonObject
+from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.project_source_paths import ResolvedProjectSourcePath
 import src.conversion.extension_registry as extension_registry
@@ -33,6 +36,22 @@ def _write_file(path: str, content: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
+
+
+def _report_objects(report: JsonObject, key: str) -> list[JsonObject]:
+    values = report[key]
+    assert isinstance(values, list)
+    result: list[JsonObject] = []
+    for value in values:
+        assert isinstance(value, dict)
+        result.append(value)
+    return result
+
+
+def _report_string(value: JsonObject, key: str) -> str:
+    result = value[key]
+    assert isinstance(result, str)
+    return result
 
 
 class TestExtensionRegistry(unittest.TestCase):
@@ -150,7 +169,7 @@ class TestExtensionRegistry(unittest.TestCase):
         self.assertEqual(entry.files[0].functions[1].arg_count, 2)
 
         report = render_extension_compatibility_report(entries, {"ads_show_rewarded"})
-        diagnostics = report["diagnostics"]
+        diagnostics = _report_objects(report, "diagnostics")
         codes = [diagnostic["code"] for diagnostic in diagnostics]
         self.assertEqual(codes.count("extension_native_binding_required"), 2)
         self.assertEqual(codes.count("extension_function_mapping_required"), 1)
@@ -161,13 +180,13 @@ class TestExtensionRegistry(unittest.TestCase):
         ]
         self.assertEqual(mapping_diagnostics[0]["function"], "analytics_track")
         bindings = {
-            (binding["function"], binding["file"]): binding
-            for binding in report["function_bindings"]
+            (_report_string(binding, "function"), _report_string(binding, "file")): binding
+            for binding in _report_objects(report, "function_bindings")
         }
         self.assertTrue(bindings[("ads_show_rewarded", "ads.dll")]["mapped"])
         self.assertFalse(bindings[("analytics_track", "ads.dll")]["mapped"])
         self.assertEqual(report["mapped_functions"], ["ads_show_rewarded"])
-        self.assertEqual(report["stubs"][0]["path"], extension_stub_resource_path("AdSDK"))
+        self.assertEqual(_report_objects(report, "stubs")[0]["path"], extension_stub_resource_path("AdSDK"))
 
     def test_renders_unique_actionable_stub_methods(self) -> None:
         self._write_extension()
@@ -782,6 +801,95 @@ class TestExtensionRegistry(unittest.TestCase):
         self.assertEqual(len(rejected), 1, rejected)
         self.assertEqual(rejected[0].manifest_entry, "extension metadata")
 
+
+
+class TestExtensionTypedAcquisition(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.gm_dir = self.temp.name
+        self.yy_path = os.path.join(self.gm_dir, "extensions", "e", "e.yy")
+        os.makedirs(os.path.dirname(self.yy_path))
+        self._write('{}')
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _write(self, source: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def test_shared_decode_builds_existing_models_with_root_child_identity(self) -> None:
+        option: JsonObject = {"name": "opt", "value": [1, None]}
+        function: JsonObject = {"name": "f", "argCount": "2"}
+        file: JsonObject = {"filename": "native.dll", "functions": [function], "options": [option]}
+        data: JsonObject = {"name": "e", "files": [file], "options": [option], "unknown": {"items": [1]}}
+        with patch("src.conversion.extension_registry.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)) as decoder:
+            entries = build_extension_entries(self.gm_dir)
+        self.assertEqual(decoder.call_count, 1)
+        self.assertEqual(decoder.call_args.kwargs["source_path"], self.yy_path)
+        entry = entries[0]
+        self.assertIs(entry.raw_data, data)
+        self.assertIs(entry.files[0].raw_data, file)
+        self.assertIs(entry.files[0].functions[0].raw_data, function)
+        self.assertIs(entry.options[0], option)
+        self.assertIs(entry.files[0].options[0], option)
+        self.assertEqual(entry.files[0].functions[0].arg_count, 2)
+        self.assertIs(entry.to_dict()["raw"], data)
+
+    def test_real_shared_decode_trailing_commas_and_live_replacement(self) -> None:
+        self._write('{"name":"first","files":[{"filename":"one.dll",},],}')
+        with patch("src.conversion.extension_registry.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            first = build_extension_entries(self.gm_dir)
+        self.assertEqual(decoder.call_count, 1)
+        self.assertEqual(first[0].name, "first")
+        self._write('{"name":"second"}')
+        self.assertEqual(build_extension_entries(self.gm_dir)[0].name, "second")
+        self._write('null')
+        self.assertEqual(build_extension_entries(self.gm_dir), ())
+
+    def test_decoder_catch_boundaries_and_uncaught_exception_identity(self) -> None:
+        with patch("src.conversion.extension_registry.decode_gamemaker_json", side_effect=json.JSONDecodeError("bad", "{", 0)):
+            self.assertEqual(build_extension_entries(self.gm_dir), ())
+        for error in (ValueError("graph"), RuntimeError("decoder")):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.extension_registry.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        build_extension_entries(self.gm_dir)
+                self.assertIs(caught.exception, error)
+
+    def test_invalid_utf8_escapes_before_decoder(self) -> None:
+        with open(self.yy_path, "wb") as stream:
+            stream.write(b'\xff')
+        with patch("src.conversion.extension_registry.decode_gamemaker_json") as decoder:
+            with self.assertRaises(UnicodeDecodeError):
+                build_extension_entries(self.gm_dir)
+        decoder.assert_not_called()
+
+    def test_argument_count_null_boolean_string_container_and_nonfinite_policies(self) -> None:
+        functions: list[JsonObject] = [
+            {"name": "a", "argCount": True, "args": [1, 2]},
+            {"name": "b", "argCount": None, "argc": "3"},
+            {"name": "c", "argCount": [], "args": [1]},
+            {"name": "d", "argCount": "bad", "args": [1]},
+            {"name": "e", "argCount": 2.9},
+        ]
+        data: JsonObject = {"files": [{"functions": [value for value in functions]}]}
+        entry = extension_entry_from_yy(self.gm_dir, self.yy_path, data)
+        self.assertEqual([function.arg_count for function in entry.files[0].functions], [2, 3, None, None, 2])
+        with self.assertRaises(OverflowError):
+            extension_entry_from_yy(self.gm_dir, self.yy_path, {"files": [{"functions": [{"name": "x", "argCount": float("inf")}]}]})
+
+    def test_known_metadata_filters_nonobjects_without_copying_known_raw_items(self) -> None:
+        option: JsonObject = {"name": "x"}
+        data: JsonObject = {"name": 17, "files": [None, {"functions": [0, {"externalName": "f"}]}], "options": [None, option],
+                            "platforms": [{"name": "macos"}, "windows", 17], "targets": {"linux": [0], "unused": False}}
+        entry = extension_entry_from_yy(self.gm_dir, self.yy_path, data)
+        self.assertEqual(entry.name, "17")
+        self.assertEqual(entry.platforms, ("linux", "macos", "windows"))
+        self.assertEqual(len(entry.files), 1)
+        self.assertEqual(entry.files[0].functions[0].name, "f")
+        self.assertIs(entry.options[0], option)
+        self.assertIs(entry.raw_data, data)
 
 if __name__ == "__main__":
     unittest.main()

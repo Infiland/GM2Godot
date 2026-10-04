@@ -1095,9 +1095,33 @@ jobs:
           archive: true
           if-no-files-found: error
 
-  release:
+  main-quality:
     needs: [get-version, release-state-preflight, build]
     if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Require every main quality workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m scripts.check_main_quality --output "$RUNNER_TEMP/main-quality.json"
+
+  release:
+    needs: [get-version, release-state-preflight, build, main-quality]
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && needs.main-quality.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

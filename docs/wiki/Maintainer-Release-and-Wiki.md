@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.42 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.43 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -8,7 +8,9 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.42` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
+`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.43` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
+
+Before publishing a new release, the `main-quality` job also requires successful Tests, Pyright, Code Health, Godot Headless Smoke, TCC Conversion Test, Native Wheel Proposals and Dependency Locks runs for the exact source SHA, with event `push` and branch `main`. It reviews the latest execution of every job name across the observed run attempts, then rechecks the run identities. Failed, missing, ambiguous or changed proof stops publication. This read-only check has a 90-minute budget inside a 95-minute job and depends on successful native builds and release preflight; it does not wait for the enclosing Build workflow. Existing-tag integrity and publisher ownership rules remain unchanged.
 
 The publisher and integrity procedure below describes the current seven-asset contract. Its checksum manifest has exactly six payload rows in lexical filename order. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) published this seven-asset contract. Preserve its exact release audit and the older `0.8.15` five-asset audit as separate historical evidence; each new version needs its own main build and publication checks.
 

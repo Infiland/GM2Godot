@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.43 - 2026-10-04
+
+- Require successful exact-source main quality workflows and every selected job before release publication.
+- Retain native build and release preflight prerequisites with bounded read-only quality checks.
+
 ## 0.8.42 - 2026-10-04
 
 - Add Python distribution metadata and installed `gm2godot` and `gm2godot-gui` launchers, with bundled GDScript, icons and language assets.

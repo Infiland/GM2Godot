@@ -7,7 +7,7 @@ import secrets
 import stat
 import tempfile
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Protocol, cast
+from typing import Iterable, Mapping, Protocol
 
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler_parts.extension_functions import (
@@ -21,7 +21,9 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import JsonDict, LogCallback
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonArray, JsonObject, JsonValue
+from src.conversion.type_defs import LogCallback
 
 EXTENSION_COMPATIBILITY_REPORT_RELATIVE_PATH = os.path.join(
     "gm2godot", "extension_compatibility_report.json"
@@ -42,9 +44,9 @@ class ExtensionFunctionEntry:
     arg_count: int | None
     return_type: str
     help_text: str
-    raw_data: JsonDict
+    raw_data: JsonObject
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "name": self.name,
             "external_name": self.external_name,
@@ -60,12 +62,12 @@ class ExtensionFileEntry:
     filename: str
     platform: str
     functions: tuple[ExtensionFunctionEntry, ...]
-    constants: tuple[JsonDict, ...]
-    macros: tuple[JsonDict, ...]
-    options: tuple[JsonDict, ...]
-    raw_data: JsonDict
+    constants: tuple[JsonObject, ...]
+    macros: tuple[JsonObject, ...]
+    options: tuple[JsonObject, ...]
+    raw_data: JsonObject
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "filename": self.filename,
             "platform": self.platform,
@@ -82,14 +84,14 @@ class ExtensionEntry:
     name: str
     source_path: str
     files: tuple[ExtensionFileEntry, ...]
-    options: tuple[JsonDict, ...]
-    constants: tuple[JsonDict, ...]
-    macros: tuple[JsonDict, ...]
+    options: tuple[JsonObject, ...]
+    constants: tuple[JsonObject, ...]
+    macros: tuple[JsonObject, ...]
     platforms: tuple[str, ...]
     version: str
-    raw_data: JsonDict
+    raw_data: JsonObject
 
-    def to_dict(self) -> JsonDict:
+    def to_dict(self) -> JsonObject:
         return {
             "name": self.name,
             "source_path": self.source_path,
@@ -495,7 +497,7 @@ def render_extension_compatibility_report(
     mapped_functions: Iterable[str] = (),
     *,
     stub_paths_by_source: Mapping[str, str] | None = None,
-) -> JsonDict:
+) -> JsonObject:
     extension_entries = tuple(entries)
     default_stub_paths = collision_safe_extension_stub_resource_paths(
         (entry.name, entry.source_path)
@@ -510,9 +512,9 @@ def render_extension_compatibility_report(
         return default_stub_paths[(entry.name, entry.source_path)]
 
     mapped = set(mapped_functions)
-    diagnostics: list[JsonDict] = []
-    function_bindings: list[JsonDict] = []
-    stubs: list[JsonDict] = []
+    diagnostics: JsonArray = []
+    function_bindings: JsonArray = []
+    stubs: JsonArray = []
     for entry in extension_entries:
         entry_stub_path = stub_path(entry)
         stubs.append({
@@ -562,7 +564,7 @@ def render_extension_compatibility_report(
         "format_version": 1,
         "extensions": [entry.to_dict() for entry in extension_entries],
         "function_bindings": function_bindings,
-        "mapped_functions": sorted(mapped),
+        "mapped_functions": [name for name in sorted(mapped)],
         "stubs": stubs,
         "diagnostics": diagnostics,
     }
@@ -571,15 +573,15 @@ def render_extension_compatibility_report(
 def extension_entry_from_yy(
     gm_project_path: str,
     yy_path: str,
-    data: JsonDict,
+    data: JsonObject,
 ) -> ExtensionEntry:
     extension_name = str(data.get("name") or data.get("%Name") or os.path.splitext(os.path.basename(yy_path))[0])
     files: list[ExtensionFileEntry] = []
     raw_files = data.get("files")
     if isinstance(raw_files, list):
-        for raw_file in cast(list[object], raw_files):
+        for raw_file in raw_files:
             if isinstance(raw_file, dict):
-                files.append(_extension_file_from_yy(cast(JsonDict, raw_file)))
+                files.append(_extension_file_from_yy(raw_file))
     source_path = os.path.relpath(yy_path, gm_project_path).replace(os.sep, "/")
     return ExtensionEntry(
         name=extension_name,
@@ -598,7 +600,7 @@ def extension_entry_metadata(
     entry: ExtensionEntry,
     *,
     stub_path: str | None = None,
-) -> JsonDict:
+) -> JsonObject:
     return {
         "name": entry.name,
         "source_path": entry.source_path,
@@ -679,13 +681,13 @@ def collision_safe_extension_stub_resource_paths(
     return paths
 
 
-def _extension_file_from_yy(data: JsonDict) -> ExtensionFileEntry:
+def _extension_file_from_yy(data: JsonObject) -> ExtensionFileEntry:
     functions: list[ExtensionFunctionEntry] = []
     raw_functions = data.get("functions")
     if isinstance(raw_functions, list):
-        for raw_function in cast(list[object], raw_functions):
+        for raw_function in raw_functions:
             if isinstance(raw_function, dict):
-                function = _extension_function_from_yy(cast(JsonDict, raw_function))
+                function = _extension_function_from_yy(raw_function)
                 if function is not None:
                     functions.append(function)
     filename = str(data.get("filename") or data.get("name") or "")
@@ -700,7 +702,7 @@ def _extension_file_from_yy(data: JsonDict) -> ExtensionFileEntry:
     )
 
 
-def _extension_function_from_yy(data: JsonDict) -> ExtensionFunctionEntry | None:
+def _extension_function_from_yy(data: JsonObject) -> ExtensionFunctionEntry | None:
     name = data.get("name") or data.get("functionName")
     external_name = data.get("externalName") or data.get("external_name")
     if not name and external_name:
@@ -1120,7 +1122,7 @@ def render_extension_stub_script(entry: ExtensionEntry) -> str:
     return "\n".join(lines)
 
 
-def _extension_file_metadata(file_entry: ExtensionFileEntry) -> JsonDict:
+def _extension_file_metadata(file_entry: ExtensionFileEntry) -> JsonObject:
     return {
         "filename": file_entry.filename,
         "platform": file_entry.platform,
@@ -1132,7 +1134,7 @@ def _extension_file_metadata(file_entry: ExtensionFileEntry) -> JsonDict:
     }
 
 
-def _extension_function_metadata(function: ExtensionFunctionEntry) -> JsonDict:
+def _extension_function_metadata(function: ExtensionFunctionEntry) -> JsonObject:
     return {
         "name": function.name,
         "external_name": function.external_name,
@@ -1174,22 +1176,24 @@ def _load_extension_mapping_names(
         return set()
 
 
-def _extension_arg_count(data: JsonDict) -> int | None:
+def _extension_arg_count(data: JsonObject) -> int | None:
     raw_arg_count = data.get("argCount")
     if raw_arg_count is None:
         raw_arg_count = data.get("argc")
     if raw_arg_count is not None and not isinstance(raw_arg_count, bool):
+        if not isinstance(raw_arg_count, (str, int, float)):
+            return None
         try:
             return int(raw_arg_count)
         except (TypeError, ValueError):
             return None
     args = data.get("args")
     if isinstance(args, list):
-        return len(cast(list[object], args))
+        return len(args)
     return None
 
 
-def _extension_platform(data: JsonDict, filename: str) -> str:
+def _extension_platform(data: JsonObject, filename: str) -> str:
     for key in ("platform", "target", "copyToTargets"):
         value = data.get(key)
         if isinstance(value, str) and value:
@@ -1206,7 +1210,7 @@ def _extension_platform(data: JsonDict, filename: str) -> str:
     return ""
 
 
-def _extension_platforms(data: JsonDict, files: list[ExtensionFileEntry]) -> tuple[str, ...]:
+def _extension_platforms(data: JsonObject, files: list[ExtensionFileEntry]) -> tuple[str, ...]:
     platforms: set[str] = set()
     for key in ("platforms", "targets", "supportedTargets", "copyToTargets"):
         _collect_platform_names(platforms, data.get(key))
@@ -1216,21 +1220,21 @@ def _extension_platforms(data: JsonDict, files: list[ExtensionFileEntry]) -> tup
     return tuple(sorted(platforms))
 
 
-def _collect_platform_names(platforms: set[str], value: object) -> None:
+def _collect_platform_names(platforms: set[str], value: JsonValue) -> None:
     if isinstance(value, str) and value:
         platforms.add(value)
         return
     if isinstance(value, list):
-        for item in cast(list[object], value):
+        for item in value:
             if isinstance(item, str) and item:
                 platforms.add(item)
             elif isinstance(item, dict):
-                name = cast(JsonDict, item).get("name")
+                name = item.get("name")
                 if isinstance(name, str) and name:
                     platforms.add(name)
         return
     if isinstance(value, dict):
-        for key, enabled in cast(JsonDict, value).items():
+        for key, enabled in value.items():
             if key and enabled:
                 platforms.add(key)
 
@@ -1282,13 +1286,13 @@ def _safe_gdscript_identifier(value: str) -> str:
     return identifier
 
 
-def _json_dict_list(value: object) -> list[JsonDict]:
+def _json_dict_list(value: JsonValue) -> list[JsonObject]:
     if not isinstance(value, list):
         return []
-    items: list[JsonDict] = []
-    for item in cast(list[object], value):
+    items: list[JsonObject] = []
+    for item in value:
         if isinstance(item, dict):
-            items.append(cast(JsonDict, item))
+            items.append(item)
     return items
 
 
@@ -1335,7 +1339,7 @@ def _read_json_lenient(
     gm_project_path: str,
     source: ResolvedProjectSourcePath,
     context: _SourceContext,
-) -> JsonDict | None:
+) -> JsonObject | None:
     refreshed = _resolve_source(
         gm_project_path,
         source.filesystem_path,
@@ -1347,12 +1351,14 @@ def _read_json_lenient(
     try:
         with open(refreshed.filesystem_path, "r", encoding="utf-8") as source_file:
             content = source_file.read()
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", content))
+        data = decode_gamemaker_json(
+            content, source_path=refreshed.filesystem_path
+        ).value
     except OSError:
         return None
     except json.JSONDecodeError:
         return None
-    return cast(JsonDict, data) if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else None
 
 
 def _report_source_path_rejection(

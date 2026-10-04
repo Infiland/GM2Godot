@@ -20,6 +20,8 @@ from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.resource_index import GameMakerResourceIndex
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.project_manifest import load_gamemaker_project_manifest
 from src.conversion.sprites import (
     AnimationData,
     CollisionData,
@@ -2709,6 +2711,151 @@ class TestGenerateAnimatedScene(unittest.TestCase):
         self.assertIn('type="Sprite2D"', content)
         self.assertNotIn('CollisionShape2D', content)
         self.assertNotIn('AnimatedSprite2D', content)
+
+
+class TestTypedSpriteViewsIntegration(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        self.converter = SpriteConverter(self.gm_dir, self.godot_dir, log_callback=self.logs.append,
+                                         conversion_running=lambda: True)
+        self.yy_path = os.path.join(self.gm_dir, "sprites", "typed", "typed.yy")
+        os.makedirs(os.path.dirname(self.yy_path))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_typed_sprite(self, source: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def test_separate_live_reads_feed_collision_animation_and_frame_views(self) -> None:
+        with patch("src.conversion.base_converter.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            self._write_typed_sprite('{"width":"32","sequence":{"xorigin":8},}')
+            collision = self.converter._parse_collision_data("typed")
+            assert collision is not None
+            self.assertEqual((collision["width"], collision["xorigin"]), (32, 8))
+            self._write_typed_sprite('{"sequence":{"playbackSpeed":"12.5"}}')
+            animation = self.converter._parse_animation_data("typed")
+            assert animation is not None
+            self.assertEqual(animation["playbackSpeed"], 12.5)
+            self._write_typed_sprite('{"frames":[{"name":"new",}],"layers":[{"name":"visible"}],}')
+            self.assertEqual(self.converter._parse_sprite_yy("typed"), (["new"], ["visible"]))
+        self.assertEqual(decoder.call_count, 3)
+        self.assertTrue(all(call.kwargs == {"source_path": self.yy_path} for call in decoder.call_args_list))
+
+    def test_existing_public_typed_dict_modules_keys_and_defaults_remain(self) -> None:
+        self._write_typed_sprite('{"sequence":{},"frames":[]}')
+        collision = self.converter._parse_collision_data("typed")
+        animation = self.converter._parse_animation_data("typed")
+        assert collision is not None and animation is not None
+        self.assertEqual(CollisionData.__module__, "src.conversion.sprites")
+        self.assertEqual(AnimationData.__module__, "src.conversion.sprites")
+        self.assertEqual(list(collision), ["collisionKind", "collisionTolerance", "bboxMode", "bbox_left",
+                                          "bbox_right", "bbox_top", "bbox_bottom", "width", "height", "origin",
+                                          "xorigin", "yorigin"])
+        self.assertEqual(list(animation), ["playbackSpeed", "playbackSpeedType", "loop", "frame_durations"])
+        self.assertEqual(animation, {"playbackSpeed": 30.0, "playbackSpeedType": 0, "loop": True, "frame_durations": []})
+
+    def test_nonobject_roots_are_rejected_by_shared_reader_before_views(self) -> None:
+        for source in ("null", "[]", "true", '"sprite"', "4"):
+            with self.subTest(source=source):
+                self._write_typed_sprite(source)
+                self.assertIsNone(self.converter._parse_collision_data("typed"))
+                self.assertIsNone(self.converter._parse_animation_data("typed"))
+                self.assertIsNone(self.converter._parse_sprite_yy("typed"))
+
+    def test_malformed_known_nested_shapes_are_handled_at_existing_owner_seams(self) -> None:
+        self._write_typed_sprite('{"sequence":{"tracks":[null]},"frames":[null]}')
+        self.assertIsNone(self.converter._parse_animation_data("typed"))
+        self.assertIsNone(self.converter._parse_sprite_yy("typed"))
+        self.assertEqual(len(self.logs), 1)
+
+    def test_decoder_graph_rejection_precedes_view_capture(self) -> None:
+        self._write_typed_sprite('{}')
+        with (
+            patch("src.conversion.gamemaker_json.json.loads", return_value={"unknown": b"invalid"}),
+            patch("src.conversion.sprites.parse_sprite_collision_fields") as projection,
+        ):
+            self.assertIsNone(self.converter._parse_collision_data("typed"))
+            projection.assert_not_called()
+
+    def test_decoder_control_exception_identity_propagates_from_read(self) -> None:
+        self._write_typed_sprite('{}')
+        for error in (RecursionError("decoder depth"), RuntimeError("control"), KeyboardInterrupt(), SystemExit(7)):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.base_converter.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        self.converter._parse_collision_data("typed")
+                self.assertIs(caught.exception, error)
+
+    def test_projection_catches_and_control_identity_keep_owner_boundaries(self) -> None:
+        self._write_typed_sprite('{"frames":[],"sequence":{}}')
+        for target, parse in (("parse_sprite_collision_fields", self.converter._parse_collision_data),
+                              ("parse_sprite_animation_fields", self.converter._parse_animation_data),
+                              ("parse_sprite_frame_layer_fields", self.converter._parse_sprite_yy)):
+            with self.subTest(target=target):
+                with patch("src.conversion.sprites." + target, side_effect=TypeError("known field")):
+                    self.assertIsNone(parse("typed"))
+                error = RuntimeError("pure control")
+                with patch("src.conversion.sprites." + target, side_effect=error):
+                    with self.assertRaises(RuntimeError) as caught:
+                        parse("typed")
+                self.assertIs(caught.exception, error)
+        error = ValueError("frame view preserves narrow catch")
+        with patch("src.conversion.sprites.parse_sprite_frame_layer_fields", side_effect=error):
+            with self.assertRaises(ValueError) as caught:
+                self.converter._parse_sprite_yy("typed")
+        self.assertIs(caught.exception, error)
+
+    def test_nonfinite_integer_overflow_keeps_existing_escape(self) -> None:
+        self._write_typed_sprite('{"width":Infinity,"sequence":{"playbackSpeedType":Infinity}}')
+        with self.assertRaises(OverflowError):
+            self.converter._parse_collision_data("typed")
+        with self.assertRaises(OverflowError):
+            self.converter._parse_animation_data("typed")
+
+    def test_manifest_capture_remains_per_entry_after_requested_callback(self) -> None:
+        for name in ("first", "old", "new"):
+            path = os.path.join(self.gm_dir, "sprites", name, name + ".yy")
+            os.makedirs(os.path.dirname(path))
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write('{}')
+        yyp_path = os.path.join(self.gm_dir, "game.yyp")
+        with open(yyp_path, "w", encoding="utf-8") as stream:
+            stream.write('{"resources":[{"id":{"name":"first","path":"sprites/first/first.yy"}},'
+                         '{"id":{"name":"old","path":"sprites/old/old.yy"}}]}')
+        manifest = load_gamemaker_project_manifest(self.gm_dir)
+        resources = manifest.raw_data["resources"]
+        assert isinstance(resources, list)
+        second = resources[1]
+        assert isinstance(second, dict)
+        requested: list[str] = []
+
+        def mutate_later_declaration(name: str) -> None:
+            requested.append(name)
+            if name == "first":
+                second["id"] = {"name": "new", "path": "sprites/new/new.yy"}
+
+        with (
+            patch("src.conversion.sprites.load_gamemaker_project_manifest", return_value=manifest),
+            patch.object(self.converter, "_resource_requested", side_effect=mutate_later_declaration),
+        ):
+            valid = self.converter._get_valid_sprite_names(request_declared_resources=True)
+        self.assertEqual(requested, ["first", "new"])
+        self.assertEqual(valid, {"first": "", "new": ""})
+        self.assertEqual(list(self.converter._yyp_declared_sprites), ["first", "new"])
+
+    def test_real_utf8_and_bom_read_failure_do_not_reach_views(self) -> None:
+        for contents in (b"\xff", b'\xef\xbb\xbf{}'):
+            with self.subTest(contents=contents):
+                with open(self.yy_path, "wb") as stream:
+                    stream.write(contents)
+                with patch("src.conversion.sprites.parse_sprite_collision_fields") as projection:
+                    self.assertIsNone(self.converter._parse_collision_data("typed"))
+                    projection.assert_not_called()
 
 
 if __name__ == "__main__":

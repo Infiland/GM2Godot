@@ -5,6 +5,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
 
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -579,6 +583,52 @@ class TestProjectSourcePaths(unittest.TestCase):
             )
 
         self.assertEqual(source_paths, ())
+
+
+class TestSourceDiscoveryJsonAcquisition(unittest.TestCase):
+    def test_shared_decoder_is_used_once_with_leniency_and_deep_unknown_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "scripts/player/player.yy"
+            source.parent.mkdir(parents=True)
+            nested: JsonValue = None
+            for _ in range(128):
+                nested = {"future": [nested]}
+            raw: JsonObject = {"name": "player", "unknown": nested}
+            source.write_text(json.dumps(raw)[:-1] + ",}", encoding="utf-8")
+            source.with_suffix(".gml").write_text("show_debug_message(1);", encoding="utf-8")
+            (root / "project.yyp").write_text(json.dumps({"resources": [
+                {"id": {"name": "player", "path": "scripts/player/player.yy"}},
+            ]}), encoding="utf-8")
+            documents: list[GameMakerJsonDocument] = []
+
+            def decode(text: str, *, source_path: str) -> GameMakerJsonDocument:
+                document = decode_gamemaker_json(text, source_path=source_path)
+                documents.append(document)
+                return document
+
+            with patch("src.conversion.project_source_paths.decode_gamemaker_json", side_effect=decode) as decoder:
+                found = project_gml_source_paths(root)
+            self.assertEqual(tuple(item.source_path for item in found), ("scripts/player/player.gml",))
+            self.assertEqual(decoder.call_count, 1)
+            self.assertEqual(documents[0].source_path, str(source))
+            value = documents[0].value
+            assert isinstance(value, dict)
+            self.assertEqual(value["unknown"], nested)
+
+    def test_legal_nonobject_resource_roots_exclude_sidecar_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "scripts/player/player.yy"
+            source.parent.mkdir(parents=True)
+            source.with_suffix(".gml").write_text("show_debug_message(1);", encoding="utf-8")
+            (root / "project.yyp").write_text(json.dumps({"resources": [
+                {"id": {"name": "player", "path": "scripts/player/player.yy"}},
+            ]}), encoding="utf-8")
+            for text in ("null", "[]", "true"):
+                with self.subTest(root=text):
+                    source.write_text(text, encoding="utf-8")
+                    self.assertEqual(project_gml_source_paths(root), ())
 
 
 if __name__ == "__main__":

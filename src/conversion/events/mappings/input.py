@@ -1,5 +1,6 @@
 from src.conversion.events.base import EventMapping
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject
+from src.conversion.object_metadata import project_gamemaker_input_event_fields
 
 
 # Input event types are merged into a single _input(event) function.
@@ -25,7 +26,7 @@ _INPUT_GML_PREFIXES: dict[int, str] = {
 }
 
 
-def map_input_event(event: JsonDict) -> EventMapping | None:
+def map_input_event(event: JsonObject) -> EventMapping | None:
     """Map an input event to its event-specific generated method.
 
     The public ``map_event`` API still returns ``None`` for these events so
@@ -33,8 +34,9 @@ def map_input_event(event: JsonDict) -> EventMapping | None:
     to load and transpile the original ``Keyboard_*.gml``, ``Mouse_*.gml``,
     and gesture source files into methods that the GMInput router dispatches.
     """
-    event_type = int(event.get("eventType", -1))
-    event_num = int(event.get("eventNum", 0))
+    fields = project_gamemaker_input_event_fields(event)
+    event_type = fields.event_type
+    event_num = fields.event_num
     function_prefix = _INPUT_FUNCTION_PREFIXES.get(event_type)
     gml_prefix = _INPUT_GML_PREFIXES.get(event_type)
     if function_prefix is None or gml_prefix is None:

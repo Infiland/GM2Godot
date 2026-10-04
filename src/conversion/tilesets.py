@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import json
 import shutil
 import posixpath
@@ -22,6 +21,7 @@ from src.conversion.generated_paths import (
 )
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.sprite_metadata import capture_sprite_atlas_frame, select_sprite_atlas_layer
 from src.conversion.project_source_paths import (
     is_safe_project_source_component,
     ProjectSourcePathError,
@@ -509,24 +509,26 @@ class TileSetConverter(BaseConverter):
         try:
             with open(yy_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = cast(JsonDict, json.loads(cleaned))
+            data = decode_gamemaker_json(content, source_path=yy_path).value
+            if not isinstance(data, dict):
+                raise AttributeError(
+                    f"'{type(data).__name__}' object has no attribute 'get'", name="get", obj=data
+                )
 
             # Get the first frame GUID
-            raw_frames = data.get('frames', [])
-            if not isinstance(raw_frames, list) or not raw_frames:
+            frame = capture_sprite_atlas_frame(data)
+            if not frame.has_frames:
                 return None
-            raw_frame = cast(list[object], raw_frames)[0]
-            if not isinstance(raw_frame, dict):
+            if not frame.frame_is_object:
                 self._reject_sprite_reference(
                     resource_name,
                     resolved_sprite.source_path,
-                    repr(raw_frame),
+                    repr(frame.raw_frame),
                     "frames[0]",
                     "GameMaker sprite frame reference must be an object",
                 )
                 return None
-            frame_value = cast(JsonDict, raw_frame).get('name', '')
+            frame_value = frame.name_value
             if not isinstance(frame_value, str) or not self._valid_reference_component(
                 frame_value
             ):
@@ -541,27 +543,11 @@ class TileSetConverter(BaseConverter):
             frame_guid = frame_value
 
             # Get the primary visible layer GUID
-            raw_layers = data.get('layers', [])
-            if not isinstance(raw_layers, list) or not raw_layers:
-                return None
-            layers: list[tuple[int, JsonDict]] = []
-            for index, raw_layer in enumerate(cast(list[object], raw_layers)):
-                if not isinstance(raw_layer, dict):
-                    continue
-                layers.append((index, cast(JsonDict, raw_layer)))
-            if not layers:
-                return None
-
-            primary_layer: tuple[int, JsonDict] | None = None
-            for index, layer in layers:
-                if layer.get('visible', True):
-                    primary_layer = (index, layer)
-                    break
+            primary_layer = select_sprite_atlas_layer(data)
             if primary_layer is None:
-                primary_layer = layers[0]
-
-            layer_index, layer = primary_layer
-            layer_value = layer.get('name', '')
+                return None
+            layer_index = primary_layer.index
+            layer_value = primary_layer.name_value
             if not isinstance(layer_value, str) or not self._valid_reference_component(
                 layer_value
             ):

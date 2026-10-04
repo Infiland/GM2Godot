@@ -199,3 +199,64 @@ def project_sound_conversion_fields(
 ) -> SoundConversionFields:
     """Apply the original eleven positions to a captured record and validated soundFile."""
     return metadata.project_conversion_fields(sound_file=sound_file)
+
+
+@dataclass(frozen=True)
+class SoundRegistryMetadataFields:
+    audio_group: str
+    sound_file: str
+    volume: float
+    duration: float
+    preload: bool
+    compression: int
+    sound_type: int
+    raw_data: JsonObject
+
+
+def capture_sound_registry_file(data: JsonObject) -> str | None:
+    """Return only a nonempty string soundFile, without converter coercion."""
+    sound_file = data.get("soundFile")
+    return sound_file if isinstance(sound_file, str) and sound_file else None
+
+
+def capture_sound_registry_audio_group(data: JsonObject) -> str:
+    """Capture the live group when the owner is ready to consume it."""
+    reference = data.get("audioGroupId")
+    if not isinstance(reference, dict):
+        return ""
+    name = reference.get("name")
+    return name if isinstance(name, str) else ""
+
+
+def _registry_float(value: JsonValue, default: float) -> float:
+    if not isinstance(value, (str, int, float)):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _registry_int(value: JsonValue, default: int) -> int:
+    if not isinstance(value, (str, int, float)):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def capture_sound_registry_metadata(data: JsonObject) -> SoundRegistryMetadataFields:
+    """Project the registry's forgiving defaults in their original order."""
+    audio_group = capture_sound_registry_audio_group(data)
+    sound_file = data.get("soundFile")
+    return SoundRegistryMetadataFields(
+        audio_group=audio_group or "audiogroup_default",
+        sound_file=sound_file if isinstance(sound_file, str) else "",
+        volume=_registry_float(data.get("volume"), 1.0),
+        duration=_registry_float(data.get("duration"), 0.0),
+        preload=bool(data.get("preload", True)),
+        compression=_registry_int(data.get("compression"), 0),
+        sound_type=_registry_int(data.get("type"), 0),
+        raw_data=data,
+    )

@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Literal, TypedDict
 
 from src.conversion.font_metadata import GameMakerFontMetadata, parse_gamemaker_font_metadata
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_font_json
+from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_resource_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_sound_json
 from src.conversion.gamemaker_json import decode_gamemaker_json as decode_gamemaker_tileset_json
 from src.conversion.generated_paths import generated_subfolder_path
-from src.conversion.json_values import JsonObject
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.object_metadata import GameMakerObjectMetadata, parse_gamemaker_object_metadata
 from src.conversion.path_metadata import GameMakerPathMetadata, parse_gamemaker_path_metadata
 from src.conversion.project_manifest import GameMakerProjectManifest, ProjectResourceReference, load_gamemaker_project_manifest
 from src.conversion.project_source_paths import (
@@ -21,16 +22,17 @@ from src.conversion.project_source_paths import (
     resolve_project_source_path,
     validate_project_resource_source_path,
 )
+from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
 from src.conversion.sound_metadata import GameMakerSoundMetadata, parse_gamemaker_sound_metadata
+from src.conversion.sprite_metadata import GameMakerSpriteMetadata, parse_gamemaker_sprite_metadata
 from src.conversion.tileset_metadata import GameMakerTilesetMetadata, parse_gamemaker_tileset_metadata
-from src.conversion.type_defs import JsonDict, JsonList
 
 
 ResourceModelSeverity = Literal["info", "warning", "error"]
 
 
-def _empty_json_dict() -> JsonDict:
-    return cast(JsonDict, {})
+def _empty_json_dict() -> JsonObject:
+    return {}
 
 
 @dataclass(frozen=True)
@@ -63,7 +65,7 @@ class ResourceModel:
     yyp_path: str
     order: int
     subfolder: str = ""
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ class SpriteModel(ResourceModel):
     width: int = 0
     height: int = 0
     origin: int = 0
+    metadata: GameMakerSpriteMetadata | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -94,6 +97,7 @@ class ObjectModel(ResourceModel):
     event_count: int = 0
     persistent: bool = False
     solid: bool = False
+    metadata: GameMakerObjectMetadata | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -103,7 +107,7 @@ class RoomLayerModel:
     resource_type: str
     depth: int | None
     order: int
-    raw_data: JsonDict = field(default_factory=_empty_json_dict)
+    raw_data: JsonObject = field(default_factory=_empty_json_dict)
 
 
 @dataclass(frozen=True)
@@ -365,20 +369,24 @@ def _parse_resource_model(
     )
     kind = reference.kind
     if kind == "sprites":
+        metadata = parse_gamemaker_sprite_metadata(raw_data, source_context=yy_path)
         return SpriteModel(
             **base,
-            width=_int_value(raw_data.get("width")),
-            height=_int_value(raw_data.get("height")),
-            origin=_int_value(raw_data.get("origin")),
+            width=metadata.width,
+            height=metadata.height,
+            origin=metadata.origin,
+            metadata=metadata,
         ), ()
     if kind == "objects":
+        metadata = parse_gamemaker_object_metadata(raw_data, source_context=yy_path)
         return ObjectModel(
             **base,
-            sprite_name=_named_reference(raw_data.get("spriteId")),
-            parent_object_name=_named_reference(raw_data.get("parentObjectId")),
-            event_count=len(_dict_list(raw_data.get("eventList"))),
-            persistent=bool(raw_data.get("persistent", False)),
-            solid=bool(raw_data.get("solid", False)),
+            sprite_name=metadata.sprite_name,
+            parent_object_name=metadata.parent_object_name,
+            event_count=metadata.event_count,
+            persistent=metadata.persistent,
+            solid=metadata.solid,
+            metadata=metadata,
         ), ()
     if kind == "rooms":
         room_settings = _dict_value(raw_data.get("roomSettings"))
@@ -651,12 +659,23 @@ def _path_subfolder(parent_path: str) -> str:
     return generated_subfolder_path("/".join(parts[1:]))
 
 
+class _ResourceModelConstructor(TypedDict):
+    name: str
+    kind: str
+    resource_type: str
+    yy_path: str
+    yyp_path: str
+    order: int
+    subfolder: str
+    raw_data: JsonObject
+
+
 def _base_kwargs(
     reference: ProjectResourceReference,
     yy_path: str,
     yyp_path: str,
-    raw_data: JsonDict,
-) -> JsonDict:
+    raw_data: JsonObject,
+) -> _ResourceModelConstructor:
     return {
         "name": reference.name,
         "kind": reference.kind,
@@ -669,23 +688,21 @@ def _base_kwargs(
     }
 
 
-def _read_lenient_json_file(path: str) -> JsonDict | None:
+def _read_lenient_json_file(path: str) -> JsonObject | None:
     try:
         with open(path, "r", encoding="utf-8") as file:
             source = file.read()
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", source))
-        return cast(JsonDict, data) if isinstance(data, dict) else None
+        data = decode_gamemaker_resource_json(source, source_path=path).value
+        return data if isinstance(data, dict) else None
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return None
 
 
-def _subfolder_from_raw_data(raw_data: JsonDict) -> str:
-    parent = raw_data.get("parent")
-    if not isinstance(parent, dict):
+def _subfolder_from_raw_data(raw_data: JsonObject) -> str:
+    metadata = parse_gamemaker_resource_parent_metadata(raw_data)
+    if not metadata.has_parent_path:
         return ""
-    parent_path = cast(JsonDict, parent).get("path")
-    if not isinstance(parent_path, str):
-        return ""
+    parent_path = metadata.parent_path
     if parent_path.startswith("folders/"):
         parent_path = parent_path[len("folders/"):]
     if parent_path.endswith(".yy"):
@@ -696,7 +713,7 @@ def _subfolder_from_raw_data(raw_data: JsonDict) -> str:
     return generated_subfolder_path("/".join(parts[1:]))
 
 
-def _parse_room_layers(room_name: str, raw_layers: object) -> tuple[RoomLayerModel, ...]:
+def _parse_room_layers(room_name: str, raw_layers: JsonValue) -> tuple[RoomLayerModel, ...]:
     layers: list[RoomLayerModel] = []
     for index, layer in enumerate(_dict_list(raw_layers)):
         layers.append(
@@ -713,7 +730,7 @@ def _parse_room_layers(room_name: str, raw_layers: object) -> tuple[RoomLayerMod
     return tuple(layers)
 
 
-def _layer_resource_type(layer: JsonDict) -> str:
+def _layer_resource_type(layer: JsonObject) -> str:
     resource_type = layer.get("resourceType")
     if isinstance(resource_type, str) and resource_type:
         return resource_type
@@ -789,34 +806,34 @@ def _source_path_diagnostic(
     )
 
 
-def _named_reference(value: object) -> str | None:
+def _named_reference(value: JsonValue) -> str | None:
     if not isinstance(value, dict):
         return None
-    name = cast(JsonDict, value).get("name")
+    name = value.get("name")
     return name if isinstance(name, str) and name else None
 
 
-def _dict_value(value: object) -> JsonDict:
-    return cast(JsonDict, value) if isinstance(value, dict) else {}
+def _dict_value(value: JsonValue) -> JsonObject:
+    return value if isinstance(value, dict) else {}
 
 
-def _dict_list(value: object) -> list[JsonDict]:
+def _dict_list(value: JsonValue) -> list[JsonObject]:
     if not isinstance(value, list):
         return []
-    result: list[JsonDict] = []
-    for item in cast(JsonList, value):
+    result: list[JsonObject] = []
+    for item in value:
         if isinstance(item, dict):
-            result.append(cast(JsonDict, item))
+            result.append(item)
     return result
 
 
-def _string_value(value: object) -> str:
+def _string_value(value: JsonValue) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _int_value(value: object) -> int:
+def _int_value(value: JsonValue) -> int:
     return value if isinstance(value, int) else 0
 
 
-def _optional_int_value(value: object) -> int | None:
+def _optional_int_value(value: JsonValue) -> int | None:
     return value if isinstance(value, int) else None

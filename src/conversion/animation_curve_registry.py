@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from dataclasses import dataclass
-from typing import Iterable, Protocol, cast
+from typing import Iterable, Protocol
 
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     resolve_project_source_path,
 )
-from src.conversion.type_defs import JsonDict
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
 
 ANIMATION_CURVE_REGISTRY_RELATIVE_PATH = os.path.join(
     "gm2godot", "gml_animation_curve_registry.gd"
@@ -41,7 +41,7 @@ class AnimationCurvePoint:
     bezier_x1: float = 0.0
     bezier_y1: float = 0.0
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "x": self.x,
             "y": self.y,
@@ -59,7 +59,7 @@ class AnimationCurveChannel:
     iterations: int
     points: tuple[AnimationCurvePoint, ...]
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "name": self.name,
             "function": self.function,
@@ -74,7 +74,7 @@ class AnimationCurveRegistryEntry:
     name: str
     channels: tuple[AnimationCurveChannel, ...]
 
-    def to_godot_dict(self) -> JsonDict:
+    def to_godot_dict(self) -> JsonObject:
         return {
             "id": self.id,
             "name": self.name,
@@ -133,15 +133,15 @@ def write_animation_curve_registry(
 
 def _animation_curve_entry_from_yy(
     asset_entry: _AnimationCurveAssetEntry,
-    data: JsonDict,
+    data: JsonObject,
 ) -> AnimationCurveRegistryEntry:
     channels: list[AnimationCurveChannel] = []
     raw_channels = data.get("channels")
     if isinstance(raw_channels, list):
-        for raw_channel in cast(list[object], raw_channels):
+        for raw_channel in raw_channels:
             if not isinstance(raw_channel, dict):
                 continue
-            channels.append(_animation_curve_channel_from_yy(cast(JsonDict, raw_channel)))
+            channels.append(_animation_curve_channel_from_yy(raw_channel))
     return AnimationCurveRegistryEntry(
         id=asset_entry.id,
         name=asset_entry.name,
@@ -149,14 +149,14 @@ def _animation_curve_entry_from_yy(
     )
 
 
-def _animation_curve_channel_from_yy(channel: JsonDict) -> AnimationCurveChannel:
+def _animation_curve_channel_from_yy(channel: JsonObject) -> AnimationCurveChannel:
     raw_points = channel.get("points")
     points: list[AnimationCurvePoint] = []
     if isinstance(raw_points, list):
-        for raw_point in cast(list[object], raw_points):
+        for raw_point in raw_points:
             if not isinstance(raw_point, dict):
                 continue
-            point = cast(JsonDict, raw_point)
+            point = raw_point
             points.append(
                 AnimationCurvePoint(
                     x=_number(point.get("x"), 0.0),
@@ -175,20 +175,20 @@ def _animation_curve_channel_from_yy(channel: JsonDict) -> AnimationCurveChannel
     )
 
 
-def _read_json_lenient(path: str) -> JsonDict | None:
+def _read_json_lenient(path: str) -> JsonObject | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
     except OSError:
         return None
     try:
-        data = json.loads(re.sub(r",\s*([}\]])", r"\1", content))
+        data = decode_gamemaker_json(content, source_path=path).value
     except json.JSONDecodeError:
         return None
-    return cast(JsonDict, data) if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else None
 
 
-def _number(value: object, default: float) -> float:
+def _number(value: JsonValue, default: float) -> float:
     if isinstance(value, bool):
         return float(int(value))
     if isinstance(value, int | float):
@@ -196,5 +196,5 @@ def _number(value: object, default: float) -> float:
     return default
 
 
-def _string(value: object) -> str:
+def _string(value: JsonValue) -> str:
     return value if isinstance(value, str) else ""

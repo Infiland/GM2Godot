@@ -8,10 +8,11 @@ import unittest
 from unittest.mock import patch
 
 from src.conversion.gamemaker_json import decode_gamemaker_json
-from src.conversion.json_values import JsonPath, JsonValue, JsonValueError
+from src.conversion.json_values import JsonObject, JsonPath, JsonValue, JsonValueError
 from src.conversion.sound_metadata import (
     GameMakerSoundMetadata,
     SoundConversionFields,
+    capture_sound_registry_metadata,
     parse_gamemaker_sound_metadata,
     project_sound_conversion_fields,
 )
@@ -611,3 +612,41 @@ class TestSoundMetadata(unittest.TestCase):
         ))
         self.assertNotIn("type: ignore", source)
         self.assertNotIn("pyright: ignore", source)
+
+
+class TestSoundRegistryMetadata(unittest.TestCase):
+    def test_registry_defaults_keep_raw_identity(self) -> None:
+        raw: JsonObject = {"unknown": {"future": [None, True]}}
+        metadata = capture_sound_registry_metadata(raw)
+        self.assertIs(metadata.raw_data, raw)
+        self.assertEqual(
+            (metadata.audio_group, metadata.sound_file, metadata.volume, metadata.duration,
+             metadata.preload, metadata.compression, metadata.sound_type),
+            ("audiogroup_default", "", 1.0, 0.0, True, 0, 0),
+        )
+
+    def test_registry_numeric_strings_and_invalid_values_keep_forgiving_policy(self) -> None:
+        raw: JsonObject = {
+            "audioGroupId": {"name": "music"}, "soundFile": "theme.ogg",
+            "volume": "0.75", "duration": "2.5", "preload": [],
+            "compression": "2", "type": True,
+        }
+        metadata = capture_sound_registry_metadata(raw)
+        self.assertEqual(
+            (metadata.audio_group, metadata.sound_file, metadata.volume, metadata.duration,
+             metadata.preload, metadata.compression, metadata.sound_type),
+            ("music", "theme.ogg", 0.75, 2.5, False, 2, 1),
+        )
+        raw.update({"volume": "bad", "duration": {}, "compression": "2.5", "type": None})
+        fallback = capture_sound_registry_metadata(raw)
+        self.assertEqual((fallback.volume, fallback.duration, fallback.compression, fallback.sound_type),
+                         (1.0, 0.0, 0, 0))
+
+    def test_registry_nonfinite_values_and_first_overflow_keep_existing_behavior(self) -> None:
+        raw: JsonObject = {"volume": "NaN", "duration": "Infinity"}
+        metadata = capture_sound_registry_metadata(raw)
+        self.assertTrue(math.isnan(metadata.volume))
+        self.assertEqual(metadata.duration, math.inf)
+        raw.update({"volume": 10 ** 10000, "compression": math.inf})
+        with self.assertRaisesRegex(OverflowError, "int too large to convert to float"):
+            capture_sound_registry_metadata(raw)

@@ -5,19 +5,25 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from PIL import Image
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TypedDict, cast
+from typing import TypedDict
 
 from src.localization import get_localized
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path, generated_resource_directory, generated_resource_stem
 from src.conversion.project_manifest import load_gamemaker_project_manifest
+from src.conversion.resource_reference_metadata import capture_sprite_resource_declaration
+from src.conversion.sprite_metadata import (
+    parse_sprite_animation_fields,
+    parse_sprite_collision_fields,
+    parse_sprite_frame_layer_fields,
+)
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     ResolvedProjectSourcePath,
     validate_project_resource_source_path,
 )
-from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
+from src.conversion.type_defs import ConversionRunning, LogCallback, ProgressCallback, StrPath
 
 
 _MAX_PRECISE_COLLISION_RECTANGLES = 16384
@@ -138,38 +144,15 @@ class SpriteConverter(BaseConverter):
             raw_resources = data.get('resources', [])
             if not isinstance(raw_resources, list):
                 raise TypeError("GameMaker project resources must be an array")
-            for resource_index, raw_resource in enumerate(cast(list[object], raw_resources)):
+            for resource_index, raw_resource in enumerate(raw_resources):
                 if not isinstance(raw_resource, dict):
                     continue
-                resource = cast(JsonDict, raw_resource)
-                raw_res_id = resource.get('id', {})
-                if not isinstance(raw_res_id, dict):
+                declaration = capture_sprite_resource_declaration(raw_resource)
+                if declaration is None:
                     continue
-                res_id = cast(JsonDict, raw_res_id)
-                raw_path_value = res_id.get('path', '')
-                resource_type = resource.get('resourceType')
-                id_resource_type = res_id.get('resourceType')
-                is_sprite = (
-                    (
-                        isinstance(raw_path_value, str)
-                        and raw_path_value.replace('\\', '/').casefold().startswith('sprites/')
-                    )
-                    or resource_type == "GMSprite"
-                    or id_resource_type == "GMSprite"
-                )
-                if is_sprite:
-                    raw_name = res_id.get('name', '')
-                    name = (
-                        raw_name
-                        if isinstance(raw_name, str) and raw_name
-                        else (
-                            os.path.splitext(os.path.basename(raw_path_value))[0]
-                            if isinstance(raw_path_value, str)
-                            else ""
-                        )
-                    )
-                    if not name:
-                        continue
+                raw_path_value = declaration.path_value
+                name = declaration.name
+                if name:
                     manifest_field = f"resources[{resource_index}].id.path"
                     self._yyp_declared_sprites.setdefault(
                         name,
@@ -570,26 +553,20 @@ class SpriteConverter(BaseConverter):
         if data is None:
             return None
         try:
-            collision_kind = int(data.get("collisionKind", 1))
-            try:
-                collision_tolerance = int(data.get("collisionTolerance", 0))
-            except (TypeError, ValueError):
-                collision_tolerance = -1 if collision_kind in (0, 4) else 0
-            sequence = data.get("sequence")
-            sequence_data = cast(JsonDict, sequence) if isinstance(sequence, dict) else {}
+            fields = parse_sprite_collision_fields(data)
             return {
-                "collisionKind": collision_kind,
-                "collisionTolerance": collision_tolerance,
-                "bboxMode": int(data.get("bboxMode", 0)),
-                "bbox_left": int(data.get("bbox_left", 0)),
-                "bbox_right": int(data.get("bbox_right", 0)),
-                "bbox_top": int(data.get("bbox_top", 0)),
-                "bbox_bottom": int(data.get("bbox_bottom", 0)),
-                "width": int(data.get("width", 0)),
-                "height": int(data.get("height", 0)),
-                "origin": int(data.get("origin", 0)),
-                "xorigin": int(data.get("xorigin", sequence_data.get("xorigin", 0))),
-                "yorigin": int(data.get("yorigin", sequence_data.get("yorigin", 0))),
+                "collisionKind": fields.collision_kind,
+                "collisionTolerance": fields.collision_tolerance,
+                "bboxMode": fields.bbox_mode,
+                "bbox_left": fields.bbox_left,
+                "bbox_right": fields.bbox_right,
+                "bbox_top": fields.bbox_top,
+                "bbox_bottom": fields.bbox_bottom,
+                "width": fields.width,
+                "height": fields.height,
+                "origin": fields.origin,
+                "xorigin": fields.xorigin,
+                "yorigin": fields.yorigin,
             }
         except (KeyError, TypeError, ValueError):
             return None
@@ -606,28 +583,14 @@ class SpriteConverter(BaseConverter):
         if data is None:
             return None
         try:
-            sequence = data.get("sequence")
-            if not isinstance(sequence, dict):
+            fields = parse_sprite_animation_fields(data)
+            if fields is None:
                 return None
-            sequence_data = cast(JsonDict, sequence)
-
-            playback_speed = float(sequence_data.get("playbackSpeed", 30.0))
-            playback_speed_type = int(sequence_data.get("playbackSpeedType", 0))
-            loop = int(sequence_data.get("playback", 1)) == 1
-
-            frame_durations: list[float] = []
-            tracks = cast(list[JsonDict], sequence_data.get("tracks", []))
-            if tracks:
-                keyframes_store = cast(JsonDict, tracks[0].get("keyframes", {}))
-                keyframes = cast(list[JsonDict], keyframes_store.get("Keyframes", []))
-                sorted_kf = sorted(keyframes, key=lambda kf: float(kf.get("Key", 0)))
-                frame_durations = [float(kf.get("Length", 1.0)) for kf in sorted_kf]
-
             return {
-                "playbackSpeed": playback_speed,
-                "playbackSpeedType": playback_speed_type,
-                "loop": loop,
-                "frame_durations": frame_durations,
+                "playbackSpeed": fields.playback_speed,
+                "playbackSpeedType": fields.playback_speed_type,
+                "loop": fields.loop,
+                "frame_durations": fields.frame_durations,
             }
         except (KeyError, TypeError, ValueError, IndexError):
             return None
@@ -1303,19 +1266,8 @@ class SpriteConverter(BaseConverter):
             if data is None:
                 raise TypeError("Sprite metadata must be an object")
 
-            frames = cast(list[JsonDict], data['frames'])
-            frame_guids = [str(frame['name']) for frame in frames]
-
-            layers = cast(list[JsonDict], data.get('layers', []))
-            visible_layer_guids = [
-                str(layer['name'])
-                for layer in layers
-                if layer.get('visible', True)
-            ]
-            if not visible_layer_guids and layers:
-                visible_layer_guids = [str(layers[0]['name'])]
-
-            return (frame_guids, visible_layer_guids)
+            fields = parse_sprite_frame_layer_fields(data)
+            return (fields.frames, fields.layers)
         except (KeyError, TypeError, IndexError):
             diagnostic_path = yy_path or self._sprite_owner_yy_paths.get(
                 sprite_name,

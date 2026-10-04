@@ -44,6 +44,8 @@ from src.conversion.extension_registry import (
 from src.conversion.fonts import FontConverter
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.path_registry import PATH_REGISTRY_RELATIVE_PATH
+from src.conversion.json_values import JsonObject
+from src.conversion.project_source_paths import ResolvedProjectSourcePath
 from src.conversion.type_defs import JsonDict, StrPath
 
 
@@ -5683,6 +5685,63 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertIn("audio_group_memory_runtime", codes)
         self.assertIn("sound_preload_lazy", codes)
         self.assertIn("sound_import_semantics", codes)
+
+
+    def test_font_registry_captures_bundle_fields_after_live_folder_callback(self) -> None:
+        converter = self._converter()
+        raw: JsonObject = {"TTFName": None, "includeTTF": False, "fontName": "Unused"}
+        resource = _ProjectResource("fonts", "font_player", "font.yy", "fonts/font_player/font.yy", raw)
+        font_directory = os.path.join(self.gm_dir, "fonts", "font_player")
+        os.makedirs(font_directory)
+        with open(os.path.join(font_directory, "actual.ttf"), "wb") as output:
+            output.write(b"font bytes")
+
+        def folder(_resource: _ProjectResource) -> str:
+            raw["TTFName"] = "actual.ttf"
+            raw["includeTTF"] = True
+            return "late_folder"
+
+        with patch.object(converter, "_get_subfolder_from_resource", side_effect=folder), patch.object(
+            converter, "_system_font_path", side_effect=AssertionError("unused system fallback"),
+        ):
+            self.assertEqual(converter._font_godot_path(resource), "res://fonts/late_folder/actual.ttf")
+
+    def test_font_registry_captures_system_name_after_bundle_resolution(self) -> None:
+        converter = self._converter()
+        raw: JsonObject = {"TTFName": "unavailable.ttf", "includeTTF": True, "fontName": "Before"}
+        resource = _ProjectResource("fonts", "font_player", "font.yy", "fonts/font_player/font.yy", raw)
+
+        def unavailable(_path: str, **_kwargs: str | None) -> None:
+            raw["fontName"] = "After"
+
+        with patch.object(converter, "_get_subfolder_from_resource", return_value=""), patch.object(
+            converter, "_resolve_project_source", side_effect=unavailable,
+        ), patch.object(converter, "_system_font_path", return_value="/system/font.otf") as system:
+            self.assertEqual(converter._font_godot_path(resource), "res://fonts/font_player.otf")
+            system.assert_called_once_with("After")
+
+    def test_sound_registry_captures_group_between_source_and_folder_callbacks(self) -> None:
+        converter = self._converter(organize_sounds_by_audio_group=True)
+        raw: JsonObject = {"soundFile": "theme.ogg", "audioGroupId": {"name": "before"}}
+        resource = _ProjectResource("sounds", "snd_theme", "sound.yy", "sounds/snd_theme/sound.yy", raw)
+        source = os.path.join(self.gm_dir, "theme.ogg")
+        with open(source, "wb") as output:
+            output.write(b"audio bytes")
+
+        def resolved(path: str, **_kwargs: str | None) -> ResolvedProjectSourcePath:
+            self.assertEqual(path, "theme.ogg")
+            raw["soundFile"] = "too_late.ogg"
+            raw["audioGroupId"] = {"name": "after_source"}
+            return ResolvedProjectSourcePath(source, "theme.ogg", self.gm_dir)
+
+        def folder(_resource: _ProjectResource) -> str:
+            raw["audioGroupId"] = {"name": "after_folder"}
+            return "nested"
+
+        with patch.object(converter, "_resolve_project_source", side_effect=resolved), patch.object(
+            converter, "_get_subfolder_from_resource", side_effect=folder,
+        ):
+            self.assertEqual(converter._sound_godot_path(resource), "res://sounds/after_source/nested/snd_theme/theme.ogg")
 
 
 if __name__ == "__main__":

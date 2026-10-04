@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import threading
 import unittest
-from typing import cast
+from typing import cast, overload
 from unittest.mock import DEFAULT, MagicMock, patch
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -21,6 +21,8 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.events.base import EventMapping
 from src.conversion.event_mapping import is_input_event, map_event, map_input_event
 from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
 
 
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
@@ -3080,7 +3082,9 @@ class TestParseObjectYYEvents(unittest.TestCase):
         self.assertIsNotNone(result)
         assert result is not None
         self.assertEqual(len(result["event_list"]), 1)
-        self.assertEqual(result["event_list"][0]["collisionObjectId"]["name"], "o_enemy")
+        collision = result["event_list"][0]["collisionObjectId"]
+        assert isinstance(collision, dict)
+        self.assertEqual(collision["name"], "o_enemy")
 
 
 class TestObjectGeneratedPathCollisions(unittest.TestCase):
@@ -3146,6 +3150,193 @@ class TestObjectGeneratedPathCollisions(unittest.TestCase):
             shutil.rmtree(gm_dir)
             shutil.rmtree(godot_dir)
 
+
+
+
+class _ObjectReadTrace(dict[str, JsonValue]):
+    def __init__(self, values: JsonObject, trace: list[str]) -> None:
+        super().__init__(values)
+        self.trace = trace
+
+    @overload
+    def get(self, key: str, default: None = None, /) -> JsonValue: ...
+
+    @overload
+    def get(self, key: str, default: JsonValue, /) -> JsonValue: ...
+
+    @overload
+    def get[T](self, key: str, default: T, /) -> JsonValue | T: ...
+
+    def get[T](self, key: str, /, *defaults: T) -> JsonValue | T:
+        self.trace.append(key)
+        if defaults:
+            return super().get(key, defaults[0])
+        return super().get(key)
+
+
+class TestObjectTypedAcquisition(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.yy_path = os.path.join(self.gm_dir, "objects", "o", "o.yy")
+        os.makedirs(os.path.dirname(self.yy_path))
+        self.logs: list[str] = []
+        self.converter = ObjectConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=self.logs.append, progress_callback=lambda _: None,
+            conversion_running=lambda: True,
+        )
+        self._write('{}')
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write(self, source: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def test_single_shared_decode_keeps_source_and_unknown_children(self) -> None:
+        self._write('{"eventList":[{"eventType":0,"eventNum":0,"unknown":{"items":[1]}},],}')
+        with patch("src.conversion.objects.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            parsed = self.converter._parse_object_yy("o")
+        assert parsed is not None
+        self.assertEqual(decoder.call_count, 1)
+        self.assertEqual(decoder.call_args.kwargs["source_path"], self.yy_path)
+        self.assertEqual(parsed["event_list"][0]["unknown"], {"items": [1]})
+        self.assertEqual(parsed["source_path"], "objects/o/o.yy")
+
+    def test_live_replacement_is_read_on_each_object_parse(self) -> None:
+        self._write('{"solid":false}')
+        first = self.converter._parse_object_yy("o")
+        self._write('{"solid":[0],"persistent":true}')
+        second = self.converter._parse_object_yy("o")
+        assert first is not None and second is not None
+        self.assertFalse(first["solid"])
+        self.assertTrue(second["solid"])
+        self.assertTrue(second["persistent"])
+
+    def test_nonobject_root_keeps_builtin_attribute_error_details(self) -> None:
+        for source in ('null', 'true', '17', '"text"', '[]'):
+            with self.subTest(source=source):
+                self._write(source)
+                with self.assertRaises(AttributeError) as caught:
+                    self.converter._parse_object_yy("o")
+                self.assertEqual(caught.exception.name, "get")
+                self.assertEqual(str(caught.exception), f"'{type(caught.exception.obj).__name__}' object has no attribute 'get'")
+        self.assertEqual(self.logs, [])
+
+    def test_decoder_error_catches_and_uncaught_identity_remain_owner_specific(self) -> None:
+        for error in (json.JSONDecodeError("bad", "{", 0), ValueError("validator"), TypeError("type"), OSError("read")):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.objects.decode_gamemaker_json", side_effect=error):
+                    self.assertIsNone(self.converter._parse_object_yy("o"))
+        error = RuntimeError("decoder failure")
+        with patch("src.conversion.objects.decode_gamemaker_json", side_effect=error):
+            with self.assertRaises(RuntimeError) as caught:
+                self.converter._parse_object_yy("o")
+        self.assertIs(caught.exception, error)
+
+    def test_invalid_utf8_remains_caught_before_decoder(self) -> None:
+        with open(self.yy_path, "wb") as stream:
+            stream.write(b'\xff')
+        with patch("src.conversion.objects.decode_gamemaker_json") as decoder:
+            self.assertIsNone(self.converter._parse_object_yy("o"))
+        decoder.assert_not_called()
+        self.assertEqual(len(self.logs), 1)
+
+    def test_reference_callbacks_and_event_sanitation_observe_prior_mutations(self) -> None:
+        sprite: JsonObject = {"name": "sprite"}
+        parent: JsonObject = {"name": "old_parent"}
+        events: list[JsonValue] = []
+        data: JsonObject = {"spriteId": sprite, "parentObjectId": parent, "eventList": events}
+        calls: list[str] = []
+        def reference(value: JsonValue, **kwargs: str) -> tuple[str, str] | None:
+            calls.append(kwargs["field"])
+            if kwargs["field"] == "spriteId":
+                self.assertIs(value, sprite)
+                data["parentObjectId"] = {"name": "new_parent"}
+                return "sprite", "sprites/sprite/sprite.yy"
+            self.assertEqual(value, {"name": "new_parent"})
+            data["eventList"] = [{"eventType": 0}]
+            return "parent", "objects/parent/parent.yy"
+        def sanitize(value: JsonValue, **_kwargs: str) -> list[JsonObject]:
+            calls.append("eventList")
+            self.assertEqual(value, [{"eventType": 0}])
+            data["solid"] = [1]
+            data["persistent"] = "enabled"
+            return []
+        with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)), \
+             patch.object(self.converter, "_resolve_resource_reference", side_effect=reference), \
+             patch.object(self.converter, "_sanitize_object_events", side_effect=sanitize):
+            parsed = self.converter._parse_object_yy("o")
+        assert parsed is not None
+        self.assertEqual(calls, ["spriteId", "parentObjectId", "eventList"])
+        self.assertTrue(parsed["solid"])
+        self.assertTrue(parsed["persistent"])
+        self.assertEqual(parsed["parent_object_name"], "parent")
+
+    def test_event_sanitizer_copies_event_but_preserves_unknown_child_identity(self) -> None:
+        child: JsonObject = {"nested": [1, None]}
+        event: JsonObject = {"eventType": 0, "eventNum": 0, "unknown": child}
+        events: JsonValue = [event, None, []]
+        sanitized = self.converter._sanitize_object_events(events, owner_source_path="objects/o/o.yy", object_name="o")
+        self.assertEqual(len(sanitized), 1)
+        self.assertIsNot(sanitized[0], event)
+        self.assertIs(sanitized[0]["unknown"], child)
+        self.assertEqual(list(sanitized[0]), ["eventType", "eventNum", "unknown"])
+
+    def test_name_only_project_fallback_does_not_require_or_read_reference_paths(self) -> None:
+        with open(os.path.join(self.gm_dir, "p.yyp"), "w", encoding="utf-8") as stream:
+            stream.write('{"resources":[{"id":{"name":"s","path":null},"resourceType":[]}],}')
+        with patch.object(AssetRegistryConverter, "build_entries", side_effect=ValueError("use fallback")), \
+             patch("src.conversion.objects.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            self.assertEqual(self.converter._get_project_asset_names(), {"s"})
+        self.assertEqual(decoder.call_count, 1)
+        with patch("src.conversion.objects.decode_gamemaker_json") as cached_decoder:
+            self.assertEqual(self.converter._get_project_asset_names(), {"s"})
+        cached_decoder.assert_not_called()
+
+    def test_name_only_project_fallback_nonobject_entry_and_id_escape(self) -> None:
+        for source in ('{"resources":[null]}', '{"resources":[{"id":null}]}', '[]'):
+            with self.subTest(source=source):
+                self.converter._project_asset_names_cache = None
+                with open(os.path.join(self.gm_dir, "p.yyp"), "w", encoding="utf-8") as stream:
+                    stream.write(source)
+                with patch.object(AssetRegistryConverter, "build_entries", side_effect=ValueError("use fallback")):
+                    with self.assertRaises(AttributeError) as caught:
+                        self.converter._get_project_asset_names()
+                self.assertEqual(caught.exception.name, "get")
+
+    def test_converter_flag_reads_remain_solid_then_persistent_after_events(self) -> None:
+        trace: list[str] = []
+        data = _ObjectReadTrace({"eventList": [], "solid": True, "persistent": False}, trace)
+        with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)):
+            parsed = self.converter._parse_object_yy("o")
+        assert parsed is not None
+        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent"])
+        self.assertTrue(parsed["solid"])
+        self.assertFalse(parsed["persistent"])
+
+    def test_live_reference_capture_keeps_explicit_path_authority_before_resolution(self) -> None:
+        with patch.object(self.converter, "_resolve_project_source") as resolver:
+            result = self.converter._resolve_resource_reference(
+                {"name": "legacy", "path": None}, owner_source_path="objects/o/o.yy",
+                owner_name="o", field="spriteId", resource_kind="sprites",
+            )
+        self.assertIsNone(result)
+        resolver.assert_not_called()
+        self.assertIn("None", self.logs[0])
+
+    def test_malformed_scalar_event_key_keeps_original_caught_lookup_failure(self) -> None:
+        self._write('{"eventList":[{"eventType":[],"eventNum":0}]}')
+        self.assertIsNone(self.converter._parse_object_yy("o"))
+        self.assertEqual(len(self.logs), 1)
+        self._write('{"eventList":[{"eventType":"2","eventNum":"3"}]}')
+        parsed = self.converter._parse_object_yy("o")
+        assert parsed is not None
+        self.assertEqual(parsed["event_list"][0]["eventType"], "2")
+        self.assertEqual(parsed["event_list"][0]["eventNum"], "3")
 
 if __name__ == "__main__":
     unittest.main()

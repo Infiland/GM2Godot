@@ -169,3 +169,23 @@ def _python_int(value: JsonValue) -> int:
 def project_font_conversion_fields(metadata: GameMakerFontMetadata) -> FontConversionFields:
     """Apply the original eight conversions in their original evaluation order."""
     return metadata.project_conversion_fields()
+
+
+@dataclass(frozen=True)
+class FontRegistryBundleFields:
+    ttf_name: str | None
+    include_ttf: bool
+    raw_data: JsonObject
+
+
+def capture_font_registry_bundle_fields(data: JsonObject) -> FontRegistryBundleFields:
+    """Read bundled-font planning inputs after the owner's live folder lookup."""
+    ttf_name = data.get("TTFName")
+    include_ttf = bool(data.get("includeTTF", False))
+    return FontRegistryBundleFields(ttf_name if isinstance(ttf_name, str) else None, include_ttf, data)
+
+
+def capture_font_registry_system_name(data: JsonObject) -> str | None:
+    """Read the fallback name only after bundled-font resolution has failed."""
+    font_name = data.get("fontName")
+    return font_name if isinstance(font_name, str) and font_name else None

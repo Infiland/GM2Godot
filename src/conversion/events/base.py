@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from typing import Callable, TypeAlias
 
-from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonObject, JsonScalar
 
 
-EventKey: TypeAlias = tuple[int, int]
-EventHandler: TypeAlias = Callable[[JsonDict, str], "EventMapping"]
+EventKey: TypeAlias = tuple[JsonScalar, JsonScalar]
+EventHandler: TypeAlias = Callable[[JsonObject, str], "EventMapping"]
 StaticMappings: TypeAlias = dict[EventKey, "EventMapping"]
-EventTypeHandlers: TypeAlias = dict[int, EventHandler]
+EventTypeHandlers: TypeAlias = dict[JsonScalar, EventHandler]
 
 
 @dataclass(frozen=True)

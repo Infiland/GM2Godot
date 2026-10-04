@@ -540,5 +540,22 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertNotIn("\n\nvar rotation\n", content)
 
 
+
+class TestScriptGeneratorRecursiveEvents(unittest.TestCase):
+    def test_source_backed_input_keeps_original_numeric_string_coercion(self) -> None:
+        content = generate_script_content([{"eventType": 5, "eventNum": "65"}])
+        self.assertIn("func _gm_input_keyboard_65():", content)
+
+    def test_collision_name_keeps_original_scalar_string_coercion(self) -> None:
+        content = generate_script_content([{"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": 17}}])
+        self.assertIn("func _on_collision_17():", content)
+        self.assertIn('"17"', content)
+
+    def test_regular_event_number_text_is_preserved_while_type_coercion_remains_late(self) -> None:
+        content = generate_script_content([{"eventType": 2, "eventNum": "3"}])
+        self.assertIn("func _on_alarm_3():", content)
+        with self.assertRaises(ValueError):
+            generate_script_content([{"eventType": "invalid", "eventNum": 0}])
+
 if __name__ == "__main__":
     unittest.main()

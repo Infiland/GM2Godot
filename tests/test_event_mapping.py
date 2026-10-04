@@ -12,6 +12,7 @@ from src.conversion.event_mapping import (
     INPUT_MERGED_MAPPING, map_input_event,
 )
 from src.conversion.type_defs import JsonDict
+from src.conversion.json_values import JsonValue
 
 
 def map_event(event: JsonDict) -> EventMapping:
@@ -292,6 +293,38 @@ class TestEventMappingFrozen(unittest.TestCase):
         self.assertEqual(INPUT_MERGED_MAPPING.params, "event")
         self.assertEqual(INPUT_MERGED_MAPPING.sort_key, 4)
 
+
+
+class TestRecursiveEventMapping(unittest.TestCase):
+    def test_native_scalar_lookup_keeps_bool_and_float_equivalence(self) -> None:
+        self.assertEqual(map_event({"eventType": False, "eventNum": 0.0}).gml_filename, "Create_0.gml")
+        self.assertEqual(map_event({"eventType": True, "eventNum": False}).gml_filename, "Destroy_0.gml")
+
+    def test_text_event_values_are_preserved_instead_of_coerced(self) -> None:
+        mapping = map_event({"eventType": "2", "eventNum": "3"})
+        self.assertEqual(mapping.godot_func, "_on_event_2_3")
+        self.assertEqual(mapping.gml_filename, "Event2_3.gml")
+        self.assertFalse(is_input_event({"eventType": "5"}))
+
+    def test_unused_input_event_num_is_not_hashed_by_regular_map(self) -> None:
+        self.assertIsNone(map_event_optional({"eventType": 5, "eventNum": []}))
+        self.assertTrue(is_input_event({"eventType": 5, "eventNum": {}}))
+        with self.assertRaises(TypeError):
+            map_input_event({"eventType": 5, "eventNum": []})
+
+    def test_unhashable_event_values_fail_at_the_original_lookup(self) -> None:
+        values: tuple[JsonValue, ...] = ([], {})
+        for value in values:
+            with self.subTest(kind=type(value).__name__):
+                with self.assertRaisesRegex(TypeError, f"unhashable type: '{type(value).__name__}'"):
+                    map_event_optional({"eventType": value, "eventNum": 0})
+                with self.assertRaisesRegex(TypeError, f"unhashable type: '{type(value).__name__}'"):
+                    map_event_optional({"eventType": 2, "eventNum": value})
+
+    def test_collision_name_native_value_is_formatted_without_new_string_policy(self) -> None:
+        mapping = map_event({"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": 17}})
+        self.assertEqual(mapping.gml_filename, "Collision_17.gml")
+        self.assertEqual(mapping.godot_func, "_on_collision_17")
 
 if __name__ == "__main__":
     unittest.main()

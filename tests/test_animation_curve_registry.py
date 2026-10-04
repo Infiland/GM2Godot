@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import math
 import os
 import tempfile
 import unittest
 from dataclasses import dataclass
+from unittest.mock import patch
+
+from src.conversion.gamemaker_json import decode_gamemaker_json
 
 from src.conversion.animation_curve_registry import (
     build_animation_curve_registry_entries,
@@ -122,6 +127,74 @@ class TestAnimationCurveRegistry(unittest.TestCase):
 
         self.assertEqual(entries, ())
 
+
+
+class TestAnimationCurveTypedAcquisition(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.gm_dir = self.temp.name
+        self.yy_path = os.path.join(self.gm_dir, "animcurves", "a", "a.yy")
+        os.makedirs(os.path.dirname(self.yy_path))
+        self.asset = _AssetEntry(3, "a", "animcurves", "animcurves/a/a.yy")
+        self._write('{}')
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def _write(self, source: str) -> None:
+        with open(self.yy_path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def test_one_shared_decode_and_authoritative_serialized_models(self) -> None:
+        self._write('{"channels":[null,{"name":"height","points":[false,{"x":true,"y":"7"},],},],}')
+        with patch("src.conversion.animation_curve_registry.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            entries = build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
+        self.assertEqual(decoder.call_count, 1)
+        self.assertEqual(decoder.call_args.kwargs["source_path"], self.yy_path)
+        self.assertEqual(entries[0].channels[0].points[0].x, 1.0)
+        self.assertEqual(entries[0].channels[0].points[0].y, 0.0)
+        self.assertEqual(entries[0].to_godot_dict()["channels"], [entries[0].channels[0].to_godot_dict()])
+
+    def test_decode_and_live_replacement_nonobject_policy(self) -> None:
+        self._write('[]')
+        self.assertEqual(build_animation_curve_registry_entries(self.gm_dir, (self.asset,)), ())
+        self._write('{"channels":[{"points":[{"x":2}]}]}')
+        entries = build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
+        self.assertEqual(entries[0].channels[0].points[0].x, 2.0)
+
+    def test_json_error_is_skipped_but_value_and_runtime_errors_escape_by_identity(self) -> None:
+        error = json.JSONDecodeError("bad", "{", 0)
+        with patch("src.conversion.animation_curve_registry.decode_gamemaker_json", side_effect=error):
+            self.assertEqual(build_animation_curve_registry_entries(self.gm_dir, (self.asset,)), ())
+        for error in (ValueError("graph"), RuntimeError("decoder")):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.animation_curve_registry.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
+                self.assertIs(caught.exception, error)
+
+    def test_invalid_utf8_escapes_before_decoder(self) -> None:
+        with open(self.yy_path, "wb") as stream:
+            stream.write(b'\xff')
+        with patch("src.conversion.animation_curve_registry.decode_gamemaker_json") as decoder:
+            with self.assertRaises(UnicodeDecodeError):
+                build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
+        decoder.assert_not_called()
+
+    def test_native_nonfinite_point_provenance_and_iterations_failure_remain(self) -> None:
+        self._write('{"channels":[{"points":[{"x":NaN,"y":Infinity}]}]}')
+        entry = build_animation_curve_registry_entries(self.gm_dir, (self.asset,))[0]
+        self.assertTrue(math.isnan(entry.channels[0].points[0].x))
+        self.assertEqual(entry.channels[0].points[0].y, float("inf"))
+        self.assertIn("NaN", render_animation_curve_registry_script((entry,)))
+        self._write('{"channels":[{"iterations":Infinity}]}')
+        with self.assertRaises(OverflowError):
+            build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
+
+    def test_point_conversion_failure_precedes_channel_iteration_conversion(self) -> None:
+        self._write(json.dumps({"channels": [{"iterations": "ignored", "points": [{"x": 10 ** 400}]}]}))
+        with self.assertRaises(OverflowError):
+            build_animation_curve_registry_entries(self.gm_dir, (self.asset,))
 
 if __name__ == "__main__":
     unittest.main()

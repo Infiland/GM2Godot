@@ -20,6 +20,9 @@ from src.conversion.converter import Converter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.resource_index import IndexedRoom
 from src.conversion.room_creation_code import resolve_instance_creation_code
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonValueError
+from src.conversion.tileset_metadata import select_tileset_room_layout
 from src.conversion.room_layers import (
     GAMEMAKER_EMPTY_TILE_SENTINEL,
     GAMEMAKER_TILE_FLIP_BIT,
@@ -32,6 +35,8 @@ from src.conversion.room_layers import (
     decode_tile_compressed_data,
     gamemaker_tile_transform_to_godot,
     is_empty_gamemaker_tile,
+    serialize_room_layers,
+    SerializedRoomLayers,
 )
 
 
@@ -2382,6 +2387,113 @@ class TestRoomConverter(unittest.TestCase):
             content = f.read()
         self.assertIn('run/main_scene="res://keep.tscn"', content)
         self.assertTrue(any("stopped" in log.lower() for log in self.logs))
+
+
+class _TypedLayoutResourceIndex:
+    def __init__(self, source: str, output_root: str) -> None:
+        self.source = source
+        self.godot_project_path = output_root
+
+    def resolve_gm_path(self, kind: str, name: str) -> str | None:
+        return self.source if kind == "tilesets" and name == "typed" else None
+
+    def resolve_godot_path(self, kind: str, name: str) -> str | None:
+        return "res://typed.tres" if kind == "tilesets" and name == "typed" else None
+
+
+class TestTypedRoomTilesetAcquisition(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.path = os.path.join(self.directory.name, "tileset.yy")
+        self.index = _TypedLayoutResourceIndex(self.path, self.directory.name)
+        with open(os.path.join(self.directory.name, "typed.tres"), "w", encoding="utf-8") as stream:
+            stream.write('[gd_resource type="TileSet" format=3]')
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def _write_layout(self, source: str) -> None:
+        with open(self.path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def _serialize_layout(self) -> SerializedRoomLayers:
+        room = IndexedRoom("typed", "rooms/typed/typed.yy", "game.yyp", "res://typed.tscn", layers=[{
+            "%Name": "Tiles", "resourceType": "GMRTileLayer", "tilesetId": {"name": "typed"},
+            "tiles": {"SerialiseWidth": 1, "SerialiseHeight": 1, "TileDataFormat": 0,
+                      "TileCompressedData": [9]},
+        }])
+        return serialize_room_layers(room, resource_index=self.index)
+
+    def test_shared_decoder_receives_actual_utf8_content_path_and_returns_same_object(self) -> None:
+        source = '{"out_columns":"3.5","unknown":"a,}",}'
+        self._write_layout(source)
+        document = decode_gamemaker_json(source, source_path=self.path)
+        with (
+            patch("src.conversion.room_layers.decode_gamemaker_json", return_value=document) as decoder,
+            patch("src.conversion.room_layers.select_tileset_room_layout", wraps=select_tileset_room_layout) as selection,
+        ):
+            result = self._serialize_layout()
+        self.assertIs(selection.call_args.args[0], document.value)
+        decoder.assert_called_once_with(source, source_path=self.path)
+        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0)", result.node_lines)
+
+    def test_live_file_replacement_changes_serialized_atlas_cells(self) -> None:
+        self._write_layout('{"out_columns":2}')
+        first = self._serialize_layout()
+        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0)", first.node_lines)
+        self._write_layout('{"out_columns":0,"tile_count":"7.9"}')
+        second = self._serialize_layout()
+        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0)", second.node_lines)
+
+    def test_nonobject_roots_io_and_json_errors_use_decoded_tile_fallback(self) -> None:
+        expected = "tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)"
+        for source in ('null', '[]', 'true', 'NaN', '"layout"', '{"out_columns":'):
+            with self.subTest(source=source):
+                self._write_layout(source)
+                self.assertIn(expected, self._serialize_layout().node_lines)
+        os.unlink(self.path)
+        self.assertIn(expected, self._serialize_layout().node_lines)
+
+    def test_actual_utf8_failure_propagates_but_bom_json_error_uses_fallback(self) -> None:
+        with open(self.path, "wb") as stream:
+            stream.write(b"\xff")
+        with self.assertRaises(UnicodeDecodeError):
+            self._serialize_layout()
+        with open(self.path, "wb") as stream:
+            stream.write(b'\xef\xbb\xbf{}')
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 1', self._serialize_layout().node_lines)
+
+    def test_decoder_error_and_control_identity_keep_narrow_catch(self) -> None:
+        self._write_layout('{}')
+        for error in (TypeError("decode"), ValueError("value"), RecursionError("depth"),
+                      RuntimeError("control"), KeyboardInterrupt(), SystemExit(4)):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.room_layers.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        self._serialize_layout()
+                self.assertIs(caught.exception, error)
+        with patch("src.conversion.room_layers.decode_gamemaker_json",
+                   side_effect=json.JSONDecodeError("bad", "{", 1)):
+            self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 1', self._serialize_layout().node_lines)
+
+    def test_unknown_graph_rejection_propagates_at_existing_read_seam(self) -> None:
+        self._write_layout('{}')
+        with patch("src.conversion.gamemaker_json.json.loads", return_value={"unknown": b"bad"}):
+            with self.assertRaises(JsonValueError) as caught:
+                self._serialize_layout()
+        self.assertEqual(caught.exception.source_path, self.path)
+        self.assertEqual(caught.exception.field_path, ("unknown",))
+
+    def test_positive_columns_skip_unused_overflow_and_owner_fallback_remains(self) -> None:
+        self._write_layout('{"out_columns":"4.9","tile_count":Infinity}')
+        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0)",
+                      self._serialize_layout().node_lines)
+        self._write_layout('{"out_columns":false,"tile_count":null}')
+        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)",
+                      self._serialize_layout().node_lines)
+        self._write_layout('{"out_columns":0,"tile_count":Infinity}')
+        with self.assertRaises(OverflowError):
+            self._serialize_layout()
 
 
 if __name__ == "__main__":

@@ -6,11 +6,14 @@ import re
 from typing import NamedTuple, Protocol, cast
 
 from src.conversion.architecture_policy import layer_policy_metadata_lines
+from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.json_values import JsonObject
 from src.conversion.room_creation_code import (
     CreationCodeSourceResolver,
     resolve_instance_creation_code,
 )
 from src.conversion.type_defs import JsonDict, JsonList, JsonValue, LogCallback
+from src.conversion.tileset_metadata import select_tileset_room_layout
 
 
 KNOWN_LAYER_TYPES = {
@@ -582,7 +585,7 @@ def _tile_map_layer_lines(
 
 def _tileset_layout(
     context: RoomLayerSerializationContext, tileset_name: str | None
-) -> JsonDict:
+) -> JsonObject:
     if not tileset_name or context.resource_index is None:
         return {}
     tileset_path = context.resource_index.resolve_gm_path("tilesets", tileset_name)
@@ -592,13 +595,10 @@ def _tileset_layout(
     return data or {}
 
 
-def _tileset_columns(layout: JsonDict, decoded_tiles: list[int]) -> int:
-    columns = _coerce_int(layout.get("out_columns", 0))
-    if columns > 0:
-        return columns
-    tile_count = _coerce_int(layout.get("tile_count", 0))
-    if tile_count > 0:
-        return tile_count
+def _tileset_columns(layout: JsonObject, decoded_tiles: list[int]) -> int:
+    selected = select_tileset_room_layout(layout)
+    if selected.columns is not None:
+        return selected.columns
     max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=1)
     return max(1, max_index)
 
@@ -655,15 +655,14 @@ def _encode_uint16(value: int) -> list[int]:
     return [unsigned & 0xFF, (unsigned >> 8) & 0xFF]
 
 
-def _read_yy_json(path: str) -> JsonDict | None:
+def _read_yy_json(path: str) -> JsonObject | None:
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-        cleaned = re.sub(r",\s*([}\]])", r"\1", content)
-        data = json.loads(cleaned)
+        data = decode_gamemaker_json(content, source_path=path).value
     except (OSError, json.JSONDecodeError):
         return None
-    return cast(JsonDict, data) if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else None
 
 
 def _asset_node_lines(

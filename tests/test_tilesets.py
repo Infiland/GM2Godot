@@ -2018,5 +2018,153 @@ class TestTypedTilesetMetadataIntegration(unittest.TestCase):
                     self.assertEqual(output_file.read(), source_file.read())
 
 
+class TestTypedSpriteAtlasAcquisition(unittest.TestCase):
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+        self.converter = TileSetConverter(self.gm_dir, self.godot_dir, log_callback=self.logs.append,
+                                          conversion_running=lambda: True, diagnostics=self.diagnostics)
+        self.sprite_path = os.path.join(self.gm_dir, "sprites", "atlas", "atlas.yy")
+        os.makedirs(os.path.dirname(self.sprite_path))
+        self.image_path = os.path.join(os.path.dirname(self.sprite_path), "layers", "frame", "chosen.png")
+        os.makedirs(os.path.dirname(self.image_path))
+        Image.new("RGBA", (16, 16), "red").save(self.image_path)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _write_atlas(self, source: str) -> None:
+        with open(self.sprite_path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def _find_atlas(self):
+        return self.converter._find_sprite_image("atlas", "sprites/atlas/atlas.yy", tileset_name="typed")
+
+    def test_real_shared_decode_feeds_safe_atlas_and_copied_tileset_output(self) -> None:
+        source = '{"frames":[{"name":"frame",}],"layers":[null,{"visible":false},{"name":"chosen"}],"unknown":"a,}",}'
+        self._write_atlas(source)
+        with patch("src.conversion.tilesets.decode_gamemaker_json", wraps=decode_gamemaker_json) as decoder:
+            result = self._find_atlas()
+        assert result is not None
+        resolved, field = result
+        self.assertEqual(resolved.filesystem_path, self.image_path)
+        self.assertEqual(field, "layers[2].name")
+        decoder.assert_called_once_with(source, source_path=self.sprite_path)
+        tileset_path = os.path.join(self.gm_dir, "tilesets", "typed", "typed.yy")
+        os.makedirs(os.path.dirname(tileset_path))
+        with open(tileset_path, "w", encoding="utf-8") as stream:
+            stream.write('{"spriteId":{"name":"atlas","path":"sprites/atlas/atlas.yy"},"tile_count":1}')
+        processed = self.converter._process_tileset("typed")
+        assert processed is not None
+        self.assertTrue(processed["success"])
+        copied = os.path.join(self.godot_dir, "tilesets", "typed", "typed.png")
+        with open(copied, "rb") as output, open(self.image_path, "rb") as original:
+            self.assertEqual(output.read(), original.read())
+        with open(os.path.join(self.godot_dir, "tilesets", "typed", "typed.tres"), encoding="utf-8") as output:
+            self.assertIn('type="TileSet"', output.read())
+
+    def test_nonobject_roots_preserve_builtin_get_attribute_metadata(self) -> None:
+        for source in ("null", "[]", "false", '"value"', "3"):
+            with self.subTest(source=source):
+                self._write_atlas(source)
+                with self.assertRaises(AttributeError) as caught:
+                    self._find_atlas()
+                value = json.loads(source)
+                self.assertEqual(str(caught.exception), f"'{type(value).__name__}' object has no attribute 'get'")
+                self.assertEqual(caught.exception.name, "get")
+                self.assertEqual(caught.exception.obj, value)
+
+    def test_frame_owner_validation_precedes_layer_capture_and_observes_mutation(self) -> None:
+        source = '{"frames":[{"name":"frame"}],"layers":[{"name":"old"}]}'
+        self._write_atlas(source)
+        document = decode_gamemaker_json(source, source_path=self.sprite_path)
+        data = document.value
+        assert isinstance(data, dict)
+        original_validator = self.converter._valid_reference_component
+        seen: list[str] = []
+
+        def validate_and_mutate(component: str) -> bool:
+            seen.append(component)
+            if component == "frame":
+                data["layers"] = [{"name": "chosen"}]
+            return original_validator(component)
+
+        with (
+            patch("src.conversion.tilesets.decode_gamemaker_json", return_value=document),
+            patch.object(self.converter, "_valid_reference_component", side_effect=validate_and_mutate),
+        ):
+            result = self._find_atlas()
+        assert result is not None
+        self.assertEqual(result[0].filesystem_path, self.image_path)
+        self.assertEqual(seen, ["frame", "chosen"])
+
+    def test_rejected_frame_does_not_read_layer_or_invoke_png_fallback(self) -> None:
+        for frame in ('null', '{"name":"../escape"}'):
+            with self.subTest(frame=frame):
+                self._write_atlas('{"frames":[' + frame + '],"layers":[{"name":"chosen"}]}')
+                with (
+                    patch("src.conversion.tilesets.select_sprite_atlas_layer") as layers,
+                    patch.object(self.converter, "_find_fallback_sprite_png") as fallback,
+                ):
+                    self.assertIsNone(self._find_atlas())
+                layers.assert_not_called()
+                fallback.assert_not_called()
+        fields = [diagnostic.manifest_entry for diagnostic in self.diagnostics.diagnostics()]
+        self.assertIn("frames[0]", fields)
+        self.assertIn("frames[0].name", fields)
+
+    def test_layer_filter_and_fallback_keep_original_index_and_diagnostic_field(self) -> None:
+        self._write_atlas('{"frames":[{"name":"frame"}],"layers":[null,{"visible":false,"name":"chosen"},'
+                          '{"visible":false,"name":"unused"}]}')
+        result = self._find_atlas()
+        assert result is not None
+        self.assertEqual(result[1], "layers[1].name")
+        self._write_atlas('{"frames":[{"name":"frame"}],"layers":[null,{"visible":false},'
+                          '{"name":"../escape"}]}')
+        self.assertIsNone(self._find_atlas())
+        self.assertEqual(self.diagnostics.diagnostics()[-1].manifest_entry, "layers[2].name")
+
+    def test_malformed_graph_uses_original_decode_failure_png_fallback(self) -> None:
+        self._write_atlas('{}')
+        with (
+            patch("src.conversion.gamemaker_json.json.loads", return_value={"frames": [], "unknown": b"bad"}),
+            patch("src.conversion.tilesets.capture_sprite_atlas_frame") as frame,
+            patch.object(self.converter, "_find_fallback_sprite_png", return_value=None) as fallback,
+        ):
+            self.assertIsNone(self._find_atlas())
+        frame.assert_not_called()
+        fallback.assert_called_once()
+
+    def test_decoder_controls_and_outside_resolver_keep_exception_identity(self) -> None:
+        self._write_atlas('{}')
+        for error in (RuntimeError("control"), RecursionError("depth"), AttributeError("uncaught"), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__):
+                with patch("src.conversion.tilesets.decode_gamemaker_json", side_effect=error):
+                    with self.assertRaises(type(error)) as caught:
+                        self._find_atlas()
+                self.assertIs(caught.exception, error)
+        error = ValueError("initial owner resolver remains outside acquisition catch")
+        with (
+            patch.object(self.converter, "_resolve_project_source", side_effect=error),
+            patch("src.conversion.tilesets.decode_gamemaker_json") as decoder,
+        ):
+            with self.assertRaises(ValueError) as caught:
+                self._find_atlas()
+        self.assertIs(caught.exception, error)
+        decoder.assert_not_called()
+
+    def test_utf8_bom_and_json_errors_keep_existing_fallback_seam(self) -> None:
+        for contents in (b"\xff", b'\xef\xbb\xbf{}', b'{"frames":'):
+            with self.subTest(contents=contents):
+                with open(self.sprite_path, "wb") as stream:
+                    stream.write(contents)
+                with patch.object(self.converter, "_find_fallback_sprite_png", return_value=None) as fallback:
+                    self.assertIsNone(self._find_atlas())
+                fallback.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

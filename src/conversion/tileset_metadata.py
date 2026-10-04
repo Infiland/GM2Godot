@@ -218,3 +218,26 @@ def _json_object_list(value: JsonValue) -> list[JsonObject]:
 def project_tileset_conversion_fields(metadata: GameMakerTilesetMetadata) -> TilesetConversionFields:
     """Request the pure ordered projection from the authoritative capture."""
     return metadata.project_conversion_fields()
+
+
+@dataclass(frozen=True)
+class TilesetRoomLayout:
+    columns: int | None = None
+
+
+def _room_layout_integer(value: JsonValue) -> int:
+    try:
+        if isinstance(value, (str, int, float)):
+            return int(float(value))
+        return 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def select_tileset_room_layout(data: JsonObject) -> TilesetRoomLayout:
+    """Select columns lazily; unused tile counts must not be evaluated."""
+    columns = _room_layout_integer(data.get("out_columns", 0))
+    if columns > 0:
+        return TilesetRoomLayout(columns)
+    tile_count = _room_layout_integer(data.get("tile_count", 0))
+    return TilesetRoomLayout(tile_count if tile_count > 0 else None)

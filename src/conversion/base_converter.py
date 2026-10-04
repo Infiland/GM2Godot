@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 from abc import ABC, abstractmethod
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from src.localization import get_localized
 from src.conversion.conversion_outcome import (
@@ -14,6 +13,7 @@ from src.conversion.conversion_outcome import (
 )
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.generated_paths import generated_subfolder_path
+from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.project_manifest import GameMakerProjectManifest
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
@@ -22,6 +22,7 @@ from src.conversion.project_source_paths import (
     resolve_project_sidecar_source_path,
     resolve_project_source_path,
 )
+from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
 from src.conversion.type_defs import ConversionRunning, JsonDict, LogCallback, ProgressCallback, StrPath
 
 
@@ -369,9 +370,11 @@ class BaseConverter(ABC):
             )
             with open(resolved.filesystem_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            cleaned = re.sub(r',\s*([}\]])', r'\1', content)
-            data = json.loads(cleaned)
-            return cast(JsonDict, data) if isinstance(data, dict) else None
+            data = decode_gamemaker_json(
+                content,
+                source_path=resolved.filesystem_path,
+            ).value
+            return data if isinstance(data, dict) else None
         except (
             OSError,
             ProjectSourcePathError,
@@ -395,13 +398,10 @@ class BaseConverter(ABC):
         if data is None:
             return ""
         try:
-            raw_parent = data.get('parent')
-            if not isinstance(raw_parent, dict):
+            metadata = parse_gamemaker_resource_parent_metadata(data)
+            if not metadata.has_parent_path:
                 return ""
-            parent = cast(JsonDict, raw_parent)
-            parent_path = parent.get('path')
-            if not isinstance(parent_path, str):
-                return ""
+            parent_path = metadata.parent_path
             if parent_path.startswith('folders/'):
                 parent_path = parent_path[len('folders/'):]
             if parent_path.endswith('.yy'):

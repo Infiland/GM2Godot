@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.24 - 2026-10-04
+
+- Route the shared resource reader through the validated GameMaker JSON boundary and extract typed parent metadata while preserving fresh reads, folder formatting and existing exception policies.
+- Continue issue #797; remaining source readers, nested resource consumers and legacy JSON aliases still require migration. The current GameMaker decoding dialect retains nonfinite numeric values.
+
 ## 0.8.23 - 2026-10-04
 
 - Share typed GameMaker tileset metadata between resource summaries and conversion, preserving sprite-reference diagnostics, ordered coercions, mutable metadata lists and generated output.

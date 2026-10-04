@@ -133,6 +133,23 @@ late rendering failures. Its inherited fresh parent reader and nested sprite
 reader remain unchanged. Generic readers, registry tileset planning, legacy
 aliases and numeric-finiteness policy remain unfinished #797 work.
 
+### Shared resource reader and parent metadata
+
+`BaseConverter._read_yy_file` retains its owner-local containment refresh and
+UTF-8 read, then uses `gamemaker_json` to validate the decoded graph. It returns
+the original object or its existing failure result; the legacy return annotation
+remains until its consumers migrate. The current GameMaker decoding dialect
+continues to accept nonfinite floats, separately from standard JSON compliance.
+
+`resource_parent_metadata` captures the optional parent path without acquiring
+files, validating an override's whole graph or coercing values. The inherited
+folder helper keeps virtual reader dispatch, fresh source reads, string-subclass
+behavior, formatting order and its existing exception boundaries. A captured
+`has_parent_path` flag distinguishes missing or malformed paths from a valid
+empty string, preserving the original string-method and early-return boundaries. Unknown raw
+metadata stays attached by identity. Remaining source readers, known nested
+views and legacy alias retirement are still open work under #797.
+
 ## GML Pipeline Phases
 
 The dependency-only typed model layer has four explicit owners:

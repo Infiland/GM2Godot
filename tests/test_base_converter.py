@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import os
+import json
+import math
 import shutil
 import sys
 import tempfile
 import threading
 import unittest
+from pathlib import Path
+from typing import SupportsIndex
+from unittest.mock import mock_open, patch
 
 # Ensure project root is on sys.path so "src.*" imports work
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,12 +22,20 @@ if PROJECT_ROOT not in sys.path:
 from src.conversion.base_converter import BaseConverter
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import GameMakerJsonDocument, decode_gamemaker_json
+from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
     ProjectSourceLocation,
     load_gamemaker_project_manifest,
 )
+from src.conversion.project_source_paths import (
+    ProjectSourcePathError,
+    ResolvedProjectSourcePath,
+    resolve_project_filesystem_source_path,
+)
+from src.conversion.resource_parent_metadata import parse_gamemaker_resource_parent_metadata
 
 
 class TestBaseConverterAbstract(unittest.TestCase):
@@ -598,6 +611,421 @@ class TestGetSubfolderFromYY(unittest.TestCase):
         with open(yy_path, "w") as f:
             f.write("not json")
         self.assertEqual(self.converter._get_subfolder_from_yy(yy_path), "")
+
+
+class TestSharedYYBoundary(unittest.TestCase):
+    class StubConverter(BaseConverter):
+        def convert_all(self) -> None:
+            pass
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.path = self.root / "metadata.yy"
+        self.converter = self.StubConverter(self.root, self.root / "godot")
+
+    def write_source(self, source: str) -> None:
+        self.path.write_text(source, encoding="utf-8")
+
+    def test_real_utf8_comma_dialect_and_literal_rewrite(self) -> None:
+        self.write_source('{"name":"café", "literal":", }", "items":[1,2,],}')
+        self.assertEqual(
+            self.converter._read_yy_file(self.path),
+            {"name": "café", "literal": "}", "items": [1, 2]},
+        )
+
+    def test_empty_object_and_legal_nonobject_roots(self) -> None:
+        cases: list[tuple[str, JsonObject | None]] = [
+            ("{}", {}), ("[]", None), ("null", None), ("true", None),
+            ("42", None), ('"text"', None),
+        ]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.write_source(source)
+                self.assertEqual(self.converter._read_yy_file(self.path), expected)
+
+    def test_resolution_open_and_shared_decode_order_and_source(self) -> None:
+        source = '{"parent":{"path":"folders/Sprites/New.yy"}}'
+        self.write_source(source)
+        events: list[str] = []
+        actual_open = open
+
+        def resolve(root: str, path: os.PathLike[str]) -> ResolvedProjectSourcePath:
+            events.append("resolve")
+            self.assertIs(path, self.path)
+            return resolve_project_filesystem_source_path(root, path)
+
+        def acquire(path: str, mode: str, *, encoding: str):
+            events.append("open")
+            self.assertEqual((path, mode, encoding), (str(self.path), "r", "utf-8"))
+            return actual_open(path, mode, encoding=encoding)
+
+        def decode(contents: str, *, source_path: str) -> GameMakerJsonDocument:
+            events.append("decode")
+            return decode_gamemaker_json(contents, source_path=source_path)
+
+        with (
+            patch("src.conversion.base_converter.resolve_project_filesystem_source_path", side_effect=resolve),
+            patch("builtins.open", side_effect=acquire),
+            patch("src.conversion.base_converter.decode_gamemaker_json", side_effect=decode) as decoder,
+        ):
+            result = self.converter._read_yy_file(self.path)
+        self.assertEqual(events, ["resolve", "open", "decode"])
+        decoder.assert_called_once_with(source, source_path=str(self.path))
+        self.assertEqual(result, {"parent": {"path": "folders/Sprites/New.yy"}})
+
+    def test_decoded_unknown_shared_deep_and_native_values_keep_identity(self) -> None:
+        self.write_source("{}")
+        deep: JsonValue = {"unknown": "bottom"}
+        for _ in range(1600):
+            deep = [deep]
+        shared: JsonObject = {"unknown": [True, None, 2**256, 2.5]}
+        root: JsonObject = {
+            "first": shared, "second": shared, "deep": deep,
+            "nan": float("nan"), "infinity": float("inf"),
+        }
+        with patch("src.conversion.gamemaker_json.json.loads", return_value=root):
+            result = self.converter._read_yy_file(self.path)
+        self.assertIs(result, root)
+        self.assertIs(root["first"], shared)
+        self.assertIs(root["second"], shared)
+        self.assertIs(root["deep"], deep)
+        self.assertEqual(list(root), ["first", "second", "deep", "nan", "infinity"])
+
+    def test_real_nonfinite_decoder_policy_is_retained(self) -> None:
+        self.write_source('{"n":NaN,"p":Infinity,"m":-Infinity,"overflow":1e999,"b":true}')
+        result = self.converter._read_yy_file(self.path)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(math.isnan(result["n"]))
+        self.assertEqual((result["p"], result["m"], result["overflow"]), (math.inf, -math.inf, math.inf))
+        self.assertIs(result["b"], True)
+
+    def test_acquired_graph_rejects_cycles_keys_subclasses_and_non_json_children(self) -> None:
+        class DerivedDict(dict[str, object]):
+            pass
+
+        class DerivedString(str):
+            pass
+
+        class DerivedList(list[object]):
+            pass
+
+        cycle: dict[str, object] = {}
+        cycle["self"] = cycle
+        self.write_source("{}")
+        invalid: list[object] = [
+            cycle, {1: "key"}, {"child": b"bytes"}, {"child": (1,)},
+            {"child": object()}, DerivedDict(parent={"path": "folders/Sprites/X.yy"}),
+            {"child": DerivedString("text")}, {"child": DerivedList([1])},
+        ]
+        for value in invalid:
+            with self.subTest(kind=type(value).__name__), patch(
+                "src.conversion.gamemaker_json.json.loads", return_value=value,
+            ):
+                self.assertIsNone(self.converter._read_yy_file(self.path))
+
+    def test_invalid_utf8_bom_and_malformed_source_return_none(self) -> None:
+        for contents in [b"\xff", b"\xef\xbb\xbf{}", b'{"broken":']:
+            with self.subTest(contents=contents):
+                self.path.write_bytes(contents)
+                self.assertIsNone(self.converter._read_yy_file(self.path))
+
+    def test_handled_exception_classes_remain_inside_each_acquisition_seam(self) -> None:
+        self.write_source("{}")
+        handled: list[Exception] = [
+            OSError("read"), ProjectSourcePathError("containment"),
+            json.JSONDecodeError("decode", "!", 0), KeyError("key"),
+            TypeError("type"), ValueError("value"),
+            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte"),
+        ]
+        for target in [
+            "src.conversion.base_converter.resolve_project_filesystem_source_path",
+            "builtins.open", "src.conversion.base_converter.decode_gamemaker_json",
+        ]:
+            for error in handled:
+                with self.subTest(target=target, error=type(error).__name__), patch(target, side_effect=error):
+                    self.assertIsNone(self.converter._read_yy_file(self.path))
+
+    def test_unhandled_exception_instances_escape_each_acquisition_seam(self) -> None:
+        self.write_source("{}")
+        errors: list[BaseException] = [
+            OverflowError("overflow"), RecursionError("recursion"),
+            MemoryError("memory"), RuntimeError("runtime"),
+            KeyboardInterrupt("interrupt"), SystemExit("exit"),
+        ]
+        for target in [
+            "src.conversion.base_converter.resolve_project_filesystem_source_path",
+            "builtins.open", "src.conversion.base_converter.decode_gamemaker_json",
+        ]:
+            for error in errors:
+                with self.subTest(target=target, error=type(error).__name__), patch(target, side_effect=error):
+                    with self.assertRaises(type(error)) as raised:
+                        self.converter._read_yy_file(self.path)
+                    self.assertIs(raised.exception, error)
+
+    def test_real_decoder_recursion_and_integer_limit_policy(self) -> None:
+        depth = sys.getrecursionlimit() + 100
+        nested = '{"deep":' + "[" * depth + "0" + "]" * depth + "}"
+        self.write_source(nested)
+        try:
+            json.loads(nested)
+        except RecursionError:
+            with self.assertRaises(RecursionError):
+                self.converter._read_yy_file(self.path)
+        else:
+            result = self.converter._read_yy_file(self.path)
+            self.assertIsNotNone(result)
+            assert result is not None
+            value: JsonValue = result["deep"]
+            for _ in range(depth):
+                self.assertIsInstance(value, list)
+                assert isinstance(value, list)
+                value = value[0]
+            self.assertEqual(value, 0)
+        limit = sys.get_int_max_str_digits()
+        source = '{"integer":' + "1" * (limit + 1 if limit else 5000) + "}"
+        self.write_source(source)
+        if limit:
+            with self.assertRaises(ValueError):
+                json.loads(source)
+            self.assertIsNone(self.converter._read_yy_file(self.path))
+        else:
+            self.assertEqual(self.converter._read_yy_file(self.path), json.loads(source))
+
+    def test_outside_and_escaping_symlink_are_rejected_before_open(self) -> None:
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside) / "external.yy"
+            external.write_text("{}", encoding="utf-8")
+            self.path.symlink_to(external)
+            with patch("builtins.open") as opened:
+                self.assertIsNone(self.converter._read_yy_file(external))
+                self.assertIsNone(self.converter._read_yy_file(self.path))
+            opened.assert_not_called()
+
+    def test_late_source_swap_is_revalidated_before_open(self) -> None:
+        self.write_source("{}")
+        with tempfile.TemporaryDirectory() as outside:
+            external = Path(outside) / "external.yy"
+            external.write_text("{}", encoding="utf-8")
+
+            def swap_then_resolve(root: str, path: os.PathLike[str]) -> ResolvedProjectSourcePath:
+                self.path.unlink()
+                self.path.symlink_to(external)
+                return resolve_project_filesystem_source_path(root, path)
+
+            with (
+                patch("src.conversion.base_converter.resolve_project_filesystem_source_path", side_effect=swap_then_resolve),
+                patch("builtins.open") as opened,
+            ):
+                self.assertIsNone(self.converter._read_yy_file(self.path))
+            opened.assert_not_called()
+
+    def test_original_pathlike_is_resolved_only_once(self) -> None:
+        self.write_source('{"parent":{"path":"folders/Sprites/Folder.yy"}}')
+        calls: list[str] = []
+
+        class CountingPath(os.PathLike[str]):
+            def __fspath__(self) -> str:
+                calls.append("fspath")
+                return str(self_path)
+
+        self_path = self.path
+        self.assertEqual(self.converter._get_subfolder_from_yy(CountingPath()), "folder")
+        self.assertEqual(calls, ["fspath"])
+
+    def test_read_exception_in_file_context_is_handled(self) -> None:
+        source = mock_open(read_data="{}")
+        error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad byte")
+        source.return_value.read.side_effect = error
+        with patch("builtins.open", source):
+            self.assertIsNone(self.converter._read_yy_file(self.path))
+
+
+class TestTypedResourceParentDispatch(unittest.TestCase):
+    class StubConverter(BaseConverter):
+        def convert_all(self) -> None:
+            pass
+
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        self.path = self.root / "metadata.yy"
+        self.converter = self.StubConverter(self.root, self.root / "godot")
+
+    def test_virtual_reader_receives_original_input_once_without_fspath(self) -> None:
+        class UnreadPath(os.PathLike[str]):
+            def __fspath__(self) -> str:
+                raise AssertionError("parent extraction must not resolve virtual input")
+
+        original = UnreadPath()
+        data = {"parent": {"path": "folders/Sprites/Override.yy"}}
+        with patch.object(self.converter, "_read_yy_file", return_value=data) as reader:
+            self.assertEqual(self.converter._get_subfolder_from_yy(original), "override")
+        reader.assert_called_once_with(original)
+
+    def test_override_get_string_subclass_and_formatter_order(self) -> None:
+        events: list[tuple[str, object]] = []
+
+        class TracedString(str):
+            def startswith(self, prefix: str | tuple[str, ...], start: SupportsIndex | None = 0, end: SupportsIndex | None = None) -> bool:
+                events.append(("startswith", prefix))
+                return super().startswith(prefix, start) if end is None else super().startswith(prefix, start, end)
+
+            def endswith(self, suffix: str | tuple[str, ...], start: SupportsIndex | None = 0, end: SupportsIndex | None = None) -> bool:
+                events.append(("endswith", suffix))
+                return super().endswith(suffix, start) if end is None else super().endswith(suffix, start, end)
+
+            def __getitem__(self, key: SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]) -> str:
+                events.append(("slice", key))
+                return TracedString(super().__getitem__(key))
+
+            def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
+                events.append(("split", sep))
+                return super().split(sep, maxsplit)
+
+        class TracedDict(dict[str, object]):
+            def get(self, key: str, default: object = None) -> object:
+                events.append(("get", key))
+                return super().get(key, default)
+
+        parent_path = TracedString("folders/Sprites/One/Two.yy")
+        parent = TracedDict(path=parent_path)
+        root = TracedDict(parent=parent)
+        root["unknown"] = root
+
+        def format_path(value: str) -> str:
+            events.append(("formatter", value))
+            return "formatted"
+
+        with (
+            patch.object(self.converter, "_read_yy_file", return_value=root),
+            patch("src.conversion.base_converter.generated_subfolder_path", side_effect=format_path),
+        ):
+            self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "formatted")
+        self.assertEqual(events, [
+            ("get", "parent"), ("get", "path"), ("startswith", "folders/"),
+            ("slice", slice(8, None)), ("endswith", ".yy"),
+            ("slice", slice(None, -3)), ("split", "/"), ("formatter", "One/Two"),
+        ])
+
+    def test_wrong_kind_parent_defaults_and_none_reader_short_circuit(self) -> None:
+        roots: list[object] = [
+            None, {}, {"parent": None}, {"parent": []}, {"parent": "text"},
+            {"parent": {}}, {"parent": {"path": None}},
+            {"parent": {"path": 4}}, {"parent": {"path": []}},
+        ]
+        for root in roots:
+            with (
+                self.subTest(root=root),
+                patch.object(self.converter, "_read_yy_file", return_value=root),
+                patch("src.conversion.base_converter.generated_subfolder_path") as formatter,
+            ):
+                self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "")
+            formatter.assert_not_called()
+        with (
+            patch.object(self.converter, "_read_yy_file", return_value=None),
+            patch("src.conversion.base_converter.parse_gamemaker_resource_parent_metadata") as parser,
+        ):
+            self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "")
+        parser.assert_not_called()
+
+    def test_valid_empty_string_still_observes_string_methods_before_root_return(self) -> None:
+        events: list[str] = []
+
+        class EmptyString(str):
+            def startswith(self, prefix: str | tuple[str, ...], start: SupportsIndex | None = 0, end: SupportsIndex | None = None) -> bool:
+                events.append("startswith")
+                return super().startswith(prefix, start) if end is None else super().startswith(prefix, start, end)
+
+            def endswith(self, suffix: str | tuple[str, ...], start: SupportsIndex | None = 0, end: SupportsIndex | None = None) -> bool:
+                events.append("endswith")
+                return super().endswith(suffix, start) if end is None else super().endswith(suffix, start, end)
+
+            def split(self, sep: str | None = None, maxsplit: SupportsIndex = -1) -> list[str]:
+                events.append("split")
+                return super().split(sep, maxsplit)
+
+        with (
+            patch.object(self.converter, "_read_yy_file", return_value={"parent": {"path": EmptyString("")}}),
+            patch("src.conversion.base_converter.generated_subfolder_path") as formatter,
+        ):
+            self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "")
+        self.assertEqual(events, ["startswith", "endswith", "split"])
+        formatter.assert_not_called()
+
+    def test_virtual_get_exceptions_keep_actual_leaf_extraction_catch(self) -> None:
+        for error in [KeyError("key"), TypeError("type"), AttributeError("attribute"), ValueError("value")]:
+            class FailingDict(dict[str, object]):
+                def get(self, key: str, default: object = None) -> object:
+                    raise error
+
+            for root in [FailingDict(), {"parent": FailingDict()}]:
+                with self.subTest(error=type(error).__name__, at_root=isinstance(root, FailingDict)), patch.object(self.converter, "_read_yy_file", return_value=root):
+                    if isinstance(error, ValueError):
+                        with self.assertRaises(ValueError) as raised:
+                            self.converter._get_subfolder_from_yy(self.path)
+                        self.assertIs(raised.exception, error)
+                    else:
+                        self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "")
+
+    def test_reader_exceptions_are_outside_extraction_catch(self) -> None:
+        for error in [KeyError("key"), TypeError("type"), AttributeError("attribute")]:
+            with self.subTest(error=type(error).__name__), patch.object(self.converter, "_read_yy_file", side_effect=error):
+                with self.assertRaises(type(error)) as raised:
+                    self.converter._get_subfolder_from_yy(self.path)
+                self.assertIs(raised.exception, error)
+
+    def test_parser_and_formatter_preserve_handled_and_unhandled_boundaries(self) -> None:
+        root = {"parent": {"path": "folders/Sprites/Folder.yy"}}
+        for target in [
+            "src.conversion.base_converter.parse_gamemaker_resource_parent_metadata",
+            "src.conversion.base_converter.generated_subfolder_path",
+        ]:
+            for error in [KeyError("key"), TypeError("type"), AttributeError("attribute")]:
+                with self.subTest(target=target, error=type(error).__name__), patch.object(self.converter, "_read_yy_file", return_value=root), patch(target, side_effect=error):
+                    self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "")
+            for error in [ValueError("value"), OverflowError("overflow"), RuntimeError("runtime"), KeyboardInterrupt("interrupt")]:
+                with self.subTest(target=target, error=type(error).__name__), patch.object(self.converter, "_read_yy_file", return_value=root), patch(target, side_effect=error):
+                    with self.assertRaises(type(error)) as raised:
+                        self.converter._get_subfolder_from_yy(self.path)
+                    self.assertIs(raised.exception, error)
+
+    def test_captured_parent_authority_and_next_real_read_are_distinct(self) -> None:
+        root: JsonObject = {"parent": {"path": "folders/Sprites/Captured.yy"}}
+
+        def capture_then_replace(data: JsonObject):
+            metadata = parse_gamemaker_resource_parent_metadata(data)
+            self.assertIs(metadata.raw_data, root)
+            data["parent"] = {"path": "folders/Sprites/Replaced.yy"}
+            return metadata
+
+        with (
+            patch.object(self.converter, "_read_yy_file", return_value=root),
+            patch("src.conversion.base_converter.parse_gamemaker_resource_parent_metadata", side_effect=capture_then_replace),
+        ):
+            self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "captured")
+        self.path.write_text('{"parent":{"path":"folders/Sprites/First.yy"}}', encoding="utf-8")
+        self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "first")
+        self.path.write_text('{"parent":{"path":"folders/Sprites/Second.yy"}}', encoding="utf-8")
+        self.assertEqual(self.converter._get_subfolder_from_yy(self.path), "second")
+
+    def test_case_slashes_backslashes_and_punctuation_keep_formatting_order(self) -> None:
+        cases = [
+            ("Folders/Sprites/Foo.yy", "sprites/foo"),
+            ("folders/Sprites/Foo.YY", "foo_yy"),
+            ("folders//Sprites/Foo.yy", "sprites/foo"),
+            ("folders/Sprites/One\\Two.yy", "one/two"),
+            ("folders\\Sprites\\Foo.yy", ""),
+            ("folders/Sprites/Hello-World/2Boss.yy", "hello_world/_2_boss"),
+        ]
+        for parent_path, expected in cases:
+            with self.subTest(path=parent_path), patch.object(
+                self.converter, "_read_yy_file", return_value={"parent": {"path": parent_path}},
+            ):
+                self.assertEqual(self.converter._get_subfolder_from_yy(self.path), expected)
 
 
 if __name__ == "__main__":

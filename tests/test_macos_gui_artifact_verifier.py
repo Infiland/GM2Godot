@@ -261,8 +261,17 @@ class ZipTranscriptTests(Fixture):
             with self.subTest(member=row[0].filename):
                 with mock.patch("warnings.warn"):
                     _write_zip(self.zip_path, extra=(row,))
-                with self.assertRaises(Exception):
+                try:
                     self.extract()
+                except Exception as error:
+                    # The verifier compiles a fresh sibling module for this
+                    # call, so qualify the actual producer type after failure.
+                    self.assertEqual(
+                        (type(error).__module__, type(error).__qualname__),
+                        ("_gm2godot_mac_gui__verify_macos_bundle_metadata", "MetadataVerificationError"),
+                    )
+                else:
+                    self.fail("Malformed ZIP must raise the metadata producer error")
                 self.assertFalse((self.root / "GM2Godot.app").exists())
 
     def test_encrypted_directory_and_resource_are_rejected(self) -> None:
@@ -300,8 +309,17 @@ class ZipTranscriptTests(Fixture):
         for value in (bytes(corrupted), original[:-30]):
             with self.subTest(length=len(value)):
                 self.zip_path.write_bytes(value)
-                with self.assertRaises(Exception):
+                try:
                     self.extract()
+                except Exception as error:
+                    # The verifier compiles a fresh sibling module for this
+                    # call, so qualify the actual producer type after failure.
+                    self.assertEqual(
+                        (type(error).__module__, type(error).__qualname__),
+                        ("_gm2godot_mac_gui__verify_macos_bundle_metadata", "MetadataVerificationError"),
+                    )
+                else:
+                    self.fail("Malformed ZIP must raise the metadata producer error")
 
     def test_regular_copy_rejects_link_substitution_growth_and_caps(self) -> None:
         destination = self.root / "copy.zip"
@@ -502,7 +520,7 @@ class ReceiptAndRuntimeTests(Fixture):
         alias.unlink()
         path.unlink()
         path.symlink_to(self.zip_path)
-        with self.assertRaises(Exception):
+        with self.assertRaises(subject.MacGuiVerificationError):
             subject.validate_gui_receipt(path)
 
     def test_private_environment_preserves_cocoa_and_removes_injection(self) -> None:

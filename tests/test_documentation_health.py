@@ -60,13 +60,45 @@ APPROVED_NODE24_ACTION_MAJORS = {
     "actions/download-artifact": 8,
     "softprops/action-gh-release": 3,
 }
+FOCUSED_B_RULES = (
+    "B002",
+    "B003",
+    "B004",
+    "B005",
+    "B006",
+    "B008",
+    "B011",
+    "B012",
+    "B014",
+    "B015",
+    "B016",
+    "B017",
+    "B018",
+    "B019",
+    "B020",
+    "B021",
+    "B022",
+    "B025",
+    "B029",
+    "B030",
+    "B031",
+    "B032",
+    "B033",
+    "B035",
+    "B039",
+    "B905",
+)
+EXPECTED_RUFF_SELECTORS = ("E4", "E7", "E9", "F", "I", *FOCUSED_B_RULES)
+EXPECTED_RUFF_SELECTOR_ARGUMENT = ",".join(EXPECTED_RUFF_SELECTORS)
+
+
 EXPECTED_RUFF_CONFIG: dict[str, object] = {
     "target-version": "py312",
     "line-length": 120,
     "extend-exclude": ["build", "dist", "release", "venv"],
-    "lint": {"select": ["E4", "E7", "E9", "F", "I"], "isort": {"combine-as-imports": True}},
+    "lint": {"select": list(EXPECTED_RUFF_SELECTORS), "isort": {"combine-as-imports": True}},
 }
-EXPECTED_RUFF_LINT_STEPS = """\
+EXPECTED_RUFF_LINT_STEPS = f"""\
       - name: Run Ruff
         run: python -m ruff check .
 
@@ -74,7 +106,7 @@ EXPECTED_RUFF_LINT_STEPS = """\
         run: |
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
             xargs -0 -- python -m ruff check --isolated --target-version py312 --line-length 120 \\
-              --select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
+              --select {EXPECTED_RUFF_SELECTOR_ARGUMENT} --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
 """
 
 
@@ -383,13 +415,16 @@ class TestDocumentationHealth(unittest.TestCase):
                 self.assertIn("./venv/bin/python -m ruff check .", content)
                 self.assertIn("generated `build/`, `dist/`, and `release/` output", content)
                 self.assertIn("local `venv/` environment", content)
-                self.assertIn("The `B` and `C90` families belong to separate reviewed changes.", content)
+                self.assertIn("The `C90` family belongs to a separate reviewed change.", content)
+                self.assertIn("This focused B gate does not enable the entire B family.", content)
+                for rule in FOCUSED_B_RULES:
+                    self.assertIn(f"`{rule}`", content)
                 self.assertIn("Ruff also enforces import sorting through the `I` rule family.", content)
                 self.assertIn("Ruff also enforces import placement through the `E4` rule family.", content)
                 self.assertIn("The event-mapping test package uses normal package imports", content)
                 self.assertIn("tests/test_macos_gui_artifact_verifier.py", content)
                 self.assertIn(
-                    "--select E4,E7,E9,F,I --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --",
+                    f"--select {EXPECTED_RUFF_SELECTOR_ARGUMENT} --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --",
                     content,
                 )
                 self.assertIn("Ruff does not lint Python code blocks in the passed Markdown documents.", content)
@@ -448,7 +483,7 @@ class TestDocumentationHealth(unittest.TestCase):
             )
 
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E4,E7,E9,F,I", "--ignore-noqa",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", EXPECTED_RUFF_SELECTOR_ARGUMENT, "--ignore-noqa",
                 "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             tracked_diagnostics = self._run_ruff(bypass_path, tracked_flags, 1, cwd=temporary_path)
@@ -478,7 +513,7 @@ class TestDocumentationHealth(unittest.TestCase):
 
             project_flags = ("--config", str(PROJECT_ROOT / "pyproject.toml"))
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E4,E7,E9,F,I", "--ignore-noqa",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", EXPECTED_RUFF_SELECTOR_ARGUMENT, "--ignore-noqa",
                 "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             self.assertEqual(self._run_ruff(named_path, project_flags, 0, cwd=temporary_path), [])
@@ -549,7 +584,7 @@ class TestDocumentationHealth(unittest.TestCase):
                 ),
             )
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E4,E7,E9,F,I", "--ignore-noqa",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", EXPECTED_RUFF_SELECTOR_ARGUMENT, "--ignore-noqa",
                 "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             for name, content, import_row in cases:
@@ -625,7 +660,7 @@ class TestDocumentationHealth(unittest.TestCase):
                 ),
             )
             tracked_flags = (
-                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", "E4,E7,E9,F,I", "--ignore-noqa",
+                "--isolated", "--target-version", "py312", "--line-length", "120", "--select", EXPECTED_RUFF_SELECTOR_ARGUMENT, "--ignore-noqa",
                 "--no-respect-gitignore", "--no-force-exclude", "--config", "lint.isort.combine-as-imports=true",
             )
             for name, content, import_row in cases:
@@ -790,6 +825,63 @@ class TestDocumentationHealth(unittest.TestCase):
                     )
 
         self.assertGreater(external_count, 0)
+
+
+    def test_focused_b_rules_and_explicit_zip_truncation_are_enforced(self) -> None:
+        cases = (
+            (
+                "B006",
+                "def operation(values=[]):\n    return values\n",
+                "def operation(values=()):\n    return values\n",
+            ),
+            (
+                "B008",
+                "def make_value():\n    return 1\n\ndef operation(value=make_value()):\n    return value\n",
+                "def make_value():\n    return 1\n\nVALUE = make_value()\n\ndef operation(value=VALUE):\n    return value\n",
+            ),
+            (
+                "B012",
+                "def operation():\n    try:\n        return 1\n    finally:\n        return 2\n",
+                "def operation():\n    try:\n        return 1\n    finally:\n        print(42)\n",
+            ),
+            ("B905", "pairs = zip([1, 2], [3])\n", "pairs = zip([1, 2], [3], strict=False)\n"),
+        )
+        with tempfile.TemporaryDirectory(prefix="gm2godot-focused-b-") as directory:
+            root = Path(directory)
+            project_flags = ("--config", str(PROJECT_ROOT / "pyproject.toml"))
+            tracked_flags = (
+                "--isolated", "--target-version", "py312", "--line-length", "120",
+                "--select", EXPECTED_RUFF_SELECTOR_ARGUMENT, "--ignore-noqa",
+                "--no-respect-gitignore", "--no-force-exclude", "--config",
+                "lint.isort.combine-as-imports=true",
+            )
+            for code, bad_source, good_source in cases:
+                with self.subTest(rule=code):
+                    bad = root / "bad.py"
+                    good = root / "good.py"
+                    bad.write_text(bad_source, encoding="utf-8")
+                    good.write_text(good_source, encoding="utf-8")
+                    diagnostics = self._run_ruff(bad, project_flags, 1, cwd=root)
+                    self.assertEqual([row["code"] for row in diagnostics], [code])
+                    self.assertEqual(self._run_ruff(good, project_flags, 0, cwd=root), [])
+                    diagnostics = self._run_ruff(bad, tracked_flags, 1, cwd=root)
+                    self.assertEqual([row["code"] for row in diagnostics], [code])
+                    self.assertEqual(self._run_ruff(good, tracked_flags, 0, cwd=root), [])
+
+            hidden = root / "hidden"
+            hidden.mkdir()
+            (root / ".gitignore").write_text("hidden/\n", encoding="utf-8")
+            bypass = hidden / "bypass.py"
+            bypass.write_text("pairs = zip([1, 2], [3])  # noqa: B905\n", encoding="utf-8")
+            ignored = root / "pyproject.toml"
+            ignored.write_text(
+                '[tool.ruff.lint]\nselect = ["B905"]\nignore = ["B905"]\n', encoding="utf-8",
+            )
+            self.assertEqual(
+                self._run_ruff(bypass, ("--config", str(ignored)), 0, cwd=root), [],
+            )
+            diagnostics = self._run_ruff(bypass, tracked_flags, 1, cwd=root)
+            self.assertEqual([row["code"] for row in diagnostics], ["B905"])
 
 
 if __name__ == "__main__":

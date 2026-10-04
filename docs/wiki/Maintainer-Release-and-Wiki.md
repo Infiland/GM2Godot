@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.32 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.33 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -8,7 +8,7 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.32` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
+`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.33` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
 
 The publisher and integrity procedure below describes the current seven-asset contract. Its checksum manifest has exactly six payload rows in lexical filename order. [Release 0.8.17](https://github.com/Infiland/GM2Godot/releases/tag/v0.8.17) published this seven-asset contract. Preserve its exact release audit and the older `0.8.15` five-asset audit as separate historical evidence; each new version needs its own main build and publication checks.
 

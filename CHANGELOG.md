@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.33 - 2026-10-04
+
+- Enforce Ruff import placement locally and in CI without new suppressions; preserve intentional repository-path setup and Godot discovery before runtime imports.
+- Remove redundant event-test path injection and document repository-root unittest commands; retain existing test cases and standalone verifier entrypoints.
+
 ## 0.8.32 - 2026-10-04
 
 - Enforce Ruff import sorting locally and in the required Code Health workflow; sort existing imports while preserving bootstrap, environment setup and local import stages.

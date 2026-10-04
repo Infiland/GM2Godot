@@ -118,6 +118,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [x] Add Ruff or equivalent linting.
 - [ ] Add complexity checks for parser/emitter/runtime generation modules.
 - [x] Add import sorting.
+- [x] Enforce import placement (`E4`) without new suppressions; event tests use normal package imports and deliberate bootstrap/discovery stages remain explicit.
 - [ ] Add unused code checks.
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.

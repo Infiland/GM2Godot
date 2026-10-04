@@ -7,8 +7,7 @@ import threading
 import unittest
 from unittest.mock import MagicMock
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
+if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.conversion_outcome import ConversionCounts

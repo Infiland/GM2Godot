@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+from collections.abc import Callable as _Callable
 from pathlib import Path
 
 
@@ -22,8 +23,12 @@ def _find_godot_binary() -> str | None:
 godot_binary = _find_godot_binary()
 
 
+def _load_runtime_writer() -> _Callable[[str], str]:
+    from src.conversion.gml_runtime import write_gml_runtime
+    return write_gml_runtime
 
-from src.conversion.gml_runtime import write_gml_runtime
+
+write_gml_runtime = _load_runtime_writer()
 
 
 @unittest.skipIf(godot_binary is None, "Godot binary not found")

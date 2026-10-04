@@ -15,8 +15,7 @@ from typing import SupportsIndex
 from unittest.mock import mock_open, patch
 
 # Ensure project root is on sys.path so "src.*" imports work
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
+if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion.base_converter import BaseConverter

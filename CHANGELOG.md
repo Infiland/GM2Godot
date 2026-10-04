@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.39 - 2026-10-04
+
+- Enforce a fixed function-complexity threshold with individually reviewed removal plans and ceilings that must shrink when existing code improves.
+- Reject new or increased complexity and stale exception records in the required local and Code Health checks.
+
 ## 0.8.38 - 2026-10-04
 
 - Combine identical GML accessor branches in special-value detection and array assignment without changing emitted code.

@@ -1,0 +1,1050 @@
+{
+  "schema_version": 1,
+  "max_complexity": 15,
+  "exceptions": [
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "OutputParentBinding.close",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Two-attempt budgets, ordered failures and early retention of live children and their ancestors must survive; legacy integer resources have different contracts.",
+      "removal_action": "Extract separate POSIX and Windows bounded lease-close loops and closed-state calculation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-a68fc18d29d2bd3f"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "OutputParentBinding.verify",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Receipt-mode error translation, intermediate deny-only ACLs/private indexes, and legacy exception behavior cannot be conflated.",
+      "removal_action": "Split strategy-specific receipt-policy validation from legacy verification.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5d5cbe7b02e5e1db"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_OutputParentBindingLeaseState.close",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Do not close the parent while a newer resource remains live; preserve status-inspection failures and first/secondary exception order.",
+      "removal_action": "Extract publication-resource close and binding-close routines with explicit closed results.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-53d562b352a84365"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_darwin_descriptor_has_extended_acl",
+      "measured_complexity": 23,
+      "ceiling": 23,
+      "reason": "No double free after an interrupted native return; preserve errno, deny-only intermediates, rejection of empty non-null ACLs and cleanup-note priority.",
+      "removal_action": "Split descriptor/structural ACL validation from bounded deny-entry enumeration; leave native result recording/free in the owner.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-4822416ebb5b3299"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_open_rooted_posix_parent",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Preserve pre-native owner slots, missing-directory race rejection, private modes/ACL checks and parent fsync even for existing ancestors.",
+      "removal_action": "Extract one component acquisition/sealing step while keeping the outer installed lease authoritative.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-53a3c684261ae99e"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_publish_windows_receipt_bytes",
+      "measured_complexity": 48,
+      "ceiling": 48,
+      "reason": "Unknown/published rename outcomes preserve public names; authenticated collision provenance, winner verification and live-child parent retention remain distinct.",
+      "removal_action": "Extract exact observation/error translation, collision handling and resource finalization as finite operations.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-7f5e194fbc41eef2"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_read_exact_receipt",
+      "measured_complexity": 23,
+      "ceiling": 23,
+      "reason": "Keep len(payload)+1 bounds, one-link/mode/ACL checks, namespace drift codes, primary exception identity and two-attempt close priority.",
+      "removal_action": "Extract byte/metadata comparison and descriptor-close resolution.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-c1088b29259921b5"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "_rooted_output_parts",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Only trusted /tmp and /var aliases resolve; Windows devices/ADS and lexical escape reject before resource acquisition.",
+      "removal_action": "Extract trusted Darwin root-alias handling and Windows root/component validation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ec5aba11e237fb9c"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "open_output_parent",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "No-follow checks, final binding verification and control-flow exception identity/cleanup notes must occur at the original stages.",
+      "removal_action": "Extract POSIX and Windows acquisition branches after the existing path normalization.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e0626db692b4259f"
+    },
+    {
+      "path": "scripts/_anchored_output.py",
+      "function": "publish_new_bytes",
+      "measured_complexity": 27,
+      "ceiling": 27,
+      "reason": "Uncertain temporary identity must never be unlinked by name; retain no-replace link semantics, fsync order and control-flow failures.",
+      "removal_action": "Extract rejected-publication cleanup and successful-anchor-close error selection.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-56e2c9574e4f9267"
+    },
+    {
+      "path": "scripts/_anchored_receipt_posix.py",
+      "function": "_PosixReceiptPublicationLease.close",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Global four-attempt stage/sync budgets, two-attempt close budgets and early ancestor retention cannot reset during retries.",
+      "removal_action": "Extract descriptor closure plus named-stage and private-directory durability retry phases.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-d4a670474d49a4b7"
+    },
+    {
+      "path": "scripts/_anchored_receipt_posix.py",
+      "function": "_open_darwin_receipt_stage",
+      "measured_complexity": 34,
+      "ceiling": 34,
+      "reason": "Register native ownership before interruption; reject substituted roots/stages, preserve bounded identity cleanup and leave unprovable entries untouched.",
+      "removal_action": "Extract root creation/sealing, named-inode validation and failure cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-cd21a8f01c85f9aa"
+    },
+    {
+      "path": "scripts/_anchored_receipt_posix.py",
+      "function": "_publish_posix_receipt_bytes",
+      "measured_complexity": 34,
+      "ceiling": 34,
+      "reason": "Never roll back an uncertain public receipt; keep collision idempotency, exact identity observation, flush ordering and control-flow cleanup precedence.",
+      "removal_action": "Extract attempted-publication recovery/durability steps and lease finalization.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-fd91d14bb19af5a7"
+    },
+    {
+      "path": "scripts/_anchored_receipt_windows.py",
+      "function": "close_windows_handle_lease",
+      "measured_complexity": 30,
+      "ceiling": 30,
+      "reason": "Never retry an unrecorded ambiguous CloseHandle; replay recorded evidence rather than the native call, with bounded attempts and stable primary notes.",
+      "removal_action": "Extract result interpretation and lease retirement from native address/call capture.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5915dcaca902e60a"
+    },
+    {
+      "path": "scripts/_anchored_receipt_windows.py",
+      "function": "publish_windows_receipt",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Set unknown before native rename and published only after return; dispose only definitely staged handles and attach actual outcome evidence on interruptions.",
+      "removal_action": "Extract candidate write/read verification and primary/cleanup resolution.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ac227344f9d41771"
+    },
+    {
+      "path": "scripts/_anchored_receipt_windows.py",
+      "function": "read_windows_receipt",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Pre-acquisition missing differs from post-acquisition disappearance; whole payload bounds, retained lease and exact close errors remain authoritative.",
+      "removal_action": "Extract metadata/byte validation and phase-aware OSError translation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-9af0279f0cb35772"
+    },
+    {
+      "path": "scripts/build_dependency_snapshot.py",
+      "function": "verify_receipt",
+      "measured_complexity": 32,
+      "ceiling": 32,
+      "reason": "A self-consistent but foreign receipt can otherwise be accepted. Exact int/bool distinctions, first mismatch code, source/constraint path and hash checks must retain their current order.",
+      "removal_action": "Extract ordered constraint/installed/runtime, bootstrap-transition, then command-result validators. Each takes the existing typed policies, and bootstrap checks keep stable/source-transition projections separate. The top-level function retains stage order.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-7af085f0a4d2dd4f"
+    },
+    {
+      "path": "scripts/capture_conversion_parity.py",
+      "function": "validate_runtime_markers",
+      "measured_complexity": 22,
+      "ceiling": 22,
+      "reason": "Declared resource-fixture warnings intentionally retain failed status while accepting zero import/boot codes; default-empty policy cannot be silently widened. Three output scans must agree, including duplicates/order.",
+      "removal_action": "Small first extraction: one exact ANSI-stripped issue parser shared by output and boot_output. Then isolate schema/stage validation from warning-policy comparison; keep operations extraction from boot_output and status checks last.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-00e44d06699cbff2"
+    },
+    {
+      "path": "scripts/conversion_parity_snapshot.py",
+      "function": "_validate_journal_rows",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "An evidence transition must not become managed, and previous-public/backup/desired-stage identities are distinct. Validation order, sorted transition keys and exact backup set are part of rejection behavior.",
+      "removal_action": "Extract directory-row validation and a single transition-row validator returning its kind/path/backup contribution. Keep ordered aggregation, uniqueness and whole-inventory equality in the caller.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8e28695267bffed7"
+    },
+    {
+      "path": "scripts/conversion_parity_snapshot.py",
+      "function": "_validated_publication",
+      "measured_complexity": 25,
+      "ceiling": 25,
+      "reason": "Normalizing before digest, native identity, evidence inventory and backup proof checks could conceal a changed publication. Transaction lock bytes/modes and stable paths must remain visible.",
+      "removal_action": "Split exact record/provenance authentication, generation/public inventory joins, and final normalization. Pass only authenticated existing records into normalization; retain exact observed/public record inventories and rechecks.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-38b99f490df87409"
+    },
+    {
+      "path": "scripts/propose_native_wheels.py",
+      "function": "_observe_wheel",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "Archive aliases, special/encrypted members, duplicate metadata roots and incompatible tags must fail before acceptance. Streaming hash and post-read descriptor/name seals must remain outside parsing helpers.",
+      "removal_action": "Extract ZIP namespace/member policy, then exact metadata-pair/tag identity validation on the already-open archive. Keep opening, bounded full hashing, seek, and before/after file checks with the current descriptor owner.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-db2a5c54f398b025"
+    },
+    {
+      "path": "scripts/propose_native_wheels.py",
+      "function": "produce",
+      "measured_complexity": 29,
+      "ceiling": 29,
+      "reason": "Native preflight precedes source/venv work; current/candidate/fresh environments, caches and wheelhouses must remain distinct. Nested closures capture one Journal/publisher and phase order; partial journal failure must note the primary error.",
+      "removal_action": "Extract the double-download/observation comparison and final wheelhouse/reference sealing as named stages. Move environment/compile/preflight operations into a finite typed producer owner retaining one Journal and exact command order, then keep orchestration thin.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-48a6a7e98dfaf044"
+    },
+    {
+      "path": "scripts/propose_native_wheels.py",
+      "function": "run_command",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Readiness is a directory published after successful result publication; early result reads or reaping before final group signaling risk forged completion/PGID reuse. Control-flow exceptions and cleanup/capture notes retain precedence.",
+      "removal_action": "Separate readiness/output/deadline observation from cleanup of the same unreaped process. A cleanup helper returns ordered errors after group kill, wait, stdin close and both captures; caller preserves original BaseException and notes.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-14bf1394f2b66e0e"
+    },
+    {
+      "path": "scripts/release_publisher.py",
+      "function": "PublisherConfig.from_environment",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Token retrieval and validation order must not expose credentials or permit PR refs/foreign URLs/path traversal. Preflight delay permits 0..10 while ownership delay permits 0..1, including current nonfinite rejection.",
+      "removal_action": "Small extraction: validate both named retry delays in one pure stage at their original position, or move only relative output-path validation. Retain required-value checks and main event identity checks before config construction.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-70bb118e8ef8fc01"
+    },
+    {
+      "path": "scripts/release_publisher.py",
+      "function": "validate_release",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "A draft HTML segment differs intentionally from the published tag URL. Ownership ID, immutable/draft state and empty-asset check cannot be merged into permissive generic schema handling.",
+      "removal_action": "Small extraction: validate publication timestamps/immutable/asset state after existing ID/URL checks. Keep ReleaseIdentity construction and draft HTML handling in order. This is preferable to accepting a historical score-16 exception.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5807e3fcea299ed8"
+    },
+    {
+      "path": "scripts/verify_dependency_environment.py",
+      "function": "_bound_regular_files",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Sequential reads cannot synthesize mixed generations. Append failure must close the untracked descriptor, caller interruption keeps its identity, and successful cleanup gives control-flow exceptions priority over ordinary close failures.",
+      "removal_action": "Extract reverse close collection and exact successful/primary-error resolution into narrow helpers. Keep acquisition, alias rejection, all-cohort checks and generator yield in one ownership scope; no new context controller.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-16431ca110b8484e"
+    },
+    {
+      "path": "scripts/verify_dependency_environment.py",
+      "function": "analyze_inspect_report",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Malformed schema raises immediately while mismatches accumulate; duplicate normalized names preserve the first installed version. pip bootstrap checks differ from other pins, and metadata/direct URL locality rules cannot be weakened.",
+      "removal_action": "Extract installed-item analysis, pip bootstrap findings, and required/complete membership findings in their existing sequence; keep final sorted finding tuple and exact schema parsing unchanged.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-2ed948e01d6856e4"
+    },
+    {
+      "path": "scripts/verify_dependency_environment.py",
+      "function": "main",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Alias/policy failures occur before pip, pip check remains independent of inspect failure, and output failure returns 2 instead of verification failure 1. Failure receipts must still be written and preserve cleanup diagnostics.",
+      "removal_action": "Small extraction candidate: the final atomic receipt write/error reporting/status return stage contains two except branches plus one status branch. Move it intact into a named finisher; then remeasure before considering an exception.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-7c67956d42edf500"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_inspect_directory_inventory_at",
+      "measured_complexity": 30,
+      "ceiling": 30,
+      "reason": "The nested visit is counted inside this owner as well as independently in the historical inventory; two independent waivers would hide one decomposition debt. Root identity and final link graph must remain checked.",
+      "removal_action": "Move the walker into a named private function with finite typed inventory state, keeping root pre/post seals and finalization here. Coordinate this task with the nested visit removal below rather than waive both.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-f9103fe486050a52"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_inspect_directory_inventory_at.visit",
+      "measured_complexity": 27,
+      "ceiling": 27,
+      "reason": "Count limit precedes sorted materialization, nofollow/nonblock prevent symlink/FIFO races, and every acquired descriptor is closed without masking the active error. Lexical aliases/link graph and cumulative entry count span recursion.",
+      "removal_action": "Extract child-directory recursion ownership, regular Mach-O leaf inspection and symlink inspection as three handlers returning actual inventory records. Keep one bounded shared count and original per-entry dispatch order.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-59906da18b85a286"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_inspect_dmg_contents",
+      "measured_complexity": 31,
+      "ceiling": 31,
+      "reason": "Failed/timeout/malformed attach may still mount. Known device must be detached before safety is inferred; unconfirmed mount retains root. Active/primary/cleanup errors and notes have explicit precedence, and mounted descriptors close before detach.",
+      "removal_action": "Separate attach/device recovery, mounted inspection, and detach/confirmation/private cleanup around one finite state owner. Do not make a generic context manager that assumes failed attach means no mount or overwrites the active exception.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-f555c76779efcc8a"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_inspect_zip_inventory",
+      "measured_complexity": 26,
+      "ceiling": 26,
+      "reason": "Every archive path participates in duplicate detection while app-relative paths also get normalization/ancestor checks; explicit Unix type and encrypted members reject before payload reads. Link targets remain bounded UTF-8.",
+      "removal_action": "Extract namespace/app-member planning from planned payload inspection, preserving the existing full namespace pass before any stream reads. Return finite member/path/kind and available-path inventories, then finalize the same graph.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ef8426703b273959"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_parse_macho_stream",
+      "measured_complexity": 29,
+      "ceiling": 29,
+      "reason": "Wrong CPU/subtype, fat/32-bit/byte-swapped files, malformed table sizes/alignment, non-macOS platforms and duplicate deployment commands must reject before claiming native compatibility. Preserve stream byte consumption and limits.",
+      "removal_action": "Split native header validation from bounded deployment-command decoding. A command decoder returns zero/one minimum versions per command; keep exact table offset/trailing bytes and exactly-one final policy in the caller.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-76cf62e0646615d7"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_remove_private_dmg_root",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Canonical paths, retained ancestry, owned mode/link count and physical mount identity must be rechecked. Copy and mount removal both run after one failure; root removal requires both successes, and first error/notes are stable.",
+      "removal_action": "Small wrapper split: standalone retained-owner acquisition delegates to a named owned cleanup operation; within it extract copy and mount removal helpers while retaining both attempts and ordered failure resolution.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-4231382ca6f9abfa"
+    },
+    {
+      "path": "scripts/verify_macos_bundle_metadata.py",
+      "function": "_select_zip_plist",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Unrelated members are intentionally ignored here while plist ancestor aliases and target duplicates reject. Generic full-app validation is a different policy and must not silently replace this selector.",
+      "removal_action": "Small extraction: final single-target regular/type/encryption/size checks into a plist-member validator. Leave canonical ancestor selection in place, preserving exact directory and unrelated-member behavior.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-80f7e92c1b21371d"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "copy_zip",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Same-size substitution, growth/truncation, changed mode/link state or output identity must fail; both descriptors close in order and preserve a primary BaseException.",
+      "removal_action": "Small extraction candidate: private-copy full reread/digest/EOF validation, called only after source verification/fsync/created-state seal. Keep both descriptor acquisitions and finally cleanup in the owner.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-604676b916a1f2d0"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "extract_transcript",
+      "measured_complexity": 40,
+      "ceiling": 40,
+      "reason": "Allowed extras are CRC-read in original member order and never extracted; cumulative budgets include extras/inferred directories. File descriptors close before deferred symlinks, modes apply deepest-first, and exact private ZIP seal is rechecked.",
+      "removal_action": "Extract member planning/extra streaming without moving its original sequence, then regular-or-link payload materialization and final link/mode stages. Keep borrowed archive ownership, exclusive creation and primary/close failure handling explicit.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-70ee6a4c94c0baa2"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "inspect_tree",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Nested walk carries cumulative byte budget and includes directory modes/symlink targets/resource hashes, so it cannot be replaced with a native-only or extension-only inventory. Parent and visit debts overlap.",
+      "removal_action": "Move visit into a named finite-state walker; retain final MAX_ENTRIES check, root verification and sorted complete transcript here. Resolve the nested task simultaneously, not via two permanent allowances.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ba977a28a4ae15fc"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "inspect_tree.visit",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Entry type/stat seals span before/open/read/after; hardlinks/special files reject, byte totals accumulate across recursion, and directory list/stat rechecks catch concurrent mutations. Child closes preserve primary identity.",
+      "removal_action": "Extract bounded regular-file hashing and one opened-child handler, leaving symlink check and sorted recursion orchestration. State tracks only actual rows/total bytes; no policy-swallowing generic traversal.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-df865b3c4f9e69de"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "run_gui_process",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Final group signal must precede direct fallback/proof/reap to avoid PID/PGID reuse; ABI/default SIGCHLD checks precede child creation. Output capture and ordered cleanup failures retain the original control exception.",
+      "removal_action": "Extract ordered cleanup of the existing unreaped process into a specific helper returning returncode/errors. Keep observation/primary capture and final exception resolution in the owner; no second process controller.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-0aa1eb792af6f700"
+    },
+    {
+      "path": "scripts/verify_macos_gui_artifact.py",
+      "function": "verify_archive",
+      "measured_complexity": 32,
+      "ceiling": 32,
+      "reason": "Replacing the new private root must not trigger recursive deletion of an unowned namespace. GUI-success claims require exact receipt plus unchanged complete resources/original bytes and successful cleanup, not process exit alone.",
+      "removal_action": "Extract final bound original-source rehash, packaged executable/receipt smoke stage and owned cleanup resolution. Preserve native runtime preflight before source reads and source/private ancestry acquisition cleanup even on early failures.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-3b4f85fb261dd65d"
+    },
+    {
+      "path": "scripts/verify_native_wheel_proposal.py",
+      "function": "_command_policy",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Removing global banned flags, -I, distinct environment/wheelhouse/cache roots, or exact helper/path/receipt binding permits synthetic/cross-platform proofs. Windows canonical key/case handling differs intentionally from POSIX.",
+      "removal_action": "Split command grouping/schema/order validation from named environment, download/compile, observation/preflight and verification/install policy passes. Preserve pass order, exact command coverage and final pip isolation/binary/direct-URL checks.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-f92805c913f1af36"
+    },
+    {
+      "path": "src/cli.py",
+      "function": "_run_convert",
+      "measured_complexity": 41,
+      "ceiling": 41,
+      "reason": "SIGINT must be active before Converter construction and managed_generation_decided set in the original convert finally. Keep the sole observer, live diagnostics/Namespace reads, logs-before-report settlement, original primary failure precedence, preparing/committing/committed trace-sensitive statements and stdout write, plus handler restore immediately before return. Helper extraction must not introduce an earlier property read, second observer/controller, or a broader catch.",
+      "removal_action": "Extract three named stages: classify the primary convert result through the live backend; settle external/canonical reports and cancelled outcomes through the existing report/session owners; select and emit terminal failure details in the existing primary/report/artifact/attempt/restore precedence. Use finite typed result records only for computed local results and the existing live owners for observable dependencies. Keep the original summary loop, phase assignments, stdout write and restore/return windows in _run_convert. Measure each extracted function and the driver before accepting the decomposition.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-0cd252af0c738c29"
+    },
+    {
+      "path": "src/cli_report_lifecycle.py",
+      "function": "ConversionReportLifecycle.repair",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Deduplicate normalized destinations only once at entry while preserving live args/operation read order. Maintain reverse receipt restoration, first report-error selection, same-object borrowed checkpoints/receipts, per-publication current backend diagnostics, managed report protection, existing exception/control boundaries and both cancellation observations. Refresh/attempt errors and restore notes must retain their precedence; a failed late repair must not erase a trusted generation.",
+      "removal_action": "Extract destination planning called once at entry; one per-iteration diagnostic publication stage returning a finite typed canonical-current/first-error result; and the artifact refresh/attempt publication stage returning a typed outcome/retry decision. Keep set_outcome/reset and the two observe_cancellation calls at their original outer-loop stages. Reuse existing checkpoint/reset/restore and seven live operations; do not cache diagnostics or introduce another transaction/report controller. Retain first Exception handling and unchanged KeyboardInterrupt propagation, then measure every new function and repair.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-c83997288b25dc51"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction._rollback_published_mutations",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Continue after ordinary/control failures, preserve unknown replacements, durable backup cleanup and combined first-signal ordering.",
+      "removal_action": "Extract one mutation restoration with its retained recovery candidate.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-aa1d01658377dbfd"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction._rollback_restore_mutations",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Distinguish displaced-only vs restored targets, retain exact recovery candidates and continue collecting errors without overwriting external changes.",
+      "removal_action": "Extract per-mutation receipt restoration and final receipt verification.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-38c3c1649c2ad00d"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction.cleanup",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Completed removals sync before rethrow; incomplete control signals stop traversal, first control-signal identity wins, after_cleanup is conditional.",
+      "removal_action": "Extract one temporary cleanup outcome and final error aggregation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8cf7b45fc4c7fc01"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction.publish_specs",
+      "measured_complexity": 25,
+      "ceiling": 25,
+      "reason": "Preserve before/after callbacks, guard rechecks, mutation recording before completion errors, per-target durability and reverse rollback.",
+      "removal_action": "Extract desired-stage/backup preparation and one guarded mutation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-cee263f1864669ac"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction.restore_snapshots",
+      "measured_complexity": 26,
+      "ceiling": 26,
+      "reason": "Record ambiguous displacement and restored_committed before errors; keep receipt rechecks, durability and recovery retention.",
+      "removal_action": "Extract restore-stage preparation and one receipt displacement/restore step.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-653a2d83370a63f9"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "ByteArtifactTransaction.unlink_finalized",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Return completed/unknown ownership faithfully; keep displaced tombstone identity, read-only restoration and original/control-flow error preference.",
+      "removal_action": "Extract backend-specific removal and completion-probe resolution.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-a4fb89ba2a09f785"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "VerifiedDirectory.chmod_exact",
+      "measured_complexity": 17,
+      "ceiling": 17,
+      "reason": "Keep provider binding, hard-link checks, expected-current-mode checks and Windows path fallback; never restore an externally replaced inode.",
+      "removal_action": "Extract descriptor chmod provider selection and late identity/mode restoration.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-89d6c2647aaee69f"
+    },
+    {
+      "path": "src/conversion/anchored_artifacts.py",
+      "function": "VerifiedDirectory.open_child",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Parent and child verification order, no-follow binding, fallback policy and same-object primary exceptions must remain exact.",
+      "removal_action": "Extract POSIX and Windows child-open paths, sharing only rejected-binding cleanup where semantics match.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8c7b2ff95d81e2c7"
+    },
+    {
+      "path": "src/conversion/atomic_generated_text.py",
+      "function": "_atomic_write_asset_text_fallback",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Preserve exact staging/output identity, file modes, Windows quarantine path and unchanged silent cleanup OSError policy.",
+      "removal_action": "Extract post-publication validator cleanup and owned-stage cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-2eafa45f61f69563"
+    },
+    {
+      "path": "src/conversion/atomic_generated_text.py",
+      "function": "_publish_bound_windows_readonly_asset_transaction",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "The previous-file deletion uncertainty forbids rollback; keep validator/hook order, namespace checks and separate cleanup notes.",
+      "removal_action": "Extract delete-pending commit classification and handle cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-7feced4f9f640fca"
+    },
+    {
+      "path": "src/conversion/conversion_artifact_generation.py",
+      "function": "_publish_locked",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Keep callbacks for unchanged manifest values, known-transition checks, durable pointer as commit boundary and recovery only before commitment.",
+      "removal_action": "Extract one desired-value publication and post-commit journal cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-824a24b5908d3a28"
+    },
+    {
+      "path": "src/conversion/converter.py",
+      "function": "Converter._run_finalizers",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Preserve finalizer error ordering, staged finalizer eligibility, late cancellation rewrite and restoration only against the matching generation.",
+      "removal_action": "Extract architecture checkpoint, diagnostic checkpoint and post-commit cancellation refresh.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-4a0b2035c18f3a59"
+    },
+    {
+      "path": "src/conversion/converter.py",
+      "function": "Converter.convert",
+      "measured_complexity": 27,
+      "ceiling": 27,
+      "reason": "Keep canonical outcome, cancellation boundaries, workspace cleanup and runtime-before-finalizer/attempt errors; public convert signature stays stable.",
+      "removal_action": "Extract conversion-step execution/accounting and final exception resolution without a second controller.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-bf90e664d206a7be"
+    },
+    {
+      "path": "src/conversion/fonts.py",
+      "function": "FontConverter._find_disk_font_files",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Keep sorted scan/reverse child scheduling, no symlink directory traversal, cross-family validation and report callback order.",
+      "removal_action": "Extract entry classification/resolution and accepted font validation from DFS.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-bfa87cbeee92f17b"
+    },
+    {
+      "path": "src/conversion/fonts.py",
+      "function": "FontConverter._process_font",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Keep owner-relative resolution before system fallback, second bundled check immediately before copy, metadata preservation and output filename/log stage.",
+      "removal_action": "Extract bundled-source selection/revalidation and publication/logging.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-61f436db49ea69c6"
+    },
+    {
+      "path": "src/conversion/generation_inventory.py",
+      "function": "_validate_legacy_generated_files",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Preserve manifest self exception, auxiliary/unmanaged skipping before duplicate tracking, case-collision and shared-owner digest exceptions.",
+      "removal_action": "Extract one canonical entry classification and current-entry validation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-a516752c7a269a05"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/emitter.py",
+      "function": "_emit_descriptor_call",
+      "measured_complexity": 37,
+      "ceiling": 37,
+      "reason": "Keep arity first, base instance arguments before domain overrides and exact self/other/default placement.",
+      "removal_action": "Extract keyboard/method, callback-array, instance-domain and variadic groups.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-cc26607ae8eac241"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/emitter.py",
+      "function": "_emit_expression",
+      "measured_complexity": 34,
+      "ceiling": 34,
+      "reason": "Preserve child evaluation order, operator precedence and receiver/static binding.",
+      "removal_action": "Extract Call and FunctionLiteral emission.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-b04bcaba675ffa3a"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/emitter.py",
+      "function": "_emit_name",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Preserve locals/static/asset-global precedence and resolve_asset_names=False checks.",
+      "removal_action": "Separate nonlocal builtin/legacy and instance resolution.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ac0c1a7f90ca0a8f"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/enum_helpers.py",
+      "function": "_evaluate_enum_expression",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Binary left then right still evaluates right when left is None; named calls stop at their first nonconstant argument.",
+      "removal_action": "Extract unary and named-call argument evaluation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5ff66ad16f1b49a6"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/enum_helpers.py",
+      "function": "_reject_enum_mutation_expression",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "Check forbidden mutation call before callee/arguments; do not start traversing previously ignored nodes.",
+      "removal_action": "Merge identical Struct/DSMap branches, then separate supported-child recursion.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-181c028b48470bc2"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/expression_parser.py",
+      "function": "_ExpressionParser._parse_postfix",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Preserve match/consume order, omitted sentinels and source errors.",
+      "removal_action": "Extract call-argument and bracket-suffix readers.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-eda12c7a369b9618"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/expression_parser.py",
+      "function": "_ExpressionParser._parse_primary",
+      "measured_complexity": 26,
+      "ceiling": 26,
+      "reason": "Keep quoted/empty-key errors, parser cursor and original error positions.",
+      "removal_action": "Extract string and array/struct readers.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-590b832be1d76089"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/gml_function_dispatch.py",
+      "function": "_build_function_descriptors",
+      "measured_complexity": 50,
+      "ceiling": 50,
+      "reason": "Keep insertion order, duplicate collisions, final overrides and all public descriptor metadata.",
+      "removal_action": "Extract core-value, resource/instance and platform registration phases with typed table helper.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-08e62a3c55d23968"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/preprocessor.py",
+      "function": "preprocess_gml_source",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "Share only identical state logic; retain macro continuations, normalized output and first diagnostic.",
+      "removal_action": "Extract conditional frame transitions and active-directive handling.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-6403511a9bed2866"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/preprocessor.py",
+      "function": "preprocess_gml_source_preserving_layout",
+      "measured_complexity": 23,
+      "ceiling": 23,
+      "reason": "Retain exact offsets/newlines, macro continuations and distinct layout policy; avoid merging normalized-output semantics.",
+      "removal_action": "Extract conditional frame transitions and span blanking.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5850f1ee7d7e600b"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/statements.py",
+      "function": "_assignment_target_reader_writer",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Keep _record_instance_assignment stage, cached target/key order and closure captures.",
+      "removal_action": "Separate scoped/builtin resolution from collection/selector handling.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-352ef2975d8347cb"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/statements.py",
+      "function": "transpile_statement",
+      "measured_complexity": 122,
+      "ceiling": 122,
+      "reason": "Preserve finally capture, shared sets/counters, LHS-before-RHS, lazy nullish preludes and writeback; do not repair unrelated unreachable DS-list raise after DS-grid raise.",
+      "removal_action": "Extract control-flow/throw, delete, increment and assignment phases.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-3b9a5f8787d0afc0"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/tokens.py",
+      "function": "tokenize_gml_source",
+      "measured_complexity": 29,
+      "ceiling": 29,
+      "reason": "Outer cursor retains newline/operator order and unterminated-prefix location.",
+      "removal_action": "Extract string/numeric and dollar/hash prefix readers.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-2c8302b8062c3df5"
+    },
+    {
+      "path": "src/conversion/gml_transpiler_parts/utils.py",
+      "function": "split_assignment",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Keep escapes/depth transitions/operator order and comparison filtering.",
+      "removal_action": "Extract quoted consumption or top-level operator recognition.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-3dc44b113d04833b"
+    },
+    {
+      "path": "src/conversion/godot_validation.py",
+      "function": "_run_godot_command",
+      "measured_complexity": 42,
+      "ceiling": 42,
+      "reason": "Keep non-reaping POSIX exit observation, claim/abandon lock, live-reader pipe ownership, timeout identity/output, group cleanup and diagnostic order.",
+      "removal_action": "Extract output-reader lifecycle and process cleanup/error assembly with explicit ownership state.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-3abe33ab62fc41fa"
+    },
+    {
+      "path": "src/conversion/godot_validation.py",
+      "function": "_wait_godot_process_exit",
+      "measured_complexity": 17,
+      "ceiling": 17,
+      "reason": "Preserve ownership checks around observation, WNOWAIT, deadline semantics, ProcessLookup reproof and queue-close error notes; no wait/poll substitution.",
+      "removal_action": "Extract waitid and kqueue observation implementations.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-4e1377386afc07d5"
+    },
+    {
+      "path": "src/conversion/godot_validation.py",
+      "function": "validate_generated_godot_project",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Do not collapse permitted import-only timeout success into general success; preserve output issue detection, boot ordering, report bytes and resource discovery.",
+      "removal_action": "Extract import/no-audio-fallback outcome decision and resource-script validation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-c5b632d5425ab93f"
+    },
+    {
+      "path": "src/conversion/included_files_parts/driver.py",
+      "function": "IncludedDriverOperations.convert_included_files",
+      "measured_complexity": 54,
+      "ceiling": 54,
+      "reason": "Keep dynamic self dispatch/resource accounting, active output reset, bounded worker cancellation, source receipt verification and final lock release precedence.",
+      "removal_action": "Extract unchanged-generation completion, worker-result consumption and staged-registry/transaction assembly into finite typed operations.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-af86ebd4c1da445c"
+    },
+    {
+      "path": "src/conversion/included_files_parts/guarded_mutations.py",
+      "function": "_chmod_exact_included_file",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Borrowed Windows binding remains caller-owned; retain late hook before open, exact inode checks and restoration notes after quarantined failure.",
+      "removal_action": "Extract descriptor path and fallback quarantine/chmod/restore paths.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-92a9c590d9c6d336"
+    },
+    {
+      "path": "src/conversion/included_files_parts/guarded_mutations.py",
+      "function": "_move_exact_included_entry",
+      "measured_complexity": 22,
+      "ceiling": 22,
+      "reason": "Keep original rename hook and repeated parent checks, no overwrite, same-binding optimization and unknown-moved-entry preservation.",
+      "removal_action": "Extract descriptor and fallback moves with explicit parent-verification closures.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-fd96f906b327cef3"
+    },
+    {
+      "path": "src/conversion/included_files_parts/locking.py",
+      "function": "_acquire_included_project_lock",
+      "measured_complexity": 25,
+      "ceiling": 25,
+      "reason": "Windows locks before reading the byte; POSIX validates before flock, then rechecks content/namespace; retain unlock/close ordering on failure.",
+      "removal_action": "Extract lock validation/acquisition from file opening/initialization and cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-295d01100af7e2af"
+    },
+    {
+      "path": "src/conversion/included_files_parts/publisher.py",
+      "function": "_commit_included_output_set",
+      "measured_complexity": 35,
+      "ceiling": 35,
+      "reason": "Cancellation/hook/fsync boundaries and durable marker determine rollback permission; ambiguous marker lookup must preserve recovery state.",
+      "removal_action": "Extract journal preparation, root/registry move phases, commit validation and post-commit retirement.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-0a2794ac65f663ca"
+    },
+    {
+      "path": "src/conversion/included_files_parts/recorded_cleanup.py",
+      "function": "_cleanup_recorded_included_directory",
+      "measured_complexity": 21,
+      "ceiling": 21,
+      "reason": "Unknown/duplicate/nonempty entries remain untouched; verify borrowed parent around list/remove and deliver quarantined/removed phases after durability.",
+      "removal_action": "Extract tombstone-resume handling and source-to-tombstone preparation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-75994f0f5dd4ee2f"
+    },
+    {
+      "path": "src/conversion/included_files_parts/recorded_cleanup.py",
+      "function": "_cleanup_recorded_included_tree",
+      "measured_complexity": 46,
+      "ceiling": 46,
+      "reason": "Preserve absent subtree pruning, reverse file/removal ordering, shared root handle lifetime and child closure before parent removal; do not flatten to recursive path deletion.",
+      "removal_action": "Extract POSIX-like traversal and Windows preflight/cleanup action stacks.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8fc1794e0fb8dc70"
+    },
+    {
+      "path": "src/conversion/included_files_parts/recovery.py",
+      "function": "_cleanup_orphan_included_recovery_state",
+      "measured_complexity": 25,
+      "ceiling": 25,
+      "reason": "Retain fresh sorted rescans, identity/marker validation, unpromoted journal preservation, canonical tombstone names and warning order.",
+      "removal_action": "Extract each of the three reserved-entry classes into separate passes.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ea87dacca7c2b99e"
+    },
+    {
+      "path": "src/conversion/included_files_parts/recovery.py",
+      "function": "_recover_included_output_set",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Keep journal/marker agreement, durable prior generation verification, record retirement order and exact recovery messages/phases.",
+      "removal_action": "Extract marker-only, uncommitted rollback and committed cleanup branches.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-1066d7288473e54c"
+    },
+    {
+      "path": "src/conversion/included_files_parts/recovery_codec.py",
+      "function": "_included_recovery_journal_from_payload",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Retain exact key/type/version rules, compact vs legacy integer policy, alias/device rejection and path construction only after validation.",
+      "removal_action": "Extract staged-snapshot consistency and registry/managed-identity cross-validation.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8bd6de8f7f636481"
+    },
+    {
+      "path": "src/conversion/included_files_parts/staging.py",
+      "function": "_create_included_output_stage",
+      "measured_complexity": 17,
+      "ceiling": 17,
+      "reason": "Preserve 100 collision attempts, parent/child identity checks, marker timing and BaseException-vs-Exception cleanup distinction.",
+      "removal_action": "Extract descriptor-bound and fallback allocation branches.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8d886d7d8fbe0484"
+    },
+    {
+      "path": "src/conversion/included_files_parts/transaction_cleanup.py",
+      "function": "_rollback_included_output_set",
+      "measured_complexity": 31,
+      "ceiling": 31,
+      "reason": "Continue collecting each branch error; never overwrite unknown entries, retain registry-before-root order and exact previous-absence policy.",
+      "removal_action": "Extract registry restoration, root restoration and newly-created-directory cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-a7b40067e92bf25d"
+    },
+    {
+      "path": "src/conversion/managed_output_publisher.py",
+      "function": "_copy_file_exact",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "No-follow one-link/same-device checks and source-after verification must bracket copy; retain read-only mode and binding-close order.",
+      "removal_action": "Extract bounded streaming/digest validation and owned destination cleanup.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-1198191da02ca10c"
+    },
+    {
+      "path": "src/conversion/managed_output_publisher.py",
+      "function": "_move_exact_noreplace",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Keep hook before the second source/destination check, no-replace rename, safe rollback, parent sync order and durable phase only after verified success.",
+      "removal_action": "Extract read-only preparation/restoration and namespace rollback.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-c05bb66e753e2342"
+    },
+    {
+      "path": "src/conversion/managed_output_workspace.py",
+      "function": "ManagedOutputWorkspace._capture_cleanup_entries",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Keep global entry counter/order, stage marker last, resume-prefix policy, mount/device boundaries and child resource closure; never traverse redirects.",
+      "removal_action": "Extract reserved-name validation and regular-file capture from recursive directory capture.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-2adab6ed547d1551"
+    },
+    {
+      "path": "src/conversion/notes.py",
+      "function": "NoteConverter._discover_notes",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Retain sorted DFS/dedup, one resolved-entry map, metadata live read timing and symlink rejection before text copy.",
+      "removal_action": "Extract directory entry collection and note asset assembly.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-072cf50565558748"
+    },
+    {
+      "path": "src/conversion/objects.py",
+      "function": "ObjectConverter.convert_objects",
+      "measured_complexity": 22,
+      "ceiling": 22,
+      "reason": "Preserve manifest authority, initial runtime/context construction, as_completed order, first worker error after all results and sorted final accounting.",
+      "removal_action": "Extract fallback discovery and completed/skipped/failed future accounting.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-aa2d274f778c8fdd"
+    },
+    {
+      "path": "src/conversion/script_functions.py",
+      "function": "modern_script_structure",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.",
+      "removal_action": "Extract declaration parsing and supported top-level initializer cases.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-34e1346ae3e0d615"
+    },
+    {
+      "path": "src/conversion/script_generator.py",
+      "function": "generate_script_content",
+      "measured_complexity": 34,
+      "ceiling": 34,
+      "reason": "Keep plugin callbacks/order, dedup/default body merging, inherited runtime declarations and sprite\u2192object\u2192draw wrapper sequencing.",
+      "removal_action": "Extract event/binding collection, runtime prelude and per-function body wrapping.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e47f1faeb860c46f"
+    },
+    {
+      "path": "src/conversion/shader_translation.py",
+      "function": "_lex_shader",
+      "measured_complexity": 28,
+      "ceiling": 28,
+      "reason": "Keep comment/directive-before-identifier order, line_has_code, backslash continuation, exponent signs, escapes and unterminated-comment issue location.",
+      "removal_action": "Extract directive, number and quoted-string readers while the outer cursor owns locations.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-6e61b6ef9443eb31"
+    },
+    {
+      "path": "src/conversion/shaders.py",
+      "function": "ShaderConverter._disk_shader_assets",
+      "measured_complexity": 22,
+      "ceiling": 22,
+      "reason": "Keep sorted DFS/source containment, expected YY name, read YY then live subfolder reread, same-directory stage ownership and first-stage authority.",
+      "removal_action": "Extract directory scan/classification and asset builder merging.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-75a9e24c9c9bb67a"
+    },
+    {
+      "path": "src/conversion/sprites.py",
+      "function": "SpriteConverter._build_precise_collision_block",
+      "measured_complexity": 24,
+      "ceiling": 24,
+      "reason": "Keep bbox/tolerance validation, strict alpha threshold, static composite vs per-frame masks, shared total rectangle budget and exact shape/node IDs.",
+      "removal_action": "Extract image-to-mask capture and resource/node emission.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-6e221c1c26e19d81"
+    },
+    {
+      "path": "src/conversion/sprites.py",
+      "function": "SpriteConverter.convert_sprites",
+      "measured_complexity": 34,
+      "ceiling": 34,
+      "reason": "Preserve unavailable/orphan/empty accounting, stable collision-safe paths, cancellation before scenes, first worker/scene error, animation fallback and log order.",
+      "removal_action": "Extract sprite source planning, frame worker outcomes and scene finalization.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-04c6efa683bc4b9d"
+    },
+    {
+      "path": "src/conversion/tilesets.py",
+      "function": "TileSetConverter.convert_tilesets",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Preserve request/skip accounting and late YY check, callback provenance, eager future exception behavior, first cancelled return and safe sibling progress.",
+      "removal_action": "Extract manifest vs fallback planning, leaving outcome consumption ordered as_completed.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-3c1b53c87722de2b"
+    },
+    {
+      "path": "src/deep/progress.py",
+      "function": "DeepProgress.apply",
+      "measured_complexity": 16,
+      "ceiling": 16,
+      "reason": "Keep sequence replay rejection before mutation, capabilities early return, queued/completed rows, phase defaults and malformed container handling.",
+      "removal_action": "Extract monitoring row merge and completion/error message update.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-9c671a631fe3e7ae"
+    },
+    {
+      "path": "src/gui/widgets/deep_model_picker.py",
+      "function": "DeepModelPicker.set_catalog",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "Keep saved selection/recommendation policy, signal blocking stages, authenticated runtime wording and catalog_changed then selection_changed order.",
+      "removal_action": "Extract automatic/provider/free population and status text construction.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e2f53a41191826dc"
+    },
+    {
+      "path": "src/update_checker.py",
+      "function": "UpdateChecker.download_update",
+      "measured_complexity": 23,
+      "ceiling": 23,
+      "reason": "Keep request before validation, finite streaming bounds, progress callbacks, old mode preservation, publication only after exact digest/size and response/temp cleanup.",
+      "removal_action": "Extract expected/header validation and streamed digest/size verification.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-449e694d388ce00c"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "TestCIWorkflows.test_authoritative_dependency_lock_fetch_contract",
+      "measured_complexity": 17,
+      "ceiling": 17,
+      "reason": "All22 assertion sites remain, including endpoint order and duplicate shared-Mac request, raw per-label lock bytes, empty output on every failure, duplicate/truncated JSON, content/size cap and missing response. Keep Intel metadata/source/missing/content/newline mutations and exact errors. Never deduplicate the two Mac fetches or normalize their raw-byte comparison.",
+      "removal_action": "Extract authenticated response/fake-gh fixture construction and a negative-result assertion helper; consolidate only repeated execution/assertion plumbing while each mutation remains named and independent.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-7c0abbdb6920c4e3"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "TestCIWorkflows.test_native_wheel_LF_materialization_rebuilds_cached_CRLF_index_fatally",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "All27 assertion call sites (including nested Git/index helpers) stay. Keep two literal LF script equality checks, native Windows Git-Bash resolution, sanitized GIT environment, executable mode/binary blobs, stale mtime/index reproduction and force-alone defect control. Same15s subprocess budgets; unchanged config/HEAD/tree/paths and failed source empty-index-before-write assertions.",
+      "removal_action": "Extract disposable Git fixture preparation/CRLF cache setup and one valid/missing/unavailable-source exercise with explicit arguments; retain the original public case and subTest labels.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-f45ad626ff4eea37"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "TestCIWorkflows.test_privileged_dependency_snapshot_validator_matches_producer_contract",
+      "measured_complexity": 44,
+      "ceiling": 44,
+      "reason": "All13 assertion sites stay and execute repeatedly across four success and16 negative fixtures. Preserve real dependency_snapshot producer calls and regular0600 archive metadata; distinct authoritative locks vs self-consistent forged candidates; current/prior attempt acceptance but future rejection; Windows newline acceptance; all pip/job/correlator/source/receipt/member/Intel archive and authoritative inventory failures. Every rejected set leaves validated output empty. No Python-only mirror of the extracted Bash validator.",
+      "removal_action": "Extract per-platform producer artifact assembly, one validator-run fixture and named mutation groups; retain the original case, success/negative subTests and assertions.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-b82c72e58e2031b7"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "_macos_release_build_policy_errors",
+      "measured_complexity": 35,
+      "ceiling": 35,
+      "reason": "Retain early structural returns, error ordering, four exact runtime tuples, all guard/timeout/environment exclusions, fatal metadata/native/GUI ordering, unique archive paths/names, exact publisher predicate and four digest-mismatch-enforced downloads. Avoid a permissive normalized YAML validator that hides duplicate or injected steps.",
+      "removal_action": "Extract matrix/runtime policy, Mac step metadata/commands, architecture-specific artifact routing and publisher/download policy into finite validators that append to the same error list.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-fc572cf9e6251363"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "_native_wheel_proposal_policy_errors",
+      "measured_complexity": 27,
+      "ceiling": 27,
+      "reason": "Retain literal prelude/source phase and headers, two checkout/LF instances, named step order/count, pinned actions/root-script SHA, event/ref/HEAD bounds, fatal stdlib test prefix, fresh aggregate parent and exact shlex command tails. Do not interpret always() here as the release validator does; this aggregate explicitly inspects matrix result.",
+      "removal_action": "Extract native/aggregate header policy, exact action and root-script policy, and producer/validator command policy. Keep outer ordered error accumulation and early missing-job return.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-8d0821ca086b641e"
+    },
+    {
+      "path": "tests/test_ci_workflows.py",
+      "function": "_run_existing_release_integrity",
+      "measured_complexity": 22,
+      "ceiling": 22,
+      "reason": "Keep generated program bytes and shebangs, endpoint/header/GET argument rejection, selected-release asset binding, per-kind response state/call logs/failures, strict manifest parsing and forced checksum exit. Retain PATH isolation, native tool links, missing token/repository/tag/tool cases and exact cwd/capture. Do not replace literal executed Bash or embedded programs with calls to a mirror validator.",
+      "removal_action": "Extract response/payload materialization and finite fake-gh/fake-sha256sum fixture writers, leaving actual workflow extraction, environment assembly and Bash invocation in the owner.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e26c9b765387d3ea"
+    },
+    {
+      "path": "tests/test_gml_transpiler_architecture.py",
+      "function": "_expression_boundary_bypasses_from_source",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "The utility module and its named/wildcard imports have a distinct rule from implementation modules. Preserve aliases and existing explicit local cycle gateways.",
+      "removal_action": "Share only the exact AST facade-binding/attribute mechanics with the lexical scanner; keep each finite owner/name policy in its own scanner. Retain every existing expression bypass fixture.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-6bb4217efe913172"
+    },
+    {
+      "path": "tests/test_gml_transpiler_architecture.py",
+      "function": "_lexical_boundary_bypasses_from_source",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Relative imports, alias prefixes and all legacy lexical facade names must still be checked; extracting a helper must not skip direct module edges.",
+      "removal_action": "Extract the exact facade-binding collection and attribute access scan into finite AST-only helpers. Retain lexical import policy here and all original bypass fixtures.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-afc8b7787b44a928"
+    },
+    {
+      "path": "tests/test_godot_validation.py",
+      "function": "TestGodotProcessOwnership._run_fake",
+      "measured_complexity": 20,
+      "ceiling": 20,
+      "reason": "Group signal precedes reaping; fake reader release, observer close notes, original SIGCHLD policy and primary error identities must retain exact order. Module proxies must not patch process-global os behavior.",
+      "removal_action": "Extract the typed reader factory and individual fake-operation bindings into a dedicated fixture owner. Keep one original patch scope, real runner call and finally reader-release sequence. Preserve all existing process-ownership cases.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-0f016ae884964633"
+    },
+    {
+      "path": "tests/test_included_files_owner_architecture.py",
+      "function": "assert_orchestration_boundary",
+      "measured_complexity": 19,
+      "ceiling": 19,
+      "reason": "Read-only source listing/open/close and the single driver mkdir are explicit exceptions. String/dataclass replace remains pure; alias/attribute resolution and write-open flag rejection cannot become leaf-name-only checks.",
+      "removal_action": "Extract import-binding collection and a finite recursive target resolver, then isolate one call policy check. Retain existing exact allowed operation sets and all negative bypass fixtures.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e504a2d7ca5faa51"
+    },
+    {
+      "path": "tests/test_native_wheel_proposals.py",
+      "function": "TestNativeWheelProposals.test_actual_guardian_readiness_defers_result_reads_and_preserves_fatal_failures",
+      "measured_complexity": 18,
+      "ceiling": 18,
+      "reason": "The literal subprocess fixture, stdin release handshake, no early result reads, bounded timeout, reaped process and closed stdin assertions are independent safety evidence. Preserve temporary module-family restoration and mode labels.",
+      "removal_action": "Extract the byte-exact guardian fixture writer and one per-mode test driver with a finite typed fixture state for acquired process/root/read observations. Keep all original assertions and actual subprocess execution; no modeled replacement.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-5eaf84f6fe5c6200"
+    },
+    {
+      "path": "tests/test_release_publisher.py",
+      "function": "ScriptedTransport._fault_result",
+      "measured_complexity": 36,
+      "ceiling": 36,
+      "reason": "Some failures mutate remote state before losing the response. Keep owned/foreign IDs, draft versus public URLs, streamed size/digest, mutation timing and exact HTTP status distinctions; a generic error dictionary would hide these behaviors.",
+      "removal_action": "Split explicit fault dispatch into tag, release ownership, upload and final-publication helpers, retaining existing FaultKind coverage and terminal unknown-kind error. Keep transport sequence/ordinal and original mutation methods authoritative.",
+      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-6013e6c02608a406"
+    }
+  ]
+}

@@ -107,6 +107,9 @@ EXPECTED_RUFF_LINT_STEPS = f"""\
           git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
             xargs -0 -- python -m ruff check --isolated --target-version py312 --line-length 120 \\
               --select {EXPECTED_RUFF_SELECTOR_ARGUMENT} --ignore-noqa --no-respect-gitignore --no-force-exclude --config lint.isort.combine-as-imports=true --
+
+      - name: Enforce measured function complexity
+        run: python -m scripts.check_complexity
 """
 
 
@@ -472,7 +475,12 @@ class TestDocumentationHealth(unittest.TestCase):
                 self.assertIn("./venv/bin/python -m ruff check .", content)
                 self.assertIn("generated `build/`, `dist/`, and `release/` output", content)
                 self.assertIn("local `venv/` environment", content)
-                self.assertIn("The `C90` family belongs to a separate reviewed change.", content)
+                self.assertIn("./venv/bin/python -m scripts.check_complexity", content)
+                self.assertIn("fixes the threshold at 15", content)
+                self.assertIn("complexity-exceptions.json", content)
+                self.assertIn("New or increased debt fails.", content)
+                self.assertIn("must tighten both measured score and ceiling", content)
+                self.assertIn("Do not add blanket `C901` suppressions or raise the threshold.", content)
                 self.assertIn("This focused B gate does not enable the entire B family.", content)
                 for rule in FOCUSED_B_RULES:
                     self.assertIn(f"`{rule}`", content)

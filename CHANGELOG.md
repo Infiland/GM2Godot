@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.36 - 2026-10-04
+
+- Simplify the README into a project overview with GUI and CLI getting-started instructions and links to detailed guides.
+- Keep installation, compatibility and report guidance in the Wiki; preserve the existing development account in a separate document.
+
 ## 0.8.35 - 2026-10-04
 
 - Give CLI report checkpointing, restoration and publication a dedicated typed owner while preserving report bytes, summaries, cancellation and error precedence.

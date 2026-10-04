@@ -1,6 +1,6 @@
 # GM2Godot Documentation
 
-> **Applies to:** GM2Godot 0.8.35 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.36 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -21,7 +21,7 @@ Maintainers should also read [Release and Wiki Maintenance](Maintainer-Release-a
 
 This documentation set describes:
 
-- GM2Godot 0.8.35;
+- GM2Godot 0.8.36;
 - GameMaker LTS 2026 source projects in the GMS2 runtime family; and
 - Godot 4.7.2 output and validation, pinned in CI as `4.7.2.stable.official.ed1daf0bf`.
 
@@ -40,7 +40,7 @@ GameMaker beta/GMRT releases and later Godot releases are not implied by that ta
 
 The Wiki explains how to use the project. Details that change frequently remain canonical in the repository:
 
-- [README and CLI outcome contract](https://github.com/Infiland/GM2Godot/blob/main/README.md)
+- [Project overview](https://github.com/Infiland/GM2Godot/blob/main/README.md)
 - [Compatibility roadmap](https://github.com/Infiland/GM2Godot/tree/main/todo-list) — planning context, not a live support table
 - [Generated-runtime documentation](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/runtime_managers.md)
 - [Godot architecture policy](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/godot_architecture_policy.md)

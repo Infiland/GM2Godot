@@ -116,7 +116,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 - [ ] Reduce broad file-level Pyright suppressions over time.
 - [x] Add Ruff or equivalent linting.
-- [ ] Add complexity checks for parser/emitter/runtime generation modules.
+- [x] Add complexity checks for parser/emitter/runtime generation modules with threshold 15 and individually reviewed, ratcheting function exceptions.
 - [x] Add import sorting.
 - [x] Enforce import placement (`E4`) without new suppressions; event tests use normal package imports and deliberate bootstrap/discovery stages remain explicit.
 - [x] Add unused code checks through the complete Pyflakes (`F`) family in local and tracked-source CI lint.
@@ -124,7 +124,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.
 - [x] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.
-- [ ] Add local pre-commit hooks or documented equivalent commands.
+- [x] Document required local Pyright, configured and tracked-source Ruff, complexity, and unittest commands as the equivalent checks before a commit.
 - [ ] Make tests import source through package configuration rather than repeated `sys.path` mutation.
 - [ ] Add shared test utility for Godot binary discovery.
 - [ ] Add shared fixture-writing helpers.

@@ -114,7 +114,7 @@ Use the matching companion from the table for another host, with its exact inter
 - Keep functions focused and concise
 - Use type hints where appropriate
 - Keep linting and type checking clean for code changes. Run `./venv/bin/pyright --warnings` before submitting Python or generated-code logic changes and fix every reported error or warning.
-- Run `./venv/bin/python -m ruff check .` before submitting Python code. CI enforces Ruff's complete `E7` and Pyflakes (`F`) rule families, plus `E9` fatal-error checks. `E7` includes the `E731` assigned-lambda and `E741` ambiguous-variable rules. Do not disable `F` or individual `F`-numbered rules globally or per file. Ruff also enforces import placement through the `E4` rule family. Keep repository-path setup in explicit conditional guards and preserve discovery before dependent imports; do not hide placement failures with new `E4` ignores. Ruff also enforces import sorting through the `I` rule family. Keep aliased imports together with `combine-as-imports = true`, including deliberate local cycle gateways. Preserve bootstrap and environment setup before dependent imports; keep intentional local imports local. Do not add `I` ignores or sorting skips. The local configuration excludes generated `build/`, `dist/`, and `release/` output and the local `venv/` environment; CI also checks every tracked lint input without suppression or exclusion bypasses. Ruff also enforces the focused stable bug-risk selectors `B002`, `B003`, `B004`, `B005`, `B006`, `B008`, `B011`, `B012`, `B014`, `B015`, `B016`, `B017`, `B018`, `B019`, `B020`, `B021`, `B022`, `B025`, `B029`, `B030`, `B031`, `B032`, `B033`, `B035`, `B039`, `B905`. This focused B gate does not enable the entire B family. B009/B010 attribute style, B023 callback lifetimes and B904 exception causes remain separate source reviews. The `C90` family belongs to a separate reviewed change.
+- Run `./venv/bin/python -m ruff check .` before submitting Python code. CI enforces Ruff's complete `E7` and Pyflakes (`F`) rule families, plus `E9` fatal-error checks. `E7` includes the `E731` assigned-lambda and `E741` ambiguous-variable rules. Do not disable `F` or individual `F`-numbered rules globally or per file. Ruff also enforces import placement through the `E4` rule family. Keep repository-path setup in explicit conditional guards and preserve discovery before dependent imports; do not hide placement failures with new `E4` ignores. Ruff also enforces import sorting through the `I` rule family. Keep aliased imports together with `combine-as-imports = true`, including deliberate local cycle gateways. Preserve bootstrap and environment setup before dependent imports; keep intentional local imports local. Do not add `I` ignores or sorting skips. The local configuration excludes generated `build/`, `dist/`, and `release/` output and the local `venv/` environment; CI also checks every tracked lint input without suppression or exclusion bypasses. Ruff also enforces the focused stable bug-risk selectors `B002`, `B003`, `B004`, `B005`, `B006`, `B008`, `B011`, `B012`, `B014`, `B015`, `B016`, `B017`, `B018`, `B019`, `B020`, `B021`, `B022`, `B025`, `B029`, `B030`, `B031`, `B032`, `B033`, `B035`, `B039`, `B905`. This focused B gate does not enable the entire B family. B009/B010 attribute style, B023 callback lifetimes and B904 exception causes remain separate source reviews. Function complexity has a separate required gate: `./venv/bin/python -m scripts.check_complexity`.
 
 Run Python tests from the repository root with `./venv/bin/python -m unittest` or module-qualified unittest selectors. The event-mapping test package uses normal package imports and does not add the repository to `sys.path`.
 
@@ -134,6 +134,29 @@ git ls-files -z -- '*.py' '*.pyi' '*.pyw' '*.ipynb' '*.md' |
 ```
 
 This command checks tracked Python source regardless of local ignores or exclusions. Ruff does not lint Python code blocks in the passed Markdown documents.
+
+Run `./venv/bin/python -m scripts.check_complexity` as a separate required gate.
+It checks every tracked lint input with isolated Ruff `C90`, ignores `noqa`,
+and fixes the threshold at 15. `complexity-exceptions.json` contains only
+individually reviewed repository-path and qualified-function ceilings, with a
+measured score, responsibility-specific reason, removal action, and link to a real
+issue or tracked Markdown removal plan. New or increased debt fails. Improvements
+must tighten both measured score and ceiling; deleted, renamed or simplified
+functions require removing stale entries. Ordinary Ruff does not read these
+per-function ceilings, so its clean result does not replace this command.
+Do not add blanket `C901` suppressions or raise the threshold.
+
+Local removal-plan links must name readable UTF-8 Markdown at their canonical
+tracked repository path. A supplied fragment must match an existing standalone
+`<a id="name"></a>` or `<a name="name"></a>` anchor, or a simple ATX heading of
+plain words (letters/numbers/underscores/hyphens separated by spaces or tabs).
+Heading fragments use lowercase words joined by hyphens; repeated headings add
+`-1`, `-2`, and so on. Explicit anchor names and supplied fragments match
+literally and are case-sensitive. Fenced/indented code and HTML comment lines do
+not define anchors. Use an explicit standalone anchor for headings with inline
+markup or punctuation; this gate is not a general Markdown renderer. HTTPS
+tracking links remain source-review obligations and are not fetched by the gate.
+
 
 
 ### UI Development

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.44 - 2026-10-04
+
+- Record startup-scene warnings in the supplied diagnostic collector before delivering the original raw callback.
+- Preserve warning text, callback order and exceptions, and wrapped or preseeded same-message report deduplication.
+
 ## 0.8.43 - 2026-10-04
 
 - Require successful exact-source main quality workflows and every selected job before release publication.

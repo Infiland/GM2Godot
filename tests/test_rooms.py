@@ -1484,7 +1484,7 @@ class TestRoomConverter(unittest.TestCase):
         ]
         self.assertEqual(
             {diagnostic.code for diagnostic in diagnostics.diagnostics()},
-            {"GM2GD-ROOM-CREATION-READ"},
+            {"GM2GD-ROOM-CREATION-READ", "GM2GD-WARNING"},
         )
         self.assertEqual(len(read_diagnostics), 1, read_diagnostics)
         diagnostic = read_diagnostics[0]
@@ -1492,6 +1492,31 @@ class TestRoomConverter(unittest.TestCase):
         self.assertEqual(diagnostic.resource, "r_unreadable")
         self.assertEqual(diagnostic.resource_type, "room")
         self.assertEqual(diagnostic.event, "room creation code")
+
+        self.assertEqual(diagnostic.severity, "warning")
+        startup_diagnostics = [
+            row for row in diagnostics.diagnostics() if row.code == "GM2GD-WARNING"
+        ]
+        self.assertEqual(len(startup_diagnostics), 1, startup_diagnostics)
+        self.assertEqual(startup_diagnostics[0].to_dict(), {
+            "severity": "warning",
+            "code": "GM2GD-WARNING",
+            "message": "Warning: No room scene generated; leaving project.godot main_scene unchanged.",
+            "source_path": None,
+            "line": None,
+            "column": None,
+            "resource": None,
+            "resource_type": None,
+            "event": None,
+            "api": None,
+            "manifest_entry": None,
+            "issue_number": None,
+            "workaround": None,
+        })
+        self.assertEqual(
+            diagnostics.diagnostics(),
+            (diagnostic, startup_diagnostics[0]),
+        )
 
     def test_rejects_unsafe_room_creation_code_paths_with_owner_diagnostics(self):
         room_names = [
@@ -2067,7 +2092,7 @@ class TestRoomConverter(unittest.TestCase):
         ]
         self.assertEqual(
             {diagnostic.code for diagnostic in diagnostics.diagnostics()},
-            {"GM2GD-GML-TRANSPILE"},
+            {"GM2GD-GML-TRANSPILE", "GM2GD-WARNING"},
         )
         self.assertEqual(len(transpile_diagnostics), 1, transpile_diagnostics)
         diagnostic = transpile_diagnostics[0]
@@ -2077,6 +2102,31 @@ class TestRoomConverter(unittest.TestCase):
         self.assertEqual(
             diagnostic.event,
             "instance creation code for inst_player",
+        )
+
+        self.assertEqual(diagnostic.severity, "warning")
+        startup_diagnostics = [
+            row for row in diagnostics.diagnostics() if row.code == "GM2GD-WARNING"
+        ]
+        self.assertEqual(len(startup_diagnostics), 1, startup_diagnostics)
+        self.assertEqual(startup_diagnostics[0].to_dict(), {
+            "severity": "warning",
+            "code": "GM2GD-WARNING",
+            "message": "Warning: First GameMaker room scene was not generated; leaving project.godot main_scene unchanged.",
+            "source_path": None,
+            "line": None,
+            "column": None,
+            "resource": None,
+            "resource_type": None,
+            "event": None,
+            "api": None,
+            "manifest_entry": None,
+            "issue_number": None,
+            "workaround": None,
+        })
+        self.assertEqual(
+            diagnostics.diagnostics(),
+            (diagnostic, startup_diagnostics[0]),
         )
 
     def test_missing_instance_creation_code_skips_room_with_structured_diagnostic(self):
@@ -2386,6 +2436,266 @@ class TestRoomConverter(unittest.TestCase):
             content = f.read()
         self.assertIn('run/main_scene="res://keep.tscn"', content)
         self.assertTrue(any("stopped" in log.lower() for log in self.logs))
+
+
+    def test_startup_warnings_are_recorded_before_raw_callback_delivery(self) -> None:
+        cases: list[tuple[str, list[str], str | None, str, bool]] = [
+            (
+                "no_scenes_cleared", [], "res://rooms/stale/stale.tscn",
+                "Warning: No room scene generated; removed the stale "
+                "GM2Godot-managed project.godot main_scene.", True,
+            ),
+            (
+                "no_scenes_unchanged", [], "res://keep.tscn",
+                "Warning: No room scene generated; leaving project.godot "
+                "main_scene unchanged.", False,
+            ),
+            (
+                "first_scene_cleared", ["r_blocked", "r_ready"], "res://rooms/stale/stale.tscn",
+                "Warning: First GameMaker room scene was not generated; "
+                "removed the stale GM2Godot-managed project.godot main_scene.", True,
+            ),
+            (
+                "first_scene_unchanged", ["r_blocked", "r_ready"], "res://keep.tscn",
+                "Warning: First GameMaker room scene was not generated; "
+                "leaving project.godot main_scene unchanged.", False,
+            ),
+            (
+                "missing_project", ["r_ready"], None,
+                "Warning: project.godot not found; could not set startup scene.", False,
+            ),
+        ]
+        for label, names, main_scene, warning, removed in cases:
+            with self.subTest(branch=label):
+                gm_dir = os.path.join(self.gm_dir, label)
+                godot_dir = os.path.join(self.godot_dir, label)
+                manifest = _make_yyp(names) if names else json.dumps({
+                    "resources": [], "RoomOrderNodes": [], "resourceType": "GMProject",
+                })
+                _write_file(os.path.join(gm_dir, "TestProject.yyp"), manifest)
+                for name in names:
+                    _write_file(
+                        os.path.join(gm_dir, "rooms", name, name + ".yy"),
+                        _make_room_yy(
+                            name,
+                            creation_code_file="RoomCreationCode.gml" if name == "r_blocked" else "",
+                        ),
+                    )
+                project_path = os.path.join(godot_dir, "project.godot")
+                initial = (
+                    '[application]\nconfig/name="Existing"\n'
+                    f'run/main_scene="{main_scene}"\n'
+                )
+                expected = initial.replace(f'run/main_scene="{main_scene}"\n', '') if removed else initial
+                if main_scene is not None:
+                    _write_file(project_path, initial)
+                collector = DiagnosticCollector()
+                delivered: list[str] = []
+
+                def receive(message: str) -> None:
+                    if message == warning:
+                        rows = [row for row in collector.diagnostics() if row.message == warning]
+                        self.assertEqual(len(rows), 1)
+                        self.assertEqual(rows[0].to_dict(), {
+                            "severity": "warning", "code": "GM2GD-WARNING", "message": warning,
+                            "source_path": None, "line": None, "column": None,
+                            "resource": None, "resource_type": None, "event": None, "api": None,
+                            "manifest_entry": None, "issue_number": None, "workaround": None,
+                        })
+                        if main_scene is None:
+                            self.assertFalse(os.path.exists(project_path))
+                        else:
+                            with open(project_path, "r", encoding="utf-8") as stream:
+                                self.assertEqual(stream.read(), expected)
+                    delivered.append(message)
+
+                RoomConverter(
+                    gm_dir, godot_dir, log_callback=receive, max_workers=1, diagnostics=collector,
+                ).convert_all()
+
+                self.assertEqual(delivered[-2:], [warning, "Room conversion completed."])
+                self.assertEqual(delivered.count(warning), 1)
+                self.assertFalse(os.path.exists(os.path.join(godot_dir, "rooms", "r_blocked")))
+                if names:
+                    with open(
+                        os.path.join(godot_dir, "rooms", "r_ready", "r_ready.tscn"),
+                        "r", encoding="utf-8",
+                    ) as stream:
+                        self.assertTrue(stream.read().startswith("[gd_scene"))
+                else:
+                    self.assertFalse(os.path.exists(os.path.join(godot_dir, "rooms")))
+                    self.assertFalse(os.path.exists(os.path.join(godot_dir, ROOM_RUNTIME_SCRIPT_RELATIVE_PATH)))
+
+    def test_wrapped_startup_warnings_keep_report_bytes_and_deduplication(self) -> None:
+        _write_file(os.path.join(self.gm_dir, "TestProject.yyp"), json.dumps({
+            "resources": [], "RoomOrderNodes": [], "resourceType": "GMProject",
+        }))
+        collector = DiagnosticCollector()
+        reference = DiagnosticCollector()
+        delivered: list[str] = []
+        reference_delivered: list[str] = []
+        wrapped = collector.wrap_log_callback(delivered.append)
+        reference_wrapped = reference.wrap_log_callback(reference_delivered.append)
+
+        def receive(message: str) -> None:
+            wrapped(message)
+            reference_wrapped(message)
+
+        converter = RoomConverter(
+            self.gm_dir, self.godot_dir, log_callback=receive, max_workers=1, diagnostics=collector,
+        )
+        self._write_project_godot(
+            '[application]\nrun/main_scene="res://rooms/stale/stale.tscn"\n'
+        )
+        converter.convert_all()
+        self._write_project_godot('[application]\nrun/main_scene="res://keep.tscn"\n')
+        converter.convert_all()
+        converter.convert_all()
+
+        cleared = (
+            "Warning: No room scene generated; removed the stale "
+            "GM2Godot-managed project.godot main_scene."
+        )
+        unchanged = (
+            "Warning: No room scene generated; leaving project.godot "
+            "main_scene unchanged."
+        )
+        self.assertEqual(delivered, [
+            cleared, "Room conversion completed.",
+            unchanged, "Room conversion completed.",
+            unchanged, "Room conversion completed.",
+        ])
+        self.assertEqual(delivered, reference_delivered)
+        self.assertEqual(collector.diagnostics(), reference.diagnostics())
+        self.assertEqual(collector.summary(), {"info": 0, "warning": 2, "error": 0, "total": 2})
+        self.assertEqual(collector.to_json().encode("utf-8"), reference.to_json().encode("utf-8"))
+        self.assertEqual(collector.to_markdown().encode("utf-8"), reference.to_markdown().encode("utf-8"))
+
+    def test_startup_callback_failure_keeps_scene_mutation_and_exception_identity(self) -> None:
+        warning = (
+            "Warning: No room scene generated; removed the stale "
+            "GM2Godot-managed project.godot main_scene."
+        )
+        for with_collector in (True, False):
+            with self.subTest(collector=with_collector):
+                label = "collected" if with_collector else "uncollected"
+                gm_dir = os.path.join(self.gm_dir, label)
+                godot_dir = os.path.join(self.godot_dir, label)
+                _write_file(os.path.join(gm_dir, "TestProject.yyp"), json.dumps({
+                    "resources": [], "RoomOrderNodes": [], "resourceType": "GMProject",
+                }))
+                project_path = os.path.join(godot_dir, "project.godot")
+                _write_file(project_path, '[application]\nrun/main_scene="res://rooms/stale/stale.tscn"\n')
+                collector = DiagnosticCollector() if with_collector else None
+                delivered: list[str] = []
+                failure = RuntimeError("startup callback sentinel")
+
+                def receive(message: str) -> None:
+                    delivered.append(message)
+                    if message == warning:
+                        with open(project_path, "r", encoding="utf-8") as stream:
+                            self.assertEqual(stream.read(), '[application]\n')
+                        if collector is not None:
+                            self.assertEqual([row.message for row in collector.diagnostics()], [warning])
+                        raise failure
+
+                converter = RoomConverter(
+                    gm_dir, godot_dir, log_callback=receive, max_workers=1, diagnostics=collector,
+                )
+                with self.assertRaises(RuntimeError) as raised:
+                    converter.convert_all()
+
+                self.assertIs(raised.exception, failure)
+                self.assertEqual(delivered, [warning])
+                self.assertIs(converter.diagnostics, collector)
+                self.assertFalse(os.path.exists(os.path.join(godot_dir, "rooms")))
+                with open(project_path, "r", encoding="utf-8") as stream:
+                    self.assertEqual(stream.read(), '[application]\n')
+
+
+    def test_preseeded_contextual_startup_warning_keeps_wrapped_report_bytes(self) -> None:
+        cleared = (
+            "Warning: No room scene generated; removed the stale "
+            "GM2Godot-managed project.godot main_scene."
+        )
+        unchanged = (
+            "Warning: No room scene generated; leaving project.godot "
+            "main_scene unchanged."
+        )
+        expected_reports: tuple[bytes, bytes] | None = None
+        for route in ("wrapper_reference", "direct_collector", "wrapped_collector"):
+            with self.subTest(route=route):
+                gm_dir = os.path.join(self.gm_dir, route)
+                godot_dir = os.path.join(self.godot_dir, route)
+                _write_file(os.path.join(gm_dir, "TestProject.yyp"), json.dumps({
+                    "resources": [], "RoomOrderNodes": [], "resourceType": "GMProject",
+                }))
+                project_path = os.path.join(godot_dir, "project.godot")
+                _write_file(
+                    project_path,
+                    '[application]\nrun/main_scene="res://rooms/stale/stale.tscn"\n',
+                )
+                collector = DiagnosticCollector()
+                seeded = collector.add(
+                    "warning", "GM2GD-RESOURCE-UNSUPPORTED", cleared,
+                    source_path="rooms/r_context/r_context.yy",
+                    resource="r_context", resource_type="room",
+                    manifest_entry="RoomOrderNodes",
+                    workaround="Keep the existing contextual diagnostic.",
+                )
+                delivered: list[str] = []
+
+                def receive(message: str) -> None:
+                    if message in (cleared, unchanged):
+                        records = collector.diagnostics()
+                        self.assertIs(records[0], seeded)
+                        same_message = [row for row in records if row.message == message]
+                        self.assertEqual(len(same_message), 1)
+                        if message == cleared:
+                            self.assertEqual(records, (seeded,))
+                            self.assertIs(same_message[0], seeded)
+                        else:
+                            self.assertEqual(len(records), 2)
+                            self.assertEqual(same_message[0].to_dict(), {
+                                "severity": "warning", "code": "GM2GD-WARNING", "message": unchanged,
+                                "source_path": None, "line": None, "column": None,
+                                "resource": None, "resource_type": None, "event": None, "api": None,
+                                "manifest_entry": None, "issue_number": None, "workaround": None,
+                            })
+                        with open(project_path, "r", encoding="utf-8") as stream:
+                            self.assertEqual(stream.read(), '[application]\n')
+                    delivered.append(message)
+
+                converter = RoomConverter(
+                    gm_dir, godot_dir,
+                    log_callback=(
+                        receive if route == "direct_collector"
+                        else collector.wrap_log_callback(receive)
+                    ),
+                    max_workers=1,
+                    diagnostics=None if route == "wrapper_reference" else collector,
+                )
+                converter.convert_all()
+                converter.convert_all()
+                converter.convert_all()
+
+                self.assertEqual(delivered, [
+                    cleared, "Room conversion completed.",
+                    unchanged, "Room conversion completed.",
+                    unchanged, "Room conversion completed.",
+                ])
+                self.assertEqual([row.message for row in collector.diagnostics()], [cleared, unchanged])
+                self.assertEqual(collector.summary(), {"info": 0, "warning": 2, "error": 0, "total": 2})
+                self.assertFalse(os.path.exists(os.path.join(godot_dir, "rooms")))
+                reports = (
+                    collector.to_json().encode("utf-8"),
+                    collector.to_markdown().encode("utf-8"),
+                )
+                if expected_reports is None:
+                    expected_reports = reports
+                else:
+                    self.assertEqual(reports, expected_reports)
+
 
 
 class _TypedLayoutResourceIndex:

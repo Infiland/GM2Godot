@@ -818,6 +818,11 @@ class RoomConverter(BaseConverter):
             self._resource_skipped(room.name)
         return result
 
+    def _log_startup_warning(self, message: str) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.add_from_log_message(message)
+        self.log_callback(message)
+
     def _set_startup_scene(
         self, index: GameMakerResourceIndex, generated_scene_paths: dict[str, str]
     ) -> None:
@@ -829,12 +834,12 @@ class RoomConverter(BaseConverter):
                 project_file,
                 generated_scene_paths,
             ):
-                self.log_callback(
+                self._log_startup_warning(
                     "Warning: No room scene generated; removed the stale "
                     "GM2Godot-managed project.godot main_scene."
                 )
             else:
-                self.log_callback(
+                self._log_startup_warning(
                     "Warning: No room scene generated; leaving project.godot "
                     "main_scene unchanged."
                 )
@@ -846,12 +851,12 @@ class RoomConverter(BaseConverter):
                 project_file,
                 generated_scene_paths,
             ):
-                self.log_callback(
+                self._log_startup_warning(
                     "Warning: First GameMaker room scene was not generated; "
                     "removed the stale GM2Godot-managed project.godot main_scene."
                 )
             else:
-                self.log_callback(
+                self._log_startup_warning(
                     "Warning: First GameMaker room scene was not generated; "
                     "leaving project.godot main_scene unchanged."
                 )
@@ -866,7 +871,7 @@ class RoomConverter(BaseConverter):
                 )
             )
         else:
-            self.log_callback(
+            self._log_startup_warning(
                 "Warning: project.godot not found; could not set startup scene."
             )
 

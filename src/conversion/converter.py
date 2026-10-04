@@ -113,6 +113,9 @@ class _FinalizerReportCheckpoint:
     diagnostics_receipt: ConversionDiagnosticReportPublicationReceipt | None = None
 
 
+_EMPTY_RESOURCE_COUNTS: ConversionCounts = ConversionCounts()
+
+
 class Converter:
     managed_output_transactional = True
 
@@ -1228,7 +1231,7 @@ class Converter:
         state: ConversionTerminalState,
         *,
         steps: ConversionStepLedger,
-        resources: ConversionCounts = ConversionCounts(),
+        resources: ConversionCounts = _EMPTY_RESOURCE_COUNTS,
         failed_step: str | None = None,
         failure_phase: str | None = None,
     ) -> ConversionOutcome:

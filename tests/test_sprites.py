@@ -437,7 +437,7 @@ def _make_yy_content(sprite_name: str, frame_guids: list[str], layer_guids: list
     layers_json = ",\n    ".join(
         '{{"$GMImageLayer":"","name":"{g}","displayName":"Layer {i}","opacity":100.0,"visible":{v},"resourceType":"GMImageLayer","resourceVersion":"2.0",}}'.format(
             g=g, i=i, v="true" if v else "false")
-        for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
+        for i, (g, v) in enumerate(zip(layer_guids, layer_visible, strict=False))
     )
     return '''{{\n  "frames":[\n    {frames}\n  ],\n  "layers":[\n    {layers}\n  ],\n  "name":"{name}",\n  "resourceType":"GMSprite",\n  "resourceVersion":"2.0",\n}}'''.format(
         frames=frames_json, layers=layers_json, name=sprite_name)
@@ -470,7 +470,7 @@ class TestSpriteConverterFrameOrdering(unittest.TestCase):
             f.write(yy_content)
 
         # Create frame directories with distinct colors
-        for guid, color in zip(self.FRAME_GUIDS, self.FRAME_COLORS):
+        for guid, color in zip(self.FRAME_GUIDS, self.FRAME_COLORS, strict=False):
             frame_dir = os.path.join(sprite_dir, "layers", guid)
             os.makedirs(frame_dir)
             img = Image.new("RGBA", (2, 2), color)
@@ -1277,7 +1277,7 @@ def _make_yy_content_with_collision(sprite_name: str, frame_guids: list[str], la
     layers_json = ",\n    ".join(
         '{{"$GMImageLayer":"","name":"{g}","displayName":"Layer {i}","opacity":100.0,"visible":{v},"resourceType":"GMImageLayer","resourceVersion":"2.0",}}'.format(
             g=g, i=i, v="true" if v else "false")
-        for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
+        for i, (g, v) in enumerate(zip(layer_guids, layer_visible, strict=False))
     )
     return (
         '{{\n'
@@ -1329,11 +1329,11 @@ def _make_yy_content_with_sequence(sprite_name: str, frame_guids: list[str], lay
     layers_json = ",\n    ".join(
         '{{"$GMImageLayer":"","name":"{g}","displayName":"Layer {i}","opacity":100.0,"visible":{v},"resourceType":"GMImageLayer","resourceVersion":"2.0",}}'.format(
             g=g, i=i, v="true" if v else "false")
-        for i, (g, v) in enumerate(zip(layer_guids, layer_visible))
+        for i, (g, v) in enumerate(zip(layer_guids, layer_visible, strict=False))
     )
     # Build sequence keyframes
     keyframes: list[str] = []
-    for idx, (guid, length) in enumerate(zip(frame_guids, frame_lengths)):
+    for idx, (guid, length) in enumerate(zip(frame_guids, frame_lengths, strict=False)):
         keyframes.append(
             '{{"Key": {key}, "Length": {length}, "Channels": {{"0": {{"Id": {{"name": "{guid}"}}}}}}}}'.format(
                 key=idx, length=length, guid=guid)
@@ -1476,8 +1476,8 @@ class TestSpriteConverterSourcePathContainment(unittest.TestCase):
         yy_path = self._write_yy(yy_relative_path, yy_content)
         sprite_directory = os.path.dirname(yy_path)
         frame_colors = [("red", "blue"), ("green", "yellow")]
-        for frame_guid, colors in zip(frame_guids, frame_colors):
-            for layer_guid, color in zip(layer_guids, colors):
+        for frame_guid, colors in zip(frame_guids, frame_colors, strict=False):
+            for layer_guid, color in zip(layer_guids, colors, strict=False):
                 self._write_png(
                     os.path.join(
                         sprite_directory,

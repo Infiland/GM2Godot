@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.34 - 2026-10-04
+
+- Enforce 26 focused Ruff bug-risk rules locally and in CI with regression and suppression-bypass checks.
+- Preserve explicit ZIP truncation and immutable default values; strengthen malformed Mac archive and room metadata assertions without changing conversion behavior.
+
 ## 0.8.33 - 2026-10-04
 
 - Enforce Ruff import placement locally and in CI without new suppressions; preserve intentional repository-path setup and Godot discovery before runtime imports.

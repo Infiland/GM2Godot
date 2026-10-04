@@ -186,7 +186,7 @@ class TestRoomMetadata(unittest.TestCase):
         for value in values:
             with self.subTest(value=value):
                 with self.assertRaises(AttributeError) as caught:
-                    RoomSettingsFields(value, "r").width
+                    _ = RoomSettingsFields(value, "r").width
                 self.assertEqual(str(caught.exception), f"'{type(value).__name__}' object has no attribute 'get'")
                 self.assertEqual(caught.exception.name, "get")
                 self.assertIs(caught.exception.obj, value)

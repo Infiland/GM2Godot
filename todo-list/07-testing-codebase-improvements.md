@@ -119,7 +119,8 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Add complexity checks for parser/emitter/runtime generation modules.
 - [x] Add import sorting.
 - [x] Enforce import placement (`E4`) without new suppressions; event tests use normal package imports and deliberate bootstrap/discovery stages remain explicit.
-- [ ] Add unused code checks.
+- [x] Add unused code checks through the complete Pyflakes (`F`) family in local and tracked-source CI lint.
+- [x] Enforce 26 focused bug-risk selectors without blanket ignores; retain separate reviews for callback lifetimes and exception causes.
 - [ ] Add broad exception checks.
 - [ ] Add unreachable branch checks.
 - [x] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.

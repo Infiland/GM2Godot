@@ -25,6 +25,12 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.conversion import included_files as included_files_module
+from src.conversion.included_files_parts import (
+    constants as _included_constants,
+    path_validation as _included_paths,
+    stat_metadata as _included_metadata,
+    recovery_codec as _included_codec,
+)
 from src.conversion.included_files import IncludedFilesConverter
 from src.conversion.included_file_registry import (
     INCLUDED_FILE_REGISTRY_RELATIVE_PATH,
@@ -45,7 +51,7 @@ def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:
     persistent_lock_path = os.path.normcase(
         os.path.join(
             project_path,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
     )
     debris: list[str] = []
@@ -55,23 +61,23 @@ def _included_files_transaction_debris(project_path: str) -> tuple[str, ...]:
             if os.path.normcase(candidate_path) == persistent_lock_path:
                 continue
             if (
-                name == included_files_module._INCLUDED_FILES_LOCK_NAME
-                or name == included_files_module._INCLUDED_FILES_JOURNAL_NAME
-                or name == included_files_module._INCLUDED_FILES_COMMIT_NAME
-                or name == included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME
+                name == _included_constants.INCLUDED_FILES_LOCK_NAME
+                or name == _included_constants.INCLUDED_FILES_JOURNAL_NAME
+                or name == _included_constants.INCLUDED_FILES_COMMIT_NAME
+                or name == _included_constants.INCLUDED_FILES_STAGE_MARKER_NAME
                 or name.startswith(
-                    included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                    _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 )
                 or name.startswith(
-                    included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                    _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 )
                 or name.startswith(
-                    included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                    _included_constants.INCLUDED_FILES_STAGE_PREFIX
                 )
                 or name.startswith(".included_files.")
                 or name.startswith(".gml_included_file_registry.gd.")
                 or name.startswith(
-                    included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                    _included_constants.INCLUDED_FILES_CLEANUP_PREFIX
                 )
             ):
                 debris.append(
@@ -587,7 +593,7 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 "streaming-cleanup",
                 "owned.bin",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(
+                    _included_metadata.included_path_fingerprint(
                         owned_stat
                     )
                 ),
@@ -824,18 +830,18 @@ IncludedFilesConverter(
             if not (
                 name
                 in {
-                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
-                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                    _included_constants.INCLUDED_FILES_JOURNAL_NAME,
+                    _included_constants.INCLUDED_FILES_COMMIT_NAME,
                 }
                 or (
                     name.startswith(
-                        included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                        _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                     )
                     and name.endswith(".tmp")
                 )
                 or (
                     name.startswith(
-                        included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                        _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                     )
                     and name.endswith(".tmp")
                 )
@@ -852,7 +858,7 @@ IncludedFilesConverter(
             state = payload.get("state")
             if state == "prepared":
                 journal = (
-                    included_files_module._included_recovery_journal_from_payload(
+                    _included_codec.included_recovery_journal_from_payload(
                         project_path,
                         project_identity,
                         payload,
@@ -861,17 +867,17 @@ IncludedFilesConverter(
                 legacy_journal = replace(
                     journal,
                     format_version=(
-                        included_files_module._INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
+                        _included_constants.INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
                     ),
                 )
                 legacy_payload = (
-                    included_files_module._included_recovery_journal_payload_v1(
+                    _included_codec.included_recovery_journal_payload_v1(
                         legacy_journal
                     )
                 )
             elif state == "committed":
                 _marker, journal = (
-                    included_files_module._included_commit_marker_and_journal_from_payload(
+                    _included_codec.included_commit_marker_and_journal_from_payload(
                         project_path,
                         payload,
                         project_identity,
@@ -880,11 +886,11 @@ IncludedFilesConverter(
                 legacy_journal = replace(
                     journal,
                     format_version=(
-                        included_files_module._INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
+                        _included_constants.INCLUDED_FILES_LEGACY_RECOVERY_FORMAT_VERSION
                     ),
                 )
                 legacy_payload = (
-                    included_files_module._included_commit_marker_payload_v1(
+                    _included_codec.included_commit_marker_payload_v1(
                         legacy_journal
                     )
                 )
@@ -892,7 +898,7 @@ IncludedFilesConverter(
                 continue
             with open(record_path, "wb") as record_file:
                 record_file.write(
-                    included_files_module._included_recovery_record_content(
+                    _included_codec.included_recovery_record_content(
                         legacy_payload
                     )
                 )
@@ -917,14 +923,14 @@ IncludedFilesConverter(
         journal_record = included_files_module._read_included_recovery_record(
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME,
             ),
             project_identity,
         )
         commit_record = included_files_module._read_included_recovery_record(
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                _included_constants.INCLUDED_FILES_COMMIT_NAME,
             ),
             project_identity,
         )
@@ -932,7 +938,7 @@ IncludedFilesConverter(
             self.fail("committed interruption did not preserve both records")
         journal_payload = dict(journal_record[1])
         commit_payload = dict(commit_record[1])
-        journal = included_files_module._included_recovery_journal_from_payload(
+        journal = _included_codec.included_recovery_journal_from_payload(
             self.godot_dir,
             project_identity,
             journal_payload,
@@ -978,7 +984,7 @@ IncludedFilesConverter(
         cases: tuple[tuple[str, Callable[[], object], str], ...] = (
             (
                 "journal",
-                lambda: included_files_module._included_recovery_journal_from_payload(
+                lambda: _included_codec.included_recovery_journal_from_payload(
                     self.godot_dir,
                     project_identity,
                     journal_payload,
@@ -987,7 +993,7 @@ IncludedFilesConverter(
             ),
             (
                 "commit-marker",
-                lambda: included_files_module._included_commit_marker_and_journal_from_payload(
+                lambda: _included_codec.included_commit_marker_and_journal_from_payload(
                     self.godot_dir,
                     commit_payload,
                     project_identity,
@@ -996,7 +1002,7 @@ IncludedFilesConverter(
             ),
             (
                 "stage-marker",
-                lambda: included_files_module._included_stage_marker_matches(
+                lambda: _included_codec.included_stage_marker_matches(
                     stage_payload,
                     project_identity,
                     stage_identity,
@@ -1005,7 +1011,7 @@ IncludedFilesConverter(
             ),
             (
                 "tree-kind",
-                lambda: included_files_module._included_tree_snapshot_from_payload(
+                lambda: _included_codec.included_tree_snapshot_from_payload(
                     tree_with_invalid_kind,
                     "test tree",
                 ),
@@ -1013,7 +1019,7 @@ IncludedFilesConverter(
             ),
             (
                 "registry-backup-location",
-                lambda: included_files_module._included_recovery_journal_from_payload(
+                lambda: _included_codec.included_recovery_journal_from_payload(
                     self.godot_dir,
                     project_identity,
                     journal_with_invalid_backup_location,
@@ -1144,7 +1150,7 @@ IncludedFilesConverter(
         with open(os.path.join(root_path, "payload.txt"), "wb") as payload_file:
             payload_file.write(b"payload")
         snapshot = included_files_module._capture_included_tree(root_path)
-        payload = included_files_module._included_tree_snapshot_payload(snapshot)
+        payload = _included_codec.included_tree_snapshot_payload(snapshot)
         entries = payload["entries"]
         self.assertIsInstance(entries, list)
         first_entry = entries[0]
@@ -1157,7 +1163,7 @@ IncludedFilesConverter(
         fingerprint[0] = root_fingerprint[0] + 1
 
         with self.assertRaisesRegex(OSError, "cross-device"):
-            included_files_module._included_tree_snapshot_from_payload(
+            _included_codec.included_tree_snapshot_from_payload(
                 payload,
                 "modeled cross-device tree",
             )
@@ -2054,7 +2060,7 @@ IncludedFilesConverter(
         self.assertTrue(all(binding.closed for binding in bindings))
         self.assertTrue(all(binding.close_count == 1 for binding in bindings))
         self.assertFalse(os.path.lexists(owned_path))
-        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+        tombstone_path = _included_paths.included_cleanup_tombstone_path(
             owned_path,
             "6" * 32,
             "nested-close-errors",
@@ -2364,7 +2370,7 @@ IncludedFilesConverter(
         self.assertIsNone(binding.handle)
         kernel32.CloseHandle.assert_called_once_with(1234)
         self.assertFalse(os.path.lexists(owned_path))
-        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+        tombstone_path = _included_paths.included_cleanup_tombstone_path(
             owned_path,
             "f" * 32,
             "flat-readonly-close-error",
@@ -2749,50 +2755,50 @@ IncludedFilesConverter(
         cases = (
             (
                 "journal",
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                 False,
             ),
             (
                 "commit-marker",
-                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                _included_constants.INCLUDED_FILES_COMMIT_NAME,
                 False,
             ),
             (
                 "stage-marker",
-                included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+                _included_constants.INCLUDED_FILES_STAGE_MARKER_NAME,
                 False,
             ),
             (
                 "journal-temporary",
-                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 + token
                 + ".tmp",
                 False,
             ),
             (
                 "commit-temporary",
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 + token
                 + ".tmp",
                 False,
             ),
             (
                 "lock-initialization-temporary",
-                included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_LOCK_TEMP_PREFIX
                 + token
                 + ".tmp",
                 False,
             ),
             (
                 "lock-cleanup-tombstone",
-                included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                _included_constants.INCLUDED_FILES_LOCK_CLEANUP_PREFIX
                 + token
                 + ".tmp",
                 False,
             ),
             (
                 "stage",
-                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                _included_constants.INCLUDED_FILES_STAGE_PREFIX
                 + token
                 + ".stage",
                 True,
@@ -2806,14 +2812,14 @@ IncludedFilesConverter(
             ),
             (
                 "cleanup-file-tombstone",
-                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                _included_constants.INCLUDED_FILES_CLEANUP_PREFIX
                 + cleanup_digest
                 + ".file",
                 False,
             ),
             (
                 "cleanup-directory-tombstone",
-                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                _included_constants.INCLUDED_FILES_CLEANUP_PREFIX
                 + cleanup_digest
                 + ".dir",
                 True,
@@ -2822,7 +2828,7 @@ IncludedFilesConverter(
                 "nested-lock-collision",
                 os.path.join(
                     "gm2godot",
-                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                    _included_constants.INCLUDED_FILES_LOCK_NAME,
                 ),
                 False,
             ),
@@ -2835,11 +2841,11 @@ IncludedFilesConverter(
             ):
                 lock_path = os.path.join(
                     project_path,
-                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                    _included_constants.INCLUDED_FILES_LOCK_NAME,
                 )
                 with open(lock_path, "wb") as lock_file:
                     lock_file.write(
-                        included_files_module._INCLUDED_FILES_LOCK_CONTENT
+                        _included_constants.INCLUDED_FILES_LOCK_CONTENT
                     )
                 self.assertEqual(
                     _included_files_transaction_debris(project_path),
@@ -3228,7 +3234,7 @@ IncludedFilesConverter(
         )
         lock_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
         with patch.object(
             included_files_module.tempfile,
@@ -3261,7 +3267,7 @@ IncludedFilesConverter(
             with open(lock_path, "rb") as lock_file:
                 self.assertEqual(
                     lock_file.read(),
-                    included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                    _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 )
             self.assertEqual(
                 (os.lstat(lock_path).st_dev, os.lstat(lock_path).st_ino),
@@ -3278,7 +3284,7 @@ IncludedFilesConverter(
         with open(lock_path, "rb") as lock_file:
             self.assertEqual(
                 lock_file.read(),
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
             )
         self.assertEqual(
             (os.lstat(lock_path).st_dev, os.lstat(lock_path).st_ino),
@@ -3295,9 +3301,9 @@ IncludedFilesConverter(
         )
         lock_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
-        lock_content = included_files_module._INCLUDED_FILES_LOCK_CONTENT
+        lock_content = _included_constants.INCLUDED_FILES_LOCK_CONTENT
         cases = {
             "empty": b"",
             "partial-prefix": lock_content[: len(lock_content) // 2],
@@ -3337,10 +3343,10 @@ IncludedFilesConverter(
         )
         lock_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
         with open(lock_path, "wb") as lock_file:
-            lock_file.write(included_files_module._INCLUDED_FILES_LOCK_CONTENT)
+            lock_file.write(_included_constants.INCLUDED_FILES_LOCK_CONTENT)
 
         with (
             patch.object(
@@ -3378,7 +3384,7 @@ IncludedFilesConverter(
         )
         lock_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
         existing_content = b"user-owned lock collision\n"
         with open(lock_path, "wb") as lock_file:
@@ -3434,9 +3440,9 @@ IncludedFilesConverter(
 
         stage_name = os.path.basename(stage_path)
         self.assertEqual(
-            included_files_module._included_recovery_managed_name(
+            _included_paths.included_recovery_managed_name(
                 stage_name,
-                prefix=included_files_module._INCLUDED_FILES_STAGE_PREFIX,
+                prefix=_included_constants.INCLUDED_FILES_STAGE_PREFIX,
                 suffix=".stage",
                 label="stage container",
             ),
@@ -3453,7 +3459,7 @@ IncludedFilesConverter(
         second_token = "b" * 16
         colliding_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            _included_constants.INCLUDED_FILES_STAGE_PREFIX
             + first_token
             + ".stage",
         )
@@ -3484,7 +3490,7 @@ IncludedFilesConverter(
 
         self.assertEqual(
             os.path.basename(stage_path),
-            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            _included_constants.INCLUDED_FILES_STAGE_PREFIX
             + second_token
             + ".stage",
         )
@@ -3508,7 +3514,7 @@ IncludedFilesConverter(
         colliding_token = "c" * 16
         colliding_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_STAGE_PREFIX
+            _included_constants.INCLUDED_FILES_STAGE_PREFIX
             + colliding_token
             + ".stage",
         )
@@ -3578,8 +3584,8 @@ included_files_module._acquire_included_project_lock(
         partial_phases = {
             "temporary-created": b"",
             "temporary-partially-written": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT[
-                    : len(included_files_module._INCLUDED_FILES_LOCK_CONTENT) // 2
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT[
+                    : len(_included_constants.INCLUDED_FILES_LOCK_CONTENT) // 2
                 ]
             ),
         }
@@ -3615,13 +3621,13 @@ included_files_module._acquire_included_project_lock(
                 )
                 lock_path = os.path.join(
                     project_path,
-                    included_files_module._INCLUDED_FILES_LOCK_NAME,
+                    _included_constants.INCLUDED_FILES_LOCK_NAME,
                 )
                 temporary_paths = [
                     os.path.join(project_path, name)
                     for name in os.listdir(project_path)
                     if name.startswith(
-                        included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                        _included_constants.INCLUDED_FILES_LOCK_TEMP_PREFIX
                     )
                     and name.endswith(".tmp")
                 ]
@@ -3634,12 +3640,12 @@ included_files_module._acquire_included_project_lock(
                 if phase in {"temporary-written", "temporary-synced"}:
                     self.assertEqual(
                         os.lstat(temporary_paths[0]).st_size,
-                        len(included_files_module._INCLUDED_FILES_LOCK_CONTENT),
+                        len(_included_constants.INCLUDED_FILES_LOCK_CONTENT),
                     )
                     with open(temporary_paths[0], "rb") as temporary_file:
                         self.assertEqual(
                             temporary_file.read(),
-                            included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                            _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                         )
 
                 project_identity = (
@@ -3656,7 +3662,7 @@ included_files_module._acquire_included_project_lock(
                 with open(lock_path, "rb") as lock_file:
                     self.assertEqual(
                         lock_file.read(),
-                        included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                        _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                     )
                 remaining_temporaries = [
                     path for path in temporary_paths if os.path.lexists(path)
@@ -3670,7 +3676,7 @@ included_files_module._acquire_included_project_lock(
                 self.assertFalse(
                     any(
                         name.startswith(
-                            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                            _included_constants.INCLUDED_FILES_LOCK_CLEANUP_PREFIX
                         )
                         for name in os.listdir(project_path)
                     )
@@ -3682,18 +3688,18 @@ included_files_module._acquire_included_project_lock(
         token = "d" * 16
         temporary_path = os.path.join(
             project_path,
-            included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+            _included_constants.INCLUDED_FILES_LOCK_TEMP_PREFIX
             + token
             + ".tmp",
         )
         tombstone_path = os.path.join(
             project_path,
-            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+            _included_constants.INCLUDED_FILES_LOCK_CLEANUP_PREFIX
             + token
             + ".tmp",
         )
         with open(temporary_path, "wb") as temporary_file:
-            temporary_file.write(included_files_module._INCLUDED_FILES_LOCK_CONTENT)
+            temporary_file.write(_included_constants.INCLUDED_FILES_LOCK_CONTENT)
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
 
@@ -3741,7 +3747,7 @@ included_files_module._acquire_included_project_lock(
         with open(tombstone_path, "rb") as tombstone_file:
             self.assertEqual(
                 tombstone_file.read(),
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
             )
 
         project_identity = (
@@ -3807,12 +3813,12 @@ included_files_module._acquire_included_project_lock(
         )
         lock_path = os.path.join(
             project_path,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
         with open(lock_path, "rb") as lock_file:
             self.assertEqual(
                 lock_file.read(),
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
             )
         self.assertEqual(_included_files_transaction_debris(project_path), ())
         next_lock = included_files_module._acquire_included_project_lock(
@@ -3827,30 +3833,30 @@ included_files_module._acquire_included_project_lock(
                 self.godot_dir
             )
         )
-        prefix = included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+        prefix = _included_constants.INCLUDED_FILES_LOCK_TEMP_PREFIX
         cleanup_prefix = (
-            included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+            _included_constants.INCLUDED_FILES_LOCK_CLEANUP_PREFIX
         )
         candidates = {
             prefix + "a" * 16 + ".tmp": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 False,
             ),
             prefix + "b" * 16 + ".tmp": (b"partial lock bytes", True),
             prefix + "c" * 15 + ".tmp": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 True,
             ),
             prefix + "e" * 16 + ".tmp": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 True,
             ),
             cleanup_prefix + "e" * 16 + ".tmp": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 True,
             ),
             cleanup_prefix + "f" * 16 + ".tmp": (
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
                 False,
             ),
         }
@@ -3893,19 +3899,19 @@ included_files_module._acquire_included_project_lock(
         candidate_paths = (
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_LOCK_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_LOCK_TEMP_PREFIX
                 + "d" * 16
                 + ".tmp",
             ),
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_LOCK_CLEANUP_PREFIX
+                _included_constants.INCLUDED_FILES_LOCK_CLEANUP_PREFIX
                 + "e" * 16
                 + ".tmp",
             ),
         )
         oversized_byte_count = (
-            len(included_files_module._INCLUDED_FILES_LOCK_CONTENT) + 1
+            len(_included_constants.INCLUDED_FILES_LOCK_CONTENT) + 1
         )
         original_identities: dict[str, tuple[int, int]] = {}
         for candidate_path in candidate_paths:
@@ -3945,7 +3951,7 @@ included_files_module._acquire_included_project_lock(
     def test_unknown_recovery_record_is_preserved_and_rejected(self) -> None:
         journal_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            _included_constants.INCLUDED_FILES_JOURNAL_NAME,
         )
         unknown_content = b"user-owned recovery collision\n"
         with open(journal_path, "wb") as journal_file:
@@ -3974,8 +3980,8 @@ included_files_module._acquire_included_project_lock(
             )
         )
         for record_name in (
-            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_JOURNAL_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         ):
             with self.subTest(record_name=record_name):
                 record_path = os.path.join(self.godot_dir, record_name)
@@ -3984,8 +3990,8 @@ included_files_module._acquire_included_project_lock(
                 original_stat = os.lstat(record_path)
                 with (
                     patch.object(
-                        included_files_module,
-                        "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                        _included_constants,
+                        'INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES',
                         64,
                     ),
                     patch.object(
@@ -4021,13 +4027,13 @@ included_files_module._acquire_included_project_lock(
         temporary_paths = (
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 + "a" * 16
                 + ".tmp",
             ),
             os.path.join(
                 self.godot_dir,
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 + "b" * 16
                 + ".tmp",
             ),
@@ -4044,8 +4050,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                _included_constants,
+                'INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES',
                 64,
             ),
             patch.object(
@@ -4083,7 +4089,7 @@ included_files_module._acquire_included_project_lock(
                 self.godot_dir
             )
         )
-        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+        tombstone_path = _included_paths.included_cleanup_tombstone_path(
             os.path.join(self.godot_dir, "temporary-record"),
             "c" * 32,
             "journal-temporary-record",
@@ -4096,8 +4102,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                _included_constants,
+                'INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES',
                 64,
             ),
             patch.object(
@@ -4139,8 +4145,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                _included_constants,
+                'INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES',
                 64,
             ),
             self.assertRaisesRegex(
@@ -4155,7 +4161,7 @@ included_files_module._acquire_included_project_lock(
                 temporary_prefix=temporary_prefix,
                 payload={
                     "format_version": (
-                        included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                        _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION
                     ),
                     "state": "x" * 128,
                 },
@@ -4175,8 +4181,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES",
+                _included_constants,
+                'INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES',
                 1024,
             ),
             patch.object(
@@ -4209,33 +4215,33 @@ included_files_module._acquire_included_project_lock(
     ) -> None:
         snapshot = self._recovery_cleanup_snapshot("nested/payload.bin")
         compact_payload = (
-            included_files_module._included_compact_tree_snapshot_payload(
+            _included_codec.included_compact_tree_snapshot_payload(
                 snapshot
             )
         )
         self.assertEqual(
-            included_files_module._included_tree_snapshot_from_payload(
+            _included_codec.included_tree_snapshot_from_payload(
                 compact_payload,
                 "compact test tree",
                 format_version=(
-                    included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                    _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION
                 ),
             ),
             snapshot,
         )
         record_payload = {
             "format_version": (
-                included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION
             ),
             "state": "test",
             "tree": compact_payload,
         }
-        content = included_files_module._included_recovery_record_content(
+        content = _included_codec.included_recovery_record_content(
             record_payload
         )
         self.assertEqual(
             content,
-            included_files_module._included_recovery_record_content(
+            _included_codec.included_recovery_record_content(
                 json.loads(content.decode("utf-8"))
             ),
         )
@@ -4263,27 +4269,27 @@ included_files_module._acquire_included_project_lock(
                 self.subTest(case=index),
                 self.assertRaises(OSError),
             ):
-                included_files_module._included_tree_snapshot_from_payload(
+                _included_codec.included_tree_snapshot_from_payload(
                     malformed_payload,
                     "compact test tree",
                     format_version=(
-                        included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                        _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION
                     ),
                 )
 
         with (
             patch.object(
-                included_files_module,
-                "_INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES",
+                _included_constants,
+                'INCLUDED_FILES_RECOVERY_MAX_TREE_ENTRIES',
                 len(snapshot.entries) - 1,
             ),
             self.assertRaisesRegex(OSError, "too many entries"),
         ):
-            included_files_module._included_tree_snapshot_from_payload(
+            _included_codec.included_tree_snapshot_from_payload(
                 compact_payload,
                 "compact test tree",
                 format_version=(
-                    included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION
+                    _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION
                 ),
             )
 
@@ -4297,7 +4303,7 @@ included_files_module._acquire_included_project_lock(
         receipts = {
             path: (
                 1,
-                included_files_module._INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256,
+                _included_constants.INCLUDED_FILES_RECOVERY_PLACEHOLDER_SHA256,
             )
             for path in logical_paths
         }
@@ -4317,7 +4323,7 @@ included_files_module._acquire_included_project_lock(
             previous_root_snapshot,
             _registry_identity,
             _registry_mode,
-        ) = included_files_module._included_preflight_placeholder_snapshots(
+        ) = _included_codec.included_preflight_placeholder_snapshots(
             project_identity,
             assigned_byte_counts,
             registry_content,
@@ -4332,7 +4338,7 @@ included_files_module._acquire_included_project_lock(
         )
 
         first_sizes = (
-            included_files_module._preflight_included_recovery_record_sizes(
+            _included_codec.preflight_included_recovery_record_sizes(
                 self.godot_dir,
                 project_identity,
                 assigned_byte_counts,
@@ -4342,7 +4348,7 @@ included_files_module._acquire_included_project_lock(
             )
         )
         second_sizes = (
-            included_files_module._preflight_included_recovery_record_sizes(
+            _included_codec.preflight_included_recovery_record_sizes(
                 self.godot_dir,
                 project_identity,
                 assigned_byte_counts,
@@ -4359,7 +4365,7 @@ included_files_module._acquire_included_project_lock(
         self.assertEqual(second_sizes, expected_sizes)
         self.assertLess(
             expected_sizes.commit_bytes,
-            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+            _included_constants.INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
         )
 
     @staticmethod
@@ -4526,11 +4532,11 @@ included_files_module._acquire_included_project_lock(
         )
         journal_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            _included_constants.INCLUDED_FILES_JOURNAL_NAME,
         )
         commit_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
         journal_record = included_files_module._read_included_recovery_record(
             journal_path,
@@ -4544,11 +4550,11 @@ included_files_module._acquire_included_project_lock(
             self.fail("committed generation did not retain both records")
         self.assertEqual(
             journal_record[1]["format_version"],
-            included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
         )
         self.assertEqual(
             commit_record[1]["format_version"],
-            included_files_module._INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
+            _included_constants.INCLUDED_FILES_RECOVERY_FORMAT_VERSION,
         )
         actual_sizes = included_files_module._IncludedRecoveryRecordSizes(
             journal_bytes=os.path.getsize(journal_path),
@@ -4564,11 +4570,11 @@ included_files_module._acquire_included_project_lock(
         )
         self.assertLess(
             actual_sizes.journal_bytes,
-            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+            _included_constants.INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
         )
         self.assertLess(
             actual_sizes.commit_bytes,
-            included_files_module._INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
+            _included_constants.INCLUDED_FILES_RECOVERY_RECORD_MAX_BYTES,
         )
 
         project_lock = included_files_module._acquire_included_project_lock(
@@ -4829,7 +4835,7 @@ IncludedFilesConverter(
                             os.path.lexists(
                                 os.path.join(
                                     godot_path,
-                                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                                    _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                                 )
                             )
                         )
@@ -4837,7 +4843,7 @@ IncludedFilesConverter(
                             name
                             for name in os.listdir(godot_path)
                             if name.startswith(
-                                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                             )
                             and name.endswith(".tmp")
                         ]
@@ -4846,7 +4852,7 @@ IncludedFilesConverter(
                             name
                             for name in os.listdir(godot_path)
                             if name.startswith(
-                                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                                _included_constants.INCLUDED_FILES_STAGE_PREFIX
                             )
                             and name.endswith(".stage")
                         ]
@@ -5109,7 +5115,7 @@ IncludedFilesConverter(
             self._assert_no_transaction_debris()
             self.assertEqual(
                 set(os.listdir(self.godot_dir)),
-                {included_files_module._INCLUDED_FILES_LOCK_NAME},
+                {_included_constants.INCLUDED_FILES_LOCK_NAME},
             )
 
         first_recovery = recover()
@@ -5148,7 +5154,7 @@ IncludedFilesConverter(
                     name
                     for name in os.listdir(self.godot_dir)
                     if name.startswith(
-                        included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                        _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                     )
                     and name.endswith(".tmp")
                 ]
@@ -5199,7 +5205,7 @@ IncludedFilesConverter(
                 name
                 for name in os.listdir(self.godot_dir)
                 if name.startswith(
-                    included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                    _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 )
                 and name.endswith(".tmp")
             ),
@@ -5309,7 +5315,7 @@ IncludedFilesConverter(
             project_identity: tuple[int, int],
         ) -> None:
             if os.path.basename(path) == (
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME
             ):
                 events.append(("remove", path, identity))
             original_remove(
@@ -5371,22 +5377,22 @@ IncludedFilesConverter(
             (
                 "record",
                 "quarantined",
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME,
             ),
             (
                 "record",
                 "removed",
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME,
             ),
             (
                 "record",
                 "quarantined",
-                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                _included_constants.INCLUDED_FILES_COMMIT_NAME,
             ),
             (
                 "record",
                 "removed",
-                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                _included_constants.INCLUDED_FILES_COMMIT_NAME,
             ),
         )
         commit_interruption_script = """
@@ -5665,7 +5671,7 @@ finally:
                     )
                     journal_path = os.path.join(
                         godot_path,
-                        included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                        _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                     )
                     journal_record = (
                         included_files_module._read_included_recovery_record(
@@ -5677,7 +5683,7 @@ finally:
                         self.fail("committed interruption did not preserve its journal")
                     _journal_identity, journal_payload = journal_record
                     journal = (
-                        included_files_module._included_recovery_journal_from_payload(
+                        _included_codec.included_recovery_journal_from_payload(
                             godot_path,
                             project_identity,
                             journal_payload,
@@ -5738,7 +5744,7 @@ finally:
                     self.assertIsNotNone(recovery_message)
                     self.assertIn("preserved", recovery_message or "")
                     tombstone_path = (
-                        included_files_module._included_cleanup_tombstone_path(
+                        _included_paths.included_cleanup_tombstone_path(
                             container_path,
                             journal.transaction_id,
                             cleanup_role,
@@ -5812,7 +5818,7 @@ finally:
                         os.path.lexists(
                             os.path.join(
                                 godot_path,
-                                included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                                _included_constants.INCLUDED_FILES_COMMIT_NAME,
                             )
                         )
                     )
@@ -5882,11 +5888,11 @@ IncludedFilesConverter(
         )
         journal_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            _included_constants.INCLUDED_FILES_JOURNAL_NAME,
         )
         commit_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
         journal_record = included_files_module._read_included_recovery_record(
             journal_path,
@@ -5900,13 +5906,13 @@ IncludedFilesConverter(
             self.fail("committed interruption did not preserve both records")
         _journal_identity, journal_payload = journal_record
         _commit_identity, commit_payload = commit_record
-        journal = included_files_module._included_recovery_journal_from_payload(
+        journal = _included_codec.included_recovery_journal_from_payload(
             self.godot_dir,
             project_identity,
             journal_payload,
         )
         _marker, embedded_journal = (
-            included_files_module._included_commit_marker_and_journal_from_payload(
+            _included_codec.included_commit_marker_and_journal_from_payload(
                 self.godot_dir,
                 commit_payload,
                 project_identity,
@@ -5975,11 +5981,11 @@ IncludedFilesConverter(
         )
         journal_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+            _included_constants.INCLUDED_FILES_JOURNAL_NAME,
         )
         commit_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
         journal_record = included_files_module._read_included_recovery_record(
             journal_path,
@@ -5993,7 +5999,7 @@ IncludedFilesConverter(
             self.fail("committed interruption did not preserve both records")
         _journal_identity, journal_payload = journal_record
         _commit_identity, commit_payload = commit_record
-        journal = included_files_module._included_recovery_journal_from_payload(
+        journal = _included_codec.included_recovery_journal_from_payload(
             self.godot_dir,
             project_identity,
             journal_payload,
@@ -6063,7 +6069,7 @@ IncludedFilesConverter(
                 tampered_payload = dict(commit_payload)
                 tampered_payload[key] = replacement
                 tampered_content = (
-                    included_files_module._included_recovery_record_content(
+                    _included_codec.included_recovery_record_content(
                         tampered_payload
                     )
                 )
@@ -6090,7 +6096,7 @@ IncludedFilesConverter(
                 self.assertEqual(self._pair_snapshot(), committed_pair)
 
         original_commit_content = (
-            included_files_module._included_recovery_record_content(commit_payload)
+            _included_codec.included_recovery_record_content(commit_payload)
         )
         with open(commit_path, "wb") as commit_file:
             commit_file.write(original_commit_content)
@@ -6116,7 +6122,7 @@ IncludedFilesConverter(
         )
         commit_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
         commit_record = included_files_module._read_included_recovery_record(
             commit_path,
@@ -6141,18 +6147,18 @@ IncludedFilesConverter(
             )
             forged_entry[0] = "safe/D:evil"
         forged_payload["recovery_journal_sha256"] = hashlib.sha256(
-            included_files_module._included_recovery_record_content(
+            _included_codec.included_recovery_record_content(
                 embedded_journal
             )
         ).hexdigest()
         forged_content = (
-            included_files_module._included_recovery_record_content(
+            _included_codec.included_recovery_record_content(
                 forged_payload
             )
         )
         self.assertEqual(
             forged_content,
-            included_files_module._included_recovery_record_content(
+            _included_codec.included_recovery_record_content(
                 json.loads(forged_content.decode("utf-8"))
             ),
         )
@@ -6175,7 +6181,7 @@ IncludedFilesConverter(
             ) as move_directory,
             self.assertRaisesRegex(OSError, "Windows-ambiguous"),
         ):
-            included_files_module._included_commit_marker_and_journal_from_payload(
+            _included_codec.included_commit_marker_and_journal_from_payload(
                 self.godot_dir,
                 forged_payload,
                 project_identity,
@@ -6249,13 +6255,13 @@ IncludedFilesConverter(
         for relative_path in cases:
             with self.subTest(relative_path=relative_path):
                 self.assertEqual(
-                    included_files_module._included_recovery_relative_path(
+                    _included_paths.included_recovery_relative_path(
                         relative_path
                     ),
                     relative_path,
                 )
                 reconstructed = (
-                    included_files_module._included_recovery_tree_entry_path(
+                    _included_paths.included_recovery_tree_entry_path(
                         root_path,
                         relative_path,
                     )
@@ -6276,7 +6282,7 @@ IncludedFilesConverter(
     @unittest.skipUnless(os.name == "nt", "requires native Windows paths")
     def test_native_windows_recovery_paths_reject_before_io(self) -> None:
         cleanup_root = os.path.join(self.godot_dir, "native-cleanup-root")
-        safe_path = included_files_module._included_recovery_tree_entry_path(
+        safe_path = _included_paths.included_recovery_tree_entry_path(
             cleanup_root,
             "safe/payload.txt",
         )
@@ -6336,7 +6342,7 @@ IncludedFilesConverter(
         )
         commit_path = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_NAME,
+            _included_constants.INCLUDED_FILES_COMMIT_NAME,
         )
         commit_record = included_files_module._read_included_recovery_record(
             commit_path,
@@ -6346,7 +6352,7 @@ IncludedFilesConverter(
             self.fail("committed interruption did not preserve its commit marker")
         _commit_identity, commit_payload = commit_record
         canonical_commit_content = (
-            included_files_module._included_recovery_record_content(commit_payload)
+            _included_codec.included_recovery_record_content(commit_payload)
         )
 
         def recover() -> str | None:
@@ -6368,32 +6374,32 @@ IncludedFilesConverter(
         committed_pair = self._pair_snapshot()
         invalid_records = {
             (
-                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 + "f" * 15
                 + ".tmp"
             ): b"short reserved token\n",
             (
-                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX
                 + "f" * 17
                 + ".tmp"
             ): b"long reserved token\n",
             (
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 + "g" * 16
                 + ".tmp"
             ): b"non-hex reserved token\n",
             (
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 + "F" * 16
                 + ".tmp"
             ): b"uppercase reserved token\n",
             (
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
                 + "f" * 16
                 + ".extra.tmp"
             ): b"extra reserved token material\n",
             (
-                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                _included_constants.INCLUDED_FILES_STAGE_PREFIX
                 + "user-owned.tmp"
             ): b"arbitrary reserved-prefix temporary\n",
         }
@@ -6407,7 +6413,7 @@ IncludedFilesConverter(
 
         canonical_commit_temporary = os.path.join(
             self.godot_dir,
-            included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX
+            _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX
             + "a" * 16
             + ".tmp",
         )
@@ -6446,13 +6452,13 @@ IncludedFilesConverter(
         record_specs = (
             (
                 "journal",
-                included_files_module._INCLUDED_FILES_JOURNAL_NAME,
-                included_files_module._INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
+                _included_constants.INCLUDED_FILES_JOURNAL_NAME,
+                _included_constants.INCLUDED_FILES_JOURNAL_TEMP_PREFIX,
             ),
             (
                 "commit",
-                included_files_module._INCLUDED_FILES_COMMIT_NAME,
-                included_files_module._INCLUDED_FILES_COMMIT_TEMP_PREFIX,
+                _included_constants.INCLUDED_FILES_COMMIT_NAME,
+                _included_constants.INCLUDED_FILES_COMMIT_TEMP_PREFIX,
             ),
         )
         canonical_records: list[tuple[str, str, bytes]] = []
@@ -6471,7 +6477,7 @@ IncludedFilesConverter(
                 (
                     record_kind,
                     temporary_prefix,
-                    included_files_module._included_recovery_record_content(
+                    _included_codec.included_recovery_record_content(
                         record[1]
                     ),
                 )
@@ -6562,7 +6568,7 @@ os._exit(88)
                         temporary_stat.st_ino,
                     )
                     tombstone_path = (
-                        included_files_module._included_cleanup_tombstone_path(
+                        _included_paths.included_cleanup_tombstone_path(
                             temporary_path,
                             hashlib.sha256(content).hexdigest()[:32],
                             record_kind + "-temporary-record",
@@ -7154,9 +7160,9 @@ os._exit(88)
             if (
                 not hardlink_created
                 and os.path.basename(root_path)
-                == included_files_module._INCLUDED_FILES_ROOT_NAME
+                == _included_constants.INCLUDED_FILES_ROOT_NAME
                 and stage_name.startswith(
-                    included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                    _included_constants.INCLUDED_FILES_STAGE_PREFIX
                 )
             ):
                 staged_path = os.path.join(root_path, "new.txt")
@@ -7707,7 +7713,7 @@ os._exit(88)
 
         self.assertIs(opened_stream, binary_stream)
         kernel32.CreateFileW.assert_called_once_with(
-            included_files_module._windows_extended_included_path(path),
+            _included_paths.windows_extended_included_path(path),
             included_files_module._WINDOWS_GENERIC_READ,
             included_files_module._WINDOWS_FILE_SHARE_READ,
             None,
@@ -7769,7 +7775,7 @@ os._exit(88)
             binding.close()
 
         kernel32.CreateFileW.assert_called_once_with(
-            included_files_module._windows_extended_included_path(parent_path),
+            _included_paths.windows_extended_included_path(parent_path),
             included_files_module._WINDOWS_FILE_TRAVERSE
             | included_files_module._WINDOWS_FILE_READ_ATTRIBUTES,
             included_files_module._WINDOWS_FILE_SHARE_READ
@@ -8065,7 +8071,7 @@ os._exit(88)
             for path, expected in cases.items():
                 with self.subTest(path=path):
                     self.assertEqual(
-                        included_files_module._windows_extended_included_path(
+                        _included_paths.windows_extended_included_path(
                             path
                         ),
                         expected,
@@ -8301,7 +8307,7 @@ os._exit(88)
             source_file.write(pre_mutation_payload)
         original_stat = os.stat(source_path)
         original_read = included_files_module._read_included_payload_chunk
-        original_fingerprint = included_files_module._included_source_fingerprint
+        original_fingerprint = _included_metadata.included_source_fingerprint
         mutated = False
         streamed_chunks: list[bytes] = []
 
@@ -8335,8 +8341,8 @@ os._exit(88)
                 side_effect=mutate_already_read_bytes,
             ),
             patch.object(
-                included_files_module,
-                "_included_source_fingerprint",
+                _included_metadata,
+                'included_source_fingerprint',
                 side_effect=windows_style_fingerprint,
             ),
             self.assertRaisesRegex(OSError, "output-set staging failed"),
@@ -8586,7 +8592,7 @@ os._exit(88)
         stage_relative_path = debris[0]
         self.assertTrue(
             stage_relative_path.startswith(
-                included_files_module._INCLUDED_FILES_STAGE_PREFIX
+                _included_constants.INCLUDED_FILES_STAGE_PREFIX
             ),
             debris,
         )
@@ -8594,7 +8600,7 @@ os._exit(88)
             debris[1],
             stage_relative_path
             + "/"
-            + included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+            + _included_constants.INCLUDED_FILES_STAGE_MARKER_NAME,
         )
         with open(
             os.path.join(
@@ -9120,7 +9126,7 @@ os._exit(88)
                 "test-file-swap",
                 "owned.txt",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(owned_stat)
+                    _included_metadata.included_path_fingerprint(owned_stat)
                 ),
                 expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
@@ -9196,7 +9202,7 @@ os._exit(88)
                         "large-streaming-cleanup",
                         "large.bin",
                         expected_fingerprint=(
-                            included_files_module._included_path_fingerprint(
+                            _included_metadata.included_path_fingerprint(
                                 owned_stat
                             )
                         ),
@@ -9239,7 +9245,7 @@ os._exit(88)
             )
             for filename in filenames
             if filename.startswith(
-                included_files_module._INCLUDED_FILES_CLEANUP_PREFIX
+                _included_constants.INCLUDED_FILES_CLEANUP_PREFIX
             )
             and filename.endswith(".file")
             and os.path.getsize(os.path.join(directory, filename))
@@ -9250,7 +9256,7 @@ os._exit(88)
             os.path.isfile(
                 os.path.join(
                     self.godot_dir,
-                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                    _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                 )
             )
         )
@@ -9258,7 +9264,7 @@ os._exit(88)
             os.path.isfile(
                 os.path.join(
                     self.godot_dir,
-                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                    _included_constants.INCLUDED_FILES_COMMIT_NAME,
                 )
             )
         )
@@ -9815,11 +9821,11 @@ os._exit(88)
         parent_stat = os.lstat(cleanup_directory)
         expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
         expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-        expected_fingerprint = included_files_module._included_path_fingerprint(
+        expected_fingerprint = _included_metadata.included_path_fingerprint(
             owned_stat
         )
         transaction_id = "a" * 32
-        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+        tombstone_path = _included_paths.included_cleanup_tombstone_path(
             owned_path,
             transaction_id,
             "test-readonly",
@@ -9914,11 +9920,11 @@ os._exit(88)
         parent_stat = os.lstat(cleanup_directory)
         expected_identity = (owned_stat.st_dev, owned_stat.st_ino)
         expected_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-        expected_fingerprint = included_files_module._included_path_fingerprint(
+        expected_fingerprint = _included_metadata.included_path_fingerprint(
             owned_stat
         )
         transaction_id = "b" * 32
-        tombstone_path = included_files_module._included_cleanup_tombstone_path(
+        tombstone_path = _included_paths.included_cleanup_tombstone_path(
             owned_path,
             transaction_id,
             "test-readonly-exit",
@@ -10045,7 +10051,7 @@ os._exit(88)
                 "test-hardlink",
                 "owned.txt",
                 expected_fingerprint=(
-                    included_files_module._included_path_fingerprint(owned_stat)
+                    _included_metadata.included_path_fingerprint(owned_stat)
                 ),
                 expected_mode=stat.S_IMODE(owned_stat.st_mode),
             )
@@ -10443,7 +10449,7 @@ os._exit(88)
             )
 
         descriptor_bytes = json.dumps(
-            included_files_module._included_tree_snapshot_payload(
+            _included_codec.included_tree_snapshot_payload(
                 descriptor_snapshot
             ),
             ensure_ascii=True,
@@ -10451,7 +10457,7 @@ os._exit(88)
             separators=(",", ":"),
         ).encode("ascii")
         fallback_bytes = json.dumps(
-            included_files_module._included_tree_snapshot_payload(
+            _included_codec.included_tree_snapshot_payload(
                 fallback_snapshot
             ),
             ensure_ascii=True,
@@ -11212,7 +11218,7 @@ os._exit(88)
             os.path.isfile(
                 os.path.join(
                     self.godot_dir,
-                    included_files_module._INCLUDED_FILES_JOURNAL_NAME,
+                    _included_constants.INCLUDED_FILES_JOURNAL_NAME,
                 )
             )
         )
@@ -11220,7 +11226,7 @@ os._exit(88)
             os.path.isfile(
                 os.path.join(
                     self.godot_dir,
-                    included_files_module._INCLUDED_FILES_COMMIT_NAME,
+                    _included_constants.INCLUDED_FILES_COMMIT_NAME,
                 )
             )
         )
@@ -12195,14 +12201,14 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
     def _assert_persistent_project_lock(self, project_path: str) -> str:
         lock_path = os.path.join(
             project_path,
-            included_files_module._INCLUDED_FILES_LOCK_NAME,
+            _included_constants.INCLUDED_FILES_LOCK_NAME,
         )
         self.assertTrue(os.path.isfile(lock_path))
         self.assertFalse(os.path.islink(lock_path))
         with open(lock_path, "rb") as lock_file:
             self.assertEqual(
                 lock_file.read(),
-                included_files_module._INCLUDED_FILES_LOCK_CONTENT,
+                _included_constants.INCLUDED_FILES_LOCK_CONTENT,
             )
         return lock_path
 
@@ -12411,7 +12417,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         outside_output = os.path.join(self.outside_dir, "payload.bin")
         with open(outside_output, "wb") as outside_file:
             outside_file.write(b"outside sentinel")
-        original_verify = included_files_module._verify_included_output_state_at
+        original_verify = _included_metadata.verify_included_output_state_at
         swapped = False
 
         def swap_then_verify(
@@ -12437,8 +12443,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
             diagnostics=diagnostics,
         )
         with patch.object(
-            included_files_module,
-            "_verify_included_output_state_at",
+            _included_metadata,
+            'verify_included_output_state_at',
             side_effect=swap_then_verify,
         ), self.assertRaises(OSError):
             converter.convert_all()
@@ -12640,7 +12646,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         outside_output = os.path.join(self.outside_dir, "payload.bin")
         with open(outside_output, "wb") as outside_file:
             outside_file.write(b"outside sentinel")
-        original_verify = included_files_module._verify_included_output_state
+        original_verify = _included_metadata.verify_included_output_state
         swapped = False
 
         def swap_then_verify(
@@ -12671,8 +12677,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
                 return_value=False,
             ),
             patch.object(
-                included_files_module,
-                "_verify_included_output_state",
+                _included_metadata,
+                'verify_included_output_state',
                 side_effect=swap_then_verify,
             ),
             self.assertRaises(OSError),
@@ -12838,7 +12844,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
             )
             self.assertEqual(
                 os.path.basename(non_lock_outside_files[0]),
-                included_files_module._INCLUDED_FILES_STAGE_MARKER_NAME,
+                _included_constants.INCLUDED_FILES_STAGE_MARKER_NAME,
             )
             self._assert_failed_output(converter, diagnostics)
         finally:

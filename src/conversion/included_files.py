@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import hashlib
 import json
 import os
@@ -11,9 +10,8 @@ import sys
 import tempfile
 from contextlib import ExitStack
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, replace
-from functools import lru_cache
-from typing import Any, BinaryIO, Callable, Iterable, TypeVar, cast
+from dataclasses import replace
+from typing import Any, BinaryIO, Callable, Iterable, TypeVar
 
 from src.localization import get_localized
 from src.conversion.atomic_generated_text import (
@@ -71,11 +69,47 @@ from src.conversion.included_files_parts import stat_metadata as _included_metad
 from src.conversion.included_files_parts import recovery_codec as _included_codec
 from src.conversion.included_files_parts import constants as _included_constants
 from src.conversion.included_files_parts import models as _included_models
+from src.conversion.included_files_parts import native_posix as _included_posix
+from src.conversion.included_files_parts import native_windows as _included_windows
+from src.conversion.included_files_parts.native_filesystem import filesystem as _included_fs
+from src.conversion.included_files_parts.filesystem_operations import (
+    IncludedCleanupParentBinding as _IncludedCleanupParentBinding,
+)
 
 _PathHandleBinding = _included_models.PathHandleBinding
 _HandleState = _included_models.HandleState
 _IncludedSourceFingerprint = _included_models.IncludedSourceFingerprint
 _IncludedRecoveryRecordSizes = _included_models.IncludedRecoveryRecordSizes
+
+_windows_included_file_locking = _included_windows.windows_included_file_locking
+_WindowsIncludedFileId128 = _included_windows.WindowsIncludedFileId128
+_WindowsIncludedFileIdInfo = _included_windows.WindowsIncludedFileIdInfo
+_WindowsIncludedFileBasicInfo = _included_windows.WindowsIncludedFileBasicInfo
+_included_descriptor_paths_supported = _included_posix.included_descriptor_paths_supported
+_included_native_noreplace_available = _included_posix.included_native_noreplace_available
+_open_pinned_included_directory = _included_posix.open_pinned_included_directory
+_open_pinned_included_parent = _included_posix.open_pinned_included_parent
+_rename_included_transaction_entry_at = _included_posix.rename_included_transaction_entry_at
+_included_output_path_is_redirected = _included_metadata.included_output_path_is_redirected
+_included_linux_mount_id_from_fd = _included_posix.included_linux_mount_id_from_fd
+_included_directory_mount_id = _included_posix.included_directory_mount_id
+_verify_included_mount_boundary = _included_posix.verify_included_mount_boundary
+_verify_included_mount_boundary_path = _included_posix.verify_included_mount_boundary_path
+_windows_included_file_read_api = _included_windows.windows_included_file_read_api
+_windows_included_cleanup_parent_api = _included_windows.windows_included_cleanup_parent_api
+_windows_included_transaction_api = _included_windows.windows_included_transaction_api
+_windows_included_transaction_error = _included_windows.windows_included_transaction_error
+_windows_included_cleanup_parent_identity = _included_windows.windows_included_cleanup_parent_identity
+_windows_included_cleanup_parent_attributes = _included_windows.windows_included_cleanup_parent_attributes
+_WindowsIncludedCleanupParentBinding = _included_windows.WindowsIncludedCleanupParentBinding
+_verify_windows_included_cleanup_parent_binding = _included_windows.verify_windows_included_cleanup_parent_binding
+_open_included_file_validation_stream = _included_windows.open_included_file_validation_stream
+_open_included_tree_directory_at = _included_posix.open_included_tree_directory_at
+_rename_included_transaction_entry = _included_windows.rename_included_transaction_entry
+_sync_included_directory = _included_posix.sync_included_directory
+_confined_included_output_supported = _included_posix.confined_included_output_supported
+_open_or_create_included_output_directory = _included_posix.open_or_create_included_output_directory
+_apply_included_output_metadata = _included_posix.apply_included_output_metadata
 
 _INCLUDED_FILES_ROOT_NAME = _included_constants.INCLUDED_FILES_ROOT_NAME
 _INCLUDED_FILES_STAGE_PREFIX = _included_constants.INCLUDED_FILES_STAGE_PREFIX
@@ -250,164 +284,43 @@ def _run_bounded_included_worker_phase(
         executor.shutdown(wait=True, cancel_futures=True)
 
 
-def _windows_included_file_locking(
-    file_descriptor: int,
-    mode: int,
-) -> None:
-    import msvcrt
-
-    locking = cast(
-        Callable[[int, int, int], None],
-        getattr(msvcrt, "locking"),
-    )
-    locking(file_descriptor, mode, 1)
 
 
-_DIRECTORY_OPEN_FLAGS = (
-    os.O_RDONLY
-    | getattr(os, "O_DIRECTORY", 0)
-    | getattr(os, "O_NOFOLLOW", 0)
-)
+_DIRECTORY_OPEN_FLAGS = _included_posix.DIRECTORY_OPEN_FLAGS
 
-_WINDOWS_GENERIC_READ = 0x80000000
-_WINDOWS_FILE_TRAVERSE = 0x00000020
-_WINDOWS_FILE_READ_ATTRIBUTES = 0x00000080
-_WINDOWS_FILE_SHARE_READ = 0x00000001
-_WINDOWS_FILE_SHARE_WRITE = 0x00000002
-_WINDOWS_FILE_SHARE_DELETE = 0x00000004
-_WINDOWS_OPEN_EXISTING = 3
-_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = 0x00000010
-_WINDOWS_FILE_ATTRIBUTE_NORMAL = 0x00000080
-_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400
-_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
-_WINDOWS_FILE_TYPE_DISK = 1
-_WINDOWS_FILE_BASIC_INFO_CLASS = 0
-_WINDOWS_FILE_ID_INFO_CLASS = 18
-_WINDOWS_MOVEFILE_WRITE_THROUGH = 0x00000008
+_WINDOWS_GENERIC_READ = _included_windows.WINDOWS_GENERIC_READ
+_WINDOWS_FILE_TRAVERSE = _included_windows.WINDOWS_FILE_TRAVERSE
+_WINDOWS_FILE_READ_ATTRIBUTES = _included_windows.WINDOWS_FILE_READ_ATTRIBUTES
+_WINDOWS_FILE_SHARE_READ = _included_windows.WINDOWS_FILE_SHARE_READ
+_WINDOWS_FILE_SHARE_WRITE = _included_windows.WINDOWS_FILE_SHARE_WRITE
+_WINDOWS_FILE_SHARE_DELETE = _included_windows.WINDOWS_FILE_SHARE_DELETE
+_WINDOWS_OPEN_EXISTING = _included_windows.WINDOWS_OPEN_EXISTING
+_WINDOWS_FILE_ATTRIBUTE_DIRECTORY = _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+_WINDOWS_FILE_ATTRIBUTE_NORMAL = _included_windows.WINDOWS_FILE_ATTRIBUTE_NORMAL
+_WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = _included_windows.WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+_WINDOWS_FILE_FLAG_BACKUP_SEMANTICS = _included_windows.WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT = _included_windows.WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+_WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN = _included_windows.WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN
+_WINDOWS_FILE_TYPE_DISK = _included_windows.WINDOWS_FILE_TYPE_DISK
+_WINDOWS_FILE_BASIC_INFO_CLASS = _included_windows.WINDOWS_FILE_BASIC_INFO_CLASS
+_WINDOWS_FILE_ID_INFO_CLASS = _included_windows.WINDOWS_FILE_ID_INFO_CLASS
+_WINDOWS_MOVEFILE_WRITE_THROUGH = _included_windows.WINDOWS_MOVEFILE_WRITE_THROUGH
 
 
-class _WindowsIncludedFileId128(ctypes.Structure):
-    _fields_ = (("Identifier", ctypes.c_uint8 * 16),)
 
 
-class _WindowsIncludedFileIdInfo(ctypes.Structure):
-    _fields_ = (
-        ("VolumeSerialNumber", ctypes.c_uint64),
-        ("FileId", _WindowsIncludedFileId128),
-    )
 
 
-class _WindowsIncludedFileBasicInfo(ctypes.Structure):
-    _fields_ = (
-        ("CreationTime", ctypes.c_int64),
-        ("LastAccessTime", ctypes.c_int64),
-        ("LastWriteTime", ctypes.c_int64),
-        ("ChangeTime", ctypes.c_int64),
-        ("FileAttributes", ctypes.c_uint32),
-    )
 
 
-def _included_descriptor_paths_supported() -> bool:
-    return (
-        os.name != "nt"
-        and hasattr(os, "O_DIRECTORY")
-        and hasattr(os, "O_NOFOLLOW")
-        and os.chmod in os.supports_fd
-        and os.listdir in os.supports_fd
-        and all(
-            operation in os.supports_dir_fd
-            for operation in (
-                os.mkdir,
-                os.open,
-                os.rmdir,
-                os.stat,
-                os.unlink,
-            )
-        )
-    )
 
 
-def _included_native_noreplace_available() -> bool:
-    return sys.platform == "darwin" or sys.platform.startswith("linux")
 
 
-def _open_pinned_included_directory(path: str) -> int:
-    if not _included_descriptor_paths_supported():
-        raise OSError("Descriptor-pinned Included Files paths are unavailable")
-    absolute_path = os.path.abspath(path)
-    components = [
-        component for component in absolute_path.split(os.sep) if component
-    ]
-    if not components:
-        return os.open(os.sep, _DIRECTORY_OPEN_FLAGS)
-    platform_anchor = os.path.join(os.sep, components[0])
-    resolved_anchor = os.path.realpath(platform_anchor)
-    current_fd = os.open(resolved_anchor, _DIRECTORY_OPEN_FLAGS)
-    try:
-        for component in components[1:]:
-            child_fd = os.open(
-                component,
-                _DIRECTORY_OPEN_FLAGS,
-                dir_fd=current_fd,
-            )
-            os.close(current_fd)
-            current_fd = child_fd
-        return current_fd
-    except BaseException:
-        os.close(current_fd)
-        raise
 
 
-def _open_pinned_included_parent(path: str) -> tuple[int, str]:
-    absolute_path = os.path.abspath(path)
-    parent_path, name = os.path.split(absolute_path)
-    if not name:
-        raise OSError(f"Included Files path has no movable leaf: {path}")
-    return _open_pinned_included_directory(parent_path), name
 
 
-def _rename_included_transaction_entry_at(
-    source_parent_fd: int,
-    source_name: str,
-    destination_parent_fd: int,
-    destination_name: str,
-) -> None:
-    if not _included_native_noreplace_available():
-        raise OSError(
-            "Atomic non-replacing Included Files rename is unavailable on "
-            f"{sys.platform}"
-        )
-    libc = ctypes.CDLL(None, use_errno=True)
-    function_name = (
-        "renameatx_np" if sys.platform == "darwin" else "renameat2"
-    )
-    raw_function = getattr(libc, function_name, None)
-    if raw_function is None:
-        raise OSError(
-            f"Atomic non-replacing Included Files rename is unavailable: {function_name}"
-        )
-    rename_function = cast(
-        Callable[[int, bytes, int, bytes, int], int],
-        raw_function,
-    )
-    rename_exclusive_flag = 0x00000004 if sys.platform == "darwin" else 1
-    ctypes.set_errno(0)
-    result = rename_function(
-        source_parent_fd,
-        os.fsencode(source_name),
-        destination_parent_fd,
-        os.fsencode(destination_name),
-        rename_exclusive_flag,
-    )
-    if result != 0:
-        error_number = ctypes.get_errno()
-        raise OSError(
-            error_number,
-            os.strerror(error_number),
-            destination_name,
-        )
 
 
 def _before_included_transaction_rename(
@@ -433,7 +346,7 @@ def _preserve_or_restore_unexpected_moved_entry_at(
     destination_display_path: str,
 ) -> OSError:
     try:
-        _rename_included_transaction_entry_at(
+        _included_fs.rename_entry_at(
             destination_parent_fd,
             destination_name,
             source_parent_fd,
@@ -450,7 +363,7 @@ def _preserve_or_restore_unexpected_moved_entry_at(
             quarantine_name,
         )
         try:
-            _rename_included_transaction_entry_at(
+            _included_fs.rename_entry_at(
                 destination_parent_fd,
                 destination_name,
                 destination_parent_fd,
@@ -484,7 +397,7 @@ def _preserve_or_restore_unexpected_moved_entry_fallback(
     destination: str,
 ) -> OSError:
     try:
-        _rename_included_transaction_entry(destination, source)
+        _included_fs.rename_entry(destination, source)
     except OSError as restore_error:
         quarantine_path = (
             destination
@@ -493,7 +406,7 @@ def _preserve_or_restore_unexpected_moved_entry_fallback(
             + ".quarantine"
         )
         try:
-            _rename_included_transaction_entry(destination, quarantine_path)
+            _included_fs.rename_entry(destination, quarantine_path)
         except OSError as quarantine_error:
             error = OSError(
                 "Unexpected Included Files replacement was preserved at "
@@ -515,136 +428,14 @@ def _preserve_or_restore_unexpected_moved_entry_fallback(
     )
 
 
-def _included_output_path_is_redirected(
-    path: str,
-    path_stat: os.stat_result,
-) -> bool:
-    if stat.S_ISLNK(path_stat.st_mode):
-        return True
-    junction_candidate: object = getattr(os.path, "isjunction", None)
-    if not callable(junction_candidate):
-        return False
-    junction_checker = cast(Callable[[str], bool], junction_candidate)
-    return junction_checker(path)
 
 
-def _included_linux_mount_id_from_fd(file_descriptor: int) -> int | None:
-    """Return Linux's mount ID for an open path when procfs exposes it."""
-
-    if not sys.platform.startswith("linux"):
-        return None
-    try:
-        with open(
-            f"/proc/self/fdinfo/{file_descriptor}",
-            encoding="ascii",
-        ) as fdinfo:
-            mount_id_values = [
-                line.partition(":")[2].strip()
-                for line in fdinfo
-                if line.startswith("mnt_id:")
-            ]
-    except OSError:
-        # Device comparison and ismount remain available on Linux systems that
-        # intentionally run without a mounted/readable procfs.
-        return None
-    if (
-        len(mount_id_values) != 1
-        or not mount_id_values[0].isascii()
-        or not mount_id_values[0].isdigit()
-    ):
-        raise OSError("Could not verify the Included Files Linux mount boundary")
-    return int(mount_id_values[0])
 
 
-def _included_directory_mount_id(
-    path: str,
-    expected_identity: _PathIdentity,
-) -> int | None:
-    """Read a directory mount ID without following a redirected leaf."""
-
-    if not sys.platform.startswith("linux"):
-        return None
-    directory_fd = os.open(path, _DIRECTORY_OPEN_FLAGS)
-    try:
-        if _included_metadata.directory_identity_from_fd(directory_fd) != expected_identity:
-            raise OSError(f"Included Files directory changed: {path}")
-        return _included_linux_mount_id_from_fd(directory_fd)
-    finally:
-        os.close(directory_fd)
 
 
-def _verify_included_mount_boundary(
-    path: str,
-    entry_stat: os.stat_result,
-    expected_device: int,
-    expected_mount_id: int | None,
-    opened_descriptor: int,
-) -> int | None:
-    """Reject a managed entry that crosses out of its parent's mount."""
-
-    try:
-        is_mountpoint = os.path.ismount(path)
-    except OSError as error:
-        raise OSError(
-            f"Could not verify the Included Files mount boundary: {path}"
-        ) from error
-    current_mount_id = _included_linux_mount_id_from_fd(opened_descriptor)
-    if (
-        entry_stat.st_dev != expected_device
-        or is_mountpoint
-        or (
-            expected_mount_id is not None
-            and current_mount_id != expected_mount_id
-        )
-    ):
-        raise OSError(
-            "Refusing an Included Files path that crosses a filesystem or "
-            f"mount boundary: {path}"
-        )
-    return current_mount_id
 
 
-def _verify_included_mount_boundary_path(
-    path: str,
-    entry_stat: os.stat_result,
-    expected_device: int,
-    expected_mount_id: int | None,
-    *,
-    expect_directory: bool,
-) -> int | None:
-    """Path fallback for mount checks, using an fd on Linux when available."""
-
-    if not sys.platform.startswith("linux"):
-        return _verify_included_mount_boundary(
-            path,
-            entry_stat,
-            expected_device,
-            expected_mount_id,
-            -1,
-        )
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    if expect_directory:
-        flags |= getattr(os, "O_DIRECTORY", 0)
-    file_descriptor = os.open(path, flags)
-    try:
-        opened_stat = os.fstat(file_descriptor)
-        expected_kind = stat.S_ISDIR if expect_directory else stat.S_ISREG
-        if not expected_kind(opened_stat.st_mode) or not os.path.samestat(
-            entry_stat,
-            opened_stat,
-        ):
-            raise OSError(
-                f"Included Files path changed while checking its mount: {path}"
-            )
-        return _verify_included_mount_boundary(
-            path,
-            opened_stat,
-            expected_device,
-            expected_mount_id,
-            file_descriptor,
-        )
-    finally:
-        os.close(file_descriptor)
 
 
 def _read_included_validation_chunk(opened_file: BinaryIO) -> bytes:
@@ -653,373 +444,22 @@ def _read_included_validation_chunk(opened_file: BinaryIO) -> bytes:
     return opened_file.read(1024 * 1024)
 
 
-@lru_cache(maxsize=1)
-def _windows_included_file_read_api() -> Any:
-    if os.name != "nt":
-        raise OSError("Windows Included File read handles are unavailable")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.CreateFileW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    kernel32.CreateFileW.restype = ctypes.c_void_p
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
 
 
-@lru_cache(maxsize=1)
-def _windows_included_cleanup_parent_api() -> Any:
-    """Return the Win32 calls used to pin one cleanup directory parent."""
-
-    if os.name != "nt":
-        raise OSError(
-            "Windows Included Files cleanup parent handles are unavailable"
-        )
-    if (
-        ctypes.sizeof(_WindowsIncludedFileId128) != 16
-        or ctypes.sizeof(_WindowsIncludedFileIdInfo) != 24
-        or _WindowsIncludedFileIdInfo.FileId.offset != 8
-        or ctypes.sizeof(_WindowsIncludedFileBasicInfo) != 40
-        or _WindowsIncludedFileBasicInfo.FileAttributes.offset != 32
-    ):
-        raise OSError("Unsupported Windows Included Files cleanup ABI layout")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.CreateFileW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-        ctypes.c_uint32,
-        ctypes.c_void_p,
-    )
-    kernel32.CreateFileW.restype = ctypes.c_void_p
-    kernel32.GetFileInformationByHandleEx.argtypes = (
-        ctypes.c_void_p,
-        ctypes.c_int,
-        ctypes.c_void_p,
-        ctypes.c_uint32,
-    )
-    kernel32.GetFileInformationByHandleEx.restype = ctypes.c_int
-    kernel32.GetFileType.argtypes = (ctypes.c_void_p,)
-    kernel32.GetFileType.restype = ctypes.c_uint32
-    kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
-    kernel32.CloseHandle.restype = ctypes.c_int
-    return kernel32
 
 
-@lru_cache(maxsize=1)
-def _windows_included_transaction_api() -> Any:
-    if os.name != "nt":
-        raise OSError("Windows Included Files transaction APIs are unavailable")
-    win_dll = cast(Callable[..., Any], getattr(ctypes, "WinDLL"))
-    kernel32 = win_dll("kernel32", use_last_error=True)
-    kernel32.MoveFileExW.argtypes = (
-        ctypes.c_wchar_p,
-        ctypes.c_wchar_p,
-        ctypes.c_uint32,
-    )
-    kernel32.MoveFileExW.restype = ctypes.c_int
-    return kernel32
 
 
-def _windows_included_transaction_error(
-    operation: str,
-    path: str,
-) -> OSError:
-    get_last_error = cast(Callable[[], int], getattr(ctypes, "get_last_error"))
-    format_error = cast(Callable[[int], str], getattr(ctypes, "FormatError"))
-    error_number = get_last_error()
-    return OSError(
-        error_number,
-        f"{operation}: {format_error(error_number).strip()}",
-        path,
-    )
 
 
-def _windows_included_cleanup_parent_identity(
-    kernel32: Any,
-    handle: int,
-    path: str,
-) -> _PathIdentity:
-    identity_info = _WindowsIncludedFileIdInfo()
-    if not kernel32.GetFileInformationByHandleEx(
-        handle,
-        _WINDOWS_FILE_ID_INFO_CLASS,
-        ctypes.byref(identity_info),
-        ctypes.sizeof(identity_info),
-    ):
-        raise _windows_included_transaction_error(
-            "Could not identify Included Files cleanup parent handle",
-            path,
-        )
-    return (
-        int(identity_info.VolumeSerialNumber),
-        int.from_bytes(bytes(identity_info.FileId.Identifier), "little"),
-    )
 
 
-def _windows_included_cleanup_parent_attributes(
-    kernel32: Any,
-    handle: int,
-    path: str,
-) -> int:
-    basic_info = _WindowsIncludedFileBasicInfo()
-    if not kernel32.GetFileInformationByHandleEx(
-        handle,
-        _WINDOWS_FILE_BASIC_INFO_CLASS,
-        ctypes.byref(basic_info),
-        ctypes.sizeof(basic_info),
-    ):
-        raise _windows_included_transaction_error(
-            "Could not inspect Included Files cleanup parent handle",
-            path,
-        )
-    return int(basic_info.FileAttributes)
 
 
-@dataclass
-class _WindowsIncludedCleanupParentBinding:
-    """Keep one verified cleanup parent immovable for path-based operations.
-
-    Windows has no Python ``dir_fd`` equivalent for the cleanup operations in
-    this module.  The retained directory handle deliberately omits
-    ``FILE_SHARE_DELETE`` so its directory cannot be renamed or deleted while
-    the binding is live.  Callers still revalidate the native file ID and path
-    before every group of path-based child operations.
-    """
-
-    path: str
-    identity: _PathIdentity
-    kernel32: Any
-    handle: int | None
-
-    @classmethod
-    def open(
-        cls,
-        path: str,
-        expected_identity: _PathIdentity,
-    ) -> "_WindowsIncludedCleanupParentBinding":
-        if os.name != "nt":
-            raise OSError(
-                "Windows Included Files cleanup parent bindings are unavailable"
-            )
-        absolute_path = os.path.abspath(path)
-        try:
-            path_stat = os.lstat(absolute_path)
-        except OSError as error:
-            raise OSError(
-                f"Included Files cleanup parent changed: {absolute_path}"
-            ) from error
-        if (
-            _included_output_path_is_redirected(absolute_path, path_stat)
-            or not stat.S_ISDIR(path_stat.st_mode)
-            or (path_stat.st_dev, path_stat.st_ino) != expected_identity
-        ):
-            raise OSError(
-                f"Included Files cleanup parent changed: {absolute_path}"
-            )
-
-        kernel32 = _windows_included_cleanup_parent_api()
-        handle = kernel32.CreateFileW(
-            _included_paths.windows_extended_included_path(absolute_path),
-            _WINDOWS_FILE_TRAVERSE | _WINDOWS_FILE_READ_ATTRIBUTES,
-            _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE,
-            None,
-            _WINDOWS_OPEN_EXISTING,
-            _WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
-            | _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
-            None,
-        )
-        invalid_handle = ctypes.c_void_p(-1).value
-        if handle is None or handle == invalid_handle:
-            raise _windows_included_transaction_error(
-                "Could not bind Included Files cleanup parent",
-                absolute_path,
-            )
-        binding = cls(
-            path=absolute_path,
-            identity=expected_identity,
-            kernel32=kernel32,
-            handle=cast(int, handle),
-        )
-        try:
-            binding.verify()
-        except BaseException as error:
-            try:
-                binding.close()
-            except BaseException as close_error:
-                error.add_note(
-                    "Could not close rejected Included Files cleanup parent "
-                    f"binding: {close_error}"
-                )
-            raise
-        return binding
-
-    def __enter__(self) -> "_WindowsIncludedCleanupParentBinding":
-        self.verify()
-        return self
-
-    def __exit__(
-        self,
-        _exception_type: object,
-        active_error: BaseException | None,
-        _traceback: object,
-    ) -> bool | None:
-        try:
-            self.close()
-        except BaseException as close_error:
-            if active_error is None:
-                raise
-            active_error.add_note(
-                "Could not close Included Files cleanup parent binding: "
-                + str(close_error)
-            )
-        return None
-
-    def verify(self) -> None:
-        handle = self.handle
-        if handle is None:
-            raise OSError(
-                f"Included Files cleanup parent binding is closed: {self.path}"
-            )
-        try:
-            path_stat = os.lstat(self.path)
-        except OSError as error:
-            raise OSError(
-                f"Included Files cleanup parent changed: {self.path}"
-            ) from error
-        attributes = _windows_included_cleanup_parent_attributes(
-            self.kernel32,
-            handle,
-            self.path,
-        )
-        if (
-            self.kernel32.GetFileType(handle) != _WINDOWS_FILE_TYPE_DISK
-            or _included_output_path_is_redirected(self.path, path_stat)
-            or not stat.S_ISDIR(path_stat.st_mode)
-            or (path_stat.st_dev, path_stat.st_ino) != self.identity
-            or _windows_included_cleanup_parent_identity(
-                self.kernel32,
-                handle,
-                self.path,
-            )
-            != self.identity
-            or not attributes & _WINDOWS_FILE_ATTRIBUTE_DIRECTORY
-            or attributes & _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
-        ):
-            raise OSError(
-                f"Included Files cleanup parent changed: {self.path}"
-            )
-
-    def close(self) -> None:
-        handle = self.handle
-        if handle is None:
-            return
-        self.handle = None
-        if not self.kernel32.CloseHandle(handle):
-            raise _windows_included_transaction_error(
-                "Could not close Included Files cleanup parent handle",
-                self.path,
-            )
 
 
-def _verify_windows_included_cleanup_parent_binding(
-    binding: _WindowsIncludedCleanupParentBinding,
-    parent_path: str,
-    expected_identity: _PathIdentity,
-) -> None:
-    """Verify that a retained Windows handle still binds the requested parent."""
-
-    absolute_parent_path = os.path.abspath(parent_path)
-    if (
-        os.name != "nt"
-        or os.path.normcase(binding.path)
-        != os.path.normcase(absolute_parent_path)
-        or binding.identity != expected_identity
-    ):
-        raise OSError(
-            f"Included Files cleanup parent binding mismatch: {absolute_parent_path}"
-        )
-    binding.verify()
 
 
-def _open_included_file_validation_stream(
-    path: str,
-    *,
-    deny_writes: bool,
-    no_follow: bool = False,
-) -> BinaryIO:
-    """Open a validation stream with requested sharing and link semantics."""
-
-    if os.name != "nt":
-        if no_follow:
-            file_descriptor = os.open(
-                path,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-            )
-            try:
-                return os.fdopen(file_descriptor, "rb")
-            except BaseException:
-                os.close(file_descriptor)
-                raise
-        return open(path, "rb")
-    if not deny_writes and not no_follow:
-        return open(path, "rb")
-
-    kernel32 = _windows_included_file_read_api()
-    handle_value = kernel32.CreateFileW(
-        _included_paths.windows_extended_included_path(path),
-        _WINDOWS_GENERIC_READ,
-        _WINDOWS_FILE_SHARE_READ,
-        None,
-        _WINDOWS_OPEN_EXISTING,
-        _WINDOWS_FILE_ATTRIBUTE_NORMAL
-        | (_WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT if no_follow else 0)
-        | _WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
-        None,
-    )
-    invalid_handle = ctypes.c_void_p(-1).value
-    if handle_value is None or handle_value == invalid_handle:
-        get_last_error = cast(
-            Callable[[], int],
-            getattr(ctypes, "get_last_error"),
-        )
-        error_number = get_last_error()
-        format_error = cast(
-            Callable[[int], str],
-            getattr(ctypes, "FormatError"),
-        )
-        raise OSError(
-            error_number,
-            format_error(error_number).strip(),
-            path,
-        )
-
-    handle = cast(int, handle_value)
-    try:
-        import msvcrt
-
-        file_descriptor = msvcrt.open_osfhandle(
-            handle,
-            os.O_RDONLY | getattr(os, "O_BINARY", 0),
-        )
-    except BaseException:
-        kernel32.CloseHandle(handle)
-        raise
-    try:
-        return os.fdopen(file_descriptor, "rb")
-    except BaseException:
-        os.close(file_descriptor)
-        raise
 
 
 def _digest_open_included_file(
@@ -1046,7 +486,7 @@ def _digest_included_regular_file(
     expected_fingerprint = _included_metadata.included_path_fingerprint(expected_stat)
     expected_binding = _included_metadata.included_path_handle_binding(expected_stat)
     expected_ctime_ns = expected_stat.st_ctime_ns
-    with _open_included_file_validation_stream(
+    with _included_fs.open_validation_stream(
         path,
         deny_writes=True,
         no_follow=True,
@@ -1058,7 +498,7 @@ def _digest_included_regular_file(
         ):
             raise OSError(f"Included Files file changed before hashing: {path}")
         if expected_device is not None:
-            _verify_included_mount_boundary(
+            _included_fs.verify_mount_boundary(
                 path,
                 opened_stat,
                 expected_device,
@@ -1078,7 +518,7 @@ def _digest_included_regular_file(
 
         current_stat = os.lstat(path)
         if (
-            _included_output_path_is_redirected(path, current_stat)
+            _included_fs.output_path_is_redirected(path, current_stat)
             or not stat.S_ISREG(current_stat.st_mode)
             or _included_metadata.included_path_fingerprint(current_stat) != expected_fingerprint
             or current_stat.st_ctime_ns != expected_ctime_ns
@@ -1114,7 +554,7 @@ def _capture_fallback_directory_ancestors(
                 f"Included Files directory ancestor changed: {current_path}"
             ) from error
         if (
-            _included_output_path_is_redirected(current_path, current_stat)
+            _included_fs.output_path_is_redirected(current_path, current_stat)
             or not stat.S_ISDIR(current_stat.st_mode)
         ):
             raise OSError(
@@ -1138,7 +578,7 @@ def _verify_fallback_directory_ancestors(
                 f"Included Files directory ancestor changed: {directory_path}"
             ) from error
         if (
-            _included_output_path_is_redirected(directory_path, current_stat)
+            _included_fs.output_path_is_redirected(directory_path, current_stat)
             or not stat.S_ISDIR(current_stat.st_mode)
             or (current_stat.st_dev, current_stat.st_ino) != expected_identity
         ):
@@ -1182,7 +622,7 @@ def _capture_included_source_directory_identities(
             directory_path = os.path.join(directory_path, component)
         directory_stat = os.lstat(directory_path)
         if (
-            _included_output_path_is_redirected(
+            _included_fs.output_path_is_redirected(
                 directory_path,
                 directory_stat,
             )
@@ -1202,9 +642,9 @@ def _capture_included_source_directory_identities(
 
 
 def _included_directory_identity(path: str) -> _PathIdentity | None:
-    if _included_descriptor_paths_supported():
+    if _included_fs.descriptor_paths_supported():
         try:
-            directory_fd = _open_pinned_included_directory(path)
+            directory_fd = _included_fs.open_pinned_directory(path)
         except FileNotFoundError:
             return None
         except OSError as error:
@@ -1224,7 +664,7 @@ def _included_directory_identity(path: str) -> _PathIdentity | None:
         _verify_fallback_directory_ancestors(parent_identities)
         return None
     if (
-        _included_output_path_is_redirected(path, path_stat)
+        _included_fs.output_path_is_redirected(path, path_stat)
         or not stat.S_ISDIR(path_stat.st_mode)
     ):
         raise OSError(f"Refusing redirected or non-directory Included Files path: {path}")
@@ -1241,7 +681,7 @@ def _included_regular_file_state_at(
 ) -> tuple[_PathIdentity, int, bytes] | None:
     parent_stat = os.fstat(parent_fd)
     parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-    parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+    parent_mount_id = _included_fs.linux_mount_id_from_fd(parent_fd)
     path_stat = _included_metadata.included_entry_stat_at(parent_fd, name)
     if path_stat is None:
         return None
@@ -1274,7 +714,7 @@ def _included_regular_file_state_at(
             raise OSError(
                 f"Included Files path changed while reading: {display_path}"
             )
-        _verify_included_mount_boundary(
+        _included_fs.verify_mount_boundary(
             display_path,
             opened_stat,
             parent_identity[0],
@@ -1317,9 +757,9 @@ def _included_regular_file_state(
     ) = None,
     allowed_identities: frozenset[_PathIdentity] | None = None,
 ) -> tuple[_PathIdentity, int, bytes] | None:
-    if _included_descriptor_paths_supported():
+    if _included_fs.descriptor_paths_supported():
         try:
-            parent_fd, name = _open_pinned_included_parent(path)
+            parent_fd, name = _included_fs.open_pinned_parent(path)
         except FileNotFoundError:
             return None
         try:
@@ -1361,7 +801,7 @@ def _included_regular_file_state(
         _verify_fallback_directory_ancestors(parent_identities)
         return None
     if (
-        _included_output_path_is_redirected(path, path_stat)
+        _included_fs.output_path_is_redirected(path, path_stat)
         or not stat.S_ISREG(path_stat.st_mode)
     ):
         raise OSError(f"Refusing redirected or non-regular Included Files path: {path}")
@@ -1373,7 +813,7 @@ def _included_regular_file_state(
         raise OSError(f"Included Files path changed before reading: {path}")
 
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         parent_path,
         parent_identities[-1][1],
     )
@@ -1387,7 +827,7 @@ def _included_regular_file_state(
             opened_stat,
         ):
             raise OSError(f"Included Files path changed while reading: {path}")
-        _verify_included_mount_boundary(
+        _included_fs.verify_mount_boundary(
             path,
             opened_stat,
             parent_identities[-1][1][0],
@@ -1404,7 +844,7 @@ def _included_regular_file_state(
 
     current_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, current_stat)
+        _included_fs.output_path_is_redirected(path, current_stat)
         or not stat.S_ISREG(current_stat.st_mode)
         or _included_metadata.included_path_fingerprint(current_stat)
         != _included_metadata.included_path_fingerprint(path_stat)
@@ -1446,7 +886,7 @@ def _digest_included_regular_file_at(
                 f"Included Files file changed before hashing: {display_path}"
             )
         if expected_device is not None:
-            _verify_included_mount_boundary(
+            _included_fs.verify_mount_boundary(
                 display_path,
                 opened_stat,
                 expected_device,
@@ -1510,7 +950,7 @@ def _verify_included_regular_file_mount_boundary_at(
             raise OSError(
                 f"Included Files file changed while checking its mount: {display_path}"
             )
-        _verify_included_mount_boundary(
+        _included_fs.verify_mount_boundary(
             display_path,
             opened_stat,
             expected_device,
@@ -1521,12 +961,6 @@ def _verify_included_regular_file_mount_boundary_at(
         os.close(file_descriptor)
 
 
-def _open_included_tree_directory_at(parent_fd: int, name: str) -> int:
-    return os.open(
-        name,
-        _DIRECTORY_OPEN_FLAGS,
-        dir_fd=parent_fd,
-    )
 
 
 def _verify_included_tree_descriptor_binding(
@@ -1554,7 +988,7 @@ def _verify_included_tree_path_binding(
             f"Included Files directory changed: {binding.path}"
         ) from error
     if (
-        _included_output_path_is_redirected(binding.path, current_stat)
+        _included_fs.output_path_is_redirected(binding.path, current_stat)
         or not stat.S_ISDIR(current_stat.st_mode)
         or (current_stat.st_dev, current_stat.st_ino) != binding.identity
     ):
@@ -1595,7 +1029,7 @@ def _capture_included_tree_from_fd(
             )
         entry_fingerprint = _included_metadata.included_path_fingerprint(entry_stat)
         if stat.S_ISDIR(entry_stat.st_mode):
-            child_fd = _open_included_tree_directory_at(directory_fd, name)
+            child_fd = _included_fs.open_tree_directory_at(directory_fd, name)
             try:
                 child_stat = os.fstat(child_fd)
                 if (
@@ -1606,7 +1040,7 @@ def _capture_included_tree_from_fd(
                     raise OSError(
                         f"Included Files directory changed: {entry_path}"
                     )
-                _verify_included_mount_boundary(
+                _included_fs.verify_mount_boundary(
                     entry_path,
                     child_stat,
                     boundary_device,
@@ -1683,11 +1117,11 @@ def _capture_included_tree_descriptor(
     *,
     include_content: bool,
 ) -> _IncludedTreeSnapshot:
-    parent_fd, root_name = _open_pinned_included_parent(root_path)
+    parent_fd, root_name = _included_fs.open_pinned_parent(root_path)
     try:
         parent_stat = os.fstat(parent_fd)
         parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
-        parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+        parent_mount_id = _included_fs.linux_mount_id_from_fd(parent_fd)
         if (
             expected_parent_identity is not None
             and parent_identity != expected_parent_identity
@@ -1706,14 +1140,14 @@ def _capture_included_tree_descriptor(
                 f"Refusing redirected or non-directory Included Files root: {root_path}"
             )
         root_fingerprint = _included_metadata.included_path_fingerprint(root_stat)
-        root_fd = _open_included_tree_directory_at(parent_fd, root_name)
+        root_fd = _included_fs.open_tree_directory_at(parent_fd, root_name)
         try:
             opened_root_stat = os.fstat(root_fd)
             if _included_metadata.included_path_fingerprint(opened_root_stat) != root_fingerprint:
                 raise OSError(
                     f"Included Files root changed while opening: {root_path}"
                 )
-            root_mount_id = _verify_included_mount_boundary(
+            root_mount_id = _included_fs.verify_mount_boundary(
                 root_path,
                 opened_root_stat,
                 parent_stat.st_dev,
@@ -1779,7 +1213,7 @@ def _capture_included_tree_fallback(
         _verify_fallback_directory_ancestors(root_parent_identities)
         return _IncludedTreeSnapshot(root_fingerprint=None, entries=())
     if (
-        _included_output_path_is_redirected(root_path, root_stat)
+        _included_fs.output_path_is_redirected(root_path, root_stat)
         or not stat.S_ISDIR(root_stat.st_mode)
     ):
         raise OSError(
@@ -1787,11 +1221,11 @@ def _capture_included_tree_fallback(
         )
 
     root_fingerprint = _included_metadata.included_path_fingerprint(root_stat)
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         root_parent_path,
         root_parent_identities[-1][1],
     )
-    root_mount_id = _verify_included_mount_boundary_path(
+    root_mount_id = _included_fs.verify_mount_boundary_path(
         root_path,
         root_stat,
         root_parent_identities[-1][1][0],
@@ -1812,7 +1246,7 @@ def _capture_included_tree_fallback(
         relative_directory, directory_binding = pending.pop()
         directory_path = directory_binding.path
         directory_stat = _verify_included_tree_path_binding(directory_binding)
-        _verify_included_mount_boundary_path(
+        _included_fs.verify_mount_boundary_path(
             directory_path,
             directory_stat,
             root_stat.st_dev,
@@ -1844,12 +1278,12 @@ def _capture_included_tree_fallback(
                 relative_directory,
                 directory_entry.name,
             )
-            if _included_output_path_is_redirected(entry_path, entry_stat):
+            if _included_fs.output_path_is_redirected(entry_path, entry_stat):
                 raise OSError(
                     f"Refusing redirected entry in Included Files tree: {entry_path}"
                 )
             if stat.S_ISDIR(entry_stat.st_mode):
-                _verify_included_mount_boundary_path(
+                _included_fs.verify_mount_boundary_path(
                     entry_path,
                     entry_stat,
                     root_stat.st_dev,
@@ -1880,7 +1314,7 @@ def _capture_included_tree_fallback(
                         expected_mount_id=root_mount_id,
                     )
                 else:
-                    _verify_included_mount_boundary_path(
+                    _included_fs.verify_mount_boundary_path(
                         entry_path,
                         entry_stat,
                         root_stat.st_dev,
@@ -1907,7 +1341,7 @@ def _capture_included_tree_fallback(
     _verify_fallback_directory_ancestors(root_parent_identities)
     current_root_stat = os.lstat(root_path)
     if (
-        _included_output_path_is_redirected(root_path, current_root_stat)
+        _included_fs.output_path_is_redirected(root_path, current_root_stat)
         or not stat.S_ISDIR(current_root_stat.st_mode)
         or _included_metadata.included_path_fingerprint(current_root_stat) != root_fingerprint
     ):
@@ -1929,7 +1363,7 @@ def _capture_included_tree(
     expected_parent_identity: _PathIdentity | None = None,
     include_content: bool = True,
 ) -> _IncludedTreeSnapshot:
-    if _included_descriptor_paths_supported():
+    if _included_fs.descriptor_paths_supported():
         return _capture_included_tree_descriptor(
             root_path,
             expected_parent_identity,
@@ -2064,7 +1498,7 @@ def _verify_included_generation_source_receipt(
     binding = receipt.binding
     source_path = binding.filesystem_path
     project_root = binding.directory_identities[0][0]
-    with _open_included_file_validation_stream(
+    with _included_fs.open_validation_stream(
         source_path,
         deny_writes=validate_content,
     ) as source_file:
@@ -2250,13 +1684,13 @@ def _capture_included_registry(
 ) -> _IncludedRegistrySnapshot:
     registry_path = _included_paths.included_registry_path(project_path)
     registry_directory = os.path.dirname(registry_path)
-    if _included_descriptor_paths_supported():
-        project_fd, registry_directory_name = _open_pinned_included_parent(
+    if _included_fs.descriptor_paths_supported():
+        project_fd, registry_directory_name = _included_fs.open_pinned_parent(
             registry_directory
         )
         try:
             project_stat = os.fstat(project_fd)
-            project_mount_id = _included_linux_mount_id_from_fd(project_fd)
+            project_mount_id = _included_fs.linux_mount_id_from_fd(project_fd)
             _included_metadata.verify_included_directory_fd(
                 project_fd,
                 expected_project_identity,
@@ -2289,7 +1723,7 @@ def _capture_included_registry(
             )
             registry_directory_fd = os.open(
                 registry_directory_name,
-                _DIRECTORY_OPEN_FLAGS,
+                _included_posix.DIRECTORY_OPEN_FLAGS,
                 dir_fd=project_fd,
             )
             try:
@@ -2300,7 +1734,7 @@ def _capture_included_registry(
                     raise OSError(
                         "Included File registry directory changed while opening"
                     )
-                _verify_included_mount_boundary(
+                _included_fs.verify_mount_boundary(
                     registry_directory,
                     os.fstat(registry_directory_fd),
                     project_stat.st_dev,
@@ -2364,7 +1798,7 @@ def _capture_included_registry(
             content=None,
         )
     if (
-        _included_output_path_is_redirected(
+        _included_fs.output_path_is_redirected(
             registry_directory,
             registry_directory_stat,
         )
@@ -2378,11 +1812,11 @@ def _capture_included_registry(
         registry_directory_stat.st_dev,
         registry_directory_stat.st_ino,
     )
-    project_mount_id = _included_directory_mount_id(
+    project_mount_id = _included_fs.directory_mount_id(
         project_path,
         project_ancestors[-1][1],
     )
-    _verify_included_mount_boundary_path(
+    _included_fs.verify_mount_boundary_path(
         registry_directory,
         registry_directory_stat,
         project_ancestors[-1][1][0],
@@ -2509,8 +1943,8 @@ def _write_included_stage_marker(
         )
         if marker_state is None or marker_state[2] != content:
             raise OSError("Included Files staging ownership marker changed")
-        _sync_included_directory(stage_path, stage_identity)
-        _sync_included_directory(project_path, project_identity)
+        _included_fs.sync_directory(stage_path, stage_identity)
+        _included_fs.sync_directory(project_path, project_identity)
         _verify_included_stage_container(
             project_path,
             project_identity,
@@ -2527,8 +1961,8 @@ def _create_included_output_stage(
     project_identity: _PathIdentity,
 ) -> tuple[str, _PathIdentity]:
     _verify_included_project_identity(project_path, project_identity)
-    if _included_descriptor_paths_supported():
-        project_fd = _open_pinned_included_directory(project_path)
+    if _included_fs.descriptor_paths_supported():
+        project_fd = _included_fs.open_pinned_directory(project_path)
         stage_name = ""
         stage_identity: _PathIdentity | None = None
         try:
@@ -2553,7 +1987,7 @@ def _create_included_output_stage(
                 raise OSError("Could not allocate Included Files staging directory")
             stage_fd = os.open(
                 stage_name,
-                _DIRECTORY_OPEN_FLAGS,
+                _included_posix.DIRECTORY_OPEN_FLAGS,
                 dir_fd=project_fd,
             )
             try:
@@ -2688,7 +2122,7 @@ def _quarantine_included_entry_at(
         quarantine_name,
     )
     _before_included_cleanup_quarantine(parent_fd, name)
-    _rename_included_transaction_entry_at(
+    _included_fs.rename_entry_at(
         parent_fd,
         name,
         parent_fd,
@@ -2778,7 +2212,7 @@ def _remove_included_tree_contents_at(
         if stat.S_ISDIR(entry_stat.st_mode):
             child_fd = os.open(
                 name,
-                _DIRECTORY_OPEN_FLAGS,
+                _included_posix.DIRECTORY_OPEN_FLAGS,
                 dir_fd=directory_fd,
             )
             try:
@@ -2791,7 +2225,7 @@ def _remove_included_tree_contents_at(
                     raise OSError(
                         f"Included Files cleanup directory changed: {entry_path}"
                     )
-                _verify_included_mount_boundary(
+                _included_fs.verify_mount_boundary(
                     entry_path,
                     child_stat,
                     boundary_device,
@@ -2826,7 +2260,7 @@ def _remove_included_tree_contents_at(
                             "Included Files cleanup directory changed: "
                             f"{quarantined_path}"
                         )
-                    _verify_included_mount_boundary(
+                    _included_fs.verify_mount_boundary(
                         quarantined_path,
                         current_child_stat,
                         boundary_device,
@@ -2892,7 +2326,7 @@ def _quarantine_included_entry_fallback(
 ) -> str:
     quarantine_path = path + "." + secrets.token_hex(8) + ".quarantine"
     _before_included_cleanup_quarantine_fallback(path)
-    _rename_included_transaction_entry(path, quarantine_path)
+    _included_fs.rename_entry(path, quarantine_path)
     quarantine_stat = os.lstat(quarantine_path)
     quarantine_is_expected_kind = (
         stat.S_ISDIR(quarantine_stat.st_mode)
@@ -2900,7 +2334,7 @@ def _quarantine_included_entry_fallback(
         else not stat.S_ISDIR(quarantine_stat.st_mode)
     )
     if (
-        _included_output_path_is_redirected(quarantine_path, quarantine_stat)
+        _included_fs.output_path_is_redirected(quarantine_path, quarantine_stat)
         or not quarantine_is_expected_kind
         or (quarantine_stat.st_dev, quarantine_stat.st_ino)
         != expected_identity
@@ -2917,7 +2351,7 @@ def _unlink_exact_quarantined_entry_fallback(
     expected_identity: _PathIdentity,
     *,
     expected_parent_identity: _PathIdentity | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
@@ -2925,7 +2359,7 @@ def _unlink_exact_quarantined_entry_fallback(
             raise OSError(
                 "Included Files cleanup parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -2975,7 +2409,7 @@ def _unlink_exact_quarantined_entry_fallback(
             ) from error
         writable_stat = os.lstat(path)
         if (
-            _included_output_path_is_redirected(path, writable_stat)
+            _included_fs.output_path_is_redirected(path, writable_stat)
             or not stat.S_ISREG(writable_stat.st_mode)
             or (writable_stat.st_dev, writable_stat.st_ino)
             != expected_identity
@@ -2988,7 +2422,7 @@ def _unlink_exact_quarantined_entry_fallback(
         _after_included_transaction_phase("cleanup-readonly-cleared")
     if windows_parent_binding is not None:
         assert expected_parent_identity is not None
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3030,7 +2464,7 @@ def _chmod_exact_included_directory_fallback(
     mode: int,
     expected_parent_identity: _PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     parent_identities: tuple[tuple[str, _PathIdentity], ...] | None
@@ -3043,7 +2477,7 @@ def _chmod_exact_included_directory_fallback(
             )
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3055,7 +2489,7 @@ def _chmod_exact_included_directory_fallback(
                 raise AssertionError("Missing Included Files directory parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -3063,7 +2497,7 @@ def _chmod_exact_included_directory_fallback(
 
     current_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, current_stat)
+        _included_fs.output_path_is_redirected(path, current_stat)
         or not stat.S_ISDIR(current_stat.st_mode)
         or (current_stat.st_dev, current_stat.st_ino)
         != expected_identity
@@ -3087,7 +2521,7 @@ def _chmod_exact_included_directory_fallback(
     try:
         quarantined_stat = os.lstat(quarantined_path)
         if (
-            _included_output_path_is_redirected(
+            _included_fs.output_path_is_redirected(
                 quarantined_path,
                 quarantined_stat,
             )
@@ -3102,7 +2536,7 @@ def _chmod_exact_included_directory_fallback(
         os.chmod(quarantined_path, mode)
         changed_stat = os.lstat(quarantined_path)
         if (
-            _included_output_path_is_redirected(
+            _included_fs.output_path_is_redirected(
                 quarantined_path,
                 changed_stat,
             )
@@ -3145,7 +2579,7 @@ def _chmod_exact_included_directory_fallback(
     )
     final_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, final_stat)
+        _included_fs.output_path_is_redirected(path, final_stat)
         or not stat.S_ISDIR(final_stat.st_mode)
         or (final_stat.st_dev, final_stat.st_ino) != expected_identity
         or bool(final_stat.st_mode & stat.S_IWRITE)
@@ -3160,7 +2594,7 @@ def _rmdir_exact_quarantined_entry_fallback(
     expected_identity: _PathIdentity,
     *,
     expected_parent_identity: _PathIdentity | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
@@ -3168,7 +2602,7 @@ def _rmdir_exact_quarantined_entry_fallback(
             raise OSError(
                 "Included Files cleanup parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3212,7 +2646,7 @@ def _rmdir_exact_quarantined_entry_fallback(
             ) from error
         writable_stat = os.lstat(path)
         if (
-            _included_output_path_is_redirected(path, writable_stat)
+            _included_fs.output_path_is_redirected(path, writable_stat)
             or not stat.S_ISDIR(writable_stat.st_mode)
             or (writable_stat.st_dev, writable_stat.st_ino)
             != expected_identity
@@ -3224,7 +2658,7 @@ def _rmdir_exact_quarantined_entry_fallback(
             )
     if windows_parent_binding is not None:
         assert expected_parent_identity is not None
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3279,16 +2713,16 @@ def _remove_owned_included_tree_fallback(
         _verify_fallback_directory_ancestors(parent_identities)
         return
     if (
-        _included_output_path_is_redirected(path, root_stat)
+        _included_fs.output_path_is_redirected(path, root_stat)
         or not stat.S_ISDIR(root_stat.st_mode)
         or (root_stat.st_dev, root_stat.st_ino) != expected_identity
     ):
         raise OSError(f"Refusing to remove changed Included Files tree: {path}")
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         parent_path,
         parent_identities[-1][1],
     )
-    root_mount_id = _verify_included_mount_boundary_path(
+    root_mount_id = _included_fs.verify_mount_boundary_path(
         path,
         root_stat,
         parent_identities[-1][1][0],
@@ -3313,7 +2747,7 @@ def _remove_owned_included_tree_fallback(
                 f"Included Files cleanup directory changed: {directory_path}"
             )
         directory_stat = os.lstat(directory_path)
-        _verify_included_mount_boundary_path(
+        _included_fs.verify_mount_boundary_path(
             directory_path,
             directory_stat,
             root_stat.st_dev,
@@ -3325,12 +2759,12 @@ def _remove_owned_included_tree_fallback(
             entry_path = os.path.join(directory_path, name)
             entry_stat = os.lstat(entry_path)
             entry_identity = entry_stat.st_dev, entry_stat.st_ino
-            if _included_output_path_is_redirected(entry_path, entry_stat):
+            if _included_fs.output_path_is_redirected(entry_path, entry_stat):
                 raise OSError(
                     f"Refusing redirected Included Files cleanup entry: {entry_path}"
                 )
             if stat.S_ISDIR(entry_stat.st_mode):
-                _verify_included_mount_boundary_path(
+                _included_fs.verify_mount_boundary_path(
                     entry_path,
                     entry_stat,
                     root_stat.st_dev,
@@ -3350,7 +2784,7 @@ def _remove_owned_included_tree_fallback(
                 )
             else:
                 if stat.S_ISREG(entry_stat.st_mode):
-                    _verify_included_mount_boundary_path(
+                    _included_fs.verify_mount_boundary_path(
                         entry_path,
                         entry_stat,
                         root_stat.st_dev,
@@ -3383,14 +2817,14 @@ def _remove_owned_included_tree(
     *,
     expected_parent_identity: _PathIdentity | None = None,
 ) -> None:
-    if not _included_descriptor_paths_supported():
+    if not _included_fs.descriptor_paths_supported():
         _remove_owned_included_tree_fallback(
             path,
             expected_identity,
             expected_parent_identity,
         )
         return
-    parent_fd, name = _open_pinned_included_parent(path)
+    parent_fd, name = _included_fs.open_pinned_parent(path)
     try:
         parent_identity = _included_metadata.verify_included_directory_fd(
             parent_fd,
@@ -3407,7 +2841,7 @@ def _remove_owned_included_tree(
             raise OSError(f"Refusing to remove changed Included Files tree: {path}")
         root_fd = os.open(
             name,
-            _DIRECTORY_OPEN_FLAGS,
+            _included_posix.DIRECTORY_OPEN_FLAGS,
             dir_fd=parent_fd,
         )
         try:
@@ -3420,8 +2854,8 @@ def _remove_owned_included_tree(
                 raise OSError(
                     f"Refusing to remove changed Included Files tree: {path}"
                 )
-            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
-            root_mount_id = _verify_included_mount_boundary(
+            parent_mount_id = _included_fs.linux_mount_id_from_fd(parent_fd)
+            root_mount_id = _included_fs.verify_mount_boundary(
                 path,
                 opened_root_stat,
                 parent_identity[0],
@@ -3453,7 +2887,7 @@ def _remove_owned_included_tree(
                         "Refusing to remove changed Included Files tree: "
                         f"{quarantined_path}"
                     )
-                _verify_included_mount_boundary(
+                _included_fs.verify_mount_boundary(
                     quarantined_path,
                     current_root_stat,
                     opened_root_stat.st_dev,
@@ -3491,10 +2925,10 @@ def _chmod_exact_included_file(
     mode: int,
     expected_parent_identity: _PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> None:
-    if _included_descriptor_paths_supported():
-        parent_fd, name = _open_pinned_included_parent(path)
+    if _included_fs.descriptor_paths_supported():
+        parent_fd, name = _included_fs.open_pinned_parent(path)
         try:
             _included_metadata.verify_included_directory_fd(
                 parent_fd,
@@ -3528,7 +2962,7 @@ def _chmod_exact_included_file(
             raise OSError(f"Included Files file parent changed: {path}")
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -3540,7 +2974,7 @@ def _chmod_exact_included_file(
                 raise AssertionError("Missing Included Files file parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -3551,7 +2985,7 @@ def _chmod_exact_included_file(
     except FileNotFoundError as error:
         raise OSError(f"Included Files file changed: {path}") from error
     if (
-        _included_output_path_is_redirected(path, path_stat)
+        _included_fs.output_path_is_redirected(path, path_stat)
         or not stat.S_ISREG(path_stat.st_mode)
         or (path_stat.st_dev, path_stat.st_ino) != expected_identity
     ):
@@ -3644,7 +3078,7 @@ def _chmod_exact_included_file(
     except FileNotFoundError as error:
         raise OSError(f"Included Files file changed: {path}") from error
     if (
-        _included_output_path_is_redirected(path, current_stat)
+        _included_fs.output_path_is_redirected(path, current_stat)
         or not stat.S_ISREG(current_stat.st_mode)
         or (current_stat.st_dev, current_stat.st_ino) != expected_identity
     ):
@@ -3666,26 +3100,6 @@ def _unique_included_transaction_path(
     raise OSError(f"Could not allocate Included Files transaction backup for {label}")
 
 
-def _rename_included_transaction_entry(source: str, destination: str) -> None:
-    if os.name != "nt":
-        raise OSError(
-            "Unsafe path-based Included Files rename is disabled on POSIX"
-        )
-    if sys.platform != "win32":
-        # Cross-platform unit tests model the Windows fallback by patching
-        # os.name; the real Windows runner exercises MoveFileExW below.
-        os.rename(source, destination)
-        return
-    kernel32 = _windows_included_transaction_api()
-    if not kernel32.MoveFileExW(
-        _included_paths.windows_extended_included_path(source),
-        _included_paths.windows_extended_included_path(destination),
-        _WINDOWS_MOVEFILE_WRITE_THROUGH,
-    ):
-        raise _windows_included_transaction_error(
-            "Could not durably move Included Files transaction entry",
-            destination,
-        )
 
 
 def _move_exact_included_entry(
@@ -3697,16 +3111,16 @@ def _move_exact_included_entry(
     source_parent_identity: _PathIdentity | None,
     destination_parent_identity: _PathIdentity | None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
 ) -> None:
     source_parent_path = os.path.dirname(os.path.abspath(source))
     destination_parent_path = os.path.dirname(os.path.abspath(destination))
-    if _included_descriptor_paths_supported():
-        source_parent_fd, source_name = _open_pinned_included_parent(source)
+    if _included_fs.descriptor_paths_supported():
+        source_parent_fd, source_name = _included_fs.open_pinned_parent(source)
         try:
             _included_metadata.verify_included_directory_fd(
                 source_parent_fd,
@@ -3714,7 +3128,7 @@ def _move_exact_included_entry(
                 source_parent_path,
             )
             destination_parent_fd, destination_name = (
-                _open_pinned_included_parent(destination)
+                _included_fs.open_pinned_parent(destination)
             )
             try:
                 _included_metadata.verify_included_directory_fd(
@@ -3747,7 +3161,7 @@ def _move_exact_included_entry(
                     source_parent_fd,
                     source_name,
                 )
-                _rename_included_transaction_entry_at(
+                _included_fs.rename_entry_at(
                     source_parent_fd,
                     source_name,
                     destination_parent_fd,
@@ -3803,7 +3217,7 @@ def _move_exact_included_entry(
             raise OSError(
                 "Included Files source parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_source_parent_binding,
             source_parent_path,
             source_parent_identity,
@@ -3831,7 +3245,7 @@ def _move_exact_included_entry(
             raise OSError(
                 "Included Files destination parent binding requires an exact identity"
             )
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_destination_parent_binding,
             destination_parent_path,
             destination_parent_identity,
@@ -3845,7 +3259,7 @@ def _move_exact_included_entry(
         else:
             if source_parent_identity is None:
                 raise AssertionError("Missing Included Files source parent identity")
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_source_parent_binding,
                 source_parent_path,
                 source_parent_identity,
@@ -3859,7 +3273,7 @@ def _move_exact_included_entry(
                 raise AssertionError(
                     "Missing Included Files destination parent identity"
                 )
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_destination_parent_binding,
                 destination_parent_path,
                 destination_parent_identity,
@@ -3871,7 +3285,7 @@ def _move_exact_included_entry(
         else stat.S_ISREG(source_stat.st_mode)
     )
     if (
-        _included_output_path_is_redirected(source, source_stat)
+        _included_fs.output_path_is_redirected(source, source_stat)
         or not source_is_expected_kind
         or (source_stat.st_dev, source_stat.st_ino) != expected_identity
     ):
@@ -3883,7 +3297,7 @@ def _move_exact_included_entry(
     verify_parents()
     _before_included_transaction_rename_fallback(source, destination)
     verify_parents()
-    _rename_included_transaction_entry(source, destination)
+    _included_fs.rename_entry(source, destination)
     verify_parents()
     destination_stat = os.lstat(destination)
     destination_is_expected_kind = (
@@ -3892,7 +3306,7 @@ def _move_exact_included_entry(
         else stat.S_ISREG(destination_stat.st_mode)
     )
     if (
-        _included_output_path_is_redirected(destination, destination_stat)
+        _included_fs.output_path_is_redirected(destination, destination_stat)
         or not destination_is_expected_kind
         or (destination_stat.st_dev, destination_stat.st_ino)
         != expected_identity
@@ -3911,10 +3325,10 @@ def _move_exact_included_directory(
     source_parent_identity: _PathIdentity | None = None,
     destination_parent_identity: _PathIdentity | None = None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
 ) -> None:
     _move_exact_included_entry(
@@ -3937,10 +3351,10 @@ def _move_exact_included_file(
     source_parent_identity: _PathIdentity | None = None,
     destination_parent_identity: _PathIdentity | None = None,
     windows_source_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
     windows_destination_parent_binding: (
-        _WindowsIncludedCleanupParentBinding | None
+        _IncludedCleanupParentBinding | None
     ) = None,
 ) -> None:
     _move_exact_included_entry(
@@ -3955,31 +3369,6 @@ def _move_exact_included_file(
     )
 
 
-def _sync_included_directory(
-    path: str,
-    expected_identity: _PathIdentity,
-) -> None:
-    """Make prior namespace changes durable where Python exposes directory fsync."""
-
-    if os.name == "nt":
-        # Windows transaction renames use MoveFileExW with
-        # MOVEFILE_WRITE_THROUGH instead.
-        return
-    directory_fd = _open_pinned_included_directory(path)
-    try:
-        _included_metadata.verify_included_directory_fd(
-            directory_fd,
-            expected_identity,
-            path,
-        )
-        os.fsync(directory_fd)
-        _included_metadata.verify_included_directory_fd(
-            directory_fd,
-            expected_identity,
-            path,
-        )
-    finally:
-        os.close(directory_fd)
 
 
 def _sync_included_tree_directories_bottom_up(
@@ -4006,14 +3395,14 @@ def _sync_included_tree_directories_bottom_up(
         reverse=True,
     )
     for entry in directories:
-        _sync_included_directory(
+        _included_fs.sync_directory(
             _included_paths.included_recovery_tree_entry_path(
                 root_path,
                 entry.relative_path,
             ),
             entry.fingerprint[:2],
         )
-    _sync_included_directory(root_path, root_identity)
+    _included_fs.sync_directory(root_path, root_identity)
     _verify_included_tree_snapshot_metadata(
         root_path,
         snapshot,
@@ -4038,8 +3427,8 @@ def _prepare_included_registry_directory(
         return registry_directory, expected.directory_identity, False
     if current_identity is not None:
         raise OSError("Included File registry directory appeared during conversion")
-    if _included_descriptor_paths_supported():
-        project_fd = _open_pinned_included_directory(project_path)
+    if _included_fs.descriptor_paths_supported():
+        project_fd = _included_fs.open_pinned_directory(project_path)
         try:
             _included_metadata.verify_included_directory_fd(
                 project_fd,
@@ -4050,7 +3439,7 @@ def _prepare_included_registry_directory(
             os.mkdir(registry_name, 0o755, dir_fd=project_fd)
             registry_fd = os.open(
                 registry_name,
-                _DIRECTORY_OPEN_FLAGS,
+                _included_posix.DIRECTORY_OPEN_FLAGS,
                 dir_fd=project_fd,
             )
             try:
@@ -4199,7 +3588,7 @@ def _remove_exact_included_lock_initialization_temporary(
             source_parent_identity=project_identity,
             destination_parent_identity=project_identity,
         )
-        _sync_included_directory(parent_path, project_identity)
+        _included_fs.sync_directory(parent_path, project_identity)
         _after_included_lock_initialization_phase("temporary-cleanup-quarantined")
 
     tombstone_state = _included_lock_initialization_record_state(
@@ -4332,7 +3721,7 @@ def _initialize_included_project_lock(
                 or temporary_state[2] != _included_constants.INCLUDED_FILES_LOCK_CONTENT
             ):
                 raise OSError("Included Files lock initialization record changed")
-            _sync_included_directory(project_path, project_identity)
+            _included_fs.sync_directory(project_path, project_identity)
             _after_included_lock_initialization_phase("temporary-synced")
             _move_exact_included_file(
                 temporary_path,
@@ -4342,7 +3731,7 @@ def _initialize_included_project_lock(
                 destination_parent_identity=project_identity,
             )
             temporary_pending = False
-            _sync_included_directory(project_path, project_identity)
+            _included_fs.sync_directory(project_path, project_identity)
             _after_included_lock_initialization_phase("temporary-published")
         except OSError:
             # A competing initializer may have atomically published the complete
@@ -4382,9 +3771,9 @@ def _acquire_included_project_lock(
         | getattr(os, "O_NOFOLLOW", 0)
     )
     project_fd = -1
-    descriptor_bound = _included_descriptor_paths_supported()
+    descriptor_bound = _included_fs.descriptor_paths_supported()
     if descriptor_bound:
-        project_fd = _open_pinned_included_directory(project_path)
+        project_fd = _included_fs.open_pinned_directory(project_path)
         try:
             _included_metadata.verify_included_directory_fd(
                 project_fd,
@@ -4435,7 +3824,7 @@ def _acquire_included_project_lock(
         opened_stat = os.fstat(file_descriptor)
         path_stat = lock_lstat()
         if (
-            _included_output_path_is_redirected(lock_path, path_stat)
+            _included_fs.output_path_is_redirected(lock_path, path_stat)
             or not stat.S_ISREG(opened_stat.st_mode)
             or not os.path.samestat(opened_stat, path_stat)
             or opened_stat.st_nlink != 1
@@ -4447,7 +3836,7 @@ def _acquire_included_project_lock(
         if windows:
             os.lseek(file_descriptor, 0, os.SEEK_SET)
             try:
-                _windows_included_file_locking(file_descriptor, 2)
+                _included_fs.windows_file_locking(file_descriptor, 2)
             except OSError as error:
                 raise OSError(
                     "Another GM2Godot conversion is already publishing or "
@@ -4496,7 +3885,7 @@ def _acquire_included_project_lock(
             )
         final_stat = lock_lstat()
         if (
-            _included_output_path_is_redirected(lock_path, final_stat)
+            _included_fs.output_path_is_redirected(lock_path, final_stat)
             or not os.path.samestat(os.fstat(file_descriptor), final_stat)
         ):
             raise OSError(f"Included Files transaction lock changed: {lock_path}")
@@ -4517,7 +3906,7 @@ def _acquire_included_project_lock(
             try:
                 if windows:
                     os.lseek(file_descriptor, 0, os.SEEK_SET)
-                    _windows_included_file_locking(file_descriptor, 0)
+                    _included_fs.windows_file_locking(file_descriptor, 0)
                 else:
                     import fcntl
 
@@ -4534,7 +3923,7 @@ def _release_included_project_lock(project_lock: _IncludedProjectLock) -> None:
     try:
         if project_lock.windows:
             os.lseek(project_lock.file_descriptor, 0, os.SEEK_SET)
-            _windows_included_file_locking(project_lock.file_descriptor, 0)
+            _included_fs.windows_file_locking(project_lock.file_descriptor, 0)
         else:
             import fcntl
 
@@ -4584,7 +3973,7 @@ def _read_opened_included_bounded_record_payload(
         record_label,
         size_qualifier,
     )
-    _verify_included_mount_boundary(
+    _included_fs.verify_mount_boundary(
         path,
         opened_stat,
         expected_device,
@@ -4619,9 +4008,9 @@ def _included_bounded_record_state(
     size_qualifier: str,
     allowed_identities: frozenset[_PathIdentity] | None = None,
 ) -> tuple[_PathIdentity, int, bytes] | None:
-    if _included_descriptor_paths_supported():
+    if _included_fs.descriptor_paths_supported():
         try:
-            parent_fd, name = _open_pinned_included_parent(path)
+            parent_fd, name = _included_fs.open_pinned_parent(path)
         except FileNotFoundError:
             return None
         try:
@@ -4630,7 +4019,7 @@ def _included_bounded_record_state(
                 project_identity,
                 os.path.dirname(path),
             )
-            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+            parent_mount_id = _included_fs.linux_mount_id_from_fd(parent_fd)
             path_stat = _included_metadata.included_entry_stat_at(parent_fd, name)
             if path_stat is None:
                 return None
@@ -4706,7 +4095,7 @@ def _included_bounded_record_state(
         _verify_fallback_directory_ancestors(parent_identities)
         return None
     if (
-        _included_output_path_is_redirected(path, path_stat)
+        _included_fs.output_path_is_redirected(path, path_stat)
         or not stat.S_ISREG(path_stat.st_mode)
     ):
         raise OSError(
@@ -4729,7 +4118,7 @@ def _included_bounded_record_state(
     )
     expected_fingerprint = _included_metadata.included_path_fingerprint(path_stat)
     expected_ctime_ns = path_stat.st_ctime_ns
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         parent_path,
         parent_identities[-1][1],
     )
@@ -4758,7 +4147,7 @@ def _included_bounded_record_state(
             os.close(file_descriptor)
     current_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, current_stat)
+        _included_fs.output_path_is_redirected(path, current_stat)
         or not stat.S_ISREG(current_stat.st_mode)
         or _included_metadata.included_path_fingerprint(current_stat) != expected_fingerprint
         or current_stat.st_ctime_ns != expected_ctime_ns
@@ -4874,7 +4263,7 @@ def _publish_included_recovery_record(
         # The crash-test phase names this temporary "durable". Persist its
         # project-directory entry as well as its already-fsynced contents
         # before exposing that boundary to recovery.
-        _sync_included_directory(project_path, project_identity)
+        _included_fs.sync_directory(project_path, project_identity)
         if staged_phase is not None:
             _after_included_transaction_phase(staged_phase)
         _move_exact_included_file(
@@ -4885,7 +4274,7 @@ def _publish_included_recovery_record(
             destination_parent_identity=project_identity,
         )
         temporary_pending = False
-        _sync_included_directory(project_path, project_identity)
+        _included_fs.sync_directory(project_path, project_identity)
         published_state = _included_recovery_record_state(
             destination_path,
             project_identity,
@@ -5047,10 +4436,10 @@ def _included_cleanup_file_state(
     expected_identity: _PathIdentity,
     expected_parent_identity: _PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> _IncludedCleanupFileState | None:
-    if _included_descriptor_paths_supported():
-        parent_fd, name = _open_pinned_included_parent(path)
+    if _included_fs.descriptor_paths_supported():
+        parent_fd, name = _included_fs.open_pinned_parent(path)
         try:
             _included_metadata.verify_included_directory_fd(
                 parent_fd,
@@ -5068,7 +4457,7 @@ def _included_cleanup_file_state(
                 raise OSError(f"Included Files cleanup file changed: {path}")
             expected_fingerprint = _included_metadata.included_path_fingerprint(current_stat)
             expected_ctime_ns = current_stat.st_ctime_ns
-            parent_mount_id = _included_linux_mount_id_from_fd(parent_fd)
+            parent_mount_id = _included_fs.linux_mount_id_from_fd(parent_fd)
             content_sha256 = _digest_included_regular_file_at(
                 parent_fd,
                 name,
@@ -5103,7 +4492,7 @@ def _included_cleanup_file_state(
             raise OSError(f"Included Files cleanup parent changed: {path}")
     else:
         parent_identities = None
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5115,7 +4504,7 @@ def _included_cleanup_file_state(
                 raise AssertionError("Missing Included Files cleanup parent state")
             _verify_fallback_directory_ancestors(parent_identities)
         else:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5126,14 +4515,14 @@ def _included_cleanup_file_state(
         verify_parent()
         return None
     if (
-        _included_output_path_is_redirected(path, current_stat)
+        _included_fs.output_path_is_redirected(path, current_stat)
         or not stat.S_ISREG(current_stat.st_mode)
         or (current_stat.st_dev, current_stat.st_ino) != expected_identity
     ):
         raise OSError(f"Included Files cleanup file changed: {path}")
     expected_fingerprint = _included_metadata.included_path_fingerprint(current_stat)
     expected_ctime_ns = current_stat.st_ctime_ns
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         parent_path,
         expected_parent_identity,
     )
@@ -5147,7 +4536,7 @@ def _included_cleanup_file_state(
     verify_parent()
     final_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, final_stat)
+        _included_fs.output_path_is_redirected(path, final_stat)
         or not stat.S_ISREG(final_stat.st_mode)
         or (final_stat.st_dev, final_stat.st_ino) != expected_identity
         or _included_metadata.included_path_fingerprint(final_stat) != expected_fingerprint
@@ -5167,11 +4556,11 @@ def _included_cleanup_directory_state(
     expected_identity: _PathIdentity,
     expected_parent_identity: _PathIdentity,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> bool | None:
     parent_path = os.path.dirname(os.path.abspath(path))
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5179,28 +4568,28 @@ def _included_cleanup_directory_state(
         try:
             path_stat = os.lstat(path)
         except FileNotFoundError:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
             )
             return None
         if (
-            _included_output_path_is_redirected(path, path_stat)
+            _included_fs.output_path_is_redirected(path, path_stat)
             or not stat.S_ISDIR(path_stat.st_mode)
             or (path_stat.st_dev, path_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Included Files cleanup directory changed: {path}")
-        parent_mount_id = _included_directory_mount_id(
+        parent_mount_id = _included_fs.directory_mount_id(
             parent_path,
             expected_parent_identity,
         )
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
         )
-        _verify_included_mount_boundary_path(
+        _included_fs.verify_mount_boundary_path(
             path,
             path_stat,
             expected_parent_identity[0],
@@ -5209,12 +4598,12 @@ def _included_cleanup_directory_state(
         )
         final_stat = os.lstat(path)
         if (
-            _included_output_path_is_redirected(path, final_stat)
+            _included_fs.output_path_is_redirected(path, final_stat)
             or not stat.S_ISDIR(final_stat.st_mode)
             or (final_stat.st_dev, final_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Included Files cleanup directory changed: {path}")
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5231,15 +4620,15 @@ def _included_cleanup_directory_state(
         raise OSError(f"Included Files cleanup directory changed: {path}")
     path_stat = os.lstat(path)
     if (
-        _included_output_path_is_redirected(path, path_stat)
+        _included_fs.output_path_is_redirected(path, path_stat)
         or not stat.S_ISDIR(path_stat.st_mode)
     ):
         raise OSError(f"Included Files cleanup directory changed: {path}")
-    parent_mount_id = _included_directory_mount_id(
+    parent_mount_id = _included_fs.directory_mount_id(
         parent_path,
         expected_parent_identity,
     )
-    _verify_included_mount_boundary_path(
+    _included_fs.verify_mount_boundary_path(
         path,
         path_stat,
         expected_parent_identity[0],
@@ -5261,18 +4650,18 @@ def _remove_included_cleanup_tombstone(
     parent_identity: _PathIdentity,
     *,
     expect_directory: bool,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> None:
     # The fallback removers must observe the original Windows READONLY state
     # themselves so they can restore that attribute after a sharing failure.
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             parent_identity,
         )
-    if _included_descriptor_paths_supported():
-        parent_fd, name = _open_pinned_included_parent(path)
+    if _included_fs.descriptor_paths_supported():
+        parent_fd, name = _included_fs.open_pinned_parent(path)
         try:
             _included_metadata.verify_included_directory_fd(
                 parent_fd,
@@ -5309,7 +4698,7 @@ def _remove_included_cleanup_tombstone(
             expected_parent_identity=parent_identity,
             windows_parent_binding=windows_parent_binding,
         )
-    _sync_included_directory(parent_path, parent_identity)
+    _included_fs.sync_directory(parent_path, parent_identity)
 
 
 def _cleanup_recorded_included_file(
@@ -5323,7 +4712,7 @@ def _cleanup_recorded_included_file(
     *,
     expected_fingerprint: _PathFingerprint | None = None,
     expected_mode: int | None = None,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> tuple[str, ...]:
     warnings: list[str] = []
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -5343,7 +4732,7 @@ def _cleanup_recorded_included_file(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5362,7 +4751,7 @@ def _cleanup_recorded_included_file(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5394,7 +4783,7 @@ def _cleanup_recorded_included_file(
             )
             return tuple(warnings)
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5432,7 +4821,7 @@ def _cleanup_recorded_included_file(
         windows_source_parent_binding=windows_parent_binding,
         windows_destination_parent_binding=windows_parent_binding,
     )
-    _sync_included_directory(parent_path, expected_parent_identity)
+    _included_fs.sync_directory(parent_path, expected_parent_identity)
     _after_included_transaction_phase(
         f"cleanup:{role}:{relative_path}:quarantined"
     )
@@ -5454,7 +4843,7 @@ def _cleanup_recorded_included_file(
             + tombstone_path
         )
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5479,7 +4868,7 @@ def _cleanup_recorded_included_directory(
     role: str,
     relative_path: str,
     *,
-    windows_parent_binding: _WindowsIncludedCleanupParentBinding | None = None,
+    windows_parent_binding: _IncludedCleanupParentBinding | None = None,
 ) -> tuple[str, ...]:
     warnings: list[str] = []
     parent_path = os.path.dirname(os.path.abspath(path))
@@ -5499,7 +4888,7 @@ def _cleanup_recorded_included_directory(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5518,7 +4907,7 @@ def _cleanup_recorded_included_directory(
         )
     except OSError:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5538,7 +4927,7 @@ def _cleanup_recorded_included_directory(
         return tuple(warnings)
     if tombstone_state is not None:
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5550,7 +4939,7 @@ def _cleanup_recorded_included_directory(
             )
             return tuple(warnings)
         if windows_parent_binding is not None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 windows_parent_binding,
                 parent_path,
                 expected_parent_identity,
@@ -5570,7 +4959,7 @@ def _cleanup_recorded_included_directory(
     if source_state is None:
         return tuple(warnings)
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5590,12 +4979,12 @@ def _cleanup_recorded_included_directory(
     else:
         current_stat = os.lstat(path)
         if (
-            _included_output_path_is_redirected(path, current_stat)
+            _included_fs.output_path_is_redirected(path, current_stat)
             or not stat.S_ISDIR(current_stat.st_mode)
             or (current_stat.st_dev, current_stat.st_ino) != expected_identity
         ):
             raise OSError(f"Included Files cleanup directory changed: {path}")
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5609,12 +4998,12 @@ def _cleanup_recorded_included_directory(
         windows_source_parent_binding=windows_parent_binding,
         windows_destination_parent_binding=windows_parent_binding,
     )
-    _sync_included_directory(parent_path, expected_parent_identity)
+    _included_fs.sync_directory(parent_path, expected_parent_identity)
     _after_included_transaction_phase(
         f"cleanup:{role}:{relative_path}:quarantined"
     )
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5626,7 +5015,7 @@ def _cleanup_recorded_included_directory(
         )
         return tuple(warnings)
     if windows_parent_binding is not None:
-        _verify_windows_included_cleanup_parent_binding(
+        _included_fs.verify_windows_cleanup_parent(
             windows_parent_binding,
             parent_path,
             expected_parent_identity,
@@ -5701,7 +5090,7 @@ def _cleanup_recorded_included_tree(
     windows_bindings_enabled = (
         os.name == "nt"
         and sys.platform == "win32"
-        and not _included_descriptor_paths_supported()
+        and not _included_fs.descriptor_paths_supported()
     )
     if not windows_bindings_enabled or not snapshot.entries:
         absent_directories: set[str] = set()
@@ -5814,17 +5203,17 @@ def _cleanup_recorded_included_tree(
             )
 
         def verify_parent_binding(
-            binding: _WindowsIncludedCleanupParentBinding,
+            binding: _IncludedCleanupParentBinding,
             relative_path: str,
         ) -> None:
-            _verify_windows_included_cleanup_parent_binding(
+            _included_fs.verify_windows_cleanup_parent(
                 binding,
                 parent_path_for(relative_path),
                 directory_identities[relative_path],
             )
 
         with ExitStack() as root_binding_scope:
-            root_parent_binding = _WindowsIncludedCleanupParentBinding.open(
+            root_parent_binding = _included_fs.open_windows_cleanup_parent(
                 path,
                 root_identity,
             )
@@ -5836,10 +5225,10 @@ def _cleanup_recorded_included_tree(
                 binding_scope: ExitStack,
                 active_bindings: dict[
                     str,
-                    _WindowsIncludedCleanupParentBinding,
+                    _IncludedCleanupParentBinding,
                 ],
                 relative_path: str,
-            ) -> _WindowsIncludedCleanupParentBinding:
+            ) -> _IncludedCleanupParentBinding:
                 parent_relative = posixpath.dirname(relative_path)
                 parent_binding = active_bindings.get(parent_relative)
                 if parent_binding is None:
@@ -5848,7 +5237,7 @@ def _cleanup_recorded_included_tree(
                         + parent_relative
                     )
                 verify_parent_binding(parent_binding, parent_relative)
-                binding = _WindowsIncludedCleanupParentBinding.open(
+                binding = _included_fs.open_windows_cleanup_parent(
                     parent_path_for(relative_path),
                     directory_identities[relative_path],
                 )
@@ -6785,7 +6174,7 @@ def _promote_included_journal_temporary(
         source_parent_identity=project_identity,
         destination_parent_identity=project_identity,
     )
-    _sync_included_directory(project_path, project_identity)
+    _included_fs.sync_directory(project_path, project_identity)
     _after_included_transaction_phase("recovery-journal-promoted")
     return True, tuple(warnings)
 
@@ -6912,12 +6301,12 @@ def _recover_included_output_set(
             journal.transaction_id,
             "rollback-stage",
         )
-        _sync_included_directory(project_path, project_identity)
+        _included_fs.sync_directory(project_path, project_identity)
         previous_registry_directory_identity = (
             transaction.previous_registry_snapshot.directory_identity
         )
         if previous_registry_directory_identity is not None:
-            _sync_included_directory(
+            _included_fs.sync_directory(
                 journal.registry_directory_path,
                 previous_registry_directory_identity,
             )
@@ -7177,7 +6566,7 @@ def _commit_included_output_set(
                 source_parent_identity=transaction.project_identity,
                 destination_parent_identity=transaction.project_identity,
             )
-        _sync_included_directory(project_path, transaction.project_identity)
+        _included_fs.sync_directory(project_path, transaction.project_identity)
         _after_included_transaction_phase("previous-root-backed-up")
         if not conversion_running():
             raise _IncludedOutputSetCancelled()
@@ -7192,11 +6581,11 @@ def _commit_included_output_set(
             source_parent_identity=transaction.stage_container_identity,
             destination_parent_identity=transaction.project_identity,
         )
-        _sync_included_directory(
+        _included_fs.sync_directory(
             transaction.stage_container_path,
             transaction.stage_container_identity,
         )
-        _sync_included_directory(project_path, transaction.project_identity)
+        _included_fs.sync_directory(project_path, transaction.project_identity)
         _verify_included_tree_snapshot_metadata(
             final_root_path,
             transaction.staged_root_snapshot,
@@ -7217,7 +6606,7 @@ def _commit_included_output_set(
                 source_parent_identity=registry_directory_identity,
                 destination_parent_identity=registry_directory_identity,
             )
-        _sync_included_directory(
+        _included_fs.sync_directory(
             registry_directory_path,
             registry_directory_identity,
         )
@@ -7232,11 +6621,11 @@ def _commit_included_output_set(
             source_parent_identity=transaction.stage_container_identity,
             destination_parent_identity=registry_directory_identity,
         )
-        _sync_included_directory(
+        _included_fs.sync_directory(
             transaction.stage_container_path,
             transaction.stage_container_identity,
         )
-        _sync_included_directory(
+        _included_fs.sync_directory(
             registry_directory_path,
             registry_directory_identity,
         )
@@ -7385,7 +6774,7 @@ def _commit_included_output_set(
                 )
                 for cleanup_warning in rollback_cleanup_warnings:
                     error.add_note(cleanup_warning)
-                _sync_included_directory(
+                _included_fs.sync_directory(
                     project_path,
                     transaction.project_identity,
                 )
@@ -7394,7 +6783,7 @@ def _commit_included_output_set(
                     and _included_directory_identity(registry_directory_path)
                     == registry_directory_identity
                 ):
-                    _sync_included_directory(
+                    _included_fs.sync_directory(
                         registry_directory_path,
                         registry_directory_identity,
                     )
@@ -7475,7 +6864,7 @@ def _ensure_included_output_project_root(project_path: str) -> tuple[int, int]:
     os.makedirs(project_path, exist_ok=True)
     project_stat = os.lstat(project_path)
     if (
-        _included_output_path_is_redirected(project_path, project_stat)
+        _included_fs.output_path_is_redirected(project_path, project_stat)
         or not stat.S_ISDIR(project_stat.st_mode)
     ):
         raise OSError(
@@ -7484,41 +6873,8 @@ def _ensure_included_output_project_root(project_path: str) -> tuple[int, int]:
     return (project_stat.st_dev, project_stat.st_ino)
 
 
-def _confined_included_output_supported() -> bool:
-    return (
-        os.name != "nt"
-        and os.chmod in os.supports_fd
-        and os.utime in os.supports_fd
-        and all(
-            operation in os.supports_dir_fd
-            for operation in (os.open, os.mkdir, os.stat, os.rename, os.unlink)
-        )
-    )
 
 
-def _open_or_create_included_output_directory(
-    parent_fd: int,
-    component: str,
-    flags: int,
-) -> int:
-    try:
-        return os.open(component, flags, dir_fd=parent_fd)
-    except FileNotFoundError:
-        try:
-            os.mkdir(component, 0o755, dir_fd=parent_fd)
-        except FileExistsError:
-            pass
-        try:
-            return os.open(component, flags, dir_fd=parent_fd)
-        except OSError as error:
-            raise OSError(
-                "Refusing redirected Included File output directory: "
-                f"{component}"
-            ) from error
-    except OSError as error:
-        raise OSError(
-            f"Refusing redirected Included File output directory: {component}"
-        ) from error
 
 
 def _verify_open_included_output_directory(
@@ -7543,7 +6899,7 @@ def _verify_open_included_output_directory(
     except ValueError:
         contained = False
     if (
-        _included_output_path_is_redirected(directory_path, path_stat)
+        _included_fs.output_path_is_redirected(directory_path, path_stat)
         or not stat.S_ISDIR(path_stat.st_mode)
         or (path_stat.st_dev, path_stat.st_ino)
         != (open_stat.st_dev, open_stat.st_ino)
@@ -7554,17 +6910,6 @@ def _verify_open_included_output_directory(
         )
 
 
-def _apply_included_output_metadata(
-    file_descriptor: int,
-    source_stat: os.stat_result,
-) -> None:
-    if os.chmod in os.supports_fd:
-        os.chmod(file_descriptor, stat.S_IMODE(source_stat.st_mode))
-    if os.utime in os.supports_fd:
-        os.utime(
-            file_descriptor,
-            ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns),
-        )
 
 
 def _read_included_payload_chunk(source_file: BinaryIO) -> bytes:
@@ -7682,7 +7027,7 @@ def _stage_included_output_at(
                 expected_receipt,
             )
             target_file.flush()
-            _apply_included_output_metadata(
+            _included_fs.apply_output_metadata(
                 target_file.fileno(),
                 source_stat,
             )
@@ -7816,7 +7161,7 @@ def _publish_included_output_at(
             project_fd,
         )
         for component in components[:-1]:
-            child_fd = _open_or_create_included_output_directory(
+            child_fd = _included_fs.open_or_create_output_directory(
                 current_fd,
                 component,
                 directory_flags,
@@ -7879,7 +7224,7 @@ def _prepare_included_output_directories_fallback(
         except ValueError:
             contained = False
         if (
-            _included_output_path_is_redirected(directory_path, directory_stat)
+            _included_fs.output_path_is_redirected(directory_path, directory_stat)
             or not stat.S_ISDIR(directory_stat.st_mode)
             or not contained
         ):
@@ -7907,7 +7252,7 @@ def _verify_included_output_directories_fallback(
                 f"Included File output directory changed: {directory_path}"
             ) from error
         if (
-            _included_output_path_is_redirected(directory_path, directory_stat)
+            _included_fs.output_path_is_redirected(directory_path, directory_stat)
             or not stat.S_ISDIR(directory_stat.st_mode)
             or (directory_stat.st_dev, directory_stat.st_ino)
             != expected_identity
@@ -7931,10 +7276,10 @@ def _verify_included_output_stage_fallback(
             f"Included File staging output changed: {staged_path}"
         ) from error
     if (
-        _included_output_path_is_redirected(staged_path, staged_stat)
+        _included_fs.output_path_is_redirected(staged_path, staged_stat)
         or not stat.S_ISREG(staged_stat.st_mode)
         or (staged_stat.st_dev, staged_stat.st_ino) != expected_identity
-        or _included_output_path_is_redirected(parent_path, parent_stat)
+        or _included_fs.output_path_is_redirected(parent_path, parent_stat)
         or not stat.S_ISDIR(parent_stat.st_mode)
         or (parent_stat.st_dev, parent_stat.st_ino)
         != expected_project_identity
@@ -8027,7 +7372,7 @@ def _publish_included_output_fallback(
                 expected_receipt,
             )
             target_file.flush()
-            _apply_included_output_metadata(
+            _included_fs.apply_output_metadata(
                 target_file.fileno(),
                 source_stat,
             )
@@ -8051,7 +7396,7 @@ def _publish_included_output_fallback(
             raise OSError(
                 f"Included File output changed after publication: {output_path}"
             )
-        with _open_included_file_validation_stream(
+        with _included_fs.open_validation_stream(
             output_path,
             deny_writes=False,
             no_follow=True,
@@ -8100,7 +7445,7 @@ def _publish_confined_included_output(
 ) -> _IncludedCopyReceipt:
     components = _included_paths.included_output_components(project_path, output_path)
     _ensure_included_output_project_root(project_path)
-    if _confined_included_output_supported():
+    if _included_fs.confined_output_supported():
         return _publish_included_output_at(
             project_path,
             components,
@@ -8294,7 +7639,7 @@ class IncludedFilesConverter(BaseConverter):
             return None
 
         try:
-            source_file = _open_included_file_validation_stream(
+            source_file = _included_fs.open_validation_stream(
                 resolved.filesystem_path,
                 deny_writes=deny_writes,
             )

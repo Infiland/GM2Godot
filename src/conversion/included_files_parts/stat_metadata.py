@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import posixpath
 import stat
+from typing import Callable, cast
 from src.conversion.included_files_parts.models import (
     PathIdentity as _PathIdentity,
     PathFingerprint as _PathFingerprint,
@@ -511,6 +512,19 @@ def _verify_included_output_state(
         )
 
 
+def _included_output_path_is_redirected(
+    path: str,
+    path_stat: os.stat_result,
+) -> bool:
+    if stat.S_ISLNK(path_stat.st_mode):
+        return True
+    junction_candidate: object = getattr(os.path, "isjunction", None)
+    if not callable(junction_candidate):
+        return False
+    junction_checker = cast(Callable[[str], bool], junction_candidate)
+    return junction_checker(path)
+
+
 # Finite compatibility exports; each operation has one actual owner.
 directory_identity_from_fd = _directory_identity_from_fd
 verify_included_directory_fd = _verify_included_directory_fd
@@ -535,3 +549,5 @@ included_output_state_at = _included_output_state_at
 verify_included_output_state_at = _verify_included_output_state_at
 included_output_state = _included_output_state
 verify_included_output_state = _verify_included_output_state
+
+included_output_path_is_redirected = _included_output_path_is_redirected

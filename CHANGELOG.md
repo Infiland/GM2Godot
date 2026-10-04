@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.41 - 2026-10-04
+
+- Reuse shared Godot smoke-test utilities in 44 more compatible modules while preserving live discovery, fixture bytes, assertions and skip policies.
+- Keep specialized capability checks, process environments, working directories, timeouts and lifecycle handling with their existing test owners.
+
 ## 0.8.40 - 2026-10-04
 
 - Share Godot binary discovery, fixture text writing and standard headless scene invocation across six smoke-test modules while preserving their fixtures and assertions.

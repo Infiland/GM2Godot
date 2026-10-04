@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -17,6 +16,10 @@ from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.rooms import RoomConverter
 from src.conversion.sprites import SpriteConverter
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    write_fixture_text as _write_text,
+)
 
 _EXPECTED_GODOT_VERSION = "4.7.2.stable.official.ed1daf0bf"
 _FIXTURE_PATH = (
@@ -25,22 +28,6 @@ _FIXTURE_PATH = (
     / "authored_particles"
     / "fixture.json"
 )
-
-
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _write_json(path: Path, value: object) -> None:

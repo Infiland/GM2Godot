@@ -27,6 +27,7 @@ from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
     ScriptConverter,
 )
+from tests.godot_test_support import write_fixture_text as _write_text
 
 SNAP_BUFFER_READ_YAML_FIXTURE = (
     Path(__file__).parent
@@ -40,11 +41,6 @@ SNAP_BUFFER_READ_YAML_FIXTURE = (
 def _write_json(path: Path, data: JsonObject) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
 
 
 def _resource_entry(kind: str, name: str) -> JsonObject:

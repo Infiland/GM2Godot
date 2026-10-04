@@ -126,8 +126,8 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [x] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.
 - [x] Document required local Pyright, configured and tracked-source Ruff, complexity, and unittest commands as the equivalent checks before a commit.
 - [ ] Make tests import source through package configuration rather than repeated `sys.path` mutation.
-- [ ] Add shared test utility for Godot binary discovery.
-- [ ] Add shared fixture-writing helpers.
+- [x] Add shared test utility for live Godot binary discovery with the original lookup order.
+- [x] Add shared UTF-8 fixture-writing helpers; 50 compatible test modules use shared discovery, writes or standard scene launches while assertions, skips and specialized capability/launch policies stay local.
 - [x] Add Python coverage reporting and coverage floor for core modules.
 
 ## P2: Runtime Maintainability

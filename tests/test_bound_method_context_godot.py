@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -11,35 +10,17 @@ from pathlib import Path
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.scripts import SCRIPT_REGISTRY_RELATIVE_PATH, ScriptConverter
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    run_headless_scene,
+    write_fixture_text as _write_text,
+)
 
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "bound_method_context"
 
 
-def _find_godot_binary() -> str | None:
-    configured = os.environ.get("GODOT_BIN")
-    if configured and os.path.isfile(configured):
-        return configured
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    return mac_binary if os.path.isfile(mac_binary) else None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
 def _run_godot(godot_binary: str, project_dir: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [godot_binary, "--headless", "--path", str(project_dir), "smoke.tscn"],
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        timeout=30,
-    )
+    return run_headless_scene(godot_binary, project_dir, 'smoke.tscn', timeout=30)
 
 
 def _smoke_scene() -> str:

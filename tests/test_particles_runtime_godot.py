@@ -1,34 +1,16 @@
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
 from src.conversion.gml_runtime import write_gml_runtime
-
-
-def _find_godot_binary() -> str | None:
-    env_path = os.environ.get("GODOT_BIN")
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    path_binary = shutil.which("godot")
-    if path_binary is not None:
-        return path_binary
-
-    mac_binary = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if os.path.isfile(mac_binary):
-        return mac_binary
-    return None
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+from tests.godot_test_support import (
+    find_smoke_godot_binary as _find_godot_binary,
+    run_headless_scene,
+    write_fixture_text as _write_text,
+)
 
 
 class TestParticlesRuntimeGodotSmoke(unittest.TestCase):
@@ -158,14 +140,7 @@ class TestParticlesRuntimeGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "smoke.gd", smoke_script)
             _write_text(project_dir / "smoke.tscn", smoke_scene)
 
-            result = subprocess.run(
-                [godot_binary, "--headless", "--path", str(project_dir), "smoke.tscn"],
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=30,
-            )
+            result = run_headless_scene(godot_binary, project_dir, 'smoke.tscn', timeout=30)
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("PARTICLES_RUNTIME_SMOKE_OK", result.stdout)

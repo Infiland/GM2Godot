@@ -10,11 +10,7 @@ from pathlib import Path
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.godot_validation import find_godot_binary
 from src.conversion.scripts import ScriptConverter
-
-
-def _write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+from tests.godot_test_support import write_fixture_text as _write_text
 
 
 def _write_json(path: Path, data: dict[str, object]) -> None:

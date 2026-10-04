@@ -345,6 +345,7 @@ jobs:
           tests.test_managed_output_publisher
           tests.test_included_files.TestIncludedFilesManagedRootTransaction
           tests.test_included_files.TestIncludedFilesConverterOutputContainment
+          tests.test_included_files_native_owners
 
       - name: Run native Windows Godot output-reader scheduling tests
         run: >-

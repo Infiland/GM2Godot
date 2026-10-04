@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.29 - 2026-10-04
+
+- Move included-files POSIX and Windows primitives behind a finite typed filesystem interface, preserving native flags, ownership and transaction behavior.
+- Verify live native delegation, late platform selection, borrowed descriptors and Windows cleanup-parent lifecycle; keep existing recovery and transaction tests.
+
 ## 0.8.28 - 2026-10-04
 
 - Separate included-files path validation, metadata checks and recovery codecs into dedicated owners, preserving conversion output and transaction guarantees.

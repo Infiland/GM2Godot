@@ -26,6 +26,8 @@ if PROJECT_ROOT not in sys.path:
 
 from src.conversion import included_files as included_files_module
 from src.conversion.included_files_parts import (
+    native_posix as _included_posix,
+    native_windows as _included_windows,
     constants as _included_constants,
     path_validation as _included_paths,
     stat_metadata as _included_metadata,
@@ -137,7 +139,7 @@ class _ModeledWindowsCleanupParentBinding:
                 f"Included Files cleanup parent changed: {self.path}"
             ) from error
         if (
-            included_files_module._included_output_path_is_redirected(
+            _included_metadata.included_output_path_is_redirected(
                 self.path,
                 path_stat,
             )
@@ -357,10 +359,10 @@ class TestIncludedFilesConverterBasic(unittest.TestCase):
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> None:
             original_move(
@@ -464,8 +466,8 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         cleanup_context = ExitStack()
         cleanup_context.enter_context(
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             )
         )
@@ -477,22 +479,22 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
         )
         cleanup_context.enter_context(
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                _included_windows.WindowsIncludedCleanupParentBinding,
                 "open",
                 side_effect=binding_opener,
             )
         )
         cleanup_context.enter_context(
             patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+                _included_windows,
+                'rename_included_transaction_entry',
                 side_effect=os.rename,
             )
         )
         cleanup_context.enter_context(
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             )
         )
@@ -558,8 +560,8 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=not force_fallback,
             ),
             patch.object(
@@ -575,13 +577,13 @@ class TestIncludedFilesManagedRootTransaction(unittest.TestCase):
                 ),
             ),
             patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+                _included_windows,
+                'rename_included_transaction_entry',
                 side_effect=os.rename,
             ),
             patch.object(
-                included_files_module,
-                "_sync_included_directory",
+                _included_posix,
+                'sync_included_directory',
             ),
         ):
             warnings = included_files_module._cleanup_recorded_included_file(
@@ -905,7 +907,7 @@ IncludedFilesConverter(
                 record_file.flush()
                 os.fsync(record_file.fileno())
             rewritten += 1
-        included_files_module._sync_included_directory(
+        _included_posix.sync_included_directory(
             project_path,
             project_identity,
         )
@@ -1050,20 +1052,20 @@ IncludedFilesConverter(
             ),
         ):
             self.assertEqual(
-                included_files_module._included_linux_mount_id_from_fd(123),
+                _included_posix.included_linux_mount_id_from_fd(123),
                 41,
             )
 
         with (
             patch.object(
-                included_files_module,
-                "_included_linux_mount_id_from_fd",
+                _included_posix,
+                'included_linux_mount_id_from_fd',
                 return_value=42,
             ),
             patch.object(included_files_module.os.path, "ismount", return_value=False),
             self.assertRaisesRegex(OSError, "mount boundary"),
         ):
-            included_files_module._verify_included_mount_boundary(
+            _included_posix.verify_included_mount_boundary(
                 os.path.join(self.datafiles_dir, "test-mount-id"),
                 opened_stat,
                 opened_stat.st_dev,
@@ -1074,12 +1076,12 @@ IncludedFilesConverter(
     def test_descriptor_tree_capture_closes_parent_when_mount_check_fails(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned tree capture is unavailable")
         root_path = os.path.join(self.godot_dir, "fd-cleanup-root")
         os.mkdir(root_path)
         original_open_parent = (
-            included_files_module._open_pinned_included_parent
+            _included_posix.open_pinned_included_parent
         )
         opened_parent_fd = -1
 
@@ -1090,13 +1092,13 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_open_pinned_included_parent",
+                _included_posix,
+                'open_pinned_included_parent',
                 side_effect=observe_parent_open,
             ),
             patch.object(
-                included_files_module,
-                "_included_linux_mount_id_from_fd",
+                _included_posix,
+                'included_linux_mount_id_from_fd',
                 side_effect=OSError("injected mount inspection failure"),
             ),
             self.assertRaisesRegex(OSError, "mount inspection failure"),
@@ -1122,8 +1124,8 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(
@@ -1243,8 +1245,8 @@ IncludedFilesConverter(
 
                 with (
                     patch.object(
-                        included_files_module,
-                        "_included_descriptor_paths_supported",
+                        _included_posix,
+                        'included_descriptor_paths_supported',
                         return_value=False,
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
@@ -1664,8 +1666,8 @@ IncludedFilesConverter(
                 project_stat = os.lstat(self.godot_dir)
                 project_identity = project_stat.st_dev, project_stat.st_ino
                 with patch.object(
-                    included_files_module,
-                    "_included_descriptor_paths_supported",
+                    _included_posix,
+                    'included_descriptor_paths_supported',
                     return_value=False,
                 ):
                     snapshot = included_files_module._capture_included_tree(
@@ -1696,7 +1698,7 @@ IncludedFilesConverter(
 
                 binding_opener = MagicMock(side_effect=open_binding)
                 verify_parent_binding = (
-                    included_files_module._verify_windows_included_cleanup_parent_binding
+                    _included_windows.verify_windows_included_cleanup_parent_binding
                 )
                 capture_ancestors = (
                     included_files_module._capture_fallback_directory_ancestors
@@ -1704,8 +1706,8 @@ IncludedFilesConverter(
                 with (
                     self._modeled_windows_cleanup_context(binding_opener),
                     patch.object(
-                        included_files_module,
-                        "_verify_windows_included_cleanup_parent_binding",
+                        _included_windows,
+                        'verify_windows_included_cleanup_parent_binding',
                         wraps=verify_parent_binding,
                     ) as parent_binding_verifier,
                     patch.object(
@@ -1789,8 +1791,8 @@ IncludedFilesConverter(
         project_stat = os.lstat(self.godot_dir)
         project_identity = project_stat.st_dev, project_stat.st_ino
         with patch.object(
-            included_files_module,
-            "_included_descriptor_paths_supported",
+            _included_posix,
+            'included_descriptor_paths_supported',
             return_value=False,
         ):
             snapshot = included_files_module._capture_included_tree(
@@ -2199,8 +2201,8 @@ IncludedFilesConverter(
 
                 with (
                     patch.object(
-                        included_files_module,
-                        "_included_descriptor_paths_supported",
+                        _included_posix,
+                        'included_descriptor_paths_supported',
                         return_value=False,
                     ),
                     patch.object(included_files_module.os, "name", "nt"),
@@ -2211,18 +2213,18 @@ IncludedFilesConverter(
                         supports_without_chmod,
                     ),
                     patch.object(
-                        included_files_module._WindowsIncludedCleanupParentBinding,
+                        _included_windows.WindowsIncludedCleanupParentBinding,
                         "open",
                         side_effect=open_binding,
                     ) as binding_open,
                     patch.object(
-                        included_files_module,
-                        "_rename_included_transaction_entry",
+                        _included_windows,
+                        'rename_included_transaction_entry',
                         side_effect=os.rename,
                     ),
                     patch.object(
-                        included_files_module,
-                        "_open_included_file_validation_stream",
+                        _included_windows,
+                        'open_included_file_validation_stream',
                         side_effect=self._open_modeled_windows_validation_stream,
                     ),
                     patch.object(
@@ -2280,10 +2282,10 @@ IncludedFilesConverter(
             self.fail("captured read-only cleanup root unexpectedly disappeared")
         kernel32 = MagicMock()
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 0
-        binding = included_files_module._WindowsIncludedCleanupParentBinding(
+        binding = _included_windows.WindowsIncludedCleanupParentBinding(
             path=os.path.abspath(root_path),
             identity=root_identity,
             kernel32=kernel32,
@@ -2300,8 +2302,8 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -2312,35 +2314,35 @@ IncludedFilesConverter(
                 supports_without_chmod,
             ),
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                _included_windows.WindowsIncludedCleanupParentBinding,
                 "open",
                 return_value=binding,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+                _included_windows,
+                'windows_included_cleanup_parent_identity',
                 return_value=root_identity,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+                _included_windows,
+                'windows_included_cleanup_parent_attributes',
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_transaction_error",
+                _included_windows,
+                'windows_included_transaction_error',
                 return_value=close_error,
             ),
             patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+                _included_windows,
+                'rename_included_transaction_entry',
                 side_effect=os.rename,
             ),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -2421,25 +2423,25 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(included_files_module.sys, "platform", "win32"),
             patch.object(
-                included_files_module._WindowsIncludedCleanupParentBinding,
+                _included_windows.WindowsIncludedCleanupParentBinding,
                 "open",
                 side_effect=open_binding,
             ),
             patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry",
+                _included_windows,
+                'rename_included_transaction_entry',
                 side_effect=os.rename,
             ),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -2515,7 +2517,7 @@ IncludedFilesConverter(
             expected_parent_identity: tuple[int, int],
             *,
             windows_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> bool | None:
             nonlocal replacement_created
@@ -2538,8 +2540,8 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -2577,8 +2579,8 @@ IncludedFilesConverter(
     def test_owned_tree_cleanup_preserves_modeled_nested_mount(self) -> None:
         variants = [("fallback", False)]
         if (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            _included_posix.included_descriptor_paths_supported()
+            and _included_posix.included_native_noreplace_available()
         ):
             variants.append(("descriptor", True))
 
@@ -2600,8 +2602,8 @@ IncludedFilesConverter(
 
                 with (
                     patch.object(
-                        included_files_module,
-                        "_included_descriptor_paths_supported",
+                        _included_posix,
+                        'included_descriptor_paths_supported',
                         return_value=descriptor_paths_supported,
                     ),
                     patch.object(
@@ -2655,7 +2657,7 @@ IncludedFilesConverter(
     def test_native_linux_same_device_bind_mount_is_rejected(self) -> None:
         if not sys.platform.startswith("linux"):
             self.skipTest("Native Linux bind mounts are unavailable")
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned Included Files paths are unavailable")
         mount_tool = shutil.which("mount")
         umount_tool = shutil.which("umount")
@@ -3350,14 +3352,14 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_file_locking",
+                _included_windows,
+                'windows_included_file_locking',
                 side_effect=PermissionError("locked byte"),
             ) as locking,
             patch.object(
@@ -3396,14 +3398,14 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_file_locking",
+                _included_windows,
+                'windows_included_file_locking',
                 side_effect=record_locking,
             ),
             self.assertRaisesRegex(OSError, "unknown or incomplete file"),
@@ -3425,11 +3427,11 @@ IncludedFilesConverter(
         )
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
-            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(_included_posix, 'sync_included_directory'),
         ):
             stage_path, _stage_identity = (
                 included_files_module._create_included_output_stage(
@@ -3470,11 +3472,11 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
-            patch.object(included_files_module, "_sync_included_directory"),
+            patch.object(_included_posix, 'sync_included_directory'),
             patch.object(
                 included_files_module.secrets,
                 "token_hex",
@@ -3525,8 +3527,8 @@ IncludedFilesConverter(
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(
@@ -4621,7 +4623,7 @@ included_files_module._acquire_included_project_lock(
             )
         )
         events: list[tuple[str, str]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = _included_posix.sync_included_directory
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
             events.append(("sync", path))
@@ -4632,8 +4634,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_sync_included_directory",
+                _included_posix,
+                'sync_included_directory',
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -4665,7 +4667,7 @@ included_files_module._acquire_included_project_lock(
     ) -> None:
         self._write("level-one/level-two/payload.txt", "payload")
         events: list[tuple[str, str]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = _included_posix.sync_included_directory
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
             events.append(("sync", os.path.abspath(path)))
@@ -4676,8 +4678,8 @@ included_files_module._acquire_included_project_lock(
 
         with (
             patch.object(
-                included_files_module,
-                "_sync_included_directory",
+                _included_posix,
+                'sync_included_directory',
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -5300,7 +5302,7 @@ IncludedFilesConverter(
         )
 
         events: list[tuple[str, str, tuple[int, int] | None]] = []
-        original_sync = included_files_module._sync_included_directory
+        original_sync = _included_posix.sync_included_directory
         original_remove = included_files_module._remove_included_recovery_record
 
         def trace_sync(path: str, expected_identity: tuple[int, int]) -> None:
@@ -5332,8 +5334,8 @@ IncludedFilesConverter(
         )
         with (
             patch.object(
-                included_files_module,
-                "_sync_included_directory",
+                _included_posix,
+                'sync_included_directory',
                 side_effect=trace_sync,
             ),
             patch.object(
@@ -5933,7 +5935,7 @@ IncludedFilesConverter(
         self.assertNotIn(b'"logical_path": "old.txt"', committed_pair[3])
 
         os.unlink(journal_path)
-        included_files_module._sync_included_directory(
+        _included_posix.sync_included_directory(
             self.godot_dir,
             project_identity,
         )
@@ -6008,7 +6010,7 @@ IncludedFilesConverter(
         self.assertEqual(committed_pair[1], {"new.txt": b"new generation"})
 
         os.unlink(journal_path)
-        included_files_module._sync_included_directory(
+        _included_posix.sync_included_directory(
             self.godot_dir,
             project_identity,
         )
@@ -6558,7 +6560,7 @@ os._exit(88)
                         temporary_file.write(content)
                         temporary_file.flush()
                         os.fsync(temporary_file.fileno())
-                    included_files_module._sync_included_directory(
+                    _included_posix.sync_included_directory(
                         self.godot_dir,
                         project_identity,
                     )
@@ -7533,8 +7535,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(
@@ -7692,8 +7694,8 @@ os._exit(88)
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_file_read_api",
+                _included_windows,
+                'windows_included_file_read_api',
                 return_value=kernel32,
             ),
             patch.dict(sys.modules, {"msvcrt": msvcrt}),
@@ -7704,7 +7706,7 @@ os._exit(88)
             ) as fdopen,
         ):
             opened_stream = (
-                included_files_module._open_included_file_validation_stream(
+                _included_windows.open_included_file_validation_stream(
                     path,
                     deny_writes=True,
                     no_follow=True,
@@ -7714,13 +7716,13 @@ os._exit(88)
         self.assertIs(opened_stream, binary_stream)
         kernel32.CreateFileW.assert_called_once_with(
             _included_paths.windows_extended_included_path(path),
-            included_files_module._WINDOWS_GENERIC_READ,
-            included_files_module._WINDOWS_FILE_SHARE_READ,
+            _included_windows.WINDOWS_GENERIC_READ,
+            _included_windows.WINDOWS_FILE_SHARE_READ,
             None,
-            included_files_module._WINDOWS_OPEN_EXISTING,
-            included_files_module._WINDOWS_FILE_ATTRIBUTE_NORMAL
-            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
-            | included_files_module._WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
+            _included_windows.WINDOWS_OPEN_EXISTING,
+            _included_windows.WINDOWS_FILE_ATTRIBUTE_NORMAL
+            | _included_windows.WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT
+            | _included_windows.WINDOWS_FILE_FLAG_SEQUENTIAL_SCAN,
             None,
         )
         msvcrt.open_osfhandle.assert_called_once_with(
@@ -7740,32 +7742,32 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+                _included_windows,
+                'windows_included_cleanup_parent_api',
                 return_value=kernel32,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+                _included_windows,
+                'windows_included_cleanup_parent_identity',
                 return_value=parent_identity,
             ) as identify,
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+                _included_windows,
+                'windows_included_cleanup_parent_attributes',
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
                 ),
             ) as inspect_attributes,
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                _included_windows.WindowsIncludedCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7776,19 +7778,19 @@ os._exit(88)
 
         kernel32.CreateFileW.assert_called_once_with(
             _included_paths.windows_extended_included_path(parent_path),
-            included_files_module._WINDOWS_FILE_TRAVERSE
-            | included_files_module._WINDOWS_FILE_READ_ATTRIBUTES,
-            included_files_module._WINDOWS_FILE_SHARE_READ
-            | included_files_module._WINDOWS_FILE_SHARE_WRITE,
+            _included_windows.WINDOWS_FILE_TRAVERSE
+            | _included_windows.WINDOWS_FILE_READ_ATTRIBUTES,
+            _included_windows.WINDOWS_FILE_SHARE_READ
+            | _included_windows.WINDOWS_FILE_SHARE_WRITE,
             None,
-            included_files_module._WINDOWS_OPEN_EXISTING,
-            included_files_module._WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
-            | included_files_module._WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
+            _included_windows.WINDOWS_OPEN_EXISTING,
+            _included_windows.WINDOWS_FILE_FLAG_BACKUP_SEMANTICS
+            | _included_windows.WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT,
             None,
         )
         share_mode = kernel32.CreateFileW.call_args.args[2]
         self.assertEqual(
-            share_mode & included_files_module._WINDOWS_FILE_SHARE_DELETE,
+            share_mode & _included_windows.WINDOWS_FILE_SHARE_DELETE,
             0,
         )
         self.assertEqual(identify.call_count, 2)
@@ -7806,32 +7808,32 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+                _included_windows,
+                'windows_included_cleanup_parent_api',
                 return_value=kernel32,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+                _included_windows,
+                'windows_included_cleanup_parent_identity',
                 side_effect=(parent_identity, changed_identity),
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+                _included_windows,
+                'windows_included_cleanup_parent_attributes',
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                _included_windows.WindowsIncludedCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7852,33 +7854,33 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+                _included_windows,
+                'windows_included_cleanup_parent_api',
                 return_value=kernel32,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+                _included_windows,
+                'windows_included_cleanup_parent_identity',
                 return_value=parent_identity,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+                _included_windows,
+                'windows_included_cleanup_parent_attributes',
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
-                    | included_files_module._WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
+                    _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    | _included_windows.WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT
                 ),
             ),
             self.assertRaisesRegex(OSError, "cleanup parent changed"),
         ):
-            included_files_module._WindowsIncludedCleanupParentBinding.open(
+            _included_windows.WindowsIncludedCleanupParentBinding.open(
                 parent_path,
                 parent_identity,
             )
@@ -7895,32 +7897,32 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
 
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_api",
+                _included_windows,
+                'windows_included_cleanup_parent_api',
                 return_value=kernel32,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_identity",
+                _included_windows,
+                'windows_included_cleanup_parent_identity',
                 return_value=parent_identity,
             ),
             patch.object(
-                included_files_module,
-                "_windows_included_cleanup_parent_attributes",
+                _included_windows,
+                'windows_included_cleanup_parent_attributes',
                 return_value=(
-                    included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                    _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
                 ),
             ),
         ):
             binding = (
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                _included_windows.WindowsIncludedCleanupParentBinding.open(
                     parent_path,
                     parent_identity,
                 )
@@ -7929,8 +7931,8 @@ os._exit(88)
             close_error = OSError("injected cleanup handle close failure")
             with (
                 patch.object(
-                    included_files_module,
-                    "_windows_included_transaction_error",
+                    _included_windows,
+                    'windows_included_transaction_error',
                     return_value=close_error,
                 ),
                 self.assertRaises(OSError) as raised,
@@ -7953,36 +7955,36 @@ os._exit(88)
         kernel32 = MagicMock()
         kernel32.CreateFileW.return_value = 1234
         kernel32.GetFileType.return_value = (
-            included_files_module._WINDOWS_FILE_TYPE_DISK
+            _included_windows.WINDOWS_FILE_TYPE_DISK
         )
         kernel32.CloseHandle.return_value = 1
         binding: (
-            included_files_module._WindowsIncludedCleanupParentBinding | None
+            _included_windows.WindowsIncludedCleanupParentBinding | None
         ) = None
 
         try:
             with (
                 patch.object(included_files_module.os, "name", "nt"),
                 patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_api",
+                    _included_windows,
+                    'windows_included_cleanup_parent_api',
                     return_value=kernel32,
                 ),
                 patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_identity",
+                    _included_windows,
+                    'windows_included_cleanup_parent_identity',
                     return_value=parent_identity,
                 ),
                 patch.object(
-                    included_files_module,
-                    "_windows_included_cleanup_parent_attributes",
+                    _included_windows,
+                    'windows_included_cleanup_parent_attributes',
                     return_value=(
-                        included_files_module._WINDOWS_FILE_ATTRIBUTE_DIRECTORY
+                        _included_windows.WINDOWS_FILE_ATTRIBUTE_DIRECTORY
                     ),
                 ),
             ):
                 binding = (
-                    included_files_module._WindowsIncludedCleanupParentBinding.open(
+                    _included_windows.WindowsIncludedCleanupParentBinding.open(
                         parent_path,
                         parent_identity,
                     )
@@ -8013,7 +8015,7 @@ os._exit(88)
         parent_stat = os.lstat(parent_path)
         parent_identity = parent_stat.st_dev, parent_stat.st_ino
         binding = (
-            included_files_module._WindowsIncludedCleanupParentBinding.open(
+            _included_windows.WindowsIncludedCleanupParentBinding.open(
                 parent_path,
                 parent_identity,
             )
@@ -8044,7 +8046,7 @@ os._exit(88)
         try:
             junction_stat = os.lstat(junction_path)
             with self.assertRaisesRegex(OSError, "cleanup parent changed"):
-                included_files_module._WindowsIncludedCleanupParentBinding.open(
+                _included_windows.WindowsIncludedCleanupParentBinding.open(
                     junction_path,
                     (junction_stat.st_dev, junction_stat.st_ino),
                 )
@@ -8087,12 +8089,12 @@ os._exit(88)
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(included_files_module.sys, "platform", "win32"),
             patch.object(
-                included_files_module,
-                "_windows_included_transaction_api",
+                _included_windows,
+                'windows_included_transaction_api',
                 return_value=kernel32,
             ),
         ):
-            included_files_module._rename_included_transaction_entry(
+            _included_windows.rename_included_transaction_entry(
                 source,
                 destination,
             )
@@ -8104,7 +8106,7 @@ os._exit(88)
         self.assertTrue(destination_argument.startswith("\\\\?\\"))
         self.assertEqual(
             flags,
-            included_files_module._WINDOWS_MOVEFILE_WRITE_THROUGH,
+            _included_windows.WINDOWS_MOVEFILE_WRITE_THROUGH,
         )
 
     def test_windows_validation_stream_closes_fd_when_wrapping_fails(
@@ -8118,8 +8120,8 @@ os._exit(88)
         with (
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_windows_included_file_read_api",
+                _included_windows,
+                'windows_included_file_read_api',
                 return_value=kernel32,
             ),
             patch.dict(sys.modules, {"msvcrt": msvcrt}),
@@ -8131,7 +8133,7 @@ os._exit(88)
             patch.object(included_files_module.os, "close") as close,
             self.assertRaisesRegex(MemoryError, "injected wrapper failure"),
         ):
-            included_files_module._open_included_file_validation_stream(
+            _included_windows.open_included_file_validation_stream(
                 os.path.join(self.godot_dir, "payload.bin"),
                 deny_writes=True,
                 no_follow=True,
@@ -8173,7 +8175,7 @@ os._exit(88)
         self.assertEqual(blocked_paths, {source_path, output_path})
 
     def test_descriptor_digest_rechecks_the_open_handle(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned Included Files paths are unavailable")
         payload = b"descriptor staged payload"
         staged_path = os.path.join(self.godot_dir, "staged.bin")
@@ -8188,7 +8190,7 @@ os._exit(88)
             path_stat,
             ctime_offset=2,
         )
-        parent_fd = included_files_module._open_pinned_included_directory(
+        parent_fd = _included_posix.open_pinned_included_directory(
             self.godot_dir
         )
         try:
@@ -8457,10 +8459,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal publication_failed
@@ -8623,7 +8625,7 @@ os._exit(88)
         os.unlink(os.path.join(self.datafiles_dir, "old.txt"))
         self._write("new.txt", "new")
         original_rename = (
-            included_files_module._rename_included_transaction_entry_at
+            _included_posix.rename_included_transaction_entry_at
         )
         sentinel_name: str | None = None
 
@@ -8681,11 +8683,11 @@ os._exit(88)
 
         rename_patcher = (
             patch.object(
-                included_files_module,
-                "_rename_included_transaction_entry_at",
+                _included_posix,
+                'rename_included_transaction_entry_at',
                 side_effect=inject_unknown_destination,
             )
-            if included_files_module._included_descriptor_paths_supported()
+            if _included_posix.included_descriptor_paths_supported()
             else patch.object(
                 included_files_module,
                 "_before_included_transaction_rename_fallback",
@@ -9008,8 +9010,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            _included_posix.included_descriptor_paths_supported()
+            and _included_posix.included_native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         transaction_directory = os.path.join(self.godot_dir, "source-swap")
@@ -9074,8 +9076,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            _included_posix.included_descriptor_paths_supported()
+            and _included_posix.included_native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         cleanup_directory = os.path.join(self.godot_dir, "file-cleanup-swap")
@@ -9138,7 +9140,7 @@ os._exit(88)
             self.assertEqual(parked_file.read(), "owned cleanup file")
 
     def test_descriptor_cleanup_streams_payload_receipts(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned cleanup is unavailable")
         self._assert_streaming_cleanup_path(force_fallback=False)
 
@@ -9282,8 +9284,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            _included_posix.included_descriptor_paths_supported()
+            and _included_posix.included_native_noreplace_available()
         ):
             self.skipTest("Descriptor-pinned no-replace rename is unavailable")
         owned_path = os.path.join(self.godot_dir, "owned-empty-tree")
@@ -9347,7 +9349,7 @@ os._exit(88)
     def test_registry_capture_rejects_directory_swap_without_mixing_bytes(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry capture is unavailable")
         registry_directory = os.path.join(self.godot_dir, "gm2godot")
         replacement_directory = os.path.join(
@@ -9410,7 +9412,7 @@ os._exit(88)
     def test_registry_verifier_rejects_project_swap_before_reading_bytes(
         self,
     ) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry capture is unavailable")
         project_path = os.path.join(self.godot_dir, "project-root")
         parked_project = os.path.join(self.godot_dir, "parked-project-root")
@@ -9500,8 +9502,8 @@ os._exit(88)
         project_stat = os.lstat(project_path)
         project_identity = (project_stat.st_dev, project_stat.st_ino)
         with patch.object(
-            included_files_module,
-            "_included_descriptor_paths_supported",
+            _included_posix,
+            'included_descriptor_paths_supported',
             return_value=False,
         ):
             expected_snapshot = included_files_module._capture_included_registry(
@@ -9529,8 +9531,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(
@@ -9568,7 +9570,7 @@ os._exit(88)
             self.assertEqual(parked_file.read(), b"old fallback registry bytes")
 
     def test_created_registry_directory_swap_is_not_adopted(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned registry creation is unavailable")
         registry_directory = os.path.join(self.godot_dir, "gm2godot")
         replacement_directory = os.path.join(
@@ -9662,8 +9664,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(
@@ -9727,8 +9729,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9770,8 +9772,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9835,8 +9837,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -9846,8 +9848,8 @@ os._exit(88)
                 side_effect=PermissionError("injected Windows sharing failure"),
             ),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             self.assertRaisesRegex(
@@ -9877,14 +9879,14 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
@@ -9941,14 +9943,14 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             patch.object(
@@ -9976,14 +9978,14 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
         ):
@@ -10024,14 +10026,14 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
             patch.object(
-                included_files_module,
-                "_open_included_file_validation_stream",
+                _included_windows,
+                'open_included_file_validation_stream',
                 side_effect=self._open_modeled_windows_validation_stream,
             ),
             self.assertRaisesRegex(
@@ -10093,8 +10095,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -10127,8 +10129,8 @@ os._exit(88)
 
         with (
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(included_files_module.os, "name", "nt"),
@@ -10220,7 +10222,7 @@ os._exit(88)
                 os.unlink(stage_link)
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        _included_posix.included_descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_deep_directory_swap_is_not_followed_during_tree_capture(
@@ -10241,7 +10243,7 @@ os._exit(88)
         with open(outside_file, "w", encoding="utf-8") as external_file:
             external_file.write("external sentinel")
         parked_directory = os.path.join(scan_root, "parked-b")
-        original_open = included_files_module._open_included_tree_directory_at
+        original_open = _included_posix.open_included_tree_directory_at
         swapped = False
 
         def swap_before_open(parent_fd: int, name: str) -> int:
@@ -10258,8 +10260,8 @@ os._exit(88)
 
         try:
             with patch.object(
-                included_files_module,
-                "_open_included_tree_directory_at",
+                _included_posix,
+                'open_included_tree_directory_at',
                 side_effect=swap_before_open,
             ), self.assertRaises(OSError):
                 included_files_module._capture_included_tree(scan_root)
@@ -10307,8 +10309,8 @@ os._exit(88)
         try:
             with (
                 patch.object(
-                    included_files_module,
-                    "_included_descriptor_paths_supported",
+                    _included_posix,
+                    'included_descriptor_paths_supported',
                     return_value=False,
                 ),
                 patch.object(
@@ -10348,7 +10350,7 @@ os._exit(88)
                 "_verify_included_tree_path_binding",
             )
         ]
-        if included_files_module._included_descriptor_paths_supported():
+        if _included_posix.included_descriptor_paths_supported():
             variants.insert(
                 0,
                 (
@@ -10381,8 +10383,8 @@ os._exit(88)
 
                     with (
                         patch.object(
-                            included_files_module,
-                            "_included_descriptor_paths_supported",
+                            _included_posix,
+                            'included_descriptor_paths_supported',
                             return_value=descriptor_supported,
                         ),
                         patch.object(
@@ -10418,7 +10420,7 @@ os._exit(88)
                     )
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        _included_posix.included_descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_descriptor_and_fallback_tree_snapshots_are_byte_equivalent(
@@ -10440,8 +10442,8 @@ os._exit(88)
             root_path
         )
         with patch.object(
-            included_files_module,
-            "_included_descriptor_paths_supported",
+            _included_posix,
+            'included_descriptor_paths_supported',
             return_value=False,
         ):
             fallback_snapshot = included_files_module._capture_included_tree(
@@ -10467,7 +10469,7 @@ os._exit(88)
         self.assertEqual(fallback_bytes, descriptor_bytes)
 
     @unittest.skipUnless(
-        included_files_module._included_descriptor_paths_supported(),
+        _included_posix.included_descriptor_paths_supported(),
         "Descriptor-pinned Included Files paths are unavailable",
     )
     def test_descriptor_tree_capture_rejects_deep_ancestor_swap(
@@ -10522,8 +10524,8 @@ os._exit(88)
         try:
             with (
                 patch.object(
-                    included_files_module,
-                    "_included_descriptor_paths_supported",
+                    _included_posix,
+                    'included_descriptor_paths_supported',
                     return_value=True,
                 ),
                 patch.object(
@@ -10554,8 +10556,8 @@ os._exit(88)
         self,
     ) -> None:
         if not (
-            included_files_module._included_descriptor_paths_supported()
-            and included_files_module._included_native_noreplace_available()
+            _included_posix.included_descriptor_paths_supported()
+            and _included_posix.included_native_noreplace_available()
         ):
             self.skipTest("Native no-replace rename is unavailable")
         transaction_directory = os.path.join(
@@ -10577,7 +10579,7 @@ os._exit(88)
             destination_file.write("destination")
         os.mkdir(os.path.join(transaction_directory, "source-dir"))
         os.mkdir(os.path.join(transaction_directory, "destination-dir"))
-        directory_fd = included_files_module._open_pinned_included_directory(
+        directory_fd = _included_posix.open_pinned_included_directory(
             transaction_directory
         )
         try:
@@ -10588,7 +10590,7 @@ os._exit(88)
                 with self.subTest(source_name=source_name), self.assertRaises(
                     OSError
                 ):
-                    included_files_module._rename_included_transaction_entry_at(
+                    _included_posix.rename_included_transaction_entry_at(
                         directory_fd,
                         source_name,
                         directory_fd,
@@ -10616,7 +10618,7 @@ os._exit(88)
         )
 
     def test_native_noreplace_missing_capability_fails_closed(self) -> None:
-        if not included_files_module._included_descriptor_paths_supported():
+        if not _included_posix.included_descriptor_paths_supported():
             self.skipTest("Descriptor-pinned paths are unavailable")
         transaction_directory = os.path.join(
             self.godot_dir,
@@ -10626,16 +10628,16 @@ os._exit(88)
         source_path = os.path.join(transaction_directory, "source.txt")
         with open(source_path, "w", encoding="utf-8") as source_file:
             source_file.write("source")
-        directory_fd = included_files_module._open_pinned_included_directory(
+        directory_fd = _included_posix.open_pinned_included_directory(
             transaction_directory
         )
         try:
             with patch.object(
-                included_files_module,
-                "_included_native_noreplace_available",
+                _included_posix,
+                'included_native_noreplace_available',
                 return_value=False,
             ), self.assertRaisesRegex(OSError, "unavailable"):
-                included_files_module._rename_included_transaction_entry_at(
+                _included_posix.rename_included_transaction_entry_at(
                     directory_fd,
                     "source.txt",
                     directory_fd,
@@ -11119,10 +11121,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> None:
             if (
@@ -11290,10 +11292,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal publication_failed
@@ -11385,10 +11387,10 @@ os._exit(88)
             source_parent_identity: tuple[int, int] | None = None,
             destination_parent_identity: tuple[int, int] | None = None,
             windows_source_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
             windows_destination_parent_binding: (
-                included_files_module._WindowsIncludedCleanupParentBinding | None
+                _included_windows.WindowsIncludedCleanupParentBinding | None
             ) = None,
         ) -> None:
             nonlocal cancellation_injected
@@ -12167,8 +12169,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         def convert() -> None:
             if force_fallback:
                 with patch.object(
-                    included_files_module,
-                    "_confined_included_output_supported",
+                    _included_posix,
+                    'confined_included_output_supported',
                     return_value=False,
                 ):
                     converter.convert_all()
@@ -12407,7 +12409,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
     def test_late_final_output_swap_is_rejected_without_external_mutation(
         self,
     ) -> None:
-        if not included_files_module._confined_included_output_supported():
+        if not _included_posix.confined_included_output_supported():
             self.skipTest("Descriptor-relative Included File output is unavailable")
         managed_root = os.path.join(self.godot_dir, "included_files")
         os.makedirs(managed_root)
@@ -12464,7 +12466,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
     def test_late_output_directory_relocation_is_rejected_before_publish(
         self,
     ) -> None:
-        if not included_files_module._confined_included_output_supported():
+        if not _included_posix.confined_included_output_supported():
             self.skipTest("Descriptor-relative Included File output is unavailable")
         os.unlink(self.source_path)
         nested_source = os.path.join(
@@ -12528,7 +12530,7 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         )
 
     def test_final_rename_cannot_follow_swapped_output_directory(self) -> None:
-        if not included_files_module._confined_included_output_supported():
+        if not _included_posix.confined_included_output_supported():
             self.skipTest("Descriptor-relative Included File output is unavailable")
         os.unlink(self.source_path)
         nested_source = os.path.join(
@@ -12604,8 +12606,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         )
         with (
             patch.object(
-                included_files_module,
-                "_confined_included_output_supported",
+                _included_posix,
+                'confined_included_output_supported',
                 return_value=True,
             ),
             patch.object(
@@ -12672,8 +12674,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         )
         with (
             patch.object(
-                included_files_module,
-                "_confined_included_output_supported",
+                _included_posix,
+                'confined_included_output_supported',
                 return_value=False,
             ),
             patch.object(
@@ -12742,8 +12744,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         )
         with (
             patch.object(
-                included_files_module,
-                "_confined_included_output_supported",
+                _included_posix,
+                'confined_included_output_supported',
                 return_value=False,
             ),
             patch.object(
@@ -12813,8 +12815,8 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         try:
             with (
                 patch.object(
-                    included_files_module,
-                    "_confined_included_output_supported",
+                    _included_posix,
+                    'confined_included_output_supported',
                     return_value=False,
                 ),
                 patch.object(
@@ -12910,13 +12912,13 @@ class TestIncludedFilesConverterOutputContainment(unittest.TestCase):
         included_files_module._release_included_project_lock(project_lock)
         with (
             patch.object(
-                included_files_module,
-                "_confined_included_output_supported",
+                _included_posix,
+                'confined_included_output_supported',
                 return_value=False,
             ),
             patch.object(
-                included_files_module,
-                "_included_descriptor_paths_supported",
+                _included_posix,
+                'included_descriptor_paths_supported',
                 return_value=False,
             ),
             patch.object(

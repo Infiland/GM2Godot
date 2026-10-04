@@ -1,18 +1,21 @@
 # Included Files ownership
 
 `src.conversion.included_files.IncludedFilesConverter` remains the caller entry
-point. The facade currently also owns conversion orchestration, bounded workers,
-native filesystem operations and the transaction. The records/constants and
-helper splits establish five internal owners; they do not yet make the facade
-thin.
+point. The facade currently also owns conversion orchestration, bounded workers
+and the transaction. The records, helpers and native filesystem split establish
+nine internal owners; the facade still needs the remaining orchestration split.
 
 The landed dependency direction is:
 
 ```text
-models / constants
-  -> path_validation and stat_metadata (independent)
-  -> recovery_codec
-  -> remaining included_files orchestration
+models -> filesystem_operations
+models / constants -> path_validation
+models -> stat_metadata
+path_validation / stat_metadata -> recovery_codec
+models / stat_metadata -> native_posix
+filesystem_operations / models / path_validation / stat_metadata -> native_windows
+filesystem_operations / native_posix / native_windows / stat_metadata -> native_filesystem
+owners -> remaining included_files orchestration
 ```
 
 Package init has no imports. `models` and `constants` depend only on the standard
@@ -44,6 +47,23 @@ performing I/O, native platform selection or transaction/recovery execution.
 The 16 MiB recovery cap, 100,000-entry limit, 16-digit integer representation,
 record schemas, key order and error precedence remain unchanged.
 
+`filesystem_operations` defines the finite twenty-operation filesystem contract
+and the owned Windows cleanup-parent resource contract. `native_filesystem`
+provides the typed concrete composition. It stores no platform choice or bound
+native callable: each operation reads its actual native owner's export when
+called. The facade uses this interface at the existing operation stages.
+
+`native_posix` owns descriptor-relative operations, mount checks, exclusive
+rename, directory synchronization and output metadata. `native_windows` owns
+the Win32 loaders and structures, cleanup-parent handles, locking, durable
+rename and the complete cross-platform validation-stream selector. The
+redirection metadata probe belongs to `stat_metadata`. These owners retain the
+original capability checks, native flags, loader caches, errors and cleanup
+precedence. Caller-supplied descriptors remain borrowed; returned descriptors,
+validation streams and Windows cleanup-parent bindings retain their original
+ownership. Lock release continues to use the platform flag captured at lock
+acquisition.
+
 Each moved definition retains its private spelling and has a finite named
 internal export. The facade keeps explicit aliases to those same objects for
 existing private imports. Operational calls use the actual owner's namespace;
@@ -53,9 +73,9 @@ operation stages. The move preserves public API and observable behavior while
 making internal ownership explicit; it does not provide a second implementation
 or dynamic forwarding module.
 
-The remaining target direction is: records/constants and validation/codec
-owners -> POSIX and Windows primitives -> finite typed filesystem interface ->
-source snapshots/planning/locking/workers -> record I/O/staging/recorded cleanup
+The remaining target direction is: records/constants, validation/codec and
+typed native filesystem owners -> source snapshots/planning/locking/workers ->
+record I/O/staging/recorded cleanup
 -> rollback/committed cleanup -> recovery/publication -> converter driver ->
 thin facade. Recovery and publication must not import each other, and record
 I/O must not import cleanup. Native operations must preserve no-follow,
@@ -64,13 +84,16 @@ Orchestration will compose the typed interface without selecting a platform
 early or taking ownership of borrowed descriptors.
 
 Existing transaction/security test IDs and assertions remain, with private
-fault-injection sites following the moved owners. Native workflow selectors,
-runtime pins and generated-output fixtures remain unchanged. Focused owner
-tests enforce the current dependency direction and exercise operation boundaries;
+fault-injection sites following the moved owners. Existing native workflow
+selectors remain, with the new native-owner test module added to the Windows
+transaction job. Runtime pins and generated-output fixtures remain unchanged.
+Focused owner tests enforce the dependency direction and exercise live native
+delegation, late platform selection, borrowed descriptors and real Windows
+binding pinning, close and active-error handling;
 the existing transaction, recovery, scale and Godot tests remain authoritative
 for their wider contracts. Required verification includes zero-warning global
 typing, Ruff, relevant tests, the full suite after shared-boundary changes,
 native Windows transaction checks and pinned Godot output validation.
 
-Issue #798 remains open until native interfaces, source/planning/staging and
-transaction owners, the driver, thin facade and matching test split are complete.
+Issue #798 remains open until source/planning/staging and transaction owners,
+the driver, thin facade and matching test split are complete.

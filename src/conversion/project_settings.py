@@ -212,6 +212,12 @@ class ProjectSettingsConverter(BaseConverter):
             return None
         return None
 
+    def _log_missing_project_file(self, message: str) -> None:
+        """Apply existing log classification before delivering the raw message."""
+        if self.diagnostics is not None:
+            self.diagnostics.add_from_log_message(message)
+        self.log_callback(message)
+
     def update_project_name(self) -> ProjectOperationResult:
         if not self.conversion_running():
             return ProjectOperationResult("skipped", "Conversion was cancelled.")
@@ -219,7 +225,7 @@ class ProjectSettingsConverter(BaseConverter):
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
-            self.log_callback(get_localized("Console_Error_MissingGodotFile"))
+            self._log_missing_project_file(get_localized("Console_Error_MissingGodotFile"))
             return ProjectOperationResult("failed", "project.godot is missing.")
 
         try:
@@ -264,7 +270,7 @@ class ProjectSettingsConverter(BaseConverter):
         project_godot_path = os.path.join(self.godot_project_path, 'project.godot')
         
         if not os.path.exists(project_godot_path):
-            self.log_callback(get_localized("Console_Error_MissingGodotFile"))
+            self._log_missing_project_file(get_localized("Console_Error_MissingGodotFile"))
             return ProjectOperationResult("failed", "project.godot is missing.")
 
         try:

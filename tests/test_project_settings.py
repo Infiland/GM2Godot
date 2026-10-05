@@ -1269,5 +1269,171 @@ class TestFreshOptionsJsonBoundary(unittest.TestCase):
         self.assertTrue(any("Rejected GameMaker source path" in log for log in self.logs))
 
 
+class TestMissingProjectFileDiagnosticParity(unittest.TestCase):
+    ENGLISH_MESSAGE = "Error: No project.godot file found in the Godot project folder."
+    GERMAN_MESSAGE = "Fehler: Keine project.godot-Datei im Godot-Projektordner gefunden."
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.root)
+        self.gm_dir = self.root / "gamemaker"
+        self.godot_dir = self.root / "godot"
+        self.gm_dir.mkdir()
+        self.godot_dir.mkdir()
+        (self.gm_dir / "Game.yyp").write_text(SAMPLE_YYP, encoding="utf-8")
+        for platform in ("main", "windows"):
+            options = self.gm_dir / "options" / platform / f"options_{platform}.yy"
+            options.parent.mkdir(parents=True)
+            options.write_text("{}", encoding="utf-8")
+
+    def _make_converter(
+        self,
+        callback: Callable[[str], None],
+        collector: DiagnosticCollector | None,
+    ) -> ProjectSettingsConverter:
+        return ProjectSettingsConverter(
+            str(self.gm_dir),
+            str(self.godot_dir),
+            log_callback=callback,
+            conversion_running=lambda: True,
+            diagnostics=collector,
+        )
+
+    def _assert_missing_result(self, result: ProjectOperationResult) -> None:
+        self.assertEqual(result.state, "failed")
+        self.assertEqual(result.reason, "project.godot is missing.")
+        self.assertFalse(result)
+        self.assertEqual(list(self.godot_dir.iterdir()), [])
+
+    def _exercise_repeated_operations(
+        self,
+        collector: DiagnosticCollector,
+        message: str,
+        *,
+        wrapped: bool,
+    ) -> list[str]:
+        logs: list[str] = []
+        callback = collector.wrap_log_callback(logs.append) if wrapped else logs.append
+        converter = self._make_converter(callback, collector)
+        with patch("src.conversion.project_settings.get_localized", return_value=message) as localized:
+            for _repeat in range(2):
+                self._assert_missing_result(converter.update_project_name())
+                self._assert_missing_result(converter.update_project_settings())
+        self.assertEqual(localized.call_count, 4)
+        self.assertTrue(all(call.args == ("Console_Error_MissingGodotFile",) for call in localized.call_args_list))
+        self.assertEqual(logs, [message] * 4)
+        return logs
+
+    def _report_bytes(self, collector: DiagnosticCollector) -> tuple[bytes, bytes]:
+        report_root = tempfile.mkdtemp(dir=self.root)
+        json_path, markdown_path = collector.write_reports(report_root)
+        return Path(json_path).read_bytes(), Path(markdown_path).read_bytes()
+
+    def test_both_public_methods_record_english_error_before_raw_callback(self) -> None:
+        collector = DiagnosticCollector()
+        logs: list[str] = []
+        observed_error_counts: list[int] = []
+
+        def callback(message: str) -> None:
+            observed_error_counts.append(collector.summary()["error"])
+            logs.append(message)
+
+        converter = self._make_converter(callback, collector)
+        with patch("src.conversion.project_settings.get_localized", return_value=self.ENGLISH_MESSAGE):
+            self._assert_missing_result(converter.update_project_name())
+            self._assert_missing_result(converter.update_project_settings())
+
+        self.assertEqual(observed_error_counts, [1, 1])
+        self.assertEqual(logs, [self.ENGLISH_MESSAGE, self.ENGLISH_MESSAGE])
+        self.assertEqual(collector.summary(), {"info": 0, "warning": 0, "error": 1, "total": 1})
+        self.assertEqual(
+            collector.diagnostics()[0].to_dict(),
+            {
+                "severity": "error",
+                "code": "GM2GD-WARNING",
+                "message": self.ENGLISH_MESSAGE,
+                "source_path": None,
+                "line": None,
+                "column": None,
+                "resource": None,
+                "resource_type": None,
+                "event": None,
+                "api": None,
+                "manifest_entry": None,
+                "issue_number": None,
+                "workaround": None,
+            },
+        )
+
+    def test_repeated_direct_and_wrapped_reports_match_with_contextual_preseed(self) -> None:
+        for preseeded in (False, True):
+            with self.subTest(preseeded=preseeded):
+                direct = DiagnosticCollector()
+                wrapped = DiagnosticCollector()
+                for collector in (direct, wrapped):
+                    if preseeded:
+                        collector.add(
+                            "warning",
+                            "GM2GD-EXISTING-CONTEXT",
+                            self.ENGLISH_MESSAGE,
+                            source_path="options/main/options_main.yy",
+                            resource="preexisting",
+                            resource_type="project_options",
+                        )
+                direct_before = direct.diagnostics()
+                wrapped_before = wrapped.diagnostics()
+                direct_logs = self._exercise_repeated_operations(direct, self.ENGLISH_MESSAGE, wrapped=False)
+                wrapped_logs = self._exercise_repeated_operations(wrapped, self.ENGLISH_MESSAGE, wrapped=True)
+                self.assertEqual(direct_logs, wrapped_logs)
+                self.assertEqual(direct.diagnostics(), wrapped.diagnostics())
+                self.assertEqual(len(direct.diagnostics()), 1)
+                self.assertEqual(self._report_bytes(direct), self._report_bytes(wrapped))
+                if preseeded:
+                    self.assertEqual(direct.diagnostics(), direct_before)
+                    self.assertEqual(wrapped.diagnostics(), wrapped_before)
+                    self.assertIs(direct.diagnostics()[0], direct_before[0])
+                    self.assertIs(wrapped.diagnostics()[0], wrapped_before[0])
+                    self.assertEqual(direct.summary()["error"], 0)
+                else:
+                    self.assertEqual(direct.summary()["error"], 1)
+
+    def test_german_message_preserves_wrapped_unrecognized_classification(self) -> None:
+        direct = DiagnosticCollector()
+        wrapped = DiagnosticCollector()
+        direct_logs = self._exercise_repeated_operations(direct, self.GERMAN_MESSAGE, wrapped=False)
+        wrapped_logs = self._exercise_repeated_operations(wrapped, self.GERMAN_MESSAGE, wrapped=True)
+        self.assertEqual(direct_logs, wrapped_logs)
+        self.assertEqual(direct.diagnostics(), ())
+        self.assertEqual(wrapped.diagnostics(), ())
+        self.assertEqual(direct.summary(), {"info": 0, "warning": 0, "error": 0, "total": 0})
+        self.assertEqual(self._report_bytes(direct), self._report_bytes(wrapped))
+
+    def test_callback_error_identity_escapes_before_failed_return_with_or_without_collector(self) -> None:
+        for use_collector in (False, True):
+            for update_settings in (False, True):
+                with self.subTest(collector=use_collector, settings=update_settings):
+                    collector = DiagnosticCollector() if use_collector else None
+                    sentinel = RuntimeError("raw project-file callback sentinel")
+                    observed_error_counts: list[int] = []
+                    logs: list[str] = []
+
+                    def callback(message: str) -> None:
+                        observed_error_counts.append(collector.summary()["error"] if collector is not None else 0)
+                        logs.append(message)
+                        raise sentinel
+
+                    converter = self._make_converter(callback, collector)
+                    operation = converter.update_project_settings if update_settings else converter.update_project_name
+                    with patch("src.conversion.project_settings.get_localized", return_value=self.ENGLISH_MESSAGE):
+                        with self.assertRaises(RuntimeError) as raised:
+                            operation()
+                    self.assertIs(raised.exception, sentinel)
+                    self.assertEqual(logs, [self.ENGLISH_MESSAGE])
+                    self.assertEqual(observed_error_counts, [1 if use_collector else 0])
+                    self.assertEqual(list(self.godot_dir.iterdir()), [])
+                    if collector is not None:
+                        self.assertEqual(collector.summary()["error"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

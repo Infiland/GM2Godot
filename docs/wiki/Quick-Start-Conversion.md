@@ -1,6 +1,6 @@
 # Quick Start Conversion
 
-> **Applies to:** GM2Godot 0.8.48 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 1.0.0 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 

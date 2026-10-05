@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0 - 2026-10-05
+
+- Publish the 1.0 release with the conversion, generated-runtime, diagnostics, packaging and dependency fixes delivered throughout the 0.8 series.
+- Include optional Codex-backed Deep conversion using an existing signed-in Codex account, alongside the documented GameMaker LTS 2026 and Godot 4.7.2 compatibility limits.
+- Synchronize the source version, release examples and maintained Wiki documentation to 1.0.0.
+- Retain the existing macOS distribution and serialized release publisher. Developer ID signing/notarization (#737) and expanded publisher queuing (#741) were closed as not planned.
+
 ## 0.8.48 - 2026-10-05
 
 - Add a protected, main-only manual workflow that acquires exact-source Mac build inputs and retains verification-only signing evidence.

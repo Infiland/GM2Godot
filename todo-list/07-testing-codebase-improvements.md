@@ -21,10 +21,10 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 ## P0: CI And Validation
 
-- [ ] Add a required CI job with a pinned Godot binary.
-- [ ] Ensure all `*_godot.py` tests run in CI instead of skipping when Godot is missing.
-- [ ] Add generated-GDScript syntax validation through Godot headless.
-- [ ] Add generated scene/resource load validation through Godot headless.
+- [x] Run required headless smoke CI with exact Godot `4.7.2.stable.official.ed1daf0bf` and its pinned archive checksum.
+- [ ] Partial: CI discovers `test_*_godot.py` with the pinned binary; deliberate host, fixture and capability conditions still determine which cases are eligible.
+- [x] Validate generated GDScript syntax through the pinned headless Godot validator and committed smoke/fixture corpus.
+- [x] Validate generated scene/resource loading through headless Godot, with explicit import-only and boot policies.
 - [ ] Add external-project conversion assertions for unsupported/transpile-warning counts.
 - [ ] Add failure thresholds for unsupported APIs, invalid generated code, missing assets, and skipped resources.
 - [x] Add committed minimal `.yyp/.yy` fixture project corpus.
@@ -38,17 +38,17 @@ This file tracks engineering work that will make full transpilation safer to bui
 
 ## P0: Diagnostics And User Reports
 
-- [ ] Create a formal diagnostics collector.
-- [ ] Include severity, code, source path, line, column, resource, event, API, manifest entry, issue number, and suggested workaround in diagnostics.
-- [ ] Route converter warnings through diagnostics instead of only `log_callback`.
-- [ ] Emit conversion report for unsupported syntax.
-- [ ] Emit conversion report for unsupported GML APIs.
+- [x] Provide the typed `DiagnosticCollector` and deterministic JSON/Markdown report publication.
+- [x] Define typed severity, code and message fields plus optional source path, line, column, resource/type, event, API, manifest entry, issue number and workaround context.
+- [x] Record the reviewed classified converter warning/error producers through typed diagnostics while preserving raw callback text/order and message-level report dedup.
+- [x] Include collected GML transpile failures and their available source context in conversion diagnostic reports.
+- [x] Report known unsupported GML API diagnostics and static manifest compatibility coverage.
 - [ ] Emit conversion report for skipped resources.
 - [x] Emit source-linked conversion diagnostics for unsupported shader constructs and failed logical shader resources.
 - [ ] Emit conversion report for unsupported platform services.
-- [ ] Emit conversion report for generated invalid GDScript.
-- [ ] Add fail-on-unsupported mode.
-- [ ] Add analyze-only mode.
+- [x] Include pinned-validator failures in diagnostic reports and write the generated Godot validation report.
+- [x] Provide CLI `--fail-on-unsupported` and explicit diagnostic thresholds.
+- [x] Provide the CLI `analyze` command without writing converted output.
 
 ## P1: Architecture Boundaries
 
@@ -58,6 +58,9 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [x] Create typed intermediate models for projects, sprites, sounds, fonts, objects, rooms, layers, scripts, shaders, tilesets, paths, sequences, timelines, and diagnostics.
 - [x] Separate parser AST, semantic analysis, and GDScript emission phases more sharply.
 - [x] Move asset-specific lowering rules out of the general expression emitter where possible.
+- [x] Give CLI report publication/repair and cancellation/signal state dedicated typed owners while preserving the driver’s trace and return boundaries.
+- [x] Install the GUI/CLI package with authoritative root assets and runtime segments, preserving source/frozen resource and preference behavior.
+- [x] Gate main release publication on successful exact-SHA quality workflows and the Build native/preflight prerequisites.
 - [ ] Unify arity, lowering kind, manifest status, docs URL, runtime function name, and tests in one source of truth.
 - [ ] Add explicit runtime segment dependency declarations.
 - [ ] Add event mapping manifest with event type, event number, callback, runtime requirements, support status, test path, and issue reference.
@@ -125,7 +128,7 @@ This file tracks engineering work that will make full transpilation safer to bui
 - [ ] Add unreachable branch checks.
 - [x] Add typed `.yy` dataclasses or `TypedDict` models instead of repeated casts.
 - [x] Document required local Pyright, configured and tracked-source Ruff, complexity, and unittest commands as the equivalent checks before a commit.
-- [ ] Make tests import source through package configuration rather than repeated `sys.path` mutation.
+- [ ] Partial: event tests use normal package imports; 41 ordinary unittest prefix guards remain. Standalone verifier and Godot-discovery barriers retain their deliberate contracts.
 - [x] Add shared test utility for live Godot binary discovery with the original lookup order.
 - [x] Add shared UTF-8 fixture-writing helpers; 50 compatible test modules use shared discovery, writes or standard scene launches while assertions, skips and specialized capability/launch policies stay local.
 - [x] Add Python coverage reporting and coverage floor for core modules.

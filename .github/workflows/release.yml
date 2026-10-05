@@ -1119,12 +1119,265 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m scripts.check_main_quality --output "$RUNNER_TEMP/main-quality.json"
 
-  release:
+  macos-sign:
     needs: [get-version, release-state-preflight, build, main-quality]
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && needs.main-quality.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && needs.main-quality.result == 'success' }}
+    environment: macos-developer-id-release
+    permissions:
+      actions: read
+      contents: read
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            name: macos-arm64
+            architecture: arm64
+            python_version: '3.12.10'
+            python_architecture: arm64
+            constraint: constraints/requirements-macos-py312.lock
+            pip_config_file: /dev/null
+            expected_platform: darwin
+            expected_machine: arm64
+          - os: macos-26-intel
+            name: macos-x86_64
+            architecture: x86_64
+            python_version: '3.12.10'
+            python_architecture: x64
+            constraint: constraints/requirements-macos-py312.lock
+            pip_config_file: /dev/null
+            expected_platform: darwin
+            expected_machine: x86_64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PIP_CONFIG_FILE: ${{ matrix.pip_config_file }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 10
+        with:
+          python-version: ${{ matrix.python_version }}
+          architecture: ${{ matrix.python_architecture }}
+
+      - name: Verify native signing runtime
+        timeout-minutes: 1
+        run: |
+          python -I -B scripts/verify_macos_gui_artifact.py \
+            --check-native-runtime \
+            --expected-architecture "${{ matrix.architecture }}"
+
+      - name: Install and verify dependencies
+        timeout-minutes: 20
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            venv_dir="$(cygpath -u "$RUNNER_TEMP")/gm2godot-release-${{ matrix.name }}-venv"
+            venv_bin="$venv_dir/Scripts"
+            venv_native="$(cygpath -w "$venv_dir")"
+            venv_path_native="$(cygpath -w "$venv_bin")"
+            github_env_file="$(cygpath -u "$GITHUB_ENV")"
+            github_path_file="$(cygpath -u "$GITHUB_PATH")"
+          else
+            venv_dir="$RUNNER_TEMP/gm2godot-release-${{ matrix.name }}-venv"
+            venv_bin="$venv_dir/bin"
+            venv_native="$venv_dir"
+            venv_path_native="$venv_bin"
+            github_env_file="$GITHUB_ENV"
+            github_path_file="$GITHUB_PATH"
+          fi
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo "::error::Refusing to reuse dependency environment: $venv_dir" >&2
+            exit 1
+          fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt \
+            --policy stable \
+            --constraint "${{ matrix.constraint }}" \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-bootstrap.json"
+          python -m venv "$venv_dir"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_native" >> "$github_env_file"
+          printf '%s\n' "$venv_path_native" >> "$github_path_file"
+          export VIRTUAL_ENV="$venv_native"
+          export PATH="$venv_bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint "${{ matrix.constraint }}" \
+            pip
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint "${{ matrix.constraint }}" \
+            -r requirements.txt PyInstaller==6.21.0
+          python scripts/verify_dependency_environment.py \
+            --constraint "${{ matrix.constraint }}" \
+            --mode subset \
+            --require pip \
+            --require Pillow \
+            --require markdown2 \
+            --require requests \
+            --require PySide6 \
+            --require PyInstaller \
+            --expected-python "${{ matrix.python_version }}" \
+            --expected-platform "${{ matrix.expected_platform }}" \
+            --expected-machine "${{ matrix.expected_machine }}" \
+            --bootstrap requirements-bootstrap.txt \
+            --bootstrap-policy stable \
+            --output "$RUNNER_TEMP/release-${{ matrix.name }}-dependencies.json"
+
+      - name: Select same-run unsigned native inputs
+        timeout-minutes: 5
+        id: signing-inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name ignored; do
+            case "$name" in
+              PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset "$name" ;;
+            esac
+          done < <(env)
+          export GIT_OPTIONAL_LOCKS=0
+          test "$GITHUB_REPOSITORY" = "Infiland/GM2Godot"
+          test "$GITHUB_REF" = "refs/heads/main"
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$(pwd -P)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tracked_state="$(git status --porcelain=v1 --untracked-files=no)"
+          test -z "$tracked_state"
+          untracked_state="$(git ls-files --others)"
+          test -z "$untracked_state"
+          python -B -m scripts.acquire_macos_publication_inputs plan-signing \
+            --source-root "$GITHUB_WORKSPACE" \
+            --architecture "${{ matrix.architecture }}" \
+            --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json"
+
+      - name: Download selected unsigned payload archive
+        timeout-minutes: 25
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.signing-inputs.outputs.unsigned_artifact_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/signing-${{ matrix.name }}-raw-payload
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download selected unsigned native proof archive
+        timeout-minutes: 10
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.signing-inputs.outputs.proof_artifact_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/signing-${{ matrix.name }}-raw-proof
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Recheck same-run inputs before secret access
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name ignored; do
+            case "$name" in
+              PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset "$name" ;;
+            esac
+          done < <(env)
+          export GIT_OPTIONAL_LOCKS=0
+          test "$GITHUB_REPOSITORY" = "Infiland/GM2Godot"
+          test "$GITHUB_REF" = "refs/heads/main"
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$(pwd -P)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tracked_state="$(git status --porcelain=v1 --untracked-files=no)"
+          test -z "$tracked_state"
+          untracked_state="$(git ls-files --others)"
+          test -z "$untracked_state"
+          python -B -m scripts.acquire_macos_publication_inputs verify-signing \
+            --source-root "$GITHUB_WORKSPACE" \
+            --architecture "${{ matrix.architecture }}" \
+            --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json" \
+            --payload-directory "$RUNNER_TEMP/signing-${{ matrix.name }}-raw-payload" \
+            --proof-directory "$RUNNER_TEMP/signing-${{ matrix.name }}-raw-proof" \
+            --inputs "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs" \
+            --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \
+            --receipt "$RUNNER_TEMP/signing-${{ matrix.name }}-acquisition.json"
+
+      - name: Sign notarize staple and test publication bytes
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          MACOS_SIGNING_IDENTITY_SHA1: ${{ vars.MACOS_SIGNING_IDENTITY_SHA1 }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          python -I -B scripts/sign_notarize_macos.py \
+            --purpose publication \
+            --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \
+            --source-root "$GITHUB_WORKSPACE" \
+            --unsigned-zip "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.zip" \
+            --unsigned-dmg "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.dmg" \
+            --architecture "${{ matrix.architecture }}" \
+            --output-root "$RUNNER_TEMP/signing-${{ matrix.name }}-final" \
+            --proof-root "$RUNNER_TEMP/signing-${{ matrix.name }}-proof"
+
+      - name: Upload eligible signed macOS payloads
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GM2Godot-${{ matrix.name }}-signed
+          path: |
+            ${{ runner.temp }}/signing-${{ matrix.name }}-final/GM2Godot-${{ matrix.name }}.zip
+            ${{ runner.temp }}/signing-${{ matrix.name }}-final/GM2Godot-${{ matrix.name }}.dmg
+          archive: true
+          if-no-files-found: error
+
+      - name: Upload eligible signing receipts
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GM2Godot-${{ matrix.name }}-signing-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signing-${{ matrix.name }}-proof/signing.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-proof/app-notary-log.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-proof/dmg-notary-log.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-proof/signed-gui.json
+          archive: true
+          if-no-files-found: error
+
+  release:
+    needs: [get-version, release-state-preflight, build, main-quality, macos-sign]
+    environment: macos-developer-id-release
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && needs.main-quality.result == 'success' && needs.macos-sign.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1135,6 +1388,36 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+
+      - name: Select same-run signed publication inputs
+        id: signed-inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name ignored; do
+            case "$name" in
+              PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset "$name" ;;
+            esac
+          done < <(env)
+          export GIT_OPTIONAL_LOCKS=0
+          test "$GITHUB_REPOSITORY" = "Infiland/GM2Godot"
+          test "$GITHUB_REF" = "refs/heads/main"
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$(pwd -P)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tracked_state="$(git status --porcelain=v1 --untracked-files=no)"
+          test -z "$tracked_state"
+          untracked_state="$(git ls-files --others)"
+          test -z "$untracked_state"
+          python -B -m scripts.acquire_macos_publication_inputs plan-publisher \
+            --source-root "$GITHUB_WORKSPACE" \
+            --selection "$RUNNER_TEMP/signed-publication-selection.json"
 
       - name: Download verified Windows artifact archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -1147,7 +1430,9 @@ jobs:
       - name: Download verified Apple Silicon artifact archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: GM2Godot-macos-arm64
+          artifact-ids: ${{ steps.signed-inputs.outputs.arm64_payload_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
           path: raw-artifacts/GM2Godot-macos-arm64
           skip-decompress: true
           digest-mismatch: error
@@ -1155,7 +1440,9 @@ jobs:
       - name: Download verified Intel artifact archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: GM2Godot-macos-x86_64
+          artifact-ids: ${{ steps.signed-inputs.outputs.x86_64_payload_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
           path: raw-artifacts/GM2Godot-macos-x86_64
           skip-decompress: true
           digest-mismatch: error
@@ -1167,6 +1454,75 @@ jobs:
           path: raw-artifacts/GM2Godot-linux
           skip-decompress: true
           digest-mismatch: error
+
+      - name: Download selected arm64 signing proof archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.signed-inputs.outputs.arm64_proof_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          path: raw-signing-proofs/arm64
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Download selected x86_64 signing proof archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ steps.signed-inputs.outputs.x86_64_proof_id }}
+          run-id: ${{ github.run_id }}
+          github-token: ${{ github.token }}
+          path: raw-signing-proofs/x86_64
+          skip-decompress: true
+          digest-mismatch: error
+
+      - name: Recheck signed publication bodies and receipt namespaces
+        id: signed-context
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name ignored; do
+            case "$name" in
+              PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset "$name" ;;
+            esac
+          done < <(env)
+          export GIT_OPTIONAL_LOCKS=0
+          test "$GITHUB_REPOSITORY" = "Infiland/GM2Godot"
+          test "$GITHUB_REF" = "refs/heads/main"
+          case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac
+          test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"
+          test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
+          test "$(pwd -P)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tracked_state="$(git status --porcelain=v1 --untracked-files=no)"
+          test -z "$tracked_state"
+          git ls-files --others -z | while IFS= read -r -d '' data; do
+            case "$data" in
+              "raw-artifacts/GM2Godot-windows/GM2Godot-windows.zip"|\
+              "raw-artifacts/GM2Godot-linux/GM2Godot-linux.zip"|\
+              "raw-artifacts/GM2Godot-macos-arm64/GM2Godot-macos-arm64-signed.zip"|\
+              "raw-artifacts/GM2Godot-macos-x86_64/GM2Godot-macos-x86_64-signed.zip"|\
+              "raw-signing-proofs/arm64/GM2Godot-macos-arm64-signing-proof-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip"|\
+              "raw-signing-proofs/x86_64/GM2Godot-macos-x86_64-signing-proof-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip") ;;
+              *) printf '%s\n' 'Unexpected untracked publication input' >&2; exit 1 ;;
+            esac
+            test -f "$data"
+            test ! -L "$data"
+            test ! -x "$data"
+            test ! -L "$(dirname "$data")"
+            test ! -L "$(dirname "$(dirname "$data")")"
+          done
+          python -B -m scripts.acquire_macos_publication_inputs verify-publisher \
+            --source-root "$GITHUB_WORKSPACE" \
+            --selection "$RUNNER_TEMP/signed-publication-selection.json" \
+            --raw-root "$GITHUB_WORKSPACE/raw-artifacts" \
+            --proof-root "$GITHUB_WORKSPACE/raw-signing-proofs" \
+            --receipt-root "$GITHUB_WORKSPACE/signing-receipts" \
+            --context "$RUNNER_TEMP/signed-publication-context.json" \
+            --receipt "$RUNNER_TEMP/signed-publication-acquisition.json"
 
       - name: Extract verified artifact archives
         shell: bash
@@ -1344,6 +1700,29 @@ jobs:
             archive="raw-artifacts/$name/$name.zip"
             unzip -q "$archive" -d "artifacts/$name"
           done
+
+      - name: Require eligible receipts for exact final macOS bytes
+        shell: bash
+        env:
+          MACOS_SIGNING_IDENTITY_SHA1: ${{ vars.MACOS_SIGNING_IDENTITY_SHA1 }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          RELEASE_VERSION: ${{ needs.get-version.outputs.version }}
+          PRODUCER_WORKFLOW_ID: ${{ steps.signed-inputs.outputs.workflow_id }}
+        run: |
+          set -euo pipefail
+          source_tree="$(git rev-parse HEAD^{tree})"
+          python -B -m scripts.verify_macos_signing_receipts \
+            --arm64-receipt "$GITHUB_WORKSPACE/signing-receipts/arm64/signing.json" \
+            --arm64-payload-directory "$GITHUB_WORKSPACE/artifacts/GM2Godot-macos-arm64" \
+            --x86-64-receipt "$GITHUB_WORKSPACE/signing-receipts/x86_64/signing.json" \
+            --x86-64-payload-directory "$GITHUB_WORKSPACE/artifacts/GM2Godot-macos-x86_64" \
+            --source-sha "$GITHUB_SHA" --source-tree "$source_tree" \
+            --version "$RELEASE_VERSION" \
+            --producer-run-id "$GITHUB_RUN_ID" --producer-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --producer-workflow-id "$PRODUCER_WORKFLOW_ID" \
+            --signing-run-id "$GITHUB_RUN_ID" --signing-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --build-event "$GITHUB_EVENT_NAME" \
+            --team-id "$APPLE_TEAM_ID" --identity-sha1 "$MACOS_SIGNING_IDENTITY_SHA1"
 
       - name: Generate SHA256SUMS
         shell: bash

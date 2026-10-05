@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.49 - 2026-10-05
+
+- Require protected native Developer ID signing, notarization and stapling before release publication.
+- Verify exact signed Mac payload bytes and acquired same-source signing evidence before checksums and public uploads.
+- Preserve separate verification-only runs and reject unsigned fallbacks or failed signing checks.
+
 ## 0.8.48 - 2026-10-05
 
 - Add a protected, main-only manual workflow that acquires exact-source Mac build inputs and retains verification-only signing evidence.

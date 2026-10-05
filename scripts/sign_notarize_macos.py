@@ -1,4 +1,4 @@
-"""Trusted-main verification-only Developer ID CLI; never publishes assets."""
+"""Trusted-main Developer ID CLI with explicit purpose; never publishes assets."""
 
 from __future__ import annotations
 
@@ -16,13 +16,16 @@ from scripts.macos_signing import (
     MetadataRequest,
     SigningFailure,
     SigningOptions,
+    SigningPurpose,
     metadata_worker,
     safe_failure_message,
+    sign_publication,
     sign_verification,
 )
 
 
 class SigningArguments(argparse.Namespace):
+    purpose: SigningPurpose
     context: Path
     source_root: Path
     unsigned_zip: Path
@@ -33,6 +36,7 @@ class SigningArguments(argparse.Namespace):
 
 
 class MetadataArguments(argparse.Namespace):
+    purpose: SigningPurpose
     context: Path
     source_root: Path
     app: Path
@@ -42,13 +46,14 @@ class MetadataArguments(argparse.Namespace):
 
 def metadata_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Scrubbed maintained artifact verification worker")
+    parser.add_argument("--purpose", default="verification_only", choices=("verification_only", "publication"))
     parser.add_argument("--context", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--app", required=True, type=Path)
     parser.add_argument("--zip", required=True, type=Path)
     parser.add_argument("--dmg", required=True, type=Path)
     args = parser.parse_args(argv, namespace=MetadataArguments())
-    request = MetadataRequest(args.context, args.source_root, args.app, args.zip, args.dmg)
+    request = MetadataRequest(args.context, args.source_root, args.app, args.zip, args.dmg, args.purpose)
     try:
         result = metadata_worker(request, entry_script=Path(__file__))
     except (SigningFailure, OSError, ValueError, KeyError, TypeError, RecursionError, subprocess.SubprocessError) as error:
@@ -63,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
     if actual and actual[0] == "--metadata-worker":
         return metadata_main(actual[1:])
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--purpose", default="verification_only", choices=("verification_only", "publication"))
     parser.add_argument("--context", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--unsigned-zip", required=True, type=Path)
@@ -71,15 +77,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-root", required=True, type=Path)
     parser.add_argument("--proof-root", required=True, type=Path)
     args = parser.parse_args(actual, namespace=SigningArguments())
-    options = SigningOptions(args.context, args.source_root, args.unsigned_zip, args.unsigned_dmg, args.architecture, args.output_root, args.proof_root)
+    options = SigningOptions(args.context, args.source_root, args.unsigned_zip, args.unsigned_dmg, args.architecture, args.output_root, args.proof_root, args.purpose)
     try:
-        result = sign_verification(options)
+        if args.purpose == "publication":
+            result = sign_publication(options)
+        else:
+            result = sign_verification(options)
     except (SigningFailure, OSError, ValueError, KeyError, TypeError, RecursionError, subprocess.SubprocessError) as error:
         # Confidential subprocess exceptions can contain argv. No repr, cause,
         # traceback, credential-bearing error text or secret environment prints.
         print(safe_failure_message(error), file=sys.stderr)
         return 1
-    print(f"Verification-only Developer ID proof complete for {result['architecture']}; release eligibility remains false.")
+    if args.purpose == "publication":
+        print(f"Publication-mode Developer ID proof complete for {result['architecture']}; publication still requires the same-run receipt gate.")
+    else:
+        print(f"Verification-only Developer ID proof complete for {result['architecture']}; release eligibility remains false.")
     return 0
 
 

@@ -669,8 +669,354 @@ def _main_quality_policy_errors(content: str, publisher: str) -> tuple[str, ...]
         errors.append("one main quality gate is required")
     elif _workflow_job_section(content, "main-quality") != MAIN_QUALITY_JOB:
         errors.append("main quality requires exact readonly dependencies, source and bounded checker")
-    if "    needs: [get-version, release-state-preflight, build, main-quality]\n" not in publisher:
+    if "    needs: [get-version, release-state-preflight, build, main-quality, macos-sign]\n" not in publisher:
         errors.append("publisher must depend on the successful aggregate quality gate")
+    return tuple(errors)
+
+
+SIGNED_PUBLICATION_GATE_SCRIPT = (
+    'set -euo pipefail\n'
+    'source_tree="$(git rev-parse HEAD^{tree})"\n'
+    'python -B -m scripts.verify_macos_signing_receipts \\\n'
+    '  --arm64-receipt "$GITHUB_WORKSPACE/signing-receipts/arm64/signing.json" \\\n'
+    '  --arm64-payload-directory "$GITHUB_WORKSPACE/artifacts/GM2Godot-macos-arm64" \\\n'
+    '  --x86-64-receipt "$GITHUB_WORKSPACE/signing-receipts/x86_64/signing.json" \\\n'
+    '  --x86-64-payload-directory "$GITHUB_WORKSPACE/artifacts/GM2Godot-macos-x86_64" \\\n'
+    '  --source-sha "$GITHUB_SHA" --source-tree "$source_tree" \\\n'
+    '  --version "$RELEASE_VERSION" \\\n'
+    '  --producer-run-id "$GITHUB_RUN_ID" --producer-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n'
+    '  --producer-workflow-id "$PRODUCER_WORKFLOW_ID" \\\n'
+    '  --signing-run-id "$GITHUB_RUN_ID" --signing-run-attempt "$GITHUB_RUN_ATTEMPT" \\\n'
+    '  --build-event "$GITHUB_EVENT_NAME" \\\n'
+    '  --team-id "$APPLE_TEAM_ID" --identity-sha1 "$MACOS_SIGNING_IDENTITY_SHA1"\n'
+)
+
+
+def _signed_payload_download_identity(artifact_name: str) -> str:
+    if artifact_name.startswith("GM2Godot-macos-"):
+        architecture = artifact_name.removeprefix("GM2Godot-macos-")
+        return (
+            f"          artifact-ids: ${{{{ steps.signed-inputs.outputs.{architecture}_payload_id }}}}\n"
+            "          run-id: ${{ github.run_id }}\n"
+            "          github-token: ${{ github.token }}\n"
+        )
+    return f"          name: {artifact_name}\n"
+
+
+PUBLICATION_ACQUISITION_COMMON_GUARD = (
+    'set -euo pipefail\n'
+    "while IFS='=' read -r name ignored; do\n"
+    '  case "$name" in\n'
+    '    PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset "$name" ;;\n'
+    '  esac\n'
+    'done < <(env)\n'
+    'export GIT_OPTIONAL_LOCKS=0\n'
+    'test "$GITHUB_REPOSITORY" = "Infiland/GM2Godot"\n'
+    'test "$GITHUB_REF" = "refs/heads/main"\n'
+    'case "$GITHUB_EVENT_NAME" in push|workflow_dispatch) ;; *) exit 1 ;; esac\n'
+    'test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"\n'
+    'test "$GITHUB_WORKFLOW_SHA" = "$GITHUB_SHA"\n'
+    '[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]\n'
+    '[[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]\n'
+    'test "$(pwd -P)" = "$GITHUB_WORKSPACE"\n'
+    'test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"\n'
+    'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
+    'tracked_state="$(git status --porcelain=v1 --untracked-files=no)"\n'
+    'test -z "$tracked_state"\n'
+)
+
+
+PUBLICATION_ACQUISITION_CLEAN_GUARD = (
+    PUBLICATION_ACQUISITION_COMMON_GUARD
+    + 'untracked_state="$(git ls-files --others)"\ntest -z "$untracked_state"\n'
+)
+
+
+PUBLICATION_ACQUISITION_PUBLISHER_GUARD = (
+    PUBLICATION_ACQUISITION_COMMON_GUARD
+    + (
+        "git ls-files --others -z | while IFS= read -r -d '' data; do\n"
+        '  case "$data" in\n'
+        '    "raw-artifacts/GM2Godot-windows/GM2Godot-windows.zip"|\\\n'
+        '    "raw-artifacts/GM2Godot-linux/GM2Godot-linux.zip"|\\\n'
+        '    "raw-artifacts/GM2Godot-macos-arm64/GM2Godot-macos-arm64-signed.zip"|\\\n'
+        '    "raw-artifacts/GM2Godot-macos-x86_64/GM2Godot-macos-x86_64-signed.zip"|\\\n'
+        '    "raw-signing-proofs/arm64/GM2Godot-macos-arm64-signing-proof-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip"|\\\n'
+        '    "raw-signing-proofs/x86_64/GM2Godot-macos-x86_64-signing-proof-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.zip") ;;\n'
+        "    *) printf '%s\\n' 'Unexpected untracked publication input' >&2; exit 1 ;;\n"
+        '  esac\n'
+        '  test -f "$data"\n'
+        '  test ! -L "$data"\n'
+        '  test ! -x "$data"\n'
+        '  test ! -L "$(dirname "$data")"\n'
+        '  test ! -L "$(dirname "$(dirname "$data")")"\n'
+        'done\n'
+    )
+)
+
+
+PUBLICATION_ACQUISITION_ARGUMENTS: dict[str, str] = {
+    'plan-signing': (
+        '  --source-root "$GITHUB_WORKSPACE" \\\n'
+        '  --architecture "${{ matrix.architecture }}" \\\n'
+        '  --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json"\n'
+    ),
+    'verify-signing': (
+        '  --source-root "$GITHUB_WORKSPACE" \\\n'
+        '  --architecture "${{ matrix.architecture }}" \\\n'
+        '  --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json" \\\n'
+        '  --payload-directory "$RUNNER_TEMP/signing-${{ matrix.name }}-raw-payload" \\\n'
+        '  --proof-directory "$RUNNER_TEMP/signing-${{ matrix.name }}-raw-proof" \\\n'
+        '  --inputs "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs" \\\n'
+        '  --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \\\n'
+        '  --receipt "$RUNNER_TEMP/signing-${{ matrix.name }}-acquisition.json"\n'
+    ),
+    'plan-publisher': (
+        '  --source-root "$GITHUB_WORKSPACE" \\\n'
+        '  --selection "$RUNNER_TEMP/signed-publication-selection.json"\n'
+    ),
+    'verify-publisher': (
+        '  --source-root "$GITHUB_WORKSPACE" \\\n'
+        '  --selection "$RUNNER_TEMP/signed-publication-selection.json" \\\n'
+        '  --raw-root "$GITHUB_WORKSPACE/raw-artifacts" \\\n'
+        '  --proof-root "$GITHUB_WORKSPACE/raw-signing-proofs" \\\n'
+        '  --receipt-root "$GITHUB_WORKSPACE/signing-receipts" \\\n'
+        '  --context "$RUNNER_TEMP/signed-publication-context.json" \\\n'
+        '  --receipt "$RUNNER_TEMP/signed-publication-acquisition.json"\n'
+    ),
+}
+
+
+PUBLICATION_ISOLATED_SIGNING_SCRIPTS: dict[str, str] = {
+    'Verify native signing runtime': (
+        'python -I -B scripts/verify_macos_gui_artifact.py \\\n'
+        '  --check-native-runtime \\\n'
+        '  --expected-architecture "${{ matrix.architecture }}"\n'
+    ),
+    'Sign notarize staple and test publication bytes': (
+        'set -euo pipefail\n'
+        'python -I -B scripts/sign_notarize_macos.py \\\n'
+        '  --purpose publication \\\n'
+        '  --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \\\n'
+        '  --source-root "$GITHUB_WORKSPACE" \\\n'
+        '  --unsigned-zip "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.zip" \\\n'
+        '  --unsigned-dmg "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.dmg" \\\n'
+        '  --architecture "${{ matrix.architecture }}" \\\n'
+        '  --output-root "$RUNNER_TEMP/signing-${{ matrix.name }}-final" \\\n'
+        '  --proof-root "$RUNNER_TEMP/signing-${{ matrix.name }}-proof"\n'
+    ),
+}
+
+
+def _publication_acquisition_caller_errors(job: str, stages: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    errors: list[str] = []
+    if "      PYTHONDONTWRITEBYTECODE: '1'\n" not in job:
+        errors.append("publication source jobs must prevent bytecode caches without source exemptions")
+    for name, mode in stages:
+        if len(_workflow_step_sections(job, name)) != 1:
+            errors.append("each guarded acquisition stage must exist exactly once")
+            continue
+        guard = (
+            PUBLICATION_ACQUISITION_PUBLISHER_GUARD
+            if mode == "verify-publisher" else PUBLICATION_ACQUISITION_CLEAN_GUARD
+        )
+        expected = (
+            guard + f"python -B -m scripts.acquire_macos_publication_inputs {mode}" + ' \\\n'
+            + PUBLICATION_ACQUISITION_ARGUMENTS[mode]
+        )
+        if _workflow_run_script(job, name) != expected:
+            errors.append("acquisition must scrub injection, guard source before import and retain exact owned paths")
+    return tuple(errors)
+
+
+def _publication_signing_caller_errors(signing: str) -> tuple[str, ...]:
+    errors = list(_publication_acquisition_caller_errors(signing, (
+        ("Select same-run unsigned native inputs", "plan-signing"),
+        ("Recheck same-run inputs before secret access", "verify-signing"),
+    )))
+    for name, expected in PUBLICATION_ISOLATED_SIGNING_SCRIPTS.items():
+        if len(_workflow_step_sections(signing, name)) != 1 or _workflow_run_script(signing, name) != expected:
+            errors.append("standalone signing calls require exact isolated/no-bytecode vectors and outside paths")
+    for name, suffix in (
+        ("Download selected unsigned payload archive", "raw-payload"),
+        ("Download selected unsigned native proof archive", "raw-proof"),
+    ):
+        expected = f"          path: ${{{{ runner.temp }}}}/signing-${{{{ matrix.name }}}}-{suffix}\n"
+        sections = _workflow_step_sections(signing, name)
+        if len(sections) != 1 or re.findall(r"(?m)^          path:.*\n", sections[0]) != [expected]:
+            errors.append("signing downloads must be distinct direct runner-temp roots outside source")
+    return tuple(errors)
+
+
+def _publication_signing_schedule_errors(signing: str) -> tuple[str, ...]:
+    errors: list[str] = []
+    for action, minutes in (
+        ("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1", 5),
+        ("actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0", 10),
+    ):
+        expected = f"      - uses: {action}\n        timeout-minutes: {minutes}\n        with:\n"
+        if signing.count(expected) != 1:
+            errors.append("publication signer setup actions require their finite presecret bounds")
+    for name, minutes in (
+        ("Verify native signing runtime", 1),
+        ("Install and verify dependencies", 20),
+        ("Select same-run unsigned native inputs", 5),
+        ("Download selected unsigned payload archive", 25),
+        ("Download selected unsigned native proof archive", 10),
+        ("Recheck same-run inputs before secret access", 5),
+        ("Upload eligible signed macOS payloads", 5),
+        ("Upload eligible signing receipts", 5),
+    ):
+        sections = _workflow_step_sections(signing, name)
+        if len(sections) != 1 or re.findall(r"(?m)^        timeout-minutes: ([0-9]+)$", sections[0]) != [str(minutes)]:
+            errors.append("publication signer presecret and upload steps require their exact finite bounds")
+    secret = _workflow_step_sections(signing, "Sign notarize staple and test publication bytes")
+    if len(secret) != 1 or re.search(r"(?m)^        timeout-minutes:", secret[0]):
+        errors.append("publication signing must retain helper-owned cleanup without an outer step timeout")
+    return tuple(errors)
+
+
+def _signing_upload_policy_errors(signing: str) -> tuple[str, ...]:
+    errors: list[str] = []
+    action = "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n"
+    expected_rows = (
+        ("Upload eligible signed macOS payloads", "GM2Godot-${{ matrix.name }}-signed", (
+            "${{ runner.temp }}/signing-${{ matrix.name }}-final/GM2Godot-${{ matrix.name }}.zip",
+            "${{ runner.temp }}/signing-${{ matrix.name }}-final/GM2Godot-${{ matrix.name }}.dmg",
+        )),
+        ("Upload eligible signing receipts", "GM2Godot-${{ matrix.name }}-signing-proof-${{ github.run_id }}-${{ github.run_attempt }}", tuple(
+            f"${{{{ runner.temp }}}}/signing-${{{{ matrix.name }}}}-proof/{name}"
+            for name in ("signing.json", "app-notary-log.json", "dmg-notary-log.json", "signed-gui.json")
+        )),
+    )
+    for name, artifact, paths in expected_rows:
+        expected = (
+            f"      - name: {name}\n        timeout-minutes: 5\n" + action + "        with:\n"
+            f"          name: {artifact}\n          path: |\n"
+            + "".join(f"            {path}\n" for path in paths)
+            + "          archive: true\n          if-no-files-found: error\n\n"
+        )
+        if _workflow_step_sections(signing, name) != (expected,):
+            errors.append("only the exact successful signed pair and four retained proof files may upload")
+    return tuple(errors)
+
+
+def _macos_signing_policy_errors(content: str) -> tuple[str, ...]:
+    errors: list[str] = []
+    if content.count("\n  macos-sign:\n") != 1:
+        return ("both native publication signing jobs are required",)
+    signing = _workflow_job_section(content, "macos-sign")
+    guard = (
+        "    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && "
+        "github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && "
+        "needs.get-version.outputs.tag_exists == 'false' && needs.release-state-preflight.result == 'success' && "
+        "needs.build.result == 'success' && needs.main-quality.result == 'success' }}"
+    )
+    required_metadata = (
+        "    needs: [get-version, release-state-preflight, build, main-quality]\n",
+        "    environment: macos-developer-id-release\n",
+        "    permissions:\n      actions: read\n      contents: read\n",
+        "    timeout-minutes: 180\n",
+    )
+    if re.findall(r"(?m)^    if:.*$", signing) != [guard] or any(row not in signing for row in required_metadata):
+        errors.append("signing needs protected trusted-main source, absent tag and successful build/quality/preflight")
+    for runner, name, architecture, python_architecture in (
+        ("macos-26", "macos-arm64", "arm64", "arm64"),
+        ("macos-26-intel", "macos-x86_64", "x86_64", "x64"),
+    ):
+        row = (
+            f"          - os: {runner}\n            name: {name}\n            architecture: {architecture}\n"
+            "            python_version: '3.12.10'\n"
+            f"            python_architecture: {python_architecture}\n"
+            f"            constraint: {MACOS_CONSTRAINT}\n            pip_config_file: /dev/null\n"
+            f"            expected_platform: darwin\n            expected_machine: {architecture}\n"
+        )
+        if signing.count(row) != 1:
+            errors.append("signing must retain both exact native CPython312 architecture rows")
+    names = (
+        "Verify native signing runtime", "Install and verify dependencies", "Select same-run unsigned native inputs",
+        "Download selected unsigned payload archive", "Download selected unsigned native proof archive",
+        "Recheck same-run inputs before secret access", "Sign notarize staple and test publication bytes",
+        "Upload eligible signed macOS payloads", "Upload eligible signing receipts",
+    )
+    if re.findall(r"(?m)^          - os: (.+)$", signing) != ["macos-26", "macos-26-intel"]:
+        errors.append("signing cannot add generic or unsupported runtime rows")
+    positions = [signing.find(f"      - name: {name}\n") for name in names]
+    if any(position < 0 for position in positions) or positions != sorted(set(positions)):
+        errors.append("same-run proof must be rechecked before secrets; eligible uploads follow successful signing")
+    for name, mode in (
+        ("Select same-run unsigned native inputs", "plan-signing"),
+        ("Recheck same-run inputs before secret access", "verify-signing"),
+    ):
+        sections = _workflow_step_sections(signing, name)
+        if len(sections) != 1 or f"scripts.acquire_macos_publication_inputs {mode}" not in sections[0]:
+            errors.append("signing input acquisition must use the dedicated same-run contract")
+    errors.extend(_publication_signing_caller_errors(signing))
+    errors.extend(_publication_signing_schedule_errors(signing))
+    errors.extend(_signing_upload_policy_errors(signing))
+    secret_steps = _workflow_step_sections(signing, "Sign notarize staple and test publication bytes")
+    if len(secret_steps) != 1:
+        return (*errors, "exactly one credentialed publication step is required")
+    secret = secret_steps[0]
+    if signing.count("secrets.") != 3 or secret.count("secrets.") != 3:
+        errors.append("credentials belong only to the protected signer step")
+    if "--purpose publication" not in secret or '--context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json"' not in secret:
+        errors.append("publication purpose must be validated against acquired immutable context")
+    if "always()" in signing or "continue-on-error:" in signing or "|| true" in signing:
+        errors.append("publication signing and its uploads must fail closed")
+    return tuple(errors)
+
+
+def _signed_publisher_policy_errors(publisher: str) -> tuple[str, ...]:
+    errors = list(_publication_acquisition_caller_errors(publisher, (
+        ("Select same-run signed publication inputs", "plan-publisher"),
+        ("Recheck signed publication bodies and receipt namespaces", "verify-publisher"),
+    )))
+    if re.findall(r"(?m)^    environment: (.+)$", publisher) != ["macos-developer-id-release"]:
+        errors.append("publisher requires the protected environment for certificate and Apple team variables")
+    required_steps = (
+        "Select same-run signed publication inputs", "Download verified Apple Silicon artifact archive",
+        "Download verified Intel artifact archive", "Download selected arm64 signing proof archive",
+        "Download selected x86_64 signing proof archive", "Recheck signed publication bodies and receipt namespaces",
+        "Extract verified artifact archives", "Require eligible receipts for exact final macOS bytes",
+        "Generate SHA256SUMS", "Publish run-owned release",
+    )
+    positions = [publisher.find(f"      - name: {name}\n") for name in required_steps]
+    if any(position < 0 for position in positions) or positions != sorted(set(positions)):
+        errors.append("signed proof rechecks and final-byte receipt gate must precede checksums/publication")
+    for architecture in ("arm64", "x86_64"):
+        expected = (
+            f"      - name: Download selected {architecture} signing proof archive\n"
+            "        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n"
+            "        with:\n"
+            f"          artifact-ids: ${{{{ steps.signed-inputs.outputs.{architecture}_proof_id }}}}\n"
+            "          run-id: ${{ github.run_id }}\n          github-token: ${{ github.token }}\n"
+            f"          path: raw-signing-proofs/{architecture}\n"
+            "          skip-decompress: true\n          digest-mismatch: error\n\n"
+        )
+        if _workflow_step_sections(publisher, f"Download selected {architecture} signing proof archive") != (expected,):
+            errors.append("both signing proof archives require exact same-run IDs and fatal digests")
+    rechecks = _workflow_step_sections(publisher, "Recheck signed publication bodies and receipt namespaces")
+    if len(rechecks) != 1 or "scripts.acquire_macos_publication_inputs verify-publisher" not in rechecks[0]:
+        errors.append("signed artifact API/body/proof namespaces require a fresh publisher recheck")
+    gates = _workflow_step_sections(publisher, "Require eligible receipts for exact final macOS bytes")
+    if len(gates) != 1:
+        return (*errors, "exactly one final-byte receipt gate is required")
+    gate = gates[0]
+    if _workflow_run_script(publisher, "Require eligible receipts for exact final macOS bytes") != SIGNED_PUBLICATION_GATE_SCRIPT:
+        errors.append("final-byte proof must retain its exact fatal source/event/run/attempt invocation")
+    required_context = (
+        "python -B -m scripts.verify_macos_signing_receipts", '--source-sha "$GITHUB_SHA" --source-tree "$source_tree"',
+        '--producer-run-id "$GITHUB_RUN_ID" --producer-run-attempt "$GITHUB_RUN_ATTEMPT"',
+        '--signing-run-id "$GITHUB_RUN_ID" --signing-run-attempt "$GITHUB_RUN_ATTEMPT"',
+        '--build-event "$GITHUB_EVENT_NAME"', '--producer-workflow-id "$PRODUCER_WORKFLOW_ID"',
+        "          MACOS_SIGNING_IDENTITY_SHA1: ${{ vars.MACOS_SIGNING_IDENTITY_SHA1 }}\n",
+        "          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}\n",
+    )
+    if any(fragment not in gate for fragment in required_context):
+        errors.append("receipt expectations must be the actual Build source/event/run/attempt")
+    if "        if:" in gate or "continue-on-error:" in gate or "|| true" in gate:
+        errors.append("final signing proof must fail closed before any checksums or uploads")
     return tuple(errors)
 
 
@@ -683,6 +1029,8 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
     build = _workflow_job_section(content, "build")
     publisher = _workflow_job_section(content, "release")
     errors.extend(_main_quality_policy_errors(content, publisher))
+    errors.extend(_macos_signing_policy_errors(content))
+    errors.extend(_signed_publisher_policy_errors(publisher))
     matrix_marker = "        include:\n"
     if build.count(matrix_marker) != 1 or build.count("    runs-on:") != 1:
         return ("one explicit native matrix is required",)
@@ -835,7 +1183,7 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         "github.ref == 'refs/heads/main' && needs.get-version.result == 'success' && "
         "needs.get-version.outputs.tag_exists == 'false' && "
         "needs.release-state-preflight.result == 'success' && needs.build.result == 'success' && "
-        "needs.main-quality.result == 'success' }}"
+        "needs.main-quality.result == 'success' && needs.macos-sign.result == 'success' }}"
     )
     if re.findall(r"(?m)^    if:.*$", publisher) != [expected_publisher_guard]:
         errors.append("publication requires main, successful native builds/preflight and an absent tag")
@@ -843,18 +1191,18 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         "        uses: actions/download-artifact@"
         "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n"
     )
-    if publisher.count(download_action) != 4:
-        errors.append("publication must download exactly four named payload archives")
+    if publisher.count(download_action) != 6:
+        errors.append("publication must download four payload archives and two signing proof archives")
     for step_name, artifact_name in RELEASE_ARTIFACT_DOWNLOADS:
         expected_step = (
             f"      - name: {step_name}\n" + download_action + "        with:\n"
-            f"          name: {artifact_name}\n"
-            f"          path: raw-artifacts/{artifact_name}\n"
+            + _signed_payload_download_identity(artifact_name)
+            + f"          path: raw-artifacts/{artifact_name}\n"
             "          skip-decompress: true\n"
             "          digest-mismatch: error\n\n"
         )
         if _workflow_step_sections(publisher, step_name) != (expected_step,):
-            errors.append(f"{step_name} must bind only its original verified payload archive")
+            errors.append(f"{step_name} must bind only its verified same-run payload archive")
     return tuple(errors)
 
 
@@ -2072,7 +2420,7 @@ class TestCIWorkflows(unittest.TestCase):
                     self.assertEqual(archive_inputs, ["true"])
 
         # Native Mac builds retain a separate proof archive beside each payload pair.
-        self.assertEqual(len(locations), 19, locations)
+        self.assertEqual(len(locations), 21, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             3,
@@ -4699,7 +5047,7 @@ class TestCIWorkflows(unittest.TestCase):
             "needs.get-version.result == 'success' && "
             f"{absence_guard} && "
             "needs.release-state-preflight.result == 'success' && "
-            "needs.build.result == 'success' && needs.main-quality.result == 'success' }}"
+            "needs.build.result == 'success' && needs.main-quality.result == 'success' && needs.macos-sign.result == 'success' }}"
         )
 
         self.assertIn("set -euo pipefail", script)
@@ -4876,7 +5224,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertNotIn("existing-release-integrity", build_job)
         self.assertNotIn("always()", build_job)
         self.assertIn(
-            "needs: [get-version, release-state-preflight, build, main-quality]",
+            "needs: [get-version, release-state-preflight, build, main-quality, macos-sign]",
             release_job,
         )
         self.assertNotIn("existing-release-integrity", release_job)
@@ -4914,7 +5262,7 @@ class TestCIWorkflows(unittest.TestCase):
         )
         self.assertIn("gh api --paginate --slurp", preflight_script)
         self.assertNotIn("jq", preflight_script)
-        self.assertIn("permissions:\n      contents: write", release_job)
+        self.assertIn("permissions:\n      actions: read\n      contents: write", release_job)
         for required in (
             "GITHUB_TOKEN: ${{ github.token }}",
             "RELEASE_TARGET_SHA: ${{ github.sha }}",
@@ -5493,7 +5841,7 @@ class TestCIWorkflows(unittest.TestCase):
                     (
                         "${{ matrix.constraint }}",
                         ("pip",),
-                    ): 1,
+                    ): 2,
                     (
                         "${{ matrix.constraint }}",
                         (
@@ -5501,7 +5849,7 @@ class TestCIWorkflows(unittest.TestCase):
                             "requirements.txt",
                             f"PyInstaller=={PYINSTALLER_VERSION}",
                         ),
-                    ): 1,
+                    ): 2,
                 }
             ),
             ".github/workflows/tcc-conversion-test.yml": Counter(
@@ -5630,7 +5978,7 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
-        self.assertEqual(non_dependency_lock_command_count, 29)
+        self.assertEqual(non_dependency_lock_command_count, 31)
         self.assertEqual(dependency_lock_command_count, 8)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(
@@ -7607,11 +7955,11 @@ class TestCIWorkflows(unittest.TestCase):
                 ), 1,
             ),
             "publisher quality need removed": release.replace(
-                "needs: [get-version, release-state-preflight, build, main-quality]",
+                "needs: [get-version, release-state-preflight, build, main-quality, macos-sign]",
                 "needs: [get-version, release-state-preflight, build]", 1,
             ),
             "publisher quality condition removed": release.replace(
-                " && needs.main-quality.result == 'success'", "", 1,
+                publisher, publisher.replace(" && needs.main-quality.result == 'success'", "", 1), 1,
             ),
         })
         for name in (
@@ -7635,8 +7983,8 @@ class TestCIWorkflows(unittest.TestCase):
             mutations[f"missing {name}"] = release.replace(step, "", 1)
             mutations[f"duplicate {name}"] = release.replace(step, step * 2, 1)
             for old, new in (
-                (f"          name: {artifact_name}\n", "          name: GM2Godot-macos\n"),
-                (f"          name: {artifact_name}\n", "          pattern: GM2Godot-*\n"),
+                (_signed_payload_download_identity(artifact_name), "          name: GM2Godot-macos\n"),
+                (_signed_payload_download_identity(artifact_name), "          pattern: GM2Godot-*\n"),
                 (f"          path: raw-artifacts/{artifact_name}\n", "          path: raw-artifacts\n"),
                 ("          digest-mismatch: error\n", "          digest-mismatch: warn\n"),
                 ("          skip-decompress: true\n", "          skip-decompress: false\n"),
@@ -8702,6 +9050,203 @@ class TestCIWorkflows(unittest.TestCase):
                 self.assertIn(report_name, upload_step)
         self.assertNotIn("gm2godot-lts-2026-output/*/**", upload_step)
         self.assertNotRegex(upload_step, r"(?m)^\s+path:\s+.*gm2godot-lts-2026-output/?\s*$")
+
+
+    def test_publication_signing_retains_job_headroom_and_helper_owned_cleanup(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        signing = _workflow_job_section(content, "macos-sign")
+        self.assertEqual(_macos_signing_policy_errors(content), ())
+        self.assertEqual(re.findall(r"(?m)^    timeout-minutes: ([0-9]+)$", signing), ["180"])
+        secret = _workflow_step_sections(signing, "Sign notarize staple and test publication bytes")[0]
+        self.assertNotRegex(secret, r"(?m)^        timeout-minutes:")
+        mutations = {
+            "job headroom removed": signing.replace("    timeout-minutes: 180\n", "    timeout-minutes: 90\n", 1),
+            "outer timeout kills owned cleanup": signing.replace(
+                secret, secret.replace("        env:\n", "        timeout-minutes: 75\n        env:\n", 1), 1,
+            ),
+            "checkout bound removed": signing.replace("        timeout-minutes: 5\n        with:\n", "        with:\n", 1),
+            "Python setup bound removed": signing.replace("        timeout-minutes: 10\n        with:\n", "        with:\n", 1),
+        }
+        for name, minutes in (
+            ("Verify native signing runtime", 1),
+            ("Install and verify dependencies", 20),
+            ("Select same-run unsigned native inputs", 5),
+            ("Download selected unsigned payload archive", 25),
+            ("Download selected unsigned native proof archive", 10),
+            ("Recheck same-run inputs before secret access", 5),
+            ("Upload eligible signed macOS payloads", 5),
+            ("Upload eligible signing receipts", 5),
+        ):
+            step = _workflow_step_sections(signing, name)[0]
+            mutations[f"unbounded {name}"] = signing.replace(
+                step, step.replace(f"        timeout-minutes: {minutes}\n", "", 1), 1,
+            )
+        for reason, bad in mutations.items():
+            with self.subTest(reason=reason):
+                self.assertNotEqual(bad, signing)
+                self.assertTrue(_macos_signing_policy_errors(content.replace(signing, bad, 1)))
+
+
+    def test_publication_signing_requires_both_protected_native_lanes_and_secret_order(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(_macos_signing_policy_errors(content), ())
+        signing = _workflow_job_section(content, "macos-sign")
+        mutations = {
+            "unprotected credentials": signing.replace("    environment: macos-developer-id-release\n", "", 1),
+            "quality prerequisite removed": signing.replace(
+                "needs: [get-version, release-state-preflight, build, main-quality]",
+                "needs: [get-version, release-state-preflight, build]", 1,
+            ),
+            "Intel runs on ARM": signing.replace("- os: macos-26-intel", "- os: macos-26", 1),
+            "non-native Python": signing.replace("python_architecture: x64", "python_architecture: arm64", 1),
+            "manual dispatch rejected": signing.replace(" || github.event_name == 'workflow_dispatch'", "", 1),
+            "nonfatal credentials step": signing.replace(
+                "      - name: Sign notarize staple and test publication bytes\n",
+                "      - name: Sign notarize staple and test publication bytes\n        continue-on-error: true\n", 1,
+            ),
+        }
+        recheck = _workflow_step_sections(signing, "Recheck same-run inputs before secret access")[0]
+        mutations["inputs not rechecked"] = signing.replace(recheck, "", 1)
+        for reason, bad in mutations.items():
+            with self.subTest(reason=reason):
+                self.assertNotEqual(bad, signing)
+                self.assertTrue(_macos_signing_policy_errors(content.replace(signing, bad, 1)))
+
+    def test_publisher_rejects_unsigned_fallback_foreign_ids_and_missing_signing_proofs(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(_macos_release_build_policy_errors(content), ())
+        publisher = _workflow_job_section(content, "release")
+        mutations = {
+            "publisher environment removed": publisher.replace("    environment: macos-developer-id-release\n", "", 1),
+            "publisher environment replaced": publisher.replace(
+                "    environment: macos-developer-id-release\n", "    environment: other-release\n", 1,
+            ),
+            "signing need removed": publisher.replace(
+                "needs: [get-version, release-state-preflight, build, main-quality, macos-sign]",
+                "needs: [get-version, release-state-preflight, build, main-quality]", 1,
+            ),
+            "signing condition removed": publisher.replace(" && needs.macos-sign.result == 'success'", "", 1),
+            "unsigned fallback": publisher.replace(
+                _signed_payload_download_identity("GM2Godot-macos-arm64"),
+                "          name: GM2Godot-macos-arm64\n", 1,
+            ),
+            "foreign signed run": publisher.replace("          run-id: ${{ github.run_id }}", "          run-id: 123", 1),
+            "soft proof digest": publisher.replace(
+                _workflow_step_sections(publisher, "Download selected x86_64 signing proof archive")[0],
+                _workflow_step_sections(publisher, "Download selected x86_64 signing proof archive")[0].replace(
+                    "digest-mismatch: error", "digest-mismatch: warn", 1,
+                ), 1,
+            ),
+        }
+        for reason, bad in mutations.items():
+            with self.subTest(reason=reason):
+                self.assertNotEqual(bad, publisher)
+                self.assertTrue(_macos_release_build_policy_errors(content.replace(publisher, bad, 1)))
+
+    def test_publication_gate_requires_actual_event_and_source_run_context_before_manifest(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        publisher = _workflow_job_section(content, "release")
+        self.assertEqual(_signed_publisher_policy_errors(publisher), ())
+        gate = _workflow_step_sections(publisher, "Require eligible receipts for exact final macOS bytes")[0]
+        for old, new in (
+            ('MACOS_SIGNING_IDENTITY_SHA1: ${{ vars.MACOS_SIGNING_IDENTITY_SHA1 }}', 'MACOS_SIGNING_IDENTITY_SHA1: arbitrary'),
+            ('APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}', 'APPLE_TEAM_ID: arbitrary'),
+            ('--build-event "$GITHUB_EVENT_NAME"', '--build-event push'),
+            ('--producer-run-id "$GITHUB_RUN_ID"', '--producer-run-id 123'),
+            ('--signing-run-attempt "$GITHUB_RUN_ATTEMPT"', '--signing-run-attempt 1'),
+            ('--source-sha "$GITHUB_SHA"', '--source-sha arbitrary'),
+            ('python -B -m scripts.verify_macos_signing_receipts', 'true #'),
+        ):
+            with self.subTest(changed_context=old):
+                bad = publisher.replace(gate, gate.replace(old, new, 1), 1)
+                self.assertNotEqual(bad, publisher)
+                self.assertTrue(_signed_publisher_policy_errors(bad))
+        removed = publisher.replace(gate, "", 1)
+        early_manifest = removed.replace("      - name: Extract verified artifact archives\n", gate + "      - name: Extract verified artifact archives\n", 1)
+        self.assertTrue(_signed_publisher_policy_errors(early_manifest))
+
+    def test_publication_rechecks_and_eligible_uploads_never_replace_current_build_and_quality(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(_workflow_job_section(content, "main-quality"), MAIN_QUALITY_JOB)
+        signing = _workflow_job_section(content, "macos-sign")
+        dependencies = signing.splitlines()[1].removeprefix("    needs: [").removesuffix("]").split(", ")
+        self.assertNotIn("release", dependencies)
+        self.assertNotIn("always()", signing)
+        self.assertNotIn("verification_only", signing)
+        self.assertIn("--purpose publication", signing)
+        for name in ("Upload eligible signed macOS payloads", "Upload eligible signing receipts"):
+            upload = _workflow_step_sections(signing, name)[0]
+            self.assertIn("          archive: true", upload)
+            self.assertIn("          if-no-files-found: error", upload)
+            self.assertNotIn("if:", upload)
+        publisher = _workflow_job_section(content, "release")
+        recheck = _workflow_step_sections(publisher, "Recheck signed publication bodies and receipt namespaces")[0]
+        self.assertTrue(_signed_publisher_policy_errors(publisher.replace(recheck, "", 1)))
+
+
+    def test_publication_callers_reject_bytecode_and_injection_guard_bypasses(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(_macos_release_build_policy_errors(content), ())
+        for job_name, names in (
+            ("macos-sign", ("Select same-run unsigned native inputs", "Recheck same-run inputs before secret access")),
+            ("release", ("Select same-run signed publication inputs", "Recheck signed publication bodies and receipt namespaces")),
+        ):
+            job = _workflow_job_section(content, job_name)
+            for name in names:
+                step = _workflow_step_sections(job, name)[0]
+                for reason, old, new in (
+                    ("bytecode flag removed", "python -B -m scripts.acquire_macos_publication_inputs", "python -m scripts.acquire_macos_publication_inputs"),
+                    ("module lookup broken by isolation", "python -B -m scripts.acquire_macos_publication_inputs", "python -I -B -m scripts.acquire_macos_publication_inputs"),
+                    ("injection scrub omitted", "    PYTHON*|DYLD_*|LD_*|GIT_*|BASH_ENV|ENV|CDPATH|__PYVENV_LAUNCHER__) unset \"$name\" ;;\n", ""),
+                    ("tracked guard omitted", 'test -z "$tracked_state"\n', ""),
+                    ("foreign workflow allowed", 'test "$GITHUB_WORKFLOW_REF" = "Infiland/GM2Godot/.github/workflows/release.yml@refs/heads/main"\n', ""),
+                ):
+                    with self.subTest(job=job_name, step=name, reason=reason):
+                        bad_step = step.replace(old, new, 1)
+                        self.assertNotEqual(bad_step, step)
+                        bad = content.replace(job, job.replace(step, bad_step, 1), 1)
+                        self.assertTrue(_macos_release_build_policy_errors(bad))
+            bad_job = job.replace("      PYTHONDONTWRITEBYTECODE: '1'\n", "", 1)
+            self.assertNotEqual(bad_job, job)
+            self.assertTrue(_macos_release_build_policy_errors(content.replace(job, bad_job, 1)))
+        signing = _workflow_job_section(content, "macos-sign")
+        for name in ("Verify native signing runtime", "Sign notarize staple and test publication bytes"):
+            step = _workflow_step_sections(signing, name)[0]
+            bad = content.replace(signing, signing.replace(step, step.replace("python -I -B ", "python -I ", 1), 1), 1)
+            self.assertNotEqual(bad, content)
+            self.assertTrue(_macos_release_build_policy_errors(bad))
+
+    def test_publication_callers_reject_source_signing_paths_and_untracked_wildcards(self) -> None:
+        content = (PROJECT_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(_macos_release_build_policy_errors(content), ())
+        signing = _workflow_job_section(content, "macos-sign")
+        mutations = {
+            "nested unsigned payload": signing.replace("-raw-payload", "-raw/payload"),
+            "nested native proof": signing.replace("-raw-proof", "-raw/proof"),
+            "signing source input": signing.replace('--inputs "$RUNNER_TEMP/', '--inputs "$GITHUB_WORKSPACE/', 1),
+            "signing source context": signing.replace('--context "$RUNNER_TEMP/', '--context "$GITHUB_WORKSPACE/', 1),
+            "signing source receipt": signing.replace('--receipt "$RUNNER_TEMP/', '--receipt "$GITHUB_WORKSPACE/', 1),
+            "signing source output": signing.replace('--output-root "$RUNNER_TEMP/', '--output-root "$GITHUB_WORKSPACE/', 1),
+            "signing source proof": signing.replace('--proof-root "$RUNNER_TEMP/', '--proof-root "$GITHUB_WORKSPACE/', 1),
+            "ignored caches admitted": signing.replace('git ls-files --others)', 'git ls-files --others --exclude-standard)', 1),
+        }
+        for reason, bad_job in mutations.items():
+            with self.subTest(reason=reason):
+                self.assertNotEqual(bad_job, signing)
+                self.assertTrue(_macos_release_build_policy_errors(content.replace(signing, bad_job, 1)))
+        publisher = _workflow_job_section(content, "release")
+        step = _workflow_step_sections(publisher, "Recheck signed publication bodies and receipt namespaces")[0]
+        for reason, old, new in (
+            ("directory wildcard admitted", '"raw-artifacts/GM2Godot-windows/GM2Godot-windows.zip"', "raw-artifacts/*"),
+            ("cache whitelist admitted", "*) printf '%s\\n' 'Unexpected untracked publication input'", "scripts/__pycache__/*) ;; *) printf '%s\\n' 'Unexpected untracked publication input'"),
+            ("executable data admitted", 'test ! -x "$data"\n', ""),
+            ("wrong publisher proof layout", '--proof-root "$GITHUB_WORKSPACE/raw-signing-proofs"', '--proof-root "$RUNNER_TEMP/raw-signing-proofs"'),
+            ("wrong publisher receipt layout", '--receipt-root "$GITHUB_WORKSPACE/signing-receipts"', '--receipt-root "$RUNNER_TEMP/signing-receipts"'),
+        ):
+            with self.subTest(reason=reason):
+                bad_step = step.replace(old, new, 1)
+                self.assertNotEqual(bad_step, step)
+                self.assertTrue(_macos_release_build_policy_errors(content.replace(publisher, publisher.replace(step, bad_step, 1), 1)))
 
 
 if __name__ == "__main__":

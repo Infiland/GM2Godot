@@ -1,4 +1,4 @@
-"""Protected verification-only Developer ID packaging operations.
+"""Protected Developer ID packaging operations with explicit purpose boundaries.
 
 Provider attestation belongs to the maintained acquisition planner. This module
 checks that attested context against the trusted checkout and current job before
@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     from scripts.verify_macos_bundle_metadata import BundleInspection, VerificationReceipt
 
 type Architecture = Literal["arm64", "x86_64"]
+type SigningPurpose = Literal["verification_only", "publication"]
+type BuildEvent = Literal["push", "workflow_dispatch"]
 
 REPOSITORY = "Infiland/GM2Godot"
 SECRET_NAMES = (
@@ -178,9 +180,10 @@ class ProducerRun:
     run_attempt: int
     workflow_id: int
     head_sha: str
+    event: BuildEvent = "push"
 
     def as_json(self) -> JsonObject:
-        return {"run_id": self.run_id, "run_attempt": self.run_attempt, "workflow_id": self.workflow_id, "event": "push", "branch": "main", "head_sha": self.head_sha}
+        return {"run_id": self.run_id, "run_attempt": self.run_attempt, "workflow_id": self.workflow_id, "event": self.event, "branch": "main", "head_sha": self.head_sha}
 
 
 @dataclass(frozen=True)
@@ -188,9 +191,10 @@ class SigningRun:
     run_id: int
     run_attempt: int
     head_sha: str
+    event: BuildEvent = "workflow_dispatch"
 
     def as_json(self) -> JsonObject:
-        return {"run_id": self.run_id, "run_attempt": self.run_attempt, "event": "workflow_dispatch", "branch": "main", "head_sha": self.head_sha}
+        return {"run_id": self.run_id, "run_attempt": self.run_attempt, "event": self.event, "branch": "main", "head_sha": self.head_sha}
 
 
 @dataclass(frozen=True)
@@ -212,20 +216,21 @@ class SigningContext:
     architecture: Architecture
     unsigned_artifact: ArtifactBinding
     proof_artifact: ArtifactBinding
+    purpose: SigningPurpose = "verification_only"
 
 
-def parse_producer(data: JsonObject, source_sha: str) -> ProducerRun:
+def parse_producer(data: JsonObject, source_sha: str, *, event: BuildEvent = "push") -> ProducerRun:
     exact_keys(data, frozenset({"run_id", "run_attempt", "workflow_id", "event", "branch", "head_sha"}))
-    require(text(data, "event") == "push" and text(data, "branch") == "main", "Unsigned producer is not a main push")
+    require(text(data, "event") == event and text(data, "branch") == "main", ("Unsigned producer is not a main push" if event == "push" else "Unsigned producer event/main identity differs"))
     require(sha_text(data, "head_sha") == source_sha, "Unsigned producer source differs")
-    return ProducerRun(positive_integer(data, "run_id"), positive_integer(data, "run_attempt"), positive_integer(data, "workflow_id"), source_sha)
+    return ProducerRun(positive_integer(data, "run_id"), positive_integer(data, "run_attempt"), positive_integer(data, "workflow_id"), source_sha, event)
 
 
-def parse_signing(data: JsonObject, source_sha: str) -> SigningRun:
+def parse_signing(data: JsonObject, source_sha: str, *, event: BuildEvent = "workflow_dispatch") -> SigningRun:
     exact_keys(data, frozenset({"run_id", "run_attempt", "event", "branch", "head_sha"}))
-    require(text(data, "event") == "workflow_dispatch" and text(data, "branch") == "main", "Verification is not a main manual run")
+    require(text(data, "event") == event and text(data, "branch") == "main", ("Verification is not a main manual run" if event == "workflow_dispatch" else "Signing event/main identity differs"))
     require(sha_text(data, "head_sha") == source_sha, "Signing source differs")
-    return SigningRun(positive_integer(data, "run_id"), positive_integer(data, "run_attempt"), source_sha)
+    return SigningRun(positive_integer(data, "run_id"), positive_integer(data, "run_attempt"), source_sha, event)
 
 
 def parse_artifact(data: JsonObject, producer: ProducerRun) -> ArtifactBinding:
@@ -238,10 +243,25 @@ def parse_artifact(data: JsonObject, producer: ProducerRun) -> ArtifactBinding:
     return ArtifactBinding(positive_integer(data, "id"), text(data, "name"), positive_integer(data, "size"), digest, run_id, attempt)
 
 
-def parse_context(data: JsonObject) -> SigningContext:
+def publication_event(data: JsonObject) -> BuildEvent:
+    value = text(json_object(data["producer"]), "event")
+    if value == "push":
+        return "push"
+    if value == "workflow_dispatch":
+        return "workflow_dispatch"
+    raise SigningFailure("Publication requires a trusted-main Build event")
+
+
+def require_same_build(context: SigningContext) -> None:
+    require(context.producer.run_id == context.signing.run_id and context.producer.run_attempt == context.signing.run_attempt, "Publication producer/signing run or current attempt differs")
+    require(context.producer.event == context.signing.event and context.producer.head_sha == context.signing.head_sha == context.source_sha, "Publication producer/signing event or source differs")
+
+
+def parse_context_for_purpose(data: JsonObject, purpose: SigningPurpose) -> SigningContext:
     exact_keys(data, frozenset({"schema_version", "purpose", "release_eligible", "repository", "source", "producer", "signing", "architecture", "unsigned_artifact", "proof_artifact"}))
     require(positive_integer(data, "schema_version") == 1 and text(data, "repository") == REPOSITORY, "Unknown context schema/repository")
-    require(text(data, "purpose") == "verification_only" and data["release_eligible"] is False, "Bootstrap cannot authorize publication")
+    require(purpose in ("verification_only", "publication"), "Unknown signing purpose")
+    require(text(data, "purpose") == purpose and data["release_eligible"] is (purpose == "publication"), ("Bootstrap cannot authorize publication" if purpose == "verification_only" else "Acquired context purpose/eligibility differs from the explicit mode"))
     source = json_object(data["source"])
     exact_keys(source, frozenset({"sha", "tree"}))
     source_sha, source_tree = sha_text(source, "sha"), sha_text(source, "tree")
@@ -252,13 +272,28 @@ def parse_context(data: JsonObject) -> SigningContext:
         architecture = "x86_64"
     else:
         raise SigningFailure("Unknown native architecture")
-    producer = parse_producer(json_object(data["producer"]), source_sha)
-    signing = parse_signing(json_object(data["signing"]), source_sha)
+    event = publication_event(data) if purpose == "publication" else "push"
+    signing_event = event if purpose == "publication" else "workflow_dispatch"
+    producer = parse_producer(json_object(data["producer"]), source_sha, event=event)
+    signing = parse_signing(json_object(data["signing"]), source_sha, event=signing_event)
     unsigned = parse_artifact(json_object(data["unsigned_artifact"]), producer)
     proof = parse_artifact(json_object(data["proof_artifact"]), producer)
     require(unsigned.id != proof.id and unsigned.producer_run_attempt == proof.producer_run_attempt, "Artifact identities/attempts conflict")
     require(unsigned.name == f"GM2Godot-macos-{architecture}" and proof.name == f"GM2Godot-macos-{architecture}-proof-{producer.run_id}-{unsigned.producer_run_attempt}", "Artifact names differ from source roles")
-    return SigningContext(source_sha, source_tree, producer, signing, architecture, unsigned, proof)
+    context = SigningContext(source_sha, source_tree, producer, signing, architecture, unsigned, proof, purpose)
+    if purpose == "publication":
+        require_same_build(context)
+    return context
+
+
+def parse_context(data: JsonObject) -> SigningContext:
+    """The default bootstrap boundary cannot accept publication eligibility."""
+    return parse_context_for_purpose(data, "verification_only")
+
+
+def parse_publication_context(data: JsonObject) -> SigningContext:
+    """A separately acquired context; never an upgrade of bootstrap evidence."""
+    return parse_context_for_purpose(data, "publication")
 
 
 @dataclass(frozen=True)
@@ -270,6 +305,7 @@ class SigningOptions:
     architecture: Architecture
     output_root: Path
     proof_root: Path
+    purpose: SigningPurpose = "verification_only"
 
 
 def secret_environment_name(name: str) -> bool:
@@ -296,9 +332,20 @@ def verify_checkout(source: Path, context: SigningContext, environment: Mapping[
         require(result.stdout.strip() == expected, "Trusted source HEAD/tree or tracked worktree/index changed")
 
 
+def trusted_publication_run(context: SigningContext, environment: Mapping[str, str]) -> None:
+    require_same_build(context)
+    require(required_environment(environment, "GITHUB_EVENT_NAME") == context.producer.event, "Current publication event differs from acquired context")
+    require(required_environment(environment, "GITHUB_WORKFLOW_REF") == f"{REPOSITORY}/.github/workflows/release.yml@refs/heads/main", "Publication requires the actual Build workflow on main")
+    require(required_environment(environment, "GITHUB_WORKFLOW_SHA") == context.source_sha, "Current publication workflow source differs")
+
+
 def trusted_source(options: SigningOptions, context: SigningContext, environment: Mapping[str, str]) -> Path:
     require(required_environment(environment, "GITHUB_REPOSITORY") == REPOSITORY and required_environment(environment, "GITHUB_REF") == "refs/heads/main", "Verification requires this repository's trusted main")
-    require(required_environment(environment, "GITHUB_EVENT_NAME") == "workflow_dispatch", "Verification requires a manual main run")
+    require(options.purpose == context.purpose, "Explicit signing mode differs from acquired context")
+    if context.purpose == "publication":
+        trusted_publication_run(context, environment)
+    else:
+        require(required_environment(environment, "GITHUB_EVENT_NAME") == "workflow_dispatch", "Verification requires a manual main run")
     require(required_environment(environment, "GITHUB_SHA") == context.source_sha and required_environment(environment, "GITHUB_RUN_ID") == str(context.signing.run_id) and required_environment(environment, "GITHUB_RUN_ATTEMPT") == str(context.signing.run_attempt), "Current verification run differs from acquired context")
     workspace = Path(required_environment(environment, "GITHUB_WORKSPACE")).resolve(strict=True)
     source = options.source_root.resolve(strict=True)
@@ -582,9 +629,9 @@ class BundleOperations:
         except metadata.MetadataVerificationError:
             raise SigningFailure("Maintained App verification failed") from None
 
-    def artifacts(self, context_path: Path, source: Path, app: Path, zip_path: Path, dmg_path: Path, architecture: Architecture, commands: Commands) -> VerificationReceipt:
-        context = parse_context(decode_object(read_bound_file(context_path, MAX_CONTEXT_BYTES)[0], "acquired context"))
-        body = commands.run([sys.executable, "-I", str(source / "scripts/sign_notarize_macos.py"), "--metadata-worker", "--context", str(context_path), "--source-root", str(source), "--app", str(app), "--zip", str(zip_path), "--dmg", str(dmg_path)], "maintained-metadata-worker", timeout=300, metadata_worker=True, cwd=source)
+    def artifacts(self, context_path: Path, source: Path, app: Path, zip_path: Path, dmg_path: Path, architecture: Architecture, commands: Commands, *, purpose: SigningPurpose = "verification_only") -> VerificationReceipt:
+        context = parse_context_for_purpose(decode_object(read_bound_file(context_path, MAX_CONTEXT_BYTES)[0], "acquired context"), purpose)
+        body = commands.run([sys.executable, "-I", "-B", str(source / "scripts/sign_notarize_macos.py"), "--metadata-worker", "--purpose", purpose, "--context", str(context_path), "--source-root", str(source), "--app", str(app), "--zip", str(zip_path), "--dmg", str(dmg_path)], "maintained-metadata-worker", timeout=300, metadata_worker=True, cwd=source)
         return parse_metadata_return(body, context, architecture)
 
 
@@ -826,6 +873,7 @@ class MetadataRequest:
     app: Path
     zip_path: Path
     dmg_path: Path
+    purpose: SigningPurpose = "verification_only"
 
 
 def script_source_root() -> Path:
@@ -851,7 +899,7 @@ def interrupt_metadata_worker(_signal: int, _frame: FrameType | None) -> Never:
 def metadata_worker(request: MetadataRequest, *, entry_script: Path) -> JsonObject:
     current = os.environ
     require(not any(secret_environment_name(name) for name in current), "Metadata worker refuses credential or source-injection environment keys")
-    context = parse_context(decode_object(read_bound_file(request.context_path, MAX_CONTEXT_BYTES)[0], "acquired context"))
+    context = parse_context_for_purpose(decode_object(read_bound_file(request.context_path, MAX_CONTEXT_BYTES)[0], "acquired context"), request.purpose)
     source = trusted_worker_source(request, entry_script, context, current)
     # No maintained verifier import or call occurs before the environment and
     # exact acquired checkout checks above. Its hdiutil children inherit only
@@ -991,7 +1039,7 @@ def prepare_artifacts(options: SigningOptions, source: Path, output: Path, work:
         require(text(app_notary, "id") != text(dmg_notary, "id"), "App and DMG notarization identifiers are duplicated")
         dmg_seal = seal_file(final_dmg)
         dmg_assessment = assess_dmg(commands, final_dmg, private, work)
-        actual_metadata = bundles.artifacts(options.context_path, source, app, final_zip, final_dmg, options.architecture, commands)
+        actual_metadata = bundles.artifacts(options.context_path, source, app, final_zip, final_dmg, options.architecture, commands, purpose=options.purpose)
         mount = DmgMount(work, commands, final_dmg)
         with mount as mounted_app:
             require(bundles.app(mounted_app, policy, options.architecture) == inspection, "Distributed DMG native/plist/link inventory differs")
@@ -1004,7 +1052,7 @@ def prepare_artifacts(options: SigningOptions, source: Path, output: Path, work:
 def signed_gui(commands: Commands, source: Path, final_zip: Path, architecture: Architecture) -> JsonObject:
     path = commands.proof / "signed-gui.json"
     require(not path.exists() and not path.is_symlink(), "Signed GUI proof path is occupied")
-    commands.run([sys.executable, "-I", str(source / "scripts" / "verify_macos_gui_artifact.py"), "--source-root", str(source), "--zip", str(final_zip), "--expected-architecture", architecture, "--output", str(path)], "signed-gui", timeout=300)
+    commands.run([sys.executable, "-I", "-B", str(source / "scripts" / "verify_macos_gui_artifact.py"), "--source-root", str(source), "--zip", str(final_zip), "--expected-architecture", architecture, "--output", str(path)], "signed-gui", timeout=300)
     body, report_seal = read_bound_file(path, MAX_GUI_BYTES)
     value = decode_object(body, "signed GUI receipt")
     runtime = json_object(value.get("runtime"))
@@ -1017,24 +1065,34 @@ def signed_gui(commands: Commands, source: Path, final_zip: Path, architecture: 
 
 
 def signing_receipt(context: SigningContext, private: Credentials, original: tuple[FileSeal, FileSeal], artifacts: PreparedArtifacts, gui: JsonObject, keychain_deleted: bool, private_removed: bool) -> JsonObject:
+    require(context.purpose in ("verification_only", "publication"), "Unknown signing receipt purpose")
+    if context.purpose == "publication":
+        require_same_build(context)
     require(keychain_deleted and private_removed and artifacts.owned_mounts_detached, "Private resources have not been cleaned")
     require((seal_file(artifacts.final_zip), seal_file(artifacts.final_dmg)) == artifacts.final_seals, "Final signed bytes changed after verification")
     metadata = artifacts.metadata
-    return {"schema_version": 1, "successful": True, "purpose": "verification_only", "release_eligible": False, "repository": REPOSITORY, "source": {"sha": context.source_sha, "tree": context.source_tree}, "producer": context.producer.as_json(), "signing": context.signing.as_json(), "architecture": context.architecture, "version": metadata.metadata.short_version, "unsigned_payloads": [item.as_json() for item in original], "final_payloads": [item.as_json() for item in artifacts.final_seals], "metadata": metadata_value(metadata), "developer_id": {"team_id": private.team_id, "identity_sha1": private.identity_sha1, "nested_code": artifacts.nested_code}, "notarization": artifacts.notarization, "assessments": artifacts.assessments, "signed_gui": gui, "cleanup": {"keychain_deleted": True, "private_files_removed": True, "owned_mounts_detached": True}}
+    return {"schema_version": 1, "successful": True, "purpose": context.purpose, "release_eligible": context.purpose == "publication", "repository": REPOSITORY, "source": {"sha": context.source_sha, "tree": context.source_tree}, "producer": context.producer.as_json(), "signing": context.signing.as_json(), "architecture": context.architecture, "version": metadata.metadata.short_version, "unsigned_payloads": [item.as_json() for item in original], "final_payloads": [item.as_json() for item in artifacts.final_seals], "metadata": metadata_value(metadata), "developer_id": {"team_id": private.team_id, "identity_sha1": private.identity_sha1, "nested_code": artifacts.nested_code}, "notarization": artifacts.notarization, "assessments": artifacts.assessments, "signed_gui": gui, "cleanup": {"keychain_deleted": True, "private_files_removed": True, "owned_mounts_detached": True}}
 
 
-def sign_verification(options: SigningOptions, *, environment: Mapping[str, str] | None = None, executor: CommandExecutor | None = None, bundles: BundleOperations | None = None) -> JsonObject:
+def verify_publication_context_binding(options: SigningOptions, original: FileSeal) -> None:
+    if options.purpose == "publication":
+        require(read_bound_file(options.context_path, MAX_CONTEXT_BYTES)[1] == original, "Acquired publication context changed")
+
+
+def sign_for_purpose(options: SigningOptions, purpose: SigningPurpose, *, environment: Mapping[str, str] | None = None, executor: CommandExecutor | None = None, bundles: BundleOperations | None = None) -> JsonObject:
+    require(options.purpose == purpose, "Explicit signing API and options purpose differ")
     current = os.environ if environment is None else environment
-    body, _context_seal = read_bound_file(options.context_path, MAX_CONTEXT_BYTES)
-    context = parse_context(decode_object(body, "acquired signing context"))
+    body, context_seal = read_bound_file(options.context_path, MAX_CONTEXT_BYTES)
+    context = parse_context_for_purpose(decode_object(body, "acquired signing context"), purpose)
     source = trusted_source(options, context, current)
+    verify_publication_context_binding(options, context_seal)
     require(options.unsigned_zip.name == f"GM2Godot-macos-{options.architecture}.zip" and options.unsigned_dmg.name == f"GM2Godot-macos-{options.architecture}.dmg", "Unsigned payload names differ from source roles")
     original = (seal_file(options.unsigned_zip), seal_file(options.unsigned_dmg))
     runner_temp, output, proof = prepare_roots(options, source, current)
     private = credentials(current)
     commands = Commands(SubprocessExecutor() if executor is None else executor, current, proof, private.redactions)
     operations = BundleOperations() if bundles is None else bundles
-    commands.run([sys.executable, "-I", str(source / "scripts" / "verify_macos_gui_artifact.py"), "--check-native-runtime", "--expected-architecture", options.architecture], "native-runtime", timeout=60)
+    commands.run([sys.executable, "-I", "-B", str(source / "scripts" / "verify_macos_gui_artifact.py"), "--check-native-runtime", "--expected-architecture", options.architecture], "native-runtime", timeout=60)
     work = PrivateWork(runner_temp)
     with work:
         artifacts, keychain_deleted = prepare_artifacts(options, source, output, work, commands, operations, private)
@@ -1042,9 +1100,18 @@ def sign_verification(options: SigningOptions, *, environment: Mapping[str, str]
     require((seal_file(options.unsigned_zip), seal_file(options.unsigned_dmg)) == original, "Original unsigned payload changed")
     gui = signed_gui(commands, source, artifacts.final_zip, options.architecture)
     trusted_source(options, context, current)
+    verify_publication_context_binding(options, context_seal)
     receipt = signing_receipt(context, private, original, artifacts, gui, keychain_deleted, work.removed)
     encoded = (json.dumps(receipt, indent=2, allow_nan=False) + "\n").encode()
     require(len(encoded) <= MAX_CONTEXT_BYTES, "Signing receipt exceeds its bounded size")
     commands.operation_timeout(1, False)
     write_exclusive(proof / "signing.json", encoded)
     return receipt
+
+
+def sign_verification(options: SigningOptions, *, environment: Mapping[str, str] | None = None, executor: CommandExecutor | None = None, bundles: BundleOperations | None = None) -> JsonObject:
+    return sign_for_purpose(options, "verification_only", environment=environment, executor=executor, bundles=bundles)
+
+
+def sign_publication(options: SigningOptions, *, environment: Mapping[str, str] | None = None, executor: CommandExecutor | None = None, bundles: BundleOperations | None = None) -> JsonObject:
+    return sign_for_purpose(options, "publication", environment=environment, executor=executor, bundles=bundles)

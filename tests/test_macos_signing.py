@@ -15,7 +15,7 @@ import sys
 import tempfile
 import unittest
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import BinaryIO
 from unittest.mock import patch
@@ -33,7 +33,7 @@ from scripts.verify_macos_bundle_metadata import (
     MachOFile,
     VerificationReceipt,
 )
-from src.conversion.json_values import JsonObject
+from src.conversion.json_values import JsonObject, JsonValue
 
 SOURCE_SHA = "1" * 40
 SOURCE_TREE = "2" * 40
@@ -241,6 +241,35 @@ def worker_value(options: signing.SigningOptions) -> tuple[signing.MetadataReque
 
 def cli_arguments(options: signing.SigningOptions) -> list[str]:
     return ["--context", str(options.context_path), "--source-root", str(options.source_root), "--unsigned-zip", str(options.unsigned_zip), "--unsigned-dmg", str(options.unsigned_dmg), "--architecture", options.architecture, "--output-root", str(options.output_root), "--proof-root", str(options.proof_root)]
+
+
+
+
+def publication_context_value(event: signing.BuildEvent = "push") -> JsonObject:
+    # A separate synthetic acquisition output, not an in-place bootstrap upgrade.
+    return {
+        "schema_version": 1, "purpose": "publication", "release_eligible": True,
+        "repository": signing.REPOSITORY, "source": {"sha": SOURCE_SHA, "tree": SOURCE_TREE},
+        "producer": {"run_id": 100, "run_attempt": 2, "workflow_id": 10, "event": event, "branch": "main", "head_sha": SOURCE_SHA},
+        "signing": {"run_id": 100, "run_attempt": 2, "event": event, "branch": "main", "head_sha": SOURCE_SHA},
+        "architecture": "arm64",
+        "unsigned_artifact": {"id": 300, "name": "GM2Godot-macos-arm64", "size": 10, "digest": "sha256:" + "3" * 64, "producer_run_id": 100, "producer_run_attempt": 1},
+        "proof_artifact": {"id": 301, "name": "GM2Godot-macos-arm64-proof-100-1", "size": 10, "digest": "sha256:" + "4" * 64, "producer_run_id": 100, "producer_run_attempt": 1},
+    }
+
+
+def publication_options_value(root: Path, event: signing.BuildEvent = "push") -> tuple[signing.SigningOptions, dict[str, str]]:
+    initial, environment = options_value(root)
+    # Fixtures construct a fresh separately attested publication document. The
+    # production module provides no bootstrap-context conversion operation.
+    initial.context_path.write_text(json.dumps(publication_context_value(event)))
+    options = replace(initial, purpose="publication")
+    environment.update({
+        "GITHUB_EVENT_NAME": event, "GITHUB_RUN_ID": "100", "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_WORKFLOW_REF": f"{signing.REPOSITORY}/.github/workflows/release.yml@refs/heads/main",
+        "GITHUB_WORKFLOW_SHA": SOURCE_SHA,
+    })
+    return options, environment
 
 
 @unittest.skipUnless(os.name == "posix" and hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_CLOEXEC"), "Signing resource ownership requires POSIX descriptors; genuine native macOS signing is a separate gate")
@@ -548,12 +577,12 @@ class TestMacOSSigning(unittest.TestCase):
             payload = root / "GM2Godot-macos-arm64.zip"
             payload.write_bytes(b"signed synthetic payload")
             report = gui_value(payload)
-            commands, executor = commands_value(root, [PlannedCommand((sys.executable, "-I"), writes=((root / "proof" / "signed-gui.json", json.dumps(report).encode()),))])
+            commands, executor = commands_value(root, [PlannedCommand((sys.executable, "-I", "-B"), writes=((root / "proof" / "signed-gui.json", json.dumps(report).encode()),))])
             value = signing.signed_gui(commands, root / "source", payload, "arm64")
             self.assertEqual(value["zip_sha256"], signing.seal_file(payload).sha256)
             self.assertIs(value["dmg_gui_tested"], False)
             self.assertNotIn("GITHUB_TOKEN", executor.environments[0])
-            self.assertEqual(executor.calls[0][2], str(root / "source" / "scripts" / "verify_macos_gui_artifact.py"))
+            self.assertEqual(executor.calls[0][:4], (sys.executable, "-I", "-B", str(root / "source" / "scripts" / "verify_macos_gui_artifact.py")))
 
     def test_signed_gui_rejects_mutated_hash_foreign_runtime_and_cleanup_failure(self) -> None:
         for role in ("hash", "runtime", "cleanup"):
@@ -745,7 +774,7 @@ class TestMacOSSigning(unittest.TestCase):
             commands = signing.Commands(executor, environment, proof, fake_credentials().redactions)
             actual = signing.BundleOperations().artifacts(options.context_path, options.source_root, request.app, options.unsigned_zip, options.unsigned_dmg, "arm64", commands)
             self.assertEqual(actual, metadata_receipt())
-            self.assertEqual(executor.calls[0][:4], (sys.executable, "-I", str(options.source_root / "scripts/sign_notarize_macos.py"), "--metadata-worker"))
+            self.assertEqual(executor.calls[0][:5], (sys.executable, "-I", "-B", str(options.source_root / "scripts/sign_notarize_macos.py"), "--metadata-worker"))
             self.assertIs(executor.metadata_budgets[0], commands.budgets)
             self.assertFalse(any(signing.secret_environment_name(key) for key in executor.environments[0]))
             machine["successful"] = False
@@ -822,6 +851,159 @@ class TestMacOSSigning(unittest.TestCase):
             self.assertTrue(executor.gui_saw_private_cleanup)
             self.assertFalse(list(Path(environment["RUNNER_TEMP"]).glob("gm2godot-signing-*")))
             self.assertFalse((options.proof_root / "signing.json").exists())
+
+
+    def test_publication_mode_requires_separate_context_without_upgrading_bootstrap(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, values = options_value(Path(name))
+            original = options.context_path.read_bytes()
+            guarded = GuardedEnvironment(values)
+            with self.assertRaises(signing.SigningFailure):
+                signing.sign_publication(options, environment=guarded)
+            with self.assertRaises(signing.SigningFailure):
+                signing.sign_publication(replace(options, purpose="publication"), environment=guarded)
+            self.assertEqual(options.context_path.read_bytes(), original)
+            self.assertEqual(guarded.secret_reads, [])
+            self.assertFalse(options.output_root.exists())
+            self.assertFalse(options.proof_root.exists())
+        with self.assertRaises(signing.SigningFailure):
+            signing.parse_publication_context(context_value())
+        with self.assertRaises(signing.SigningFailure):
+            signing.parse_context(publication_context_value())
+
+    def test_publication_context_binds_same_actual_event_run_attempt_and_artifact_history(self) -> None:
+        events: tuple[signing.BuildEvent, ...] = ("push", "workflow_dispatch")
+        for event in events:
+            with self.subTest(event=event):
+                context = signing.parse_publication_context(publication_context_value(event))
+                self.assertEqual(context.producer.as_json()["event"], event)
+                self.assertEqual(context.signing.as_json()["event"], event)
+                self.assertEqual((context.producer.run_id, context.signing.run_id), (100, 100))
+                self.assertEqual((context.producer.run_attempt, context.signing.run_attempt), (2, 2))
+                self.assertEqual(context.unsigned_artifact.producer_run_attempt, 1)
+                self.assertEqual(context.purpose, "publication")
+        changes: tuple[tuple[str, str, JsonValue], ...] = (
+            ("signing", "run_id", 101), ("signing", "run_attempt", 1),
+            ("signing", "event", "workflow_dispatch"), ("producer", "event", "pull_request"),
+            ("producer", "branch", "untrusted"), ("signing", "head_sha", "0" * 40),
+            ("producer", "workflow_id", True), ("unsigned_artifact", "producer_run_attempt", 3),
+        )
+        for role, field, value in changes:
+            data = publication_context_value()
+            row = data[role]
+            assert isinstance(row, dict)
+            row[field] = value
+            with self.subTest(role=role, field=field), self.assertRaises(signing.SigningFailure):
+                signing.parse_publication_context(data)
+
+    def test_publication_environment_guards_precede_credentials_and_owned_output_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, values = publication_options_value(Path(name))
+            wrong: tuple[tuple[str, str], ...] = (
+                ("GITHUB_REPOSITORY", "someone/else"), ("GITHUB_REF", "refs/heads/feature"),
+                ("GITHUB_EVENT_NAME", "workflow_dispatch"), ("GITHUB_SHA", "0" * 40),
+                ("GITHUB_RUN_ID", "101"), ("GITHUB_RUN_ATTEMPT", "3"),
+                ("GITHUB_WORKFLOW_REF", f"{signing.REPOSITORY}/.github/workflows/macos-signing-verification.yml@refs/heads/main"),
+                ("GITHUB_WORKFLOW_REF", f"{signing.REPOSITORY}/.github/workflows/release.yml@refs/heads/feature"),
+                ("GITHUB_WORKFLOW_SHA", "0" * 40),
+            )
+            for field, value in wrong:
+                guarded = GuardedEnvironment({**values, field: value})
+                with self.subTest(field=field, value=value), self.assertRaises(signing.SigningFailure):
+                    signing.sign_publication(options, environment=guarded)
+                self.assertEqual(guarded.secret_reads, [])
+            self.assertFalse(options.output_root.exists())
+            self.assertFalse(options.proof_root.exists())
+            guarded = GuardedEnvironment(values)
+            dirty = [subprocess.CompletedProcess(["git"], 0, SOURCE_SHA, ""), subprocess.CompletedProcess(["git"], 0, SOURCE_TREE, ""), subprocess.CompletedProcess(["git"], 0, " M tracked.py", "")]
+            with patch("scripts.macos_signing.subprocess.run", side_effect=dirty), self.assertRaises(signing.SigningFailure):
+                signing.sign_publication(options, environment=guarded)
+            self.assertEqual(guarded.secret_reads, [])
+            self.assertFalse(options.proof_root.exists())
+
+    def test_publication_uses_same_cleaned_pipeline_and_emits_actual_event_in_closed_receipt(self) -> None:
+        events: tuple[signing.BuildEvent, ...] = ("push", "workflow_dispatch")
+        for event in events:
+            with self.subTest(event=event), tempfile.TemporaryDirectory() as name:
+                options, environment = publication_options_value(Path(name), event)
+                initial_context = options.context_path.read_bytes()
+                executor = CleanupCheckingExecutor(Path(environment["RUNNER_TEMP"]), [PlannedCommand((sys.executable, "-I", "-B")), PlannedCommand((sys.executable, "-I", "-B"), writes=((options.proof_root / "signed-gui.json", orchestration_report()),))])
+                with patch("scripts.macos_signing.subprocess.run", side_effect=successful_git_response), patch("scripts.macos_signing.prepare_artifacts", side_effect=prepare_synthetic_artifacts):
+                    receipt = signing.sign_publication(options, environment=environment, executor=executor)
+                self.assertTrue(executor.gui_saw_private_cleanup)
+                self.assertEqual(receipt["purpose"], "publication")
+                self.assertIs(receipt["release_eligible"], True)
+                self.assertEqual(receipt["metadata"], signing.metadata_value(metadata_receipt()))
+                producer, actual = receipt["producer"], receipt["signing"]
+                assert isinstance(producer, dict) and isinstance(actual, dict)
+                self.assertEqual((producer["event"], actual["event"]), (event, event))
+                self.assertEqual((producer["run_id"], actual["run_id"], producer["run_attempt"], actual["run_attempt"]), (100, 100, 2, 2))
+                self.assertEqual(options.context_path.read_bytes(), initial_context)
+                self.assertEqual(signing.decode_object((options.proof_root / "signing.json").read_bytes(), "synthetic receipt"), receipt)
+                self.assertFalse(any(signing.secret_environment_name(key) for row in executor.environments for key in row))
+
+    def test_publication_context_mutation_after_gui_blocks_eligible_receipt(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, environment = publication_options_value(Path(name))
+            altered = publication_context_value()
+            source = altered["source"]
+            assert isinstance(source, dict)
+            source["tree"] = "0" * 40
+            executor = CleanupCheckingExecutor(Path(environment["RUNNER_TEMP"]), [PlannedCommand((sys.executable, "-I")), PlannedCommand((sys.executable, "-I"), writes=((options.proof_root / "signed-gui.json", orchestration_report()), (options.context_path, json.dumps(altered).encode())))])
+            with patch("scripts.macos_signing.subprocess.run", side_effect=successful_git_response), patch("scripts.macos_signing.prepare_artifacts", side_effect=prepare_synthetic_artifacts), self.assertRaises(signing.SigningFailure) as failed:
+                signing.sign_publication(options, environment=environment, executor=executor)
+            self.assertEqual(str(failed.exception), "Acquired publication context changed")
+            self.assertTrue(executor.gui_saw_private_cleanup)
+            self.assertFalse((options.proof_root / "signing.json").exists())
+
+    def test_publication_metadata_worker_requires_explicit_matching_mode_and_returns_actual_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, environment = publication_options_value(Path(name))
+            initial_request, entry = worker_value(options)
+            request = replace(initial_request, purpose="publication")
+            with patch.dict(os.environ, signing.safe_environment(environment), clear=True), patch("scripts.macos_signing.script_source_root", return_value=options.source_root), patch("scripts.macos_signing.subprocess.run", side_effect=successful_git_response), patch("scripts.verify_macos_bundle_metadata.verify_artifacts", return_value=metadata_receipt()) as verifier:
+                actual = signing.metadata_worker(request, entry_script=entry)
+                self.assertEqual(actual["metadata_return"], signing.metadata_value(metadata_receipt()))
+                verifier.assert_called_once_with(options.source_root, request.app, request.zip_path, request.dmg_path, "arm64")
+                with self.assertRaises(signing.SigningFailure):
+                    signing.metadata_worker(initial_request, entry_script=entry)
+                self.assertEqual(verifier.call_count, 1)
+            executor = QueueExecutor([PlannedCommand((sys.executable, "-I", "-B"), stdout=json.dumps(actual).encode())])
+            options.proof_root.mkdir()
+            commands = signing.Commands(executor, environment, options.proof_root, fake_credentials().redactions)
+            returned = signing.BundleOperations().artifacts(options.context_path, options.source_root, request.app, request.zip_path, request.dmg_path, "arm64", commands, purpose="publication")
+            self.assertEqual(returned, metadata_receipt())
+            self.assertIn(("--purpose", "publication"), tuple(zip(executor.calls[0], executor.calls[0][1:], strict=False)))
+            self.assertFalse(any(signing.secret_environment_name(key) for key in executor.environments[0]))
+
+    def test_public_cli_defaults_stay_bootstrap_and_explicit_publication_guards_fail_safely(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, values = publication_options_value(Path(name))
+            guarded = GuardedEnvironment({**values, "GITHUB_WORKFLOW_REF": "untrusted-workflow"})
+            for extra in ([], ["--purpose", "publication"]):
+                output, errors = io.StringIO(), io.StringIO()
+                with self.subTest(extra=extra), patch("scripts.macos_signing.os.environ", guarded), patch("sys.stdout", output), patch("sys.stderr", errors):
+                    self.assertEqual(signing_cli.main([*extra, *cli_arguments(options)]), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn("No publication is authorized.", errors.getvalue())
+                self.assertNotIn("Traceback", errors.getvalue())
+                self.assertNotIn(FAKE_PASSWORD, errors.getvalue())
+                self.assertEqual(guarded.secret_reads, [])
+            self.assertFalse(options.output_root.exists())
+            self.assertFalse(options.proof_root.exists())
+            with patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit) as failed:
+                signing_cli.main(["--purpose", "unknown", *cli_arguments(options)])
+            self.assertEqual(failed.exception.code, 2)
+
+    def test_public_cli_explicit_mode_preserves_options_and_does_not_claim_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as name:
+            options, _values = publication_options_value(Path(name))
+            output = io.StringIO()
+            with patch("scripts.sign_notarize_macos.sign_publication", return_value={"architecture": "arm64"}) as publish, patch("scripts.sign_notarize_macos.sign_verification") as bootstrap, patch("sys.stdout", output):
+                self.assertEqual(signing_cli.main(["--purpose", "publication", *cli_arguments(options)]), 0)
+            publish.assert_called_once_with(options)
+            bootstrap.assert_not_called()
+            self.assertEqual(output.getvalue(), "Publication-mode Developer ID proof complete for arm64; publication still requires the same-run receipt gate.\n")
 
 
 if __name__ == "__main__":

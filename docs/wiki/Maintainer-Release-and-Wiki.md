@@ -1,6 +1,6 @@
 # Release and Wiki Maintenance
 
-> **Applies to:** GM2Godot 0.8.48 · GameMaker LTS 2026 · Godot 4.7.2
+> **Applies to:** GM2Godot 0.8.49 · GameMaker LTS 2026 · Godot 4.7.2
 >
 > **Last reviewed:** 2026-10-04
 
@@ -8,7 +8,7 @@ This page documents the current maintainer path for a versioned release and for 
 
 ## Release model
 
-`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.48` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
+`src/version.py` is the source version and build trigger. A pull request that changes it starts cross-platform artifact builds; the merged change starts the `Build and Release` workflow on `main`. Source `0.8.49` uses six payloads—Linux and Windows archives plus separate native macOS arm64 and x86_64 ZIP/DMG pairs—and `SHA256SUMS` as the seventh asset. Aggregation and publication follow the successful native build gates on `main`. Every new release must use a new version.
 
 Before publishing a new release, the `main-quality` job also requires successful Tests, Pyright, Code Health, Godot Headless Smoke, TCC Conversion Test, Native Wheel Proposals and Dependency Locks runs for the exact source SHA, with event `push` and branch `main`. It reviews the latest execution of every job name across the observed run attempts, then rechecks the run identities. Failed, missing, ambiguous or changed proof stops publication. This read-only check has a 90-minute budget inside a 95-minute job and depends on successful native builds and release preflight; it does not wait for the enclosing Build workflow. Existing-tag integrity and publisher ownership rules remain unchanged.
 
@@ -40,7 +40,11 @@ Before artifact upload, `scripts/verify_macos_bundle_metadata.py` checks each so
 
 The native CI lanes use matching CPython 3.12.10 interpreters and invoke this gate with `--expected-architecture arm64` or `--expected-architecture x86_64`. They produce `GM2Godot-macos-arm64.zip`/`.dmg` and `GM2Godot-macos-x86_64.zip`/`.dmg`. The GUI gate launches only a fresh private extraction of the exact final ZIP on the matching native host, verifies its extracted content, and requires GUI readiness followed by a bounded clean exit before upload. The historical `0.8.15` Mac downloads remain arm64. Developer ID signing and notarization remain tracked in issue #737; these gates do not establish Gatekeeper trust or promise an optional Deep component build for Intel.
 
-The protected `macOS Developer ID Verification` workflow is manual and accepts only the trusted main checkout. It acquires original payload and proof artifacts from successful native jobs in an exact-source Build run and keeps signing outputs in a separate verification-only namespace. Its receipts state `purpose: verification_only` and `release_eligible: false`; it does not create release assets or change tags. Genuine Developer ID, notarization, stapling and final signed-byte GUI proof on both native architectures must be reviewed before separate release publication wiring can be enabled.
+The protected `macOS Developer ID Verification` workflow remains manual and accepts only the trusted main checkout. It acquires original payload and proof artifacts from successful native jobs in an exact-source Build run and keeps signing outputs in a separate verification-only namespace. Its receipts state `purpose: verification_only` and `release_eligible: false`; it does not create release assets or change tags. Use successful runs on both native architectures to verify the signing configuration before enabling a release with the signed publication pipeline.
+
+The release workflow requires its native builds and main quality checks before two protected native signing jobs. Each job signs nested code and the app, verifies hardened runtime and secure timestamps, submits and staples the app and final DMG, and checks the extracted signed ZIP on the matching native GUI runtime. The publisher acquires only the current run and attempt's eligible signing proofs and independently checks the exact four Mac archive bodies before generating checksums or publishing. Any signing, notarization, stapling, Gatekeeper, GUI, cleanup or final-byte verification failure blocks publication; there is no unsigned fallback.
+
+Configure the `macos-developer-id-release` GitHub environment, restricted to branch `main`. Add the secrets `MACOS_DEVELOPER_ID_P12_BASE64`, `MACOS_DEVELOPER_ID_P12_PASSWORD` and `APPLE_NOTARY_API_KEY_P8_BASE64`, and the variables `MACOS_SIGNING_IDENTITY_SHA1`, `APPLE_TEAM_ID`, `APPLE_NOTARY_KEY_ID` and `APPLE_NOTARY_ISSUER_ID`. The identity must be a Developer ID Application certificate with its private key, and the notary API key must belong to the authorized Apple team. Set these credentials directly in GitHub environment settings; do not commit them. Pull requests and forks do not run signing jobs. Issue #737 remains open until genuine Apple results and exact distributed-artifact checks demonstrate every acceptance criterion.
 
 ## Linux packaged-GUI gate
 

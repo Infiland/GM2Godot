@@ -2072,7 +2072,7 @@ class TestCIWorkflows(unittest.TestCase):
                     self.assertEqual(archive_inputs, ["true"])
 
         # Native Mac builds retain a separate proof archive beside each payload pair.
-        self.assertEqual(len(locations), 17, locations)
+        self.assertEqual(len(locations), 19, locations)
         self.assertEqual(
             sum(location.startswith("dependency-locks.yml:") for location in locations),
             3,
@@ -5433,6 +5433,7 @@ class TestCIWorkflows(unittest.TestCase):
             ".github/workflows/code-health.yml",
             ".github/workflows/dependency-locks.yml",
             ".github/workflows/godot-smoke.yml",
+            ".github/workflows/macos-signing-verification.yml",
             ".github/workflows/pyright.yml",
             ".github/workflows/release.yml",
             ".github/workflows/tcc-conversion-test.yml",
@@ -5462,6 +5463,15 @@ class TestCIWorkflows(unittest.TestCase):
                 {
                     (LINUX_CONSTRAINT, ("pip",)): 1,
                     (LINUX_CONSTRAINT, (f"Pillow=={PILLOW_VERSION}",)): 1,
+                }
+            ),
+            ".github/workflows/macos-signing-verification.yml": Counter(
+                {
+                    (MACOS_CONSTRAINT, ("pip",)): 1,
+                    (
+                        MACOS_CONSTRAINT,
+                        ("-r", "requirements.txt", f"PyInstaller=={PYINSTALLER_VERSION}"),
+                    ): 1,
                 }
             ),
             ".github/workflows/pyright.yml": Counter(
@@ -5620,7 +5630,7 @@ class TestCIWorkflows(unittest.TestCase):
 
         self.assertEqual(actual_install_files, expected_install_files)
         self.assertEqual(actual_profiles, expected_profiles)
-        self.assertEqual(non_dependency_lock_command_count, 27)
+        self.assertEqual(non_dependency_lock_command_count, 29)
         self.assertEqual(dependency_lock_command_count, 8)
 
     def test_pip_inventory_classifies_continuations_and_rejects_escape_hatches(

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.48 - 2026-10-05
+
+- Add a protected, main-only manual workflow that acquires exact-source Mac build inputs and retains verification-only signing evidence.
+- Keep Developer ID signing, notarization and final-byte verification separate from release publication; signed release wiring still requires genuine native proof.
+
 ## 0.8.47 - 2026-10-04
 
 - Reconcile architecture and testing checklists with the reviewed CLI, Godot, packaging, release-quality and diagnostic ownership features.

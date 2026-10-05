@@ -1,0 +1,180 @@
+name: macOS Developer ID Verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: macos-signing-verification-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: ${{ github.repository == 'Infiland/GM2Godot' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    environment: macos-developer-id-release
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            name: macos-arm64
+            architecture: arm64
+            python_architecture: arm64
+          - os: macos-26-intel
+            name: macos-x86_64
+            architecture: x86_64
+            python_architecture: x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PIP_CONFIG_FILE: /dev/null
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        timeout-minutes: 10
+        with:
+          python-version: '3.12.10'
+          architecture: ${{ matrix.python_architecture }}
+
+      - name: Require exact trusted main checkout
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'Infiland/GM2Godot'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$GITHUB_REF" = 'refs/heads/main'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=no)"
+
+      - name: Verify native macOS build runtime
+        timeout-minutes: 1
+        run: |
+          python -I scripts/verify_macos_gui_artifact.py \
+            --check-native-runtime \
+            --expected-architecture "${{ matrix.architecture }}"
+
+      - name: Install and verify dependencies
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          venv_dir="$RUNNER_TEMP/gm2godot-signing-${{ matrix.name }}-venv"
+          if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+            echo '::error::Refusing to reuse signing dependency environment.' >&2
+            exit 1
+          fi
+          python scripts/verify_dependency_bootstrap.py \
+            --source requirements-bootstrap.txt --policy stable \
+            --constraint constraints/requirements-macos-py312.lock \
+            --output "$RUNNER_TEMP/signing-${{ matrix.name }}-bootstrap.json"
+          python -m venv "$venv_dir"
+          printf 'VIRTUAL_ENV=%s\n' "$venv_dir" >> "$GITHUB_ENV"
+          printf '%s\n' "$venv_dir/bin" >> "$GITHUB_PATH"
+          export VIRTUAL_ENV="$venv_dir"
+          export PATH="$venv_dir/bin:$PATH"
+          hash -r
+          python -c 'import os, pathlib, sys; raise SystemExit(0 if pathlib.Path(sys.prefix).resolve() == pathlib.Path(os.environ["VIRTUAL_ENV"]).resolve() else 1)'
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-macos-py312.lock pip
+          python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
+            --constraint constraints/requirements-macos-py312.lock -r requirements.txt PyInstaller==6.21.0
+          python scripts/verify_dependency_environment.py \
+            --constraint constraints/requirements-macos-py312.lock --mode subset \
+            --require pip --require Pillow --require markdown2 --require requests --require PySide6 --require PyInstaller \
+            --expected-python '3.12.10' --expected-platform darwin --expected-machine "${{ matrix.architecture }}" \
+            --bootstrap requirements-bootstrap.txt --bootstrap-policy stable \
+            --output "$RUNNER_TEMP/signing-${{ matrix.name }}-dependencies.json"
+
+      - name: Verify native macOS GUI lifecycle tests
+        timeout-minutes: 10
+        run: |
+          python -I tests/test_macos_gui_artifact_verifier.py \
+            --native-architecture "${{ matrix.architecture }}" \
+            --output "$RUNNER_TEMP/signing-${{ matrix.name }}-native-tests.json"
+
+      - name: Select exact-source unsigned producer
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -I scripts/acquire_macos_signing_inputs.py plan \
+            --source-root "$GITHUB_WORKSPACE" --architecture "${{ matrix.architecture }}" \
+            --native-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-native-tests.json" \
+            --dependency-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-dependencies.json" \
+            --bootstrap-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-bootstrap.json" \
+            --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json"
+
+      - name: Acquire and reverify original input bytes
+        timeout-minutes: 35
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python -I scripts/acquire_macos_signing_inputs.py fetch \
+            --source-root "$GITHUB_WORKSPACE" --architecture "${{ matrix.architecture }}" \
+            --native-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-native-tests.json" \
+            --dependency-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-dependencies.json" \
+            --bootstrap-proof "$RUNNER_TEMP/signing-${{ matrix.name }}-bootstrap.json" \
+            --selection "$RUNNER_TEMP/signing-${{ matrix.name }}-selection.json" \
+            --payload-archive "$RUNNER_TEMP/signing-${{ matrix.name }}-original-payload.zip" \
+            --proof-archive "$RUNNER_TEMP/signing-${{ matrix.name }}-original-proof.zip" \
+            --input-root "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs" \
+            --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \
+            --receipt "$RUNNER_TEMP/signing-${{ matrix.name }}-acquisition.json"
+
+      - name: Sign and verify without publication
+        id: sign
+        env:
+          MACOS_DEVELOPER_ID_P12_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          MACOS_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          MACOS_SIGNING_IDENTITY_SHA1: ${{ vars.MACOS_SIGNING_IDENTITY_SHA1 }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          python -I scripts/sign_notarize_macos.py \
+            --context "$RUNNER_TEMP/signing-${{ matrix.name }}-context.json" \
+            --source-root "$GITHUB_WORKSPACE" --architecture "${{ matrix.architecture }}" \
+            --unsigned-zip "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.zip" \
+            --unsigned-dmg "$RUNNER_TEMP/signing-${{ matrix.name }}-inputs/GM2Godot-${{ matrix.name }}.dmg" \
+            --output-root "$RUNNER_TEMP/signing-${{ matrix.name }}-outputs" \
+            --proof-root "$RUNNER_TEMP/signing-${{ matrix.name }}-proof"
+
+      - name: Preserve successful verification-only payloads
+        timeout-minutes: 5
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GM2Godot-${{ matrix.name }}-verification-only-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signing-${{ matrix.name }}-outputs/GM2Godot-${{ matrix.name }}.zip
+            ${{ runner.temp }}/signing-${{ matrix.name }}-outputs/GM2Godot-${{ matrix.name }}.dmg
+          archive: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve noncredential signing evidence
+        timeout-minutes: 5
+        if: ${{ always() && steps.sign.outcome != 'skipped' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: GM2Godot-${{ matrix.name }}-verification-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signing-${{ matrix.name }}-proof
+            ${{ runner.temp }}/signing-${{ matrix.name }}-acquisition.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-bootstrap.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-dependencies.json
+            ${{ runner.temp }}/signing-${{ matrix.name }}-native-tests.json
+          archive: true
+          if-no-files-found: warn
+          retention-days: 30

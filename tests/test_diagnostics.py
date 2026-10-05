@@ -17,6 +17,7 @@ from src.conversion.conversion_outcome import ConversionCounts, ConversionOutcom
 from src.conversion.diagnostics import (
     DIAGNOSTIC_REPORT_JSON_RELATIVE_PATH,
     DIAGNOSTIC_REPORT_MARKDOWN_RELATIVE_PATH,
+    ConversionDiagnostic,
     DiagnosticCollector,
     capture_conversion_diagnostic_reports,
     invalidate_conversion_diagnostic_reports,
@@ -55,7 +56,103 @@ def _replacement_report_directory(path: Path) -> dict[str, tuple[int, int, int, 
     return _directory_snapshot(path)
 
 
+class _CountedDiagnosticMessage(str):
+    strip_calls: int
+
+    def __init__(self, value: str) -> None:
+        self.strip_calls = 0
+
+    def strip(self, chars: str | None = None) -> str:
+        self.strip_calls += 1
+        return super().strip(chars)
+
+
 class TestDiagnosticCollector(unittest.TestCase):
+    def test_typed_log_diagnostic_normalizes_once_and_preserves_all_fields(self) -> None:
+        diagnostics = DiagnosticCollector()
+        message = _CountedDiagnosticMessage(" \tWarning: Typed producer keeps metadata.\n ")
+        diagnostic = ConversionDiagnostic(
+            "warning", "GM2GD-WARNING", message,
+            source_path="rooms/r_main/r_main.yy", line=3, column=5,
+            resource="r_main", resource_type="room", event="_ready", api="room_api",
+            manifest_entry="layers[0]", issue_number=867, workaround="Keep the authored resource.",
+        )
+
+        recorded = diagnostics.add_log_diagnostic(diagnostic)
+
+        self.assertEqual(message.strip_calls, 1)
+        self.assertIs(diagnostic.message, message)
+        self.assertEqual(str(diagnostic.message), " \tWarning: Typed producer keeps metadata.\n ")
+        self.assertEqual(recorded, replace(diagnostic, message="Warning: Typed producer keeps metadata."))
+        self.assertIsNot(recorded, diagnostic)
+        self.assertEqual(diagnostics.diagnostics(), (recorded,))
+        assert recorded is not None
+        self.assertEqual(
+            recorded.to_dict(),
+            {
+                "severity": "warning", "code": "GM2GD-WARNING", "message": "Warning: Typed producer keeps metadata.",
+                "source_path": "rooms/r_main/r_main.yy", "line": 3, "column": 5,
+                "resource": "r_main", "resource_type": "room", "event": "_ready", "api": "room_api",
+                "manifest_entry": "layers[0]", "issue_number": 867, "workaround": "Keep the authored resource.",
+            },
+        )
+
+    def test_typed_log_dedup_preserves_contextual_rows_and_original_add_policy(self) -> None:
+        diagnostics = DiagnosticCollector()
+        message = "Warning: Preserve the existing contextual row."
+        contextual = diagnostics.add(
+            "warning", "GM2GD-SOURCE-PATH-REJECTED", message,
+            source_path="rooms/r_main/r_main.yy", resource="r_main", resource_type="room",
+        )
+        candidate = ConversionDiagnostic("warning", "GM2GD-WARNING", " \t" + message + "\n")
+
+        self.assertIsNone(diagnostics.add_log_diagnostic(candidate))
+        self.assertIsNone(diagnostics.add_log_diagnostic(replace(candidate, resource="r_other")))
+        self.assertIsNone(diagnostics.add_from_log_message(message))
+        self.assertEqual(diagnostics.diagnostics(), (contextual,))
+        self.assertIs(diagnostics.diagnostics()[0], contextual)
+
+        other = diagnostics.add(
+            "warning", "GM2GD-SOURCE-PATH-REJECTED", message,
+            source_path="rooms/r_other/r_other.yy", resource="r_other", resource_type="room",
+        )
+        self.assertEqual(diagnostics.diagnostics(), (contextual, other))
+        fresh = DiagnosticCollector()
+        first = fresh.add_log_diagnostic(candidate)
+        self.assertEqual(first, ConversionDiagnostic("warning", "GM2GD-WARNING", message))
+        self.assertIsNone(fresh.add_log_diagnostic(candidate))
+        self.assertIsNone(fresh.add_from_log_message(message))
+        self.assertEqual(fresh.diagnostics(), (first,))
+
+    def test_typed_log_diagnostic_discards_empty_normalized_messages_once(self) -> None:
+        diagnostics = DiagnosticCollector()
+        existing = diagnostics.add(
+            "warning", "GM2GD-WARNING", "Warning: Keep the existing row.",
+            source_path="rooms/r_main/r_main.yy",
+        )
+        before = diagnostics.diagnostics()
+        message = _CountedDiagnosticMessage(" \t\r\n ")
+        diagnostic = ConversionDiagnostic(
+            "warning", "GM2GD-WARNING", message, resource="r_empty",
+        )
+
+        self.assertIsNone(diagnostics.add_log_diagnostic(diagnostic))
+
+        self.assertEqual(message.strip_calls, 1)
+        self.assertIs(diagnostic.message, message)
+        self.assertEqual(str(diagnostic.message), " \t\r\n ")
+        self.assertEqual(diagnostics.diagnostics(), before)
+        self.assertIs(diagnostics.diagnostics()[0], existing)
+        for empty_message in ("", " \t\r\n "):
+            with self.subTest(message=empty_message):
+                self.assertIsNone(
+                    diagnostics.add_log_diagnostic(
+                        ConversionDiagnostic("warning", "GM2GD-WARNING", empty_message)
+                    )
+                )
+                self.assertEqual(diagnostics.diagnostics(), before)
+        self.assertEqual(diagnostics.summary(), {"info": 0, "warning": 1, "error": 0, "total": 1})
+
     def assertModeEqual(self, actual: int, expected: int) -> None:
         if os.name == "nt":
             self.assertEqual(

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, replace
 from typing import ClassVar
 
 from src.conversion.base_converter import BaseConverter
-from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.generated_paths import generated_nested_resource_path
 from src.conversion.json_values import JsonArray, JsonObject, JsonValue
 from src.conversion.project_manifest import (
@@ -127,6 +127,13 @@ class GameMakerResourceIndex(BaseConverter):
     def convert_all(self) -> "GameMakerResourceIndex":
         """Build the in-memory index. No Godot files are written."""
         return self.build()
+
+    def _safe_log_diagnostic(self, diagnostic: ConversionDiagnostic) -> None:
+        """Deliver an owned diagnostic at the existing thread-safe log boundary."""
+        with self._lock:
+            if self.diagnostics is not None:
+                self.diagnostics.add_log_diagnostic(diagnostic)
+            self.log_callback(diagnostic.message)
 
     def build(self) -> "GameMakerResourceIndex":
         """Build and return this resource index."""
@@ -328,8 +335,11 @@ class GameMakerResourceIndex(BaseConverter):
                 continue
 
             if not os.path.isfile(yy_path):
-                self._safe_log(
-                    f"Warning: Skipping missing GameMaker resource {name}: {yy_path}"
+                self._safe_log_diagnostic(
+                    ConversionDiagnostic(
+                        "warning", "GM2GD-WARNING",
+                        f"Warning: Skipping missing GameMaker resource {name}: {yy_path}",
+                    )
                 )
                 continue
 
@@ -594,10 +604,13 @@ class GameMakerResourceIndex(BaseConverter):
                 return room
 
             if parent_name in stack:
-                self._safe_log(
-                    "Warning: Room inheritance cycle detected: {cycle}; skipping inherited data for {room}.".format(
-                        cycle=" -> ".join(stack + [parent_name]),
-                        room=room_name,
+                self._safe_log_diagnostic(
+                    ConversionDiagnostic(
+                        "warning", "GM2GD-WARNING",
+                        "Warning: Room inheritance cycle detected: {cycle}; skipping inherited data for {room}.".format(
+                            cycle=" -> ".join(stack + [parent_name]),
+                            room=room_name,
+                        ),
                     )
                 )
                 resolved[room_name] = room
@@ -605,10 +618,13 @@ class GameMakerResourceIndex(BaseConverter):
 
             parent = self.rooms.get(parent_name)
             if parent is None:
-                self._safe_log(
-                    "Warning: Missing parent room {parent} for room {room}; using child room data only.".format(
-                        parent=parent_name,
-                        room=room_name,
+                self._safe_log_diagnostic(
+                    ConversionDiagnostic(
+                        "warning", "GM2GD-WARNING",
+                        "Warning: Missing parent room {parent} for room {room}; using child room data only.".format(
+                            parent=parent_name,
+                            room=room_name,
+                        ),
                     )
                 )
                 resolved[room_name] = room
@@ -768,8 +784,11 @@ class GameMakerResourceIndex(BaseConverter):
     def _apply_yyp_room_order(self, yyp_data: JsonObject) -> None:
         if "RoomOrderNodes" not in yyp_data:
             self.used_room_order_fallback = True
-            self._safe_log(
-                "Warning: RoomOrderNodes missing; using deterministic room order fallback."
+            self._safe_log_diagnostic(
+                ConversionDiagnostic(
+                    "warning", "GM2GD-WARNING",
+                    "Warning: RoomOrderNodes missing; using deterministic room order fallback.",
+                )
             )
             self.room_order = sorted(self.rooms)
             return

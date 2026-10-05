@@ -11,7 +11,7 @@ from unittest.mock import patch
 if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.resource_index import (
     GameMakerResourceIndex,
@@ -198,6 +198,128 @@ class TestGameMakerResourceIndex(unittest.TestCase):
         )
         self._write_room(parent_name, content=parent_content)
         self._write_room(child_name, content=child_content)
+
+    def _write_typed_warning_fixture(self) -> tuple[str, ...]:
+        resources = (
+            ("objects", "o_missing"), ("rooms", "r_cycle_a"),
+            ("rooms", "r_cycle_b"), ("rooms", "r_orphan"),
+        )
+        entries = ",\n".join(_resource_entry(kind, name) for kind, name in resources)
+        _write_file(
+            os.path.join(self.gm_dir, "TestProject.yyp"),
+            "{\n  \"resources\":[\n" + entries + "\n  ],\n  \"resourceType\":\"GMProject\"\n}\n",
+        )
+        for name, parent in (("r_cycle_a", "r_cycle_b"), ("r_cycle_b", "r_cycle_a"), ("r_orphan", "r_absent")):
+            reference = json.dumps({"name": parent, "path": f"rooms/{parent}/{parent}.yy"}, separators=(",", ":"))
+            self._write_room(
+                name,
+                content=_make_room_yy(name).replace('"parentRoom":null,', f'"parentRoom":{reference},'),
+            )
+        return (
+            "Warning: Skipping missing GameMaker resource o_missing: "
+            + os.path.join(self.gm_dir, "objects", "o_missing", "o_missing.yy"),
+            "Warning: RoomOrderNodes missing; using deterministic room order fallback.",
+            "Warning: Room inheritance cycle detected: r_cycle_a -> r_cycle_a; skipping inherited data for r_cycle_b.",
+            "Warning: Missing parent room r_absent for room r_orphan; using child room data only.",
+        )
+
+    def test_public_index_owns_four_warning_rows_before_raw_callback(self) -> None:
+        expected = self._write_typed_warning_fixture()
+        diagnostics = DiagnosticCollector()
+        indexes: list[GameMakerResourceIndex] = []
+        delivered: list[str] = []
+        optional_fields = (
+            "source_path", "line", "column", "resource", "resource_type",
+            "event", "api", "manifest_entry", "issue_number", "workaround",
+        )
+
+        def observe(message: str) -> None:
+            index = indexes[0]
+            delivered.append(message)
+            rows = diagnostics.diagnostics()
+            self.assertEqual(tuple(row.message for row in rows), expected[:len(delivered)])
+            self.assertEqual(rows[-1], ConversionDiagnostic("warning", "GM2GD-WARNING", message))
+            self.assertEqual(len(rows[-1].to_dict()), 13)
+            self.assertTrue(all(rows[-1].to_dict()[field] is None for field in optional_fields))
+            if message == expected[0]:
+                self.assertIsNone(index.get_resource("objects", "o_missing"))
+                self.assertEqual(index.rooms, {})
+                self.assertFalse(index.used_room_order_fallback)
+            elif message == expected[1]:
+                self.assertTrue(index.used_room_order_fallback)
+                self.assertEqual(index.room_order, [])
+                self.assertEqual(set(index.rooms), {"r_cycle_a", "r_cycle_b", "r_orphan"})
+            else:
+                self.assertEqual(index.room_order, ["r_cycle_a", "r_cycle_b", "r_orphan"])
+
+        index = GameMakerResourceIndex(self.gm_dir, self.godot_dir, log_callback=observe, diagnostics=diagnostics)
+        indexes.append(index)
+        with patch.object(diagnostics, "add_from_log_message", side_effect=AssertionError("unexpected inference")):
+            self.assertIs(index.build(), index)
+        self.assertEqual(delivered, list(expected))
+        self.assertEqual(tuple(room.name for room in index.ordered_rooms()), ("r_cycle_a", "r_cycle_b", "r_orphan"))
+        self.assertEqual(os.listdir(self.godot_dir), [])
+
+    def test_public_index_direct_wrapped_repeat_and_context_seed_report_bytes_match(self) -> None:
+        expected = self._write_typed_warning_fixture()
+        views: list[tuple[list[str], tuple[ConversionDiagnostic, ...], bytes, bytes]] = []
+        for route in ("wrapped-reference", "direct-typed", "wrapped-typed"):
+            diagnostics = DiagnosticCollector()
+            contextual = diagnostics.add(
+                "warning", "GM2GD-SOURCE-PATH-REJECTED", expected[0],
+                source_path="preseed/context.yy", resource="preseed", resource_type="object",
+            )
+            logs: list[str] = []
+            callback = logs.append if route == "direct-typed" else diagnostics.wrap_log_callback(logs.append)
+            supplied = None if route == "wrapped-reference" else diagnostics
+            index = GameMakerResourceIndex(self.gm_dir, self.godot_dir, log_callback=callback, diagnostics=supplied)
+            self.assertIs(index.build(), index)
+            self.assertIs(index.build(), index)
+            self.assertEqual(logs, list(expected) * 2)
+            self.assertEqual(len(diagnostics.diagnostics()), 4)
+            self.assertIs(diagnostics.diagnostics()[0], contextual)
+            self.assertEqual(tuple(row.message for row in diagnostics.diagnostics()), expected)
+            self.assertEqual(index.room_order, ["r_cycle_a", "r_cycle_b", "r_orphan"])
+            report_dir = os.path.join(self.godot_dir, route)
+            os.makedirs(report_dir)
+            json_path, markdown_path = diagnostics.write_reports(report_dir)
+            with open(json_path, "rb") as report:
+                json_content = report.read()
+            with open(markdown_path, "rb") as report:
+                markdown_content = report.read()
+            views.append((logs, diagnostics.diagnostics(), json_content, markdown_content))
+        self.assertEqual(views[1], views[0])
+        self.assertEqual(views[2], views[0])
+
+    def test_public_index_raw_callback_failure_preserves_order_with_or_without_collector(self) -> None:
+        expected = self._write_typed_warning_fixture()
+        for failing_position in range(4):
+            for supplied in (False, True):
+                with self.subTest(position=failing_position, collector=supplied):
+                    diagnostics = DiagnosticCollector() if supplied else None
+                    indexes: list[GameMakerResourceIndex] = []
+                    delivered: list[str] = []
+                    observed_rooms: list[dict[str, IndexedRoom]] = []
+                    failure = RuntimeError("resource index callback sentinel")
+
+                    def fail(message: str) -> None:
+                        delivered.append(message)
+                        if message == expected[failing_position]:
+                            observed_rooms.append(indexes[0].rooms)
+                            raise failure
+
+                    index = GameMakerResourceIndex(self.gm_dir, self.godot_dir, log_callback=fail, diagnostics=diagnostics)
+                    indexes.append(index)
+                    with self.assertRaises(RuntimeError) as caught:
+                        index.build()
+                    self.assertIs(caught.exception, failure)
+                    self.assertEqual(delivered, list(expected[:failing_position + 1]))
+                    self.assertIs(index.rooms, observed_rooms[0])
+                    self.assertEqual(index.used_room_order_fallback, failing_position > 0)
+                    self.assertEqual(index.room_order, [] if failing_position < 2 else ["r_cycle_a", "r_cycle_b", "r_orphan"])
+                    if diagnostics is not None:
+                        self.assertEqual(tuple(row.message for row in diagnostics.diagnostics()), expected[:failing_position + 1])
+                    self.assertEqual(os.listdir(self.godot_dir), [])
 
     def test_indexes_yyp_resources_and_preserves_room_order(self) -> None:
         self._write_yyp(

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.45 - 2026-10-04
+
+- Route both missing-project.godot callbacks through the supplied diagnostic collector before raw delivery.
+- Retain existing English/German classification, same-message report deduplication, callback exceptions and failed-operation results.
+
 ## 0.8.44 - 2026-10-04
 
 - Record startup-scene warnings in the supplied diagnostic collector before delivering the original raw callback.

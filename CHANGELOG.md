@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.47 - 2026-10-04
+
+- Reconcile architecture and testing checklists with the reviewed CLI, Godot, packaging, release-quality and diagnostic ownership features.
+- Keep package-import cleanup and unrelated compatibility roadmap work explicitly incomplete.
+
 ## 0.8.46 - 2026-10-04
 
 - Record four resource-index warnings as typed diagnostics before the original raw callback.

@@ -70,15 +70,15 @@ This file is the high-level roadmap for reaching full GameMaker-to-Godot transpi
 - [ ] Consider using Godot autoloads for runtime managers where stable global state is required.
 - [ ] Preserve GameMaker instance IDs independently from Godot node instance IDs.
 - [ ] Add deterministic generated-code ordering, scene resource IDs, output paths, and stable snapshot tests.
-- [ ] Add headless Godot project validation for generated `.gd`, `.tscn`, `.tres`, imports, and project settings.
+- [x] Validate generated `.gd`, `.tscn`, `.tres`, imports and project settings through the pinned headless Godot validator; validation is distinct from full gameplay parity.
 
 ### Testing And Fixtures
 
 - [x] Run strict Pyright through local and CI checks.
 - [x] Run Python unit tests in CI.
 - [x] Maintain broad tests for converters, parser, runtime generation, events, and Godot smoke harnesses.
-- [ ] Add CI with a pinned Godot binary so `*_godot.py` smoke tests do not silently skip.
-- [ ] Add generated GDScript parser/load checks through Godot headless.
+- [x] Install and verify exact Godot 4.7.2 before CI discovers the smoke corpus; unsupported host/capability cases keep their explicit eligibility rules.
+- [x] Run generated GDScript parser/resource-load checks through headless Godot and the committed smoke/fixture corpus.
 - [ ] Add GameMaker-to-Godot golden trace fixtures for event order, alarms, input, collision, draw order, async, rooms, persistence, and lifecycle.
 - [ ] Add visual regression tests for surfaces, blend state, shaders, GUI scaling, cameras, tiles, and draw order.
 - [ ] Add project-specific compatibility reports and fail thresholds for unsupported APIs and transpile warnings.
@@ -86,7 +86,7 @@ This file is the high-level roadmap for reaching full GameMaker-to-Godot transpi
 ### Tooling And UX
 
 - [x] Provide a GUI converter with selectable conversion groups.
-- [ ] Add CLI modes: analyze-only, convert, validate, report, fail-on-unsupported, and target-platform filter.
+- [x] Provide CLI `analyze`, `convert`, `validate` and `report` commands, diagnostic thresholds including fail-on-unsupported, and target-platform filtering.
 - [ ] Generate compatibility reports grouped by manual category, asset type, event, function, source file, and severity.
 - [ ] Add source-linked warnings for unsupported GML APIs, unsupported resources, skipped event source, shader failures, invalid generated code, and platform gaps.
 - [x] Update README product positioning because the project now contains a real transpiler and runtime.

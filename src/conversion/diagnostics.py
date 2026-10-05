@@ -178,6 +178,33 @@ class DiagnosticCollector:
             self._recorded_messages.add(message)
         return diagnostic
 
+    def add_log_diagnostic(
+        self,
+        diagnostic: ConversionDiagnostic,
+    ) -> ConversionDiagnostic | None:
+        """Record a typed log-backed row with legacy message-level deduplication."""
+        stripped = diagnostic.message.strip()
+        if not stripped:
+            return None
+        with self._lock:
+            if stripped in self._recorded_messages:
+                return None
+            return self.add(
+                diagnostic.severity,
+                diagnostic.code,
+                stripped,
+                source_path=diagnostic.source_path,
+                line=diagnostic.line,
+                column=diagnostic.column,
+                resource=diagnostic.resource,
+                resource_type=diagnostic.resource_type,
+                event=diagnostic.event,
+                api=diagnostic.api,
+                manifest_entry=diagnostic.manifest_entry,
+                issue_number=diagnostic.issue_number,
+                workaround=diagnostic.workaround,
+            )
+
     def add_from_log_message(
         self,
         message: str,

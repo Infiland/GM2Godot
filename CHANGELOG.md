@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.46 - 2026-10-04
+
+- Record four resource-index warnings as typed diagnostics before the original raw callback.
+- Preserve atomic normalized-message deduplication, empty-message filtering, report bytes and callback failure ordering.
+
 ## 0.8.45 - 2026-10-04
 
 - Route both missing-project.godot callbacks through the supplied diagnostic collector before raw delivery.

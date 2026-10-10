@@ -52,6 +52,13 @@ class TestOSDebugGCGodotSmoke(unittest.TestCase):
             \t\treturn
             \tGMRuntime.gml_clipboard_set_text("")
 
+            \t# Godot editor runs are debug builds; GameMaker's debug_mode is only
+            \t# true under its debugger, unless the project opts in.
+            \tif not _check(GMRuntime.gml_builtin_global("debug_mode") == false, "debug_mode is not false by default"):
+            \t\treturn
+            \tProjectSettings.set_setting("application/config/gm2godot_debug_mode", true)
+            \tif not _check(GMRuntime.gml_builtin_global("debug_mode") == true, "debug_mode setting ignored"):
+            \t\treturn
             \tGMRuntime.gml_show_debug_message_ext("OS_DEBUG_VALUE {0}", [os_type])
             \tGMRuntime.gml_show_debug_message_ext("SHOW_DEBUG_VARIADIC {0}/{1}", ["alpha", 7])
             \tGMRuntime.gml_gc_enable(false)

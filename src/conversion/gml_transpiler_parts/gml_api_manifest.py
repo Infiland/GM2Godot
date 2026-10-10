@@ -633,7 +633,7 @@ _OS_COMPILER_DOCS_PATH = "GameMaker_Language/GML_Reference/OS_And_Compiler/OS_An
 _GC_DOCS_PATH = "GameMaker_Language/GML_Reference/Garbage_Collection/Garbage_Collection.htm"
 _OS_DEBUG_GC_IMPLEMENTED_APIS = (
     ("show_debug_message", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Formats values with GameMaker string semantics and prints to the Godot output log."),
-    ("debug_mode", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Godot's debug-build flag through GMRuntime built-in globals."),
+    ("debug_mode", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "False, as in a normal GameMaker run; the application/config/gm2godot_debug_mode project setting turns it on."),
     ("fps", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
     ("fps_real", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Reads Engine frames-per-second through GMRuntime built-in globals."),
     ("os_browser", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns browser_not_a_browser outside web exports and a deterministic web fallback."),

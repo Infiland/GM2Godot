@@ -437,7 +437,7 @@ static func gml_struct_get(struct_value, member_name):
 			return struct_value[key]
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
-		if _gml_object_has_builtin_field(struct_value, key):
+		if _gml_object_uses_builtin_field(struct_value, key):
 			return _gml_object_builtin_field_get(struct_value, key)
 		if _object_has_property(struct_value, key):
 			return struct_value.get(key)
@@ -612,8 +612,12 @@ static func gml_struct_set(struct_value, member_name, value):
 		struct_value[key] = value
 		return value
 	if typeof(struct_value) == TYPE_OBJECT:
-		if _gml_object_has_builtin_field(struct_value, key):
+		if _gml_object_uses_builtin_field(struct_value, key):
 			_gml_object_builtin_field_set(struct_value, key, value)
+		elif struct_value is Node and _gml_motion_is_synced_field(key) and key in struct_value:
+			# speed/direction and hspeed/vspeed stay in step, as when the
+			# instance assigns them itself.
+			_gml_motion_assign_field(struct_value, key, value)
 		elif _object_has_property(struct_value, key):
 			struct_value.set(key, value)
 		else:
@@ -685,8 +689,27 @@ static func _gml_object_has_builtin_field(object_value, member_name):
 	return _gml_object_builtin_field_names(object_value).has(str(member_name))
 
 
+const GML_OBJECT_BBOX_FIELDS = ["bbox_left", "bbox_top", "bbox_right", "bbox_bottom"]
+
+
+# Whether a member of a Node2D instance maps to the node itself rather than to
+# a script variable: x and y are its position and the bbox_* variables are
+# computed from its collision mask. A converted object declares image_angle,
+# image_xscale and image_yscale with setters that update the node, so those
+# script variables hold the GML values when they exist.
+static func _gml_object_uses_builtin_field(object_value, member_name):
+	if not (object_value is Node2D):
+		return false
+	var key = str(member_name)
+	if GML_OBJECT_BBOX_FIELDS.has(key):
+		return true
+	return _gml_object_builtin_field_names(object_value).has(key) and not (key in object_value)
+
+
 static func _gml_object_builtin_field_get(object_value, member_name):
 	var key = str(member_name)
+	if object_value is Node2D and GML_OBJECT_BBOX_FIELDS.has(key):
+		return _gml_collision_instance_bbox_value(object_value, key)
 	if object_value is Node2D:
 		var in_sequence = bool(
 			object_value.get_meta("gamemaker_in_sequence", false)
@@ -726,6 +749,9 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 
 static func _gml_object_builtin_field_set(object_value, member_name, value):
 	var key = str(member_name)
+	if GML_OBJECT_BBOX_FIELDS.has(key):
+		# Read-only in GameMaker.
+		return value
 	if object_value is Node2D:
 		if key == "x":
 			if bool(object_value.get_meta("gamemaker_in_sequence", false)):

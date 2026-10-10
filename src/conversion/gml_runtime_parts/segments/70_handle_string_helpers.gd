@@ -387,11 +387,30 @@ static func _to_array_index(value):
 	return resolved_index
 
 
+static var _gml_object_property_names = {}
+
+
 static func _object_has_property(object_value, property_name):
-	for property in object_value.get_property_list():
-		if property.get("name") == property_name:
-			return true
-	return false
+	# Property lists only change with the native class and the attached script,
+	# so their names are looked up once per class and script. Metadata entries
+	# ("metadata/...") differ per object and are never cached.
+	var name = str(property_name)
+	if name.contains("/"):
+		for property in object_value.get_property_list():
+			if property.get("name") == name:
+				return true
+		return false
+	var script = object_value.get_script()
+	var key = object_value.get_class() + "#" + (str(script.get_instance_id()) if script != null else "")
+	var names = _gml_object_property_names.get(key, null)
+	if names == null:
+		names = {}
+		for property in object_value.get_property_list():
+			var property_name_value = str(property.get("name", ""))
+			if not property_name_value.contains("/"):
+				names[property_name_value] = true
+		_gml_object_property_names[key] = names
+	return names.has(name)
 
 
 static func _gml_one_based_index(value):

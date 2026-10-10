@@ -1,225 +1,76 @@
 from __future__ import annotations
 
-import os
-import subprocess
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
-from src.conversion.asset_registry import (
-    AssetRegistryEntry,
-    render_asset_registry_script,
+from tests.collision_runtime_support import (
+    CollisionSprite,
+    MaskRect,
+    object_entry,
+    run_smoke_scene,
+    write_collision_project,
 )
-from src.conversion.gml_runtime import write_gml_runtime
-from src.conversion.script_generator import ObjectRuntimeConfig, generate_script_content
-from tests.godot_test_support import (
-    find_smoke_godot_binary as _find_godot_binary,
-    write_fixture_text as _write_text,
+from tests.godot_test_support import find_smoke_godot_binary
+
+_SPRITES = (
+    CollisionSprite("spr_box16", 16, 16, (8, 8), (0, 0, 15, 15)),
+    CollisionSprite("spr_box2", 2, 2, (0, 0), (0, 0, 1, 1)),
+    CollisionSprite(
+        "spr_dots",
+        4,
+        4,
+        (0, 0),
+        (0, 0, 3, 3),
+        collision_kind=0,
+        mask_rects=(MaskRect(0, 0, 1, 1), MaskRect(3, 3, 1, 1)),
+    ),
+    CollisionSprite(
+        "spr_frames",
+        2,
+        2,
+        (0, 0),
+        (0, 0, 1, 1),
+        collision_kind=4,
+        mask_rects=(MaskRect(0, 0, 1, 1, frame=0), MaskRect(1, 1, 1, 1, frame=1)),
+        frame_count=2,
+    ),
+    CollisionSprite("spr_ellipse", 8, 8, (0, 0), (0, 0, 7, 7), collision_kind=2),
+    CollisionSprite("spr_diamond", 8, 8, (0, 0), (0, 0, 7, 7), collision_kind=3),
+    CollisionSprite("spr_bar", 16, 4, (8, 2), (0, 0, 15, 3), collision_kind=5),
 )
 
 
-def _object_scene(name: str, size: int = 16) -> str:
-    return textwrap.dedent(
-        f"""\
-        [gd_scene load_steps=3 format=3]
-
-        [ext_resource type="Script" path="res://objects/{name}/{name}.gd" id="1"]
-
-        [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
-        size = Vector2({size}, {size})
-
-        [node name="{name}" type="Node2D"]
-        script = ExtResource("1")
-
-        [node name="Mask" type="Area2D" parent="."]
-
-        [node name="CollisionShape2D" type="CollisionShape2D" parent="Mask"]
-        shape = SubResource("RectangleShape2D_1")
-        """
-    )
-
-
-def _write_object(project_dir: Path, name: str) -> None:
-    object_dir = project_dir / "objects" / name
-    _write_text(
-        object_dir / f"{name}.gd",
-        generate_script_content([], object_runtime=ObjectRuntimeConfig(object_name=name)),
-    )
-    _write_text(object_dir / f"{name}.tscn", _object_scene(name))
-
-
-def _write_registry(project_dir: Path) -> None:
-    entries = (
-        AssetRegistryEntry(
-            id=100,
-            name="o_player",
-            kind="objects",
-            asset_type="object",
-            type_name="Object",
-            source_path="objects/o_player/o_player.yy",
-            godot_path="res://objects/o_player/o_player.tscn",
-            legacy_id="objects/o_player/o_player.yy",
-        ),
-        AssetRegistryEntry(
-            id=101,
-            name="o_wall",
-            kind="objects",
-            asset_type="object",
-            type_name="Object",
-            source_path="objects/o_wall/o_wall.yy",
-            godot_path="res://objects/o_wall/o_wall.tscn",
-            legacy_id="objects/o_wall/o_wall.yy",
-        ),
-    )
-    _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
-
-
-def _write_smoke_scene(project_dir: Path) -> None:
-    smoke_script = textwrap.dedent(
-        """\
-        extends Node2D
-
-        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
-
-        func _check(condition, message):
-        \tif not condition:
-        \t\tpush_error(str(message))
-        \t\tget_tree().quit(1)
-        \t\treturn false
-        \treturn true
-
-        func _same_handle(left, right):
-        \treturn left.index == right.index
-
-        func _ready():
-        \tvar layer = Node2D.new()
-        \tlayer.name = "Instances"
-        \tadd_child(layer)
-
-        \tvar player_selector = GMRuntime.gml_asset_get_index("o_player")
-        \tvar wall_selector = GMRuntime.gml_asset_get_index("o_wall")
-        \tvar player_handle = GMRuntime.gml_instance_create_layer(10, 20, "Instances", player_selector, self)
-        \tvar wall_handle = GMRuntime.gml_instance_create_layer(40, 20, "Instances", wall_selector, self)
-        \tvar wall_handle_2 = GMRuntime.gml_instance_create_layer(55, 20, "Instances", wall_selector, self)
-        \tif not _check(GMRuntime.gml_handle_is_valid(player_handle), "player was not created"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_handle_is_valid(wall_handle), "wall was not created"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_handle_is_valid(wall_handle_2), "second wall was not created"):
-        \t\treturn
-        \tvar player = GMRuntime.gml_handle_resolve(player_handle)
-
-        \tif not _check(GMRuntime.gml_place_meeting(player, 40, 20, wall_selector), "place_meeting missed wall"):
-        \t\treturn
-        \tif not _check(not GMRuntime.gml_place_meeting(player, 10, 20, wall_selector), "place_meeting hit wall at current position"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_instance_place(player, 40, 20, wall_selector), wall_handle), "instance_place returned wrong wall"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_position_meeting(player, 40, 20, wall_selector), "position_meeting missed wall"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_instance_position(player, 40, 20, wall_selector), wall_handle), "instance_position returned wrong wall"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_collision_point(player, 40, 20, wall_selector, true, false), wall_handle), "collision_point missed wall"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_collision_rectangle(player, 32, 12, 48, 28, wall_selector, false, false), wall_handle), "collision_rectangle missed wall"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_collision_line(player, 0, 20, 80, 20, wall_selector, false, false), wall_handle), "collision_line missed wall"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_collision_circle(player, 40, 20, 8, wall_selector, false, false), wall_handle), "collision_circle missed wall"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_collision_point(player, 10, 20, GMRuntime.gml_instance_all(), false, true).index == GMRuntime.GML_INSTANCE_INVALID_INDEX, "notme did not exclude current instance"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_collision_point(player, 10, 20, GMRuntime.gml_instance_all(), false, false), player_handle), "all selector did not include current instance"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_collision_point(player, -100, -100, wall_selector, false, false).index == GMRuntime.GML_INSTANCE_INVALID_INDEX, "miss did not return noone"):
-        \t\treturn
-        \tvar point_hits = GMRuntime.gml_ds_list_create()
-        \tif not _check(GMRuntime.gml_collision_point_list(player, 40, 20, wall_selector, false, false, point_hits, true) == 1, "collision_point_list count failed"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(point_hits, 0), wall_handle), "collision_point_list handle failed"):
-        \t\treturn
-        \tvar rect_hits = GMRuntime.gml_ds_list_create()
-        \tif not _check(GMRuntime.gml_collision_rectangle_list(player, 32, 12, 64, 28, wall_selector, false, false, rect_hits, true) == 2, "collision_rectangle_list count failed"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(rect_hits, 0), wall_handle_2), "collision_rectangle_list first ordered handle failed"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(rect_hits, 1), wall_handle), "collision_rectangle_list second ordered handle failed"):
-        \t\treturn
-        \tvar line_hits = GMRuntime.gml_ds_list_create()
-        \tif not _check(GMRuntime.gml_collision_line_list(player, 0, 20, 80, 20, wall_selector, false, false, line_hits, true) == 2, "collision_line_list count failed"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(line_hits, 0), wall_handle), "collision_line_list first ordered handle failed"):
-        \t\treturn
-        \tif not _check(_same_handle(GMRuntime.gml_ds_list_find_value(line_hits, 1), wall_handle_2), "collision_line_list second ordered handle failed"):
-        \t\treturn
-        \tvar circle_hits = GMRuntime.gml_ds_list_create()
-        \tif not _check(GMRuntime.gml_collision_circle_list(player, 48, 20, 20, wall_selector, false, false, circle_hits, false) == 2, "collision_circle_list count failed"):
-        \t\treturn
-        \tif not _check(GMRuntime.gml_ds_list_size(circle_hits) == 2, "collision_circle_list did not append two handles"):
-        \t\treturn
-        \tvar notme_hits = GMRuntime.gml_ds_list_create()
-        \tif not _check(GMRuntime.gml_collision_point_list(player, 10, 20, GMRuntime.gml_instance_all(), false, true, notme_hits, false) == 0, "collision_point_list notme failed"):
-        \t\treturn
-
-        \tprint("COLLISION_SMOKE_OK")
-        \tget_tree().quit(0)
-        """
-    )
-    smoke_scene = textwrap.dedent(
-        """\
-        [gd_scene load_steps=2 format=3]
-
-        [ext_resource type="Script" path="res://smoke.gd" id="1"]
-
-        [node name="Smoke" type="Node2D"]
-        script = ExtResource("1")
-        """
-    )
-    _write_text(project_dir / "smoke.gd", smoke_script)
-    _write_text(project_dir / "smoke.tscn", smoke_scene)
-
-
-class TestCollisionQueriesGodotSmoke(unittest.TestCase):
-    def test_runtime_collision_queries_against_generated_shapes(self) -> None:
-        godot_binary = _find_godot_binary()
+class TestCollisionQueriesGodot(unittest.TestCase):
+    def test_collision_queries_follow_gamemaker_masks_and_modes(self) -> None:
+        godot_binary = find_smoke_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = Path(tmpdir)
-            _write_text(
-                project_dir / "project.godot",
-                '[application]\nconfig/name="CollisionSmoke"\nrun/main_scene="res://smoke.tscn"\n',
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_dir = Path(temporary_directory)
+            write_collision_project(
+                project_dir,
+                project_name="CollisionQueries",
+                sprites=_SPRITES,
+                objects=(
+                    object_entry(100, "o_a"),
+                    object_entry(101, "o_b"),
+                    object_entry(102, "o_none"),
+                    object_entry(103, "o_shape"),
+                ),
+                fixture_files={"smoke.gd": "queries_smoke.gd", "instance.gd": "instance.gd"},
+                application_settings="config/gm2godot_collision_compatibility=true\n",
             )
-            write_gml_runtime(str(project_dir))
-            _write_registry(project_dir)
-            _write_object(project_dir, "o_player")
-            _write_object(project_dir, "o_wall")
-            _write_smoke_scene(project_dir)
-
-            godot_env = dict(os.environ)
-            godot_env["HOME"] = str(project_dir)
-            result = subprocess.run(
-                [
-                    godot_binary,
-                    "--headless",
-                    "--log-file",
-                    str(project_dir / "godot.log"),
-                    "--path",
-                    str(project_dir),
-                    "--scene",
-                    "res://smoke.tscn",
-                    "--quit-after",
-                    "10",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-                env=godot_env,
-            )
+            result = run_smoke_scene(godot_binary, project_dir)
             output = result.stdout + result.stderr
 
         self.assertEqual(result.returncode, 0, output)
-        self.assertIn("COLLISION_SMOKE_OK", output)
+        self.assertIn("COLLISION_QUERIES_OK", output)
+        self.assertNotIn("SCRIPT ERROR:", output)
+        self.assertNotIn("ERROR:", output)
+        self.assertNotIn("WARNING:", output)
+
+
+if __name__ == "__main__":
+    unittest.main()

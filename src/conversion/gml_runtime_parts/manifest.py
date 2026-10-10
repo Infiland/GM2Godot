@@ -125,14 +125,29 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "45_collision_queries.gd",
-        "Instance collision query helpers and DS-list collision result writers.",
-        depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "40_arrays_structs_variables.gd"),
-        tests=("tests/test_collision_queries_godot.py",),
+        "GameMaker bounding boxes, collision masks, collision queries and collision events.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "15_asset_registry.gd",
+            "35_maths_numbers.gd",
+            "40_arrays_structs_variables.gd",
+        ),
+        tests=(
+            "tests/test_collision_queries_godot.py",
+            "tests/test_collision_events_godot.py",
+            "tests/test_precise_collision_masks_godot.py",
+        ),
     ),
     _segment(
         "46_motion_helpers.gd",
         "Motion, direction, friction, and wrapping helpers.",
-        depends_on=("00_prelude.gd", "30_numeric_arithmetic.gd", "35_maths_numbers.gd"),
+        depends_on=(
+            "00_prelude.gd",
+            "30_numeric_arithmetic.gd",
+            "35_maths_numbers.gd",
+            "45_collision_queries.gd",
+        ),
         tests=("tests/test_motion_helpers_godot.py",),
     ),
     _segment(

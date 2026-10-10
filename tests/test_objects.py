@@ -23,19 +23,24 @@ from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.objects import ObjectConverter, ObjectProcessResult
 
 
+def _sprite_reference(sprite_name: str | None) -> str:
+    if sprite_name is None:
+        return "null"
+    return (
+        '{{"name": "{sprite_name}", '
+        '"path": "sprites/{sprite_name}/{sprite_name}.yy",}}'
+    ).format(sprite_name=sprite_name)
+
+
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             parent_path: str = "folders/Objects.yy",
                             event_list: list[JsonObject] | None = None,
                             parent_object_name: str | None = None,
-                            persistent: bool = False) -> str:
+                            persistent: bool = False,
+                            mask_sprite_name: str | None = None) -> str:
     """Build a GameMaker object .yy file string."""
-    if sprite_name is not None:
-        sprite_id = (
-            '{{"name": "{sprite_name}", '
-            '"path": "sprites/{sprite_name}/{sprite_name}.yy",}}'
-        ).format(sprite_name=sprite_name)
-    else:
-        sprite_id = "null"
+    sprite_id = _sprite_reference(sprite_name)
+    sprite_mask_id = _sprite_reference(mask_sprite_name)
 
     if parent_object_name is None:
         parent_object_id = "null"
@@ -86,12 +91,13 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "resourceVersion": "2.0",\n'
         '  "solid": false,\n'
         '  "spriteId": {sprite_id},\n'
-        '  "spriteMaskId": null,\n'
+        '  "spriteMaskId": {sprite_mask_id},\n'
         '  "visible": true,\n'
         '}}'
     ).format(
         name=name,
         sprite_id=sprite_id,
+        sprite_mask_id=sprite_mask_id,
         parent_path=parent_path,
         parent_object_id=parent_object_id,
         event_list_str=event_list_str,
@@ -1481,7 +1487,8 @@ class TestScriptGeneration(unittest.TestCase):
                       event_list: list[JsonObject] | None = None,
                       parent_object_name: str | None = None,
                       persistent: bool = False,
-                      create_empty_event_sources: bool = True) -> None:
+                      create_empty_event_sources: bool = True,
+                      mask_sprite_name: str | None = None) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
         yy_content = _make_object_yy_content(
@@ -1490,6 +1497,7 @@ class TestScriptGeneration(unittest.TestCase):
             event_list=event_list,
             parent_object_name=parent_object_name,
             persistent=persistent,
+            mask_sprite_name=mask_sprite_name,
         )
         with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
             f.write(yy_content)
@@ -1638,6 +1646,22 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tpersistent = true", content)
         self.assertIn('GMRuntime.gml_variable_instance_set(self, "persistent", persistent)', content)
         self.assertIn('set_meta("gamemaker_persistent", persistent)', content)
+
+    def test_script_starts_instances_with_the_object_collision_mask(self):
+        self._setup_object("o_masked", sprite_name="s_body", event_list=[], mask_sprite_name="s_hitbox")
+        self._setup_object("o_plain", sprite_name="s_body", event_list=[])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_masked", "o_masked.gd"), encoding="utf-8") as f:
+            masked = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_plain", "o_plain.gd"), encoding="utf-8") as f:
+            plain = f.read()
+
+        self.assertIn("\nvar mask_index = -1", masked)
+        self.assertIn('\tmask_index = GMRuntime.gml_asset_get_index("s_hitbox")', masked)
+        self.assertIn("\tmask_index = -1", plain)
+        self.assertNotIn("s_hitbox", plain)
 
     def test_script_registers_parent_object_chain(self):
         self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
@@ -3249,6 +3273,9 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         calls: list[str] = []
         def reference(value: JsonValue, **kwargs: str) -> tuple[str, str] | None:
             calls.append(kwargs["field"])
+            if kwargs["field"] == "spriteMaskId":
+                self.assertIsNone(value)
+                return None
             if kwargs["field"] == "spriteId":
                 self.assertIs(value, sprite)
                 data["parentObjectId"] = {"name": "new_parent"}
@@ -3267,7 +3294,7 @@ class TestObjectTypedAcquisition(unittest.TestCase):
              patch.object(self.converter, "_sanitize_object_events", side_effect=sanitize):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(calls, ["spriteId", "parentObjectId", "eventList"])
+        self.assertEqual(calls, ["spriteId", "parentObjectId", "eventList", "spriteMaskId"])
         self.assertTrue(parsed["solid"])
         self.assertTrue(parsed["persistent"])
         self.assertEqual(parsed["parent_object_name"], "parent")
@@ -3310,7 +3337,7 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent"])
+        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "spriteMaskId"])
         self.assertTrue(parsed["solid"])
         self.assertFalse(parsed["persistent"])
 

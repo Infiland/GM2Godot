@@ -443,6 +443,7 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
     "asset_get_type_name": (1, 1),
     "asset_get_index_from_id": (1, 1),
     "asset_has_any_tag": (2, 2),
+    "sprite_get_name": (1, 1),
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
@@ -471,6 +472,14 @@ _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
     "collision_rectangle_list": (9, 9),
     "collision_line_list": (9, 9),
     "collision_circle_list": (8, 8),
+    "collision_ellipse": (5, 7),
+    "collision_ellipse_list": (9, 9),
+    "distance_to_point": (2, 2),
+    "instance_place_list": (5, 5),
+    "instance_position_list": (5, 5),
+    "place_empty": (2, 3),
+    "place_free": (2, 2),
+    "position_empty": (2, 2),
 }
 
 _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
@@ -479,10 +488,13 @@ _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
     "move_towards_point": (3, 3),
     "move_contact_solid": (2, 2),
     "move_contact_all": (2, 2),
+    "move_outside_solid": (2, 2),
+    "move_outside_all": (2, 2),
     "move_bounce_solid": (1, 1),
     "move_bounce_all": (1, 1),
     "move_random": (2, 2),
     "move_snap": (2, 2),
+    "move_wrap": (3, 3),
     "place_snapped": (2, 2),
 }
 

@@ -753,6 +753,7 @@ BUILTIN_VARIABLE_REGISTRY: Final[Mapping[str, _BuiltinVariableMetadata]] = Mappi
     "keyboard_lastkey": _BuiltinVariableMetadata("global", "0", True, False, "input"),
     "keyboard_string": _BuiltinVariableMetadata("global", "", True, False, "input"),
     "layer": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
+    "mask_index": _BuiltinVariableMetadata("instance", "-1", True, False, "collision"),
     "mouse_x": _BuiltinVariableMetadata("global", "0", False, False, "input"),
     "mouse_y": _BuiltinVariableMetadata("global", "0", False, False, "input"),
     "mouse_wheel_down": _BuiltinVariableMetadata("global", "false", False, False, "input"),
@@ -1215,6 +1216,7 @@ ASSET_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "asset_get_type_name": "gml_asset_get_type_name",
     "asset_get_index_from_id": "gml_asset_get_index_from_id",
     "asset_has_any_tag": "gml_asset_has_any_tag",
+    "sprite_get_name": "gml_sprite_get_name",
 })
 
 INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -1243,6 +1245,14 @@ COLLISION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "collision_rectangle_list": "gml_collision_rectangle_list",
     "collision_line_list": "gml_collision_line_list",
     "collision_circle_list": "gml_collision_circle_list",
+    "collision_ellipse": "gml_collision_ellipse",
+    "collision_ellipse_list": "gml_collision_ellipse_list",
+    "distance_to_point": "gml_distance_to_point",
+    "instance_place_list": "gml_instance_place_list",
+    "instance_position_list": "gml_instance_position_list",
+    "place_empty": "gml_place_empty",
+    "place_free": "gml_place_free",
+    "position_empty": "gml_position_empty",
 })
 
 MOTION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -1251,10 +1261,13 @@ MOTION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "move_towards_point": "gml_move_towards_point",
     "move_contact_solid": "gml_move_contact_solid",
     "move_contact_all": "gml_move_contact_all",
+    "move_outside_solid": "gml_move_outside_solid",
+    "move_outside_all": "gml_move_outside_all",
     "move_bounce_solid": "gml_move_bounce_solid",
     "move_bounce_all": "gml_move_bounce_all",
     "move_random": "gml_move_random",
     "move_snap": "gml_move_snap",
+    "move_wrap": "gml_move_wrap",
     "place_snapped": "gml_place_snapped",
 })
 

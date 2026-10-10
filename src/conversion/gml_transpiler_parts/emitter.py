@@ -14,6 +14,7 @@ from .constants import (
     BUILTIN_ARRAY_VARIABLES,
     BUILTIN_GLOBAL_VARIABLES,
     BUILTIN_INSTANCE_VARIABLES,
+    BUILTIN_VARIABLE_REGISTRY,
     COMPARISON_RUNTIME_FUNCTIONS,
     DIRECT_MEMBER_TARGETS,
     GML_BUILTIN_CONSTANT_IDENTIFIERS,
@@ -81,6 +82,12 @@ from .utils import (
     unwrap_grouped_expression as _unwrap_grouped_expression,
 )
 
+# Read-only instance variables the runtime computes on demand (the bounding
+# box from the collision mask); they have no script variable.
+_COMPUTED_INSTANCE_VARIABLES = frozenset(
+    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items() if metadata.subsystem == "collision_bounds"
+)
+
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_create_layer": frozenset({3}),
     "instance_create_depth": frozenset({3}),
@@ -106,6 +113,11 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "collision_rectangle_list": frozenset({4}),
     "collision_line_list": frozenset({4}),
     "collision_circle_list": frozenset({3}),
+    "collision_ellipse": frozenset({4}),
+    "collision_ellipse_list": frozenset({4}),
+    "instance_place_list": frozenset({2}),
+    "instance_position_list": frozenset({2}),
+    "place_empty": frozenset({2}),
 }
 
 
@@ -158,10 +170,9 @@ def _emit_name(
                 "GMRuntime.gml_struct_get("
                 f"GMRuntime.gml_global_scope(), {json.dumps(value)})"
             ), POSTFIX_PRECEDENCE
-        if value in INSTANCE_NAME_REPLACEMENTS and _uses_direct_builtin_instance_members(scope_context):
-            return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
-        if value in BUILTIN_INSTANCE_VARIABLES and _uses_direct_builtin_instance_members(scope_context):
-            return sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
+        builtin_member = _emit_builtin_instance_name(value, scope_context)
+        if builtin_member is not None:
+            return builtin_member
         if _is_gdscript_constant_identifier(value):
             return value, PRIMARY_PRECEDENCE
         if value in scope_context.direct_instance_names:
@@ -178,6 +189,21 @@ def _emit_name(
             ), POSTFIX_PRECEDENCE
     value = sanitize_gdscript_identifier(value)
     return value, PRIMARY_PRECEDENCE
+
+
+def _emit_builtin_instance_name(value: str, scope_context: _ScopeContext) -> tuple[str, int] | None:
+    """Emit a bare built-in instance variable read inside an object's own code."""
+    if value not in BUILTIN_INSTANCE_VARIABLES or not _uses_direct_builtin_instance_members(scope_context):
+        return None
+    if value in INSTANCE_NAME_REPLACEMENTS:
+        return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
+    if value in _COMPUTED_INSTANCE_VARIABLES:
+        # The bounding box has no script variable; the runtime computes it.
+        return (
+            f"GMRuntime.gml_struct_get({scope_context.self_expression}, {json.dumps(value)})",
+            POSTFIX_PRECEDENCE,
+        )
+    return sanitize_gdscript_identifier(value), PRIMARY_PRECEDENCE
 
 
 def _is_gdscript_constant_identifier(value: str) -> bool:
@@ -537,7 +563,13 @@ def _uses_direct_member_access(
         return False
     if expr.target.value == "self" and scope_context.self_expression != "self":
         return False
-    if expr.target.value == "other" and scope_context.other_expression != "other":
+    if expr.target.value == "self" and expr.member in BUILTIN_INSTANCE_VARIABLES:
+        # Built-in variables such as x, bbox_left or speed are not plain
+        # script variables of the converted instance.
+        return False
+    if expr.target.value == "other":
+        # other holds whichever instance or struct the event or with block
+        # set, so its members are looked up at run time like any instance's.
         return False
     return expr.target.value in DIRECT_MEMBER_TARGETS
 

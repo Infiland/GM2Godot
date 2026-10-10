@@ -152,6 +152,18 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("\tsolid = true", content)
         self.assertIn('GMRuntime.gml_variable_instance_set(self, "solid", solid)', content)
 
+    def test_object_runtime_starts_with_the_object_collision_mask(self):
+        masked = generate_script_content(
+            [],
+            object_runtime=ObjectRuntimeConfig(object_name="o_player", mask_sprite_name="s_hitbox"),
+        )
+        unmasked = generate_script_content([], object_runtime=ObjectRuntimeConfig(object_name="o_player"))
+
+        self.assertIn("\nvar mask_index = -1", masked)
+        self.assertIn('\tmask_index = GMRuntime.gml_asset_get_index("s_hitbox")', masked)
+        self.assertIn("\nvar mask_index = -1", unmasked)
+        self.assertIn("\tmask_index = -1", unmasked)
+
     def test_object_runtime_records_persistent_metadata_for_room_transitions(self):
         content = generate_script_content(
             [],

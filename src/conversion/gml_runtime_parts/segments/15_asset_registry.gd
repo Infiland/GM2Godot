@@ -129,6 +129,16 @@ static func gml_asset_get_index(asset_name):
 	return int(entry["id"])
 
 
+# GameMaker's sprite_get_name: the sprite's name, or "" when the value is not
+# a sprite. Sprite indices are registry ids, names or the sprite entry itself.
+static func gml_sprite_get_name(sprite):
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(sprite)
+	if entry == null or str(entry.get("type", "")) != "sprite":
+		return ""
+	return str(entry["name"])
+
+
 static func gml_asset_get_type(asset):
 	_gml_asset_registry_ensure_loaded()
 	var entry = _gml_asset_resolve(asset)

@@ -1,172 +1,112 @@
 from __future__ import annotations
 
-import os
-import subprocess
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 
-from src.conversion.gml_runtime import write_gml_runtime
-from tests.godot_test_support import (
-    find_smoke_godot_binary as _find_godot_binary,
-    write_fixture_text as _write_text,
+from src.conversion.json_values import JsonObject
+from src.conversion.script_generator import (
+    ObjectRuntimeConfig,
+    SpriteRuntimeConfig,
+    generate_script_content,
+)
+from tests.collision_runtime_support import (
+    CollisionSprite,
+    object_entry,
+    run_smoke_scene,
+    sprite_resource_path,
+    write_collision_project,
+)
+from tests.godot_test_support import find_smoke_godot_binary, write_fixture_text
+
+_SPRITE = CollisionSprite("spr_box16", 16, 16, (8, 8), (0, 0, 15, 15))
+
+# Objects in asset order, with their parent, solidity and collision events
+# (target object -> event body). The events report back to the smoke scene.
+_OBJECTS: tuple[tuple[str, str | None, bool, dict[str, str]], ...] = (
+    ("o_par", None, False, {"o_c": '\tget_parent().record("par:c", self, other)'}),
+    (
+        "o_a",
+        None,
+        False,
+        {
+            "o_par": '\tget_parent().record("a:par", self, other)',
+            "o_b": (
+                '\tget_parent().record("a:b", self, other)\n'
+                '\tif label == "killer":\n'
+                "\t\tGMRuntime.gml_instance_destroy(self)\n"
+                '\tif label == "spawner":\n'
+                '\t\tget_parent().spawn("o_b", "spawned", position.x, position.y)'
+            ),
+        },
+    ),
+    ("o_b", None, False, {"o_a": '\tget_parent().record("b:a", self, other)'}),
+    ("o_child", "o_par", False, {"o_a": '\tget_parent().record("child:a", self, other)'}),
+    ("o_wall", None, True, {"o_a": '\tget_parent().record("wall:a", self, other)'}),
+    ("o_same", None, False, {"o_same": '\tget_parent().record("same", self, other)'}),
+    ("o_c", None, False, {}),
 )
 
 
-def _write_smoke_scene(project_dir: Path) -> None:
-    probe_script = textwrap.dedent(
-        """\
-        extends Node2D
-
-        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
-
-        var id = GMRuntime.gml_instance_noone()
-        var other = GMRuntime.gml_instance_noone()
-        var object_name = ""
-        var parent_names = []
-        var solid = false
-        var trace = []
-        var xprevious = 0.0
-        var yprevious = 0.0
-
-        func configure(instance_name, gm_object_name, gm_parent_names, is_solid, trace_ref, world_position):
-        \tname = str(instance_name)
-        \tobject_name = str(gm_object_name)
-        \tparent_names = gm_parent_names
-        \tsolid = bool(is_solid)
-        \ttrace = trace_ref
-        \tglobal_position = world_position
-        \txprevious = world_position.x
-        \typrevious = world_position.y
-
-        func _ready():
-        \t_ensure_collision_shape()
-        \tid = GMRuntime.gml_instance_register(self, object_name, parent_names)
-
-        func _exit_tree():
-        \tGMRuntime.gml_instance_unregister(id)
-
-        func _ensure_collision_shape():
-        \tif get_child_count() > 0:
-        \t\treturn
-        \tvar shape_node = CollisionShape2D.new()
-        \tvar rect = RectangleShape2D.new()
-        \trect.size = Vector2(16, 16)
-        \tshape_node.shape = rect
-        \tadd_child(shape_node)
-
-        func _gm_collision_event_bindings():
-        \tif object_name != "o_player":
-        \t\treturn []
-        \treturn [
-        \t\t{"target_object": "o_wall_parent", "method": "_on_collision_o_wall_parent"},
-        \t]
-
-        func _on_collision_o_wall_parent():
-        \ttrace.append(name + ":hit:" + str(other.name) + ":x=" + str(int(global_position.x)))
-        \tGMRuntime.gml_instance_destroy(other)
-        """
-    )
-    smoke_script = textwrap.dedent(
-        """\
-        extends Node2D
-
-        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
-        const CollisionProbe = preload("res://collision_probe.gd")
-
-        func _check(condition, message):
-        \tif not condition:
-        \t\tpush_error(str(message))
-        \t\tget_tree().quit(1)
-        \t\treturn false
-        \treturn true
-
-        func _ready():
-        \tvar trace = []
-        \tvar player = CollisionProbe.new()
-        \tplayer.configure("Player", "o_player", [], false, trace, Vector2(20, 0))
-        \tplayer.xprevious = 0
-        \tplayer.yprevious = 0
-        \tadd_child(player)
-        \tvar wall = CollisionProbe.new()
-        \twall.configure("Wall", "o_wall_child", ["o_wall_parent"], true, trace, Vector2(20, 0))
-        \tadd_child(wall)
-
-        \tGMRuntime.gml_collision_event_trace_clear()
-        \tvar dispatched = GMRuntime.gml_collision_event_dispatch_frame([player, wall], 7)
-        \tif not _check(dispatched == 1, "collision dispatch count mismatch: " + str(dispatched)):
-        \t\treturn
-        \tif not _check(trace == ["Player:hit:Wall:x=0"], "collision trace mismatch: " + str(trace)):
-        \t\treturn
-        \tif not _check(not GMRuntime.gml_handle_is_valid(wall.id), "destroyed collision other handle remained valid"):
-        \t\treturn
-        \tif not _check(not GMRuntime.gml_handle_is_valid(player.other), "other was not restored after dispatch"):
-        \t\treturn
-        \tvar runtime_trace = GMRuntime.gml_collision_event_trace()
-        \tif not _check(runtime_trace[0]["event"] == "solid_rollback", "solid rollback trace missing"):
-        \t\treturn
-        \tif not _check(runtime_trace[1]["method"] == "_on_collision_o_wall_parent", "collision method trace missing"):
-        \t\treturn
-        \tprint("COLLISION_EVENT_SMOKE_OK")
-        \tget_tree().quit(0)
-        """
-    )
-    smoke_scene = textwrap.dedent(
-        """\
-        [gd_scene load_steps=2 format=3]
-
-        [ext_resource type="Script" path="res://smoke.gd" id="1"]
-
-        [node name="Smoke" type="Node2D"]
-        script = ExtResource("1")
-        """
-    )
-    _write_text(project_dir / "collision_probe.gd", probe_script)
-    _write_text(project_dir / "smoke.gd", smoke_script)
-    _write_text(project_dir / "smoke.tscn", smoke_scene)
+def _collision_event(target: str) -> JsonObject:
+    return {
+        "eventType": 4,
+        "eventNum": 0,
+        "collisionObjectId": {"name": target, "path": f"objects/{target}/{target}.yy"},
+    }
 
 
-class TestCollisionEventGodotSmoke(unittest.TestCase):
-    def test_collision_dispatch_parent_other_solid_and_destroy(self) -> None:
-        godot_binary = _find_godot_binary()
+def _write_objects(project_dir: Path) -> None:
+    sprite_scenes = {_SPRITE.name: sprite_resource_path(_SPRITE.name)}
+    for name, parent, solid, events in _OBJECTS:
+        script = generate_script_content(
+            [_collision_event(target) for target in events],
+            code_bodies={f"_on_collision_{target}": body for target, body in events.items()},
+            instance_variables=() if parent else ("label",),
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name=_SPRITE.name,
+                sprite_scene_paths=sprite_scenes,
+                inherit_runtime=parent is not None,
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name=name,
+                parent_object_names=(parent,) if parent else (),
+                solid=solid,
+                inherit_ready=parent is not None,
+                inherit_exit_tree=parent is not None,
+            ),
+            base_script_path=f"res://objects/{parent}/{parent}.gd" if parent else None,
+        )
+        write_fixture_text(project_dir / "objects" / name / f"{name}.gd", script)
+
+
+class TestCollisionEventsGodot(unittest.TestCase):
+    def test_generated_collision_events_follow_the_gamemaker_runner(self) -> None:
+        godot_binary = find_smoke_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project_dir = Path(tmpdir)
-            _write_text(
-                project_dir / "project.godot",
-                '[application]\nconfig/name="CollisionEventSmoke"\nrun/main_scene="res://smoke.tscn"\n',
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_dir = Path(temporary_directory)
+            write_collision_project(
+                project_dir,
+                project_name="CollisionEvents",
+                sprites=(_SPRITE,),
+                objects=tuple(
+                    object_entry(100 + index, name) for index, (name, *_rest) in enumerate(_OBJECTS)
+                ),
+                fixture_files={"smoke.gd": "events_smoke.gd"},
+                application_settings="config/gm2godot_collision_compatibility=true\n",
             )
-            write_gml_runtime(str(project_dir))
-            _write_smoke_scene(project_dir)
-
-            godot_env = dict(os.environ)
-            godot_env["HOME"] = str(project_dir)
-            result = subprocess.run(
-                [
-                    godot_binary,
-                    "--headless",
-                    "--log-file",
-                    str(project_dir / "godot.log"),
-                    "--path",
-                    str(project_dir),
-                    "--scene",
-                    "res://smoke.tscn",
-                    "--quit-after",
-                    "10",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=20,
-                check=False,
-                env=godot_env,
-            )
+            _write_objects(project_dir)
+            result = run_smoke_scene(godot_binary, project_dir)
             output = result.stdout + result.stderr
 
         self.assertEqual(result.returncode, 0, output)
-        self.assertIn("COLLISION_EVENT_SMOKE_OK", output)
+        self.assertIn("COLLISION_EVENTS_OK", output)
+        self.assertNotIn("SCRIPT ERROR:", output)
+        self.assertNotIn("ERROR:", output)
+        self.assertNotIn("WARNING:", output)
 
 
 if __name__ == "__main__":

@@ -387,11 +387,28 @@ static func _to_array_index(value):
 	return resolved_index
 
 
+static var _gml_script_property_names_cache = {}
+
+
 static func _object_has_property(object_value, property_name):
-	for property in object_value.get_property_list():
-		if property.get("name") == property_name:
-			return true
-	return false
+	# get_property_list() allocates every property description, so scripted
+	# objects (all converted instances) cache their names per class + script.
+	# Scriptless objects keep the full scan: some built-in classes expose
+	# per-instance properties (e.g. shader parameters).
+	var script = object_value.get_script()
+	if script == null:
+		for property in object_value.get_property_list():
+			if property.get("name") == property_name:
+				return true
+		return false
+	var cache_key = "%s:%d" % [object_value.get_class(), script.get_instance_id()]
+	var names = _gml_script_property_names_cache.get(cache_key)
+	if names == null:
+		names = {}
+		for property in object_value.get_property_list():
+			names[str(property.get("name"))] = true
+		_gml_script_property_names_cache[cache_key] = names
+	return names.has(str(property_name))
 
 
 static func _gml_one_based_index(value):

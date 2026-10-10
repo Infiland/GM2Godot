@@ -366,7 +366,7 @@ static func _gml_input_instance_snapshot(instances):
 static func _gml_input_instance_valid(inst):
 	if inst == null:
 		return false
-	if inst is Object and not is_instance_valid(inst):
+	if typeof(inst) == TYPE_OBJECT and not is_instance_valid(inst):
 		return false
 	return true
 

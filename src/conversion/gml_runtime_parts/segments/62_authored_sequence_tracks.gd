@@ -1214,7 +1214,7 @@ static func _gml_sequence_cleanup_track(state):
 	for nested in state.get("nested", {}).values():
 		_gml_sequence_cleanup_instance(nested)
 	for content in state.get("contents", {}).values():
-		if content is Object and not is_instance_valid(content):
+		if typeof(content) == TYPE_OBJECT and not is_instance_valid(content):
 			continue
 		if content is AudioStreamPlayer2D:
 			content.stop()

@@ -2676,7 +2676,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("func _physics_process(delta):", content)
 
     def test_script_with_draw_event(self):
-        """eventType 8, eventNum 0 should produce func _draw()."""
+        """eventType 8, eventNum 0 should produce func _on_draw()."""
         self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2684,7 +2684,7 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _draw():", content)
+        self.assertIn("func _on_draw():", content)
 
     def test_script_with_cleanup_event(self):
         """eventType 12 should produce func _exit_tree()."""

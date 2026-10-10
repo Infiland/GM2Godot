@@ -54,6 +54,12 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn("var solid = false", content)
+        self.assertIn(
+            "var _gm_depth = 0.0\nvar depth:\n\tget:\n\t\treturn GMRuntime.gml_instance_depth_get(self, _gm_depth)\n\tset(value):\n"
+            "\t\t_gm_depth = GMRuntime.gml_instance_depth_assign(self, value, _gm_depth)",
+            content,
+        )
+        self.assertIn("\t_gm_depth = GMRuntime.gml_instance_depth_initial(self, _gm_depth)", content)
         self.assertIn("var speed = 0.0", content)
         self.assertIn(
             "func _gm_apply_motion_step():\n\tGMRuntime.gml_path_step(self)\n\tGMRuntime.gml_motion_step(self)",
@@ -81,7 +87,8 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\n\nvar id =", content)
         self.assertNotIn("\nvar other =", content)
         self.assertNotIn("\nvar object_index =", content)
-        self.assertNotIn("\nvar depth = 0", content)
+        self.assertNotIn("\nvar depth:", content)
+        self.assertNotIn("\nvar _gm_depth", content)
         self.assertIn(
             "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
             content,
@@ -184,8 +191,8 @@ class TestScriptGeneratorEvents(unittest.TestCase):
     def test_draw_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 0}])
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
-        self.assertIn("func _draw():", content)
-        self.assertIn('GMRuntime.gml_draw_begin(self, "_draw")', content)
+        self.assertIn("func _on_draw():", content)
+        self.assertIn('GMRuntime.gml_draw_begin(self, "_on_draw")', content)
         self.assertIn("GMRuntime.gml_draw_end()", content)
 
     def test_cleanup_event(self):

@@ -323,7 +323,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("cull_clockwise", "1"),
     RuntimeValueParityCase("gpu_set_blendmode(bm_add)", "GMRuntime.gml_gpu_set_blendmode(1)"),
     RuntimeValueParityCase("gpu_get_blendmode()", "GMRuntime.gml_gpu_get_blendmode()"),
-    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(2)"),
+    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(3)"),
+    RuntimeValueParityCase("bm_max", "2"),
+    RuntimeValueParityCase("bm_min", "4"),
+    RuntimeValueParityCase("bm_reverse_subtract", "5"),
     RuntimeValueParityCase(
         "draw_circle_color(4, 5, 8, c_white, c_black, false)",
         "GMRuntime.gml_draw_circle_color(4, 5, 8, 0xffffff, 0x000000, false)",
@@ -705,6 +708,24 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("make_color_rgb(255, 128, 0)", "GMRuntime.gml_make_color_rgb(255, 128, 0)"),
     RuntimeValueParityCase("draw_set_color(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
     RuntimeValueParityCase("draw_get_color()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase("draw_set_colour(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
+    RuntimeValueParityCase("draw_get_colour()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase(
+        'draw_text_colour(1, 2, "a", c_red, c_red, c_blue, c_blue, 0.5)',
+        'GMRuntime.gml_draw_text_color(1, 2, "a", 0x0000ff, 0x0000ff, 0xff0000, 0xff0000, 0.5)',
+    ),
+    RuntimeValueParityCase(
+        "draw_line_width_colour(0, 1, 2, 3, 4, c_red, c_blue)",
+        "GMRuntime.gml_draw_line_width_color(0, 1, 2, 3, 4, 0x0000ff, 0xff0000)",
+    ),
+    RuntimeValueParityCase(
+        "draw_sprite_stretched(spr_player, 0, 1, 2, 3, 4)",
+        'GMRuntime.gml_draw_sprite_stretched(GMRuntime.gml_asset_get_index("spr_player"), 0, 1, 2, 3, 4)',
+    ),
+    RuntimeValueParityCase(
+        "draw_healthbar(0, 0, 10, 4, 50, c_black, c_red, c_lime, 0, true, true)",
+        "GMRuntime.gml_draw_healthbar(0, 0, 10, 4, 50, 0x000000, 0x0000ff, 0x00ff00, 0, true, true)",
+    ),
     RuntimeValueParityCase("draw_set_alpha(0.5)", "GMRuntime.gml_draw_set_alpha(0.5)"),
     RuntimeValueParityCase("draw_get_alpha()", "GMRuntime.gml_draw_get_alpha()"),
     RuntimeValueParityCase("draw_set_line_width(2)", "GMRuntime.gml_draw_set_line_width(2)"),
@@ -2938,7 +2959,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_draw_event_phase_order():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_draw_event_trace():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_surface_target_stack_depth():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_draw_instance_order_less(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_draw_sort_by_depth(nodes):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gm2godot_draw_event_trace_enable(enabled = true):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_input_event_dispatch_helpers(self):
         self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)

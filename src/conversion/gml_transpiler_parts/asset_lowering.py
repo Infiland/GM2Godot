@@ -28,6 +28,8 @@ _DRAW_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
     "draw_sprite_pos": frozenset({0}),
     "draw_sprite_tiled": frozenset({0}),
     "draw_sprite_tiled_ext": frozenset({0}),
+    "draw_sprite_stretched": frozenset({0}),
+    "draw_sprite_stretched_ext": frozenset({0}),
     "draw_tile": frozenset({0}),
     "draw_set_font": frozenset({0}),
     "sprite_get_texture": frozenset({0}),

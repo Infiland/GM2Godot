@@ -282,12 +282,10 @@ static func _gml_instance_creation_parent(current_self, layer):
 
 
 static func _gml_instance_apply_depth(instance, depth_value):
-	var resolved_depth = int(_to_real(depth_value))
-	if instance is CanvasItem:
-		instance.z_index = -resolved_depth
+	var resolved_depth = _to_real(depth_value)
 	if instance is Object:
-		if _object_has_property(instance, "depth"):
-			instance.set("depth", resolved_depth)
+		instance.set("depth", resolved_depth)
+	gml_instance_depth_assign(instance, resolved_depth)
 
 
 static func _gml_instance_set_meta(instance, key, value):

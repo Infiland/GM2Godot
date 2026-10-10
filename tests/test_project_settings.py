@@ -506,7 +506,10 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         os.makedirs(os.path.join(self.gm_dir, "options", "main"), exist_ok=True)
         os.makedirs(os.path.join(self.gm_dir, "options", "windows"), exist_ok=True)
         with open(os.path.join(self.gm_dir, "options", "main", "options_main.yy"), "w", encoding="utf-8") as f:
-            f.write('{"option_game_speed":144,}')
+            f.write(
+                '{"option_game_speed":144,"option_draw_colour":4278255360,'
+                '"option_legacy_primitive_drawing":false,}'
+            )
         with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
             f.write(
                 "{"
@@ -569,6 +572,9 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn("window/size/borderless=false", content)
         self.assertIn("textures/canvas_textures/default_texture_filter=1", content)
         self.assertIn("window/size/mode=3", content)
+        gm2godot = self._section_body(content, "gm2godot")
+        self.assertIn("draw/initial_colour=65280", gm2godot)
+        self.assertIn("draw/legacy_primitive_drawing=false", gm2godot)
         unsupported_logs = [
             log for log in self.logs if "option_windows_custom_future" in log
         ]

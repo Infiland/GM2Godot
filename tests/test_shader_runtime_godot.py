@@ -49,6 +49,9 @@ class TestShaderRuntimeGodotSmoke(unittest.TestCase):
             func _ready():
             \tcall_deferred("_run")
 
+            func _active_material():
+            \treturn GMRuntime._gml_draw_state["shader_material"]
+
             func _run():
             \tGMRuntime.gml_asset_registry_set([{
             \t\t"id": 1001,
@@ -72,6 +75,7 @@ class TestShaderRuntimeGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_draw_begin(self, "_draw")
             \tif not _check(GMRuntime.gml_shader_set(shader_id), "shader_set failed"):
             \t\treturn
+            \tvar material = _active_material()
             \tif not _check(material is ShaderMaterial, "shader material was not applied"):
             \t\treturn
 
@@ -109,7 +113,7 @@ class TestShaderRuntimeGodotSmoke(unittest.TestCase):
 
             \tGMRuntime.gml_surface_free(surf)
             \tGMRuntime.gml_shader_reset()
-            \tif not _check(not (material is ShaderMaterial), "shader_reset did not restore non-shader material"):
+            \tif not _check(not (_active_material() is ShaderMaterial), "shader_reset did not restore non-shader material"):
             \t\treturn
             \tGMRuntime.gml_draw_end()
             \tprint("SHADER_RUNTIME_SMOKE_OK")

@@ -535,6 +535,15 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
     )
 
 
+def _guard_create_event_body(body: str) -> str:
+    # GameMaker runs no Create event for an instance created after the
+    # current event requested a room change (unless the instance or room is
+    # persistent); the instance still exists until the room ends.
+    if body.strip() == "pass":
+        return body
+    return "\tif GMRuntime.gml_event_create_blocked(self):\n\t\treturn\n" + body
+
+
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
     init_lines = ["\t_gm_register_instance()", "\t_gm_initialize_motion_runtime()"]
     should_call_parent_ready = object_runtime.inherit_ready
@@ -697,6 +706,7 @@ def generate_script_content(
         unique_functions = _deduplicate_functions(unique_functions + [EventMapping("_ready", "", 0, "")])
         function_names = {func.godot_func for func in unique_functions}
     if uses_object_runtime:
+        effective_code_bodies["_ready"] = _guard_create_event_body(effective_code_bodies.get("_ready", "\tpass"))
         required_functions: list[EventMapping] = []
         if "_ready" not in function_names:
             required_functions.append(EventMapping("_ready", "", 0, ""))

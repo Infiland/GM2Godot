@@ -2705,7 +2705,13 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
-        self.assertIn("\t_gm_initialize_sprite_runtime()\n\timage_index = 2", content)
+        self.assertIn(
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\timage_index = 2",
+            content,
+        )
         self.assertIn("\tsprite_index = s_enemy", content)
         self.assertNotIn("\n\nvar image_index\n", content)
         self.assertNotIn("\n\nvar sprite_index\n", content)

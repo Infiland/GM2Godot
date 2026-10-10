@@ -13,8 +13,17 @@ const GML_MOTION_DEFAULT_STEPS = 1000
 const GML_MOTION_RANDOM_ATTEMPTS = 99
 const GML_MOTION_BOUNCE_ANGLES = 35
 
+# Whether a script declares direction, speed, hspeed, vspeed, friction and
+# gravity (converted objects do): their instances' motion members are then
+# read and written directly instead of by name.
+static var _gml_motion_member_scripts = {}
+
 
 static func gml_motion_set(current_self, direction, speed):
+	if _gml_motion_is_instance(current_self):
+		_gml_motion_assign_direction(current_self, direction)
+		_gml_motion_assign_speed(current_self, speed)
+		return null
 	for instance in _gml_motion_instances(current_self):
 		_gml_motion_assign_direction(instance, direction)
 		_gml_motion_assign_speed(instance, speed)
@@ -29,6 +38,9 @@ static func gml_motion_add(current_self, direction, speed):
 
 static func gml_motion_set_speed(target, value):
 	var result = _to_real(value)
+	if _gml_motion_is_instance(target):
+		_gml_motion_assign_speed(target, result)
+		return result
 	for instance in _gml_motion_instances(target):
 		_gml_motion_assign_speed(instance, result)
 	return result
@@ -36,6 +48,9 @@ static func gml_motion_set_speed(target, value):
 
 static func gml_motion_set_direction(target, value):
 	var result = _gml_motion_wrap_direction(_to_real(value))
+	if _gml_motion_is_instance(target):
+		_gml_motion_assign_direction(target, result)
+		return result
 	for instance in _gml_motion_instances(target):
 		_gml_motion_assign_direction(instance, result)
 	return result
@@ -62,6 +77,9 @@ static func gml_motion_sync_from_speed_direction(target):
 
 
 static func gml_motion_step(current_self):
+	if _gml_motion_is_instance(current_self):
+		_gml_motion_step_instance(current_self)
+		return null
 	for instance in _gml_motion_instances(current_self):
 		_gml_motion_step_instance(instance)
 	return null
@@ -153,7 +171,15 @@ static func gml_place_snapped(current_self, hsnap, vsnap):
 	return true
 
 
+# Whether the target is an instance itself (self, other, a stored instance):
+# gml_with_targets then gives just that instance.
+static func _gml_motion_is_instance(target):
+	return typeof(target) == TYPE_OBJECT and is_instance_valid(target) and target is Node
+
+
 static func _gml_motion_instances(target):
+	if _gml_motion_is_instance(target):
+		return [target]
 	var instances = []
 	for instance in gml_with_targets(target):
 		if instance != null:
@@ -167,6 +193,22 @@ static func _gml_motion_step_instance(instance):
 	# xprevious/yprevious hold the position from the start of the step; the
 	# step loop records them before Begin Step.
 
+	if _gml_motion_declares_members(instance):
+		# Without friction and gravity the instance just moves by
+		# hspeed/vspeed, as below.
+		var member_friction = instance.friction
+		var member_gravity = instance.gravity
+		var member_hspeed = instance.hspeed
+		var member_vspeed = instance.vspeed
+		if (
+			typeof(member_friction) == TYPE_FLOAT and member_friction == 0.0
+			and typeof(member_gravity) == TYPE_FLOAT and member_gravity == 0.0
+			and typeof(member_hspeed) == TYPE_FLOAT and typeof(member_vspeed) == TYPE_FLOAT
+		):
+			if member_hspeed != 0.0 or member_vspeed != 0.0:
+				var member_position = _gml_motion_position(instance)
+				_gml_motion_set_position(instance, Vector2(member_position.x + member_hspeed, member_position.y + member_vspeed))
+			return
 	var hspeed_value = _gml_motion_real(instance, "hspeed", 0.0)
 	var vspeed_value = _gml_motion_real(instance, "vspeed", 0.0)
 	# Friction and gravity change the motion before the instance moves.
@@ -400,6 +442,15 @@ static func _gml_motion_assign_vspeed(instance, value):
 
 static func _gml_motion_assign_speed(instance, value):
 	var speed_value = _to_real(value)
+	if _gml_motion_declares_members(instance):
+		var current_speed = instance.speed
+		if typeof(current_speed) != TYPE_FLOAT:
+			current_speed = _gml_motion_real(instance, "speed", 0.0)
+		if speed_value == current_speed:
+			return
+		instance.speed = speed_value
+		_gml_motion_compute_components(instance)
+		return
 	if speed_value == _gml_motion_real(instance, "speed", 0.0):
 		return
 	_gml_motion_write(instance, "speed", speed_value)
@@ -407,7 +458,11 @@ static func _gml_motion_assign_speed(instance, value):
 
 
 static func _gml_motion_assign_direction(instance, value):
-	_gml_motion_write(instance, "direction", _gml_motion_wrap_direction(_to_real(value)))
+	var direction_value = _gml_motion_wrap_direction(_to_real(value))
+	if _gml_motion_declares_members(instance):
+		instance.direction = direction_value
+	else:
+		_gml_motion_write(instance, "direction", direction_value)
 	_gml_motion_compute_components(instance)
 
 
@@ -419,10 +474,39 @@ static func _gml_motion_add_to_speed(instance, direction, amount):
 
 
 static func _gml_motion_compute_components(instance):
+	if _gml_motion_declares_members(instance):
+		# The members below hold reals unless GML code stored something else
+		# in them; anything else is read the general way.
+		var member_speed = instance.speed
+		if typeof(member_speed) != TYPE_FLOAT:
+			member_speed = _gml_motion_real(instance, "speed", 0.0)
+		var member_direction = instance.direction
+		if typeof(member_direction) != TYPE_FLOAT:
+			member_direction = _gml_motion_real(instance, "direction", 0.0)
+		var member_radians = member_direction * GML_MOTION_DEGREES_TO_RADIANS
+		instance.hspeed = _gml_motion_snap_whole(member_speed * _gml_motion_clamp_float(cos(member_radians)))
+		instance.vspeed = _gml_motion_snap_whole(-member_speed * _gml_motion_clamp_float(sin(member_radians)))
+		return
 	var speed_value = _gml_motion_real(instance, "speed", 0.0)
 	var radians = _gml_motion_real(instance, "direction", 0.0) * GML_MOTION_DEGREES_TO_RADIANS
 	_gml_motion_write(instance, "hspeed", _gml_motion_snap_whole(speed_value * _gml_motion_clamp_float(cos(radians))))
 	_gml_motion_write(instance, "vspeed", _gml_motion_snap_whole(-speed_value * _gml_motion_clamp_float(sin(radians))))
+
+
+static func _gml_motion_declares_members(instance):
+	if typeof(instance) != TYPE_OBJECT:
+		return false
+	var script = instance.get_script()
+	if script == null:
+		return false
+	var declared = _gml_motion_member_scripts.get(script)
+	if declared == null:
+		declared = (
+			"direction" in instance and "speed" in instance and "hspeed" in instance and "vspeed" in instance
+			and "friction" in instance and "gravity" in instance
+		)
+		_gml_motion_member_scripts[script] = declared
+	return declared
 
 
 static func _gml_motion_compute_polar(instance):

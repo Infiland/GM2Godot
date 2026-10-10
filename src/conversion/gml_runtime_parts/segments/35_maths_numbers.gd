@@ -5,6 +5,10 @@ const GML_RANDOM_UNIT_DENOMINATOR = 4294967296.0
 const GML_MATH_DEFAULT_EPSILON = 0.00001
 const GML_MATH_MINIMUM_EPSILON = 0.00000000001
 const GML_COMPARE_UNORDERED = -2
+# The value of pi, and of pi / 180, that GameMaker's runner uses in
+# point_direction and degtorad.
+const GML_RUNNER_PI = 3.14159265
+const GML_RUNNER_DEGREES_TO_RADIANS = 0.0174532925
 
 static var _gml_random_seed = GML_RANDOM_DEFAULT_SEED
 static var _gml_random_state = GML_RANDOM_DEFAULT_SEED
@@ -232,7 +236,10 @@ static func gml_darctan2(y, x):
 
 
 static func gml_degtorad(value):
-	return deg_to_rad(_gml_math_real("GML degtorad", value))
+	if not _is_real_convertible(value):
+		return gml_unsupported_type_error("GML degtorad", value)
+	# The runner multiplies by its rounded pi / 180.
+	return _to_real(value) * GML_RUNNER_DEGREES_TO_RADIANS
 
 
 static func gml_radtodeg(value):
@@ -246,10 +253,23 @@ static func gml_point_distance(x1, y1, x2, y2):
 
 
 static func gml_point_direction(x1, y1, x2, y2):
-	if not _gml_math_all_real([x1, y1, x2, y2]):
+	if not (_is_real_convertible(x1) and _is_real_convertible(y1) and _is_real_convertible(x2) and _is_real_convertible(y2)):
 		return gml_error("GML point_direction requires real-convertible arguments")
-	var angle = rad_to_deg(atan2(_to_real(y1) - _to_real(y2), _to_real(x2) - _to_real(x1)))
-	return _gml_angle_normalize(angle)
+	# GameMaker's point_direction: a vertical vector points exactly up (90)
+	# or down (270), no vector gives 0, and other angles are rounded to six
+	# decimals (computed with the runner's value of pi).
+	var dx = _to_real(x2) - _to_real(x1)
+	var dy = _to_real(y2) - _to_real(y1)
+	if dx == 0.0:
+		if dy > 0.0:
+			return 270.0
+		if dy < 0.0:
+			return 90.0
+		return 0.0
+	var degrees = _gml_collision_round(180.0 * atan2(dy, dx) / GML_RUNNER_PI * 1000000.0) / 1000000.0
+	# (0.0 - degrees rather than -degrees: a vector straight right gives 0,
+	# not -0.)
+	return 0.0 - degrees if degrees <= 0.0 else 360.0 - degrees
 
 
 static func gml_lengthdir_x(length, direction):

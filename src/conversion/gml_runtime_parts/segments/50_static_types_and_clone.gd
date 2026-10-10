@@ -127,6 +127,14 @@ static func gml_shift_right(left, right):
 
 
 static func gml_eq(left, right):
+	# Two plain numbers (the common case) compare with GameMaker's epsilon and
+	# two strings by their text, exactly as the general checks below do.
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return _gml_compare_reals(float(left), float(right)) == 0
+	if left_type == TYPE_STRING and right_type == TYPE_STRING:
+		return left == right
 	if is_undefined(left) or is_undefined(right):
 		return is_undefined(left) and is_undefined(right)
 	if is_ptr(left) or is_ptr(right):
@@ -161,6 +169,11 @@ static func _gml_compare_numeric(left, right):
 
 
 static func gml_lt(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order < 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
 		var order = _gml_compare_numeric(left, right)
 		return order != GML_COMPARE_UNORDERED and order < 0
@@ -170,6 +183,11 @@ static func gml_lt(left, right):
 
 
 static func gml_lte(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order <= 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
 		var order = _gml_compare_numeric(left, right)
 		return order != GML_COMPARE_UNORDERED and order <= 0
@@ -179,6 +197,11 @@ static func gml_lte(left, right):
 
 
 static func gml_gt(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order > 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
 		var order = _gml_compare_numeric(left, right)
 		return order != GML_COMPARE_UNORDERED and order > 0
@@ -188,6 +211,11 @@ static func gml_gt(left, right):
 
 
 static func gml_gte(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order >= 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
 		var order = _gml_compare_numeric(left, right)
 		return order != GML_COMPARE_UNORDERED and order >= 0
@@ -276,6 +304,11 @@ static func gml_string(value):
 
 
 static func gml_bool(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_BOOL:
+		return value
+	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
+		return float(value) > 0.5
 	if is_undefined(value):
 		return false
 	if is_ptr(value):

@@ -13,7 +13,10 @@ static func gml_unsupported_binary_type_error(api_name, left, right):
 
 
 static func _is_real_convertible(value):
-	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value) or is_string(value)
+	var value_type = typeof(value)
+	if value_type == TYPE_FLOAT or value_type == TYPE_INT or value_type == TYPE_BOOL or value_type == TYPE_STRING:
+		return true
+	return is_handle(value) or is_int64(value) or is_string(value)
 
 
 static func _is_int64_convertible(value):
@@ -21,10 +24,18 @@ static func _is_int64_convertible(value):
 
 
 static func _is_arithmetic_real_operand(value):
-	return is_handle(value) or is_int64(value) or is_number(value) or is_bool(value)
+	var value_type = typeof(value)
+	if value_type == TYPE_FLOAT or value_type == TYPE_INT or value_type == TYPE_BOOL:
+		return true
+	return is_handle(value) or is_int64(value)
 
 
 static func _to_real(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_FLOAT:
+		return value
+	if value_type == TYPE_INT:
+		return float(value)
 	if is_ptr(value):
 		return gml_unsupported_type_error("GML numeric conversion", value)
 	if is_handle(value):

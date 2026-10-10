@@ -122,6 +122,11 @@ static func gml_asset_registry_entries():
 
 
 static func gml_asset_get_index(asset_name):
+	if _gml_asset_registry_loaded and typeof(asset_name) == TYPE_STRING:
+		# The common case: an asset named in code.
+		var named = _gml_asset_by_name.get(asset_name)
+		if named != null:
+			return int(named["id"])
 	_gml_asset_registry_ensure_loaded()
 	var entry = _gml_asset_resolve(asset_name)
 	if entry == null:

@@ -2373,8 +2373,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
             GML_RUNTIME_SCRIPT,
         )
+        # Plain numbers and bools come first; undefined is false.
         self.assertIn(
-            "static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false",
+            "static func gml_bool(value):\n\tvar value_type = typeof(value)\n\tif value_type == TYPE_BOOL:\n\t\treturn value\n"
+            "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n"
+            "\tif is_undefined(value):\n\t\treturn false",
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
@@ -2434,7 +2437,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return INF if left_value > 0.0 else -INF", GML_RUNTIME_SCRIPT)
         self.assertIn("return left_value / right_value", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_sqrt(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if real_value < 0.0:\n\t\treturn NAN", GML_RUNTIME_SCRIPT)
+        # math_set_epsilon applies to sqrt: values within it below 0 give 0.
+        self.assertIn(
+            "if real_value < 0.0:\n\t\t# Like comparisons, sqrt uses math_set_epsilon: a negative value no\n"
+            "\t\t# further from 0 than the epsilon counts as 0.\n"
+            "\t\tif real_value >= -_gml_math_epsilon:\n\t\t\treturn 0.0\n\t\treturn NAN",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
@@ -2637,7 +2646,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if is_undefined(left) or is_undefined(right):\n\t\treturn is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tif is_undefined(value):\n\t\treturn false\n\tif is_ptr(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn(
             "if not is_undefined(stored_key):\n\t\t\treturn resolved_map[stored_key]",

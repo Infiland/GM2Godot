@@ -80,7 +80,7 @@ def resolve_room_creation_code(
         source_resolver=source_resolver,
         warn_callback=warn_callback,
     )
-    metadata = CreationCodeMetadata(
+    return CreationCodeMetadata(
         has_code=bool(source_file),
         inherit_code=bool(room.inherit_code),
         is_dnd=bool(getattr(room, "is_dnd", False)),
@@ -90,21 +90,6 @@ def resolve_room_creation_code(
         execution_phase_index=ROOM_EXECUTION_ORDER.index("room_creation_code"),
         path_rejected=path_rejected,
     )
-
-    if (
-        metadata.has_code
-        and not metadata.exists
-        and not metadata.path_rejected
-        and warn_callback is not None
-    ):
-        warn_callback(
-            "Info: Missing GameMaker room creation code file for room {room}: {path}".format(
-                room=room.name,
-                path=metadata.source_path,
-            )
-        )
-
-    return metadata
 
 
 def resolve_instance_creation_code(
@@ -155,7 +140,7 @@ def resolve_instance_creation_code(
                 warn_callback=warn_callback,
             )
 
-    metadata = CreationCodeMetadata(
+    return CreationCodeMetadata(
         has_code=has_code,
         inherit_code=bool(instance.get("inheritCode", False)),
         is_dnd=bool(instance.get("isDnd", False)),
@@ -165,23 +150,6 @@ def resolve_instance_creation_code(
         execution_phase_index=ROOM_EXECUTION_ORDER.index("instance_creation_code"),
         path_rejected=path_rejected,
     )
-
-    if (
-        metadata.has_code
-        and not metadata.exists
-        and not metadata.path_rejected
-        and warn_callback is not None
-    ):
-        warn_callback(
-            "Info: Missing GameMaker instance creation code file for room {room}, "
-            "instance {instance}: {path}".format(
-                room=room.name,
-                instance=instance_name,
-                path=metadata.source_path,
-            )
-        )
-
-    return metadata
 
 
 def instance_creation_order_names(room: RoomCreationCodeRoom) -> list[str]:

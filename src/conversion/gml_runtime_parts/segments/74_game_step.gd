@@ -228,7 +228,7 @@ static func _gml_step_finish():
 
 static func _gml_step_add_entry(entry):
 	var inst = entry["instance"]
-	if not (inst is Object) or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
 	_gml_step_entries.append(entry)
 	_gml_step_infos.append(_gml_step_script_info(inst))

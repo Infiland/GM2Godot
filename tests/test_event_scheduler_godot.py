@@ -371,6 +371,13 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \tif not _check(log == expected, "motion steps: " + str(log)):
             \t\treturn
 
+            \t# A freed node in an instance list is skipped, not type-tested.
+            \tvar freed = _add(ListedInstance, "freed")
+            \tvar kept = _add(ListedInstance, "kept")
+            \tfreed.free()
+            \tGMRuntime.gml_input_dispatch_frame([freed, kept], [5])
+            \t_frame()
+
             \tprint("EVENT_SCHEDULER_LIST_SMOKE_OK")
             \tget_tree().quit(0)
             """

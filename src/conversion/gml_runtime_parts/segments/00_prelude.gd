@@ -13,6 +13,10 @@ const GML_TYPE_STRUCT = "struct"
 const GML_TYPE_METHOD = "method"
 const GML_TYPE_HANDLE = "ref"
 const GML_TYPE_UNKNOWN = "unknown"
+# GameMaker sets debug_mode only when the IDE runs the game in its debugger;
+# a normal run and every build read false. Every run from the Godot editor is
+# a debug build, so the value comes from this project setting instead.
+const GML_DEBUG_MODE_SETTING = "application/config/gm2godot_debug_mode"
 const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
 const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
 const GML_HANDLE_TYPE_SHIFT = 32
@@ -252,7 +256,7 @@ static func gml_builtin_global(name):
 	if key == "current_second":
 		return int(Time.get_datetime_dict_from_system().get("second", 0))
 	if key == "debug_mode":
-		return OS.is_debug_build()
+		return bool(ProjectSettings.get_setting(GML_DEBUG_MODE_SETTING, false))
 	if key == "fps":
 		return int(Engine.get_frames_per_second())
 	if key == "fps_real":

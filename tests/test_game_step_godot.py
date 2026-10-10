@@ -369,16 +369,19 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             \tvar before = _in_frame(log, goto_frame - 1)
             \tif not _check(before == ["P1:begin", "P2:begin", "P1:step", "P2:step", "P1:end", "P2:end", "P1:draw_gui", "P2:draw_gui"], "normal frame: " + str(before)):
             \t\treturn
+            \t# A change requested by a Draw event happens right after the draw;
+            \t# the new room steps and draws in the same frame.
             \tvar draw_goto_frame = _frame_of(log, "Q:goto_from_draw")
-            \tif not _check(_in_frame(log, draw_goto_frame) == ["Q:begin", "Q:step", "Q:end", "Q:draw_gui", "Q:goto_from_draw"], "draw frame: " + str(_in_frame(log, draw_goto_frame))):
-            \t\treturn
-            \tvar after = _in_frame(log, draw_goto_frame + 1)
-            \tvar expected_after = [
+            \tvar expected_draw_frame = [
+            \t\t"Q:begin", "Q:step", "Q:end", "Q:draw_gui", "Q:goto_from_draw",
             \t\t"Q:room_end",
             \t\t"P1:create", "P2:create", "P1:room_start", "P2:room_start",
             \t\t"P1:begin", "P2:begin", "P1:step", "P2:step", "P1:end", "P2:end", "P1:draw_gui", "P2:draw_gui",
             \t]
-            \tif not _check(after == expected_after, "room change requested in Draw did not happen before the next step: " + str(after)):
+            \tif not _check(_in_frame(log, draw_goto_frame) == expected_draw_frame, "room change requested in Draw: " + str(_in_frame(log, draw_goto_frame))):
+            \t\treturn
+            \tvar after = _in_frame(log, draw_goto_frame + 1)
+            \tif not _check(after == ["P1:begin", "P2:begin", "P1:step", "P2:step", "P1:end", "P2:end", "P1:draw_gui", "P2:draw_gui"], "frame after the change: " + str(after)):
             \t\treturn
             \tif not _check(get_tree().current_scene.name == "r_first", "did not return to the first room"):
             \t\treturn

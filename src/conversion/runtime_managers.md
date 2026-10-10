@@ -9,7 +9,7 @@ The generated autoloads are:
 - `GMRooms`: room order, current room, transitions, and layers.
 - `GMInstances`: live instances, handles, object indices, and creation order.
 - `GMEvents`: frame events, alarms, timelines, and sequences. This manager owns the generated `_process` frame pump: its `_ready()` calls `GMRuntime.gml_event_scheduler_pump_attach()` and every frame calls `GMRuntime.gml_event_scheduler_game_frame(delta)`, which runs one GameMaker step in GameMaker's phase order (including keyboard and mouse events), so Step phases do not depend on individual node callback order.
-- `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases. It skips the frame when `GMRuntime.gml_event_scheduler_frame_drawable()` is false, because GameMaker does not draw a step that ended with a room change, `game_restart()` or `game_end()`.
+- `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases. It skips the frame when `GMRuntime.gml_event_scheduler_frame_drawable()` is false, because GameMaker does not draw a step that ended with a room change, `game_restart()` or `game_end()`. After drawing it calls `GMRuntime.gml_event_scheduler_after_draw()`, which carries out a room change requested by a Draw event right away; the new room then steps and is drawn in the same frame, as in GameMaker.
 - `GMInput`: keyboard, mouse, gamepad, and gesture state. This manager owns the generated `_input(event)` capture hook, which translates Godot keys and mouse buttons into GameMaker key and button codes; converted object scripts expose `_gm_input_event_bindings()` (including the input events inherited from parent objects) plus `_gm_input_*` methods, which `GMRuntime.gml_input_dispatch_frame()` runs in GameMaker's keyboard and mouse event order.
 - `GMAudio`: audio instances, groups, emitters, and listeners.
 - `GMAsync`: async_load, HTTP, buffer, networking, platform, and extension queues. This manager owns the generated async queue pump (`GMRuntime.gml_async_frame_pump()`) so callback delivery is FIFO and `async_load` is scoped to each Async event. While the `GMEvents` frame pump is attached, Async events are delivered in the step's async phase instead.
@@ -58,8 +58,9 @@ persistent instances or of a persistent room: instances created after the
 request get no Create event (generated Create code asks
 `GMRuntime.gml_event_create_blocked()`), and `instance_destroy()` runs no
 Destroy event.
-The change happens before the next step; after a room switch the new room steps
-and draws in the same frame. Without the frame pump (tests and tools that call
+The change happens at the end of the step, or right after the draw when a Draw
+event requested it; after a room switch the new room steps and draws in the same
+frame. Without the frame pump (tests and tools that call
 the static runtime directly) these functions act immediately and input edges
 last until `gml_input_end_frame()`. Tests that depend on these phases should
 assert the generated method names or manager queues rather than incidental

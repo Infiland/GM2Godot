@@ -5,7 +5,9 @@
 # gml_event_scheduler_frame) and, when that step requested a room change, the
 # room switch followed by the new room's step in the same tick. Draw events
 # run only after a step that finished without a pending room change,
-# game_restart or game_end.
+# game_restart or game_end. A change requested by a Draw event is carried
+# out right after the draw (gml_event_scheduler_after_draw), and the new room
+# steps and draws in the same frame.
 #
 # A step works on one list of instances in creation order, like GameMaker's
 # active instance list: instances created during a phase join it for the
@@ -24,6 +26,9 @@ const GML_STEP_MOTION_MEMBERS = ["hspeed", "vspeed", "speed", "friction", "gravi
 
 static var _gml_step_pump_attached = false
 static var _gml_step_frame_drawable = true
+# Room changes carried out after a draw in the current Godot frame.
+static var _gml_step_redraw_frame = -1
+static var _gml_step_redraws = 0
 # The step's instances (instance registry entries, in creation order) and
 # the GMLStepScriptInfo of each; _gml_step_creation_mark is the creation
 # counter when the list last took in new instances.
@@ -108,6 +113,25 @@ static func _gml_step_run_tick(seconds):
 static func gml_event_scheduler_frame_drawable():
 	# False when the last tick ended without a finished step (room change
 	# limit reached, game_restart or game_end): GameMaker skips Draw then.
+	return _gml_step_frame_drawable
+
+
+static func gml_event_scheduler_after_draw():
+	# GameMaker draws at the end of the step, so a room change, game_restart
+	# or game_end requested by a Draw event is carried out right after the
+	# draw, and the new room steps and draws in the same frame. The draw pump
+	# calls this after drawing; it returns whether to draw again.
+	if not _gml_step_pump_attached or not gml_room_change_pending():
+		return false
+	var frame = Engine.get_process_frames()
+	if frame != _gml_step_redraw_frame:
+		_gml_step_redraw_frame = frame
+		_gml_step_redraws = 0
+	_gml_step_redraws += 1
+	if _gml_step_redraws > GML_STEP_MAX_STEPS_PER_TICK:
+		return false
+	_gml_step_frame_drawable = false
+	_gml_step_run_tick(0.0)
 	return _gml_step_frame_drawable
 
 

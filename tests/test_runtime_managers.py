@@ -142,7 +142,9 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn("func _process(_delta):", script)
         self.assertIn(
             "\tif not GMRuntimeFacade.gml_event_scheduler_frame_drawable():\n\t\treturn\n"
-            "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
+            "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()\n"
+            "\twhile GMRuntimeFacade.gml_event_scheduler_after_draw():\n"
+            "\t\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
             script,
         )
 

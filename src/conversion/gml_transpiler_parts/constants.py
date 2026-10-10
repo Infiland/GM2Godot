@@ -901,6 +901,8 @@ MATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "darctan2": "gml_darctan2",
     "degtorad": "gml_degtorad",
     "radtodeg": "gml_radtodeg",
+    "math_set_epsilon": "gml_math_set_epsilon",
+    "math_get_epsilon": "gml_math_get_epsilon",
     "point_distance": "gml_point_distance",
     "point_direction": "gml_point_direction",
     "lengthdir_x": "gml_lengthdir_x",

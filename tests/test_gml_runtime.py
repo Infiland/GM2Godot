@@ -2458,7 +2458,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_preserves_nan_numeric_type_and_inequality(self):
         self.assertIn("static func is_nan_value(value):\n\treturn is_number(value) and is_nan(float(value))", GML_RUNTIME_SCRIPT)
         self.assertIn("if value_type == TYPE_INT or value_type == TYPE_FLOAT:\n\t\treturn GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if is_nan(difference):\n\t\tif is_inf(left_value) and is_inf(right_value):\n\t\t\treturn 0\n"
+            "\t\treturn GML_COMPARE_UNORDERED",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return _gml_compare_numeric(left, right) == 0", GML_RUNTIME_SCRIPT)
         self.assertIn("if not _gml_values_equal_for_array(left[index], right[index]):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
@@ -3167,7 +3172,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_lte(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_gt(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_gte(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_compare_reals(left_value, right_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if absf(difference) <= _gml_math_epsilon:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return order != GML_COMPARE_UNORDERED and order < 0", GML_RUNTIME_SCRIPT)
         self.assertIn("if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_string(left) and is_string(right):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_binary_type_error("GML less-than comparison", left, right)', GML_RUNTIME_SCRIPT)

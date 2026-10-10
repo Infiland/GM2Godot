@@ -278,6 +278,8 @@ _MATH_ARITY: dict[str, tuple[int, int | None]] = {
     "darctan2": (2, 2),
     "degtorad": (1, 1),
     "radtodeg": (1, 1),
+    "math_set_epsilon": (1, 1),
+    "math_get_epsilon": (0, 0),
     "point_distance": (4, 4),
     "point_direction": (4, 4),
     "lengthdir_x": (2, 2),

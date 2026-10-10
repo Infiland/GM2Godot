@@ -280,8 +280,11 @@ static func gml_builtin_global(name):
 	return gml_undefined()
 
 
+# The `is` checks below first make sure the value is a live object: GML code
+# can still hold an instance after its node was freed, and `is` on a freed
+# object is a script error.
 static func is_undefined(value):
-	return value is GMLUndefined
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLUndefined
 
 
 static func is_bool(value):
@@ -307,15 +310,15 @@ static func is_int32(value):
 
 
 static func is_int64(value):
-	return value is GMLInt64
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLInt64
 
 
 static func is_ptr(value):
-	return value is GMLPointer
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLPointer
 
 
 static func is_handle(value):
-	return value is GMLHandle
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle
 
 
 static func is_numeric(value):
@@ -327,11 +330,13 @@ static func is_array(value):
 
 
 static func is_struct(value):
-	return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT
+	return typeof(value) == TYPE_DICTIONARY or (typeof(value) == TYPE_OBJECT and is_instance_valid(value))
 
 
 static func is_method(value):
-	return value is GMLMethod or typeof(value) == TYPE_CALLABLE
+	if typeof(value) == TYPE_CALLABLE:
+		return true
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLMethod
 
 
 static func is_callable(value):
@@ -339,7 +344,7 @@ static func is_callable(value):
 
 
 static func is_gml_exception(value):
-	return value is GMLException
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLException
 
 
 static func is_nan_value(value):

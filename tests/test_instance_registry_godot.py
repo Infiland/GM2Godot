@@ -160,6 +160,33 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_instance_find(enemy_selector, 1).index == GMRuntime.GML_INSTANCE_INVALID_INDEX, "missing find did not return noone"):
         \t\treturn
 
+        \t# GML code can keep an instance (self, other) after its node is freed,
+        \t# and a node can be freed without unregistering. Neither may raise
+        \t# script errors, and the instance must leave the registry.
+        \tvar ghost = Node2D.new()
+        \tlayer.add_child(ghost)
+        \tvar ghost_handle = GMRuntime.gml_instance_register(ghost, "o_enemy", ["o_parent"])
+        \tif not _check(GMRuntime.gml_instance_number(enemy_selector) == 2, "registered node not counted"):
+        \t\treturn
+        \tghost.free()
+        \tif not _check(not GMRuntime.gml_instance_exists(ghost), "freed node still exists"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_handle_is_valid(ghost_handle), "handle of a freed node is still valid"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_instance_number(enemy_selector) == 1, "freed node still counted"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_builtin_global("instance_count") == 1, "instance_count still counts the freed node"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_with_targets(ghost).is_empty(), "with still visits the freed node"):
+        \t\treturn
+        \tif not _check(not GMRuntime.is_handle(ghost) and not GMRuntime.is_undefined(ghost) and not GMRuntime.is_struct(ghost), "type checks misread the freed node"):
+        \t\treturn
+        \tGMRuntime.gml_instance_destroy(ghost)
+        \tvar released = GMRuntime.gml_handle_resolve(handle_b)
+        \treleased.free()
+        \tif not _check(not GMRuntime.gml_instance_exists(released) and GMRuntime.gml_instance_number(parent_selector) == 0, "freed generated instance still exists"):
+        \t\treturn
+
         \tprint("INSTANCE_SMOKE_OK")
         \tget_tree().quit(0)
         """
@@ -242,3 +269,4 @@ class TestInstanceRegistryGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("INSTANCE_SMOKE_OK", output)
+        self.assertNotIn("SCRIPT ERROR", output)

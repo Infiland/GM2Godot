@@ -77,6 +77,8 @@ static func _gml_instance_entry_order_less(left, right):
 
 
 static func _gml_instance_entry(instance_or_handle):
+	if typeof(instance_or_handle) == TYPE_OBJECT and not is_instance_valid(instance_or_handle):
+		return null
 	if typeof(instance_or_handle) == TYPE_DICTIONARY and instance_or_handle.has("handle"):
 		return instance_or_handle
 	if is_handle(instance_or_handle):
@@ -98,7 +100,7 @@ static func _gml_instance_entry(instance_or_handle):
 
 
 static func _gml_instance_handle_for_node(instance):
-	if instance is Object:
+	if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance):
 		var node_id = instance.get_instance_id()
 		if _gml_instance_handles_by_node_id.has(node_id):
 			return _gml_instance_handles_by_node_id[node_id]

@@ -58,6 +58,8 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 	var entry = {
 		"handle": handle,
 		"instance": instance,
+		# Kept so the instance can be forgotten after its node is freed.
+		"node_id": instance.get_instance_id() if instance is Object else 0,
 		"object_id": object_id,
 		"object_name": object_name,
 		"selector_ids": selector_ids,
@@ -84,10 +86,8 @@ static func gml_instance_unregister(instance_or_handle):
 		return false
 	entry["destroyed"] = true
 	var handle = entry["handle"]
-	var instance = entry["instance"]
 	_gml_instance_entries.erase(handle.index)
-	if instance is Object:
-		_gml_instance_handles_by_node_id.erase(instance.get_instance_id())
+	_gml_instance_handles_by_node_id.erase(entry["node_id"])
 	for selector_id in entry["selector_ids"]:
 		_gml_instance_index_remove(_gml_instance_ids_by_object, selector_id, handle.index)
 	for selector_name in entry["selector_names"]:
@@ -156,6 +156,9 @@ static func gml_instance_create_depth(x, y, depth_value, object_selector, curren
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):
+	if typeof(target) == TYPE_OBJECT and not is_instance_valid(target):
+		# An instance whose node was freed no longer exists.
+		return []
 	if is_undefined(target):
 		return []
 	if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:
@@ -181,8 +184,12 @@ static func gml_handle_is_valid(handle):
 		return false
 	if not handle.valid:
 		return false
-	if handle.reference is Object and not is_instance_valid(handle.reference):
-		gml_handle_invalidate(handle)
+	if typeof(handle.reference) == TYPE_OBJECT and not is_instance_valid(handle.reference):
+		# What the handle referred to was freed: forget it everywhere.
+		if handle.kind == GML_INSTANCE_HANDLE_KIND and _gml_instance_entries.has(handle.index):
+			gml_instance_unregister(handle)
+		else:
+			gml_handle_invalidate(handle)
 		return false
 	return true
 

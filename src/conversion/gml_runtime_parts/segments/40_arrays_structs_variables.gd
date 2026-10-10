@@ -733,9 +733,13 @@ static func _gml_object_uses_builtin_field(object_value, member_name):
 	if not (object_value is Node2D):
 		return false
 	var key = str(member_name)
-	if GML_OBJECT_BBOX_FIELDS.has(key):
-		return true
-	return _gml_object_builtin_field_names(object_value).has(key) and not (key in object_value)
+	match key:
+		"x", "y", "image_angle", "image_xscale", "image_yscale":
+			# The names _gml_object_builtin_field_names lists for a Node2D.
+			return not (key in object_value)
+		"bbox_left", "bbox_top", "bbox_right", "bbox_bottom":
+			return true
+	return false
 
 
 static func _gml_object_builtin_field_get(object_value, member_name):

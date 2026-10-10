@@ -65,7 +65,12 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "ystart",
 })
 # Members the object runtime prelude declares for its own bookkeeping.
-_OBJECT_RUNTIME_MEMBER_NAMES = frozenset({"_gm_depth"})
+_OBJECT_RUNTIME_MEMBER_NAMES = frozenset({
+    "_gm_collision_changed",
+    "_gm_collision_dirty",
+    "_gm_collision_state",
+    "_gm_depth",
+})
 _DRAW_RUNTIME_FUNCTIONS = frozenset({
     "_on_draw",
     "_on_draw_begin",
@@ -241,14 +246,31 @@ def _sprite_reference_expression(sprite_name: str) -> str:
     return f"GMRuntime.gml_sprite_reference({_gd_string(sprite_name)})"
 
 
+def _collision_dirty_line(track_collision: bool) -> str:
+    # The runtime keeps an instance's collision state (its bounding box and
+    # mask) in _gm_collision_state until something the state depends on
+    # changes: the node's transform (reported by _notification) or one of
+    # the members whose setters call _gm_collision_changed.
+    return "\n\t\t_gm_collision_changed()" if track_collision else ""
+
+
+_COLLISION_NOTIFICATION_BODY = (
+    "\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
+    " or what == NOTIFICATION_EXIT_TREE:"
+    "\n\t\t_gm_collision_changed()"
+)
+
+
 def _emit_sprite_runtime_prelude(
     lines: list[str],
     sprite_runtime: SpriteRuntimeConfig,
     *,
     declare_members: bool,
+    track_collision: bool = False,
 ) -> None:
     if not declare_members:
         return
+    collision_dirty = _collision_dirty_line(track_collision)
 
     sprite_scene_paths = dict(sprite_runtime.sprite_scene_paths or {})
     sprite_constants = [
@@ -276,6 +298,7 @@ def _emit_sprite_runtime_prelude(
         f"\nvar sprite_index = {initial_sprite}:"
         "\n\tset(value):"
         "\n\t\tsprite_index = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_sprite_index()"
         "\n\nvar image_index = 0.0:"
         "\n\tset(value):"
@@ -287,14 +310,17 @@ def _emit_sprite_runtime_prelude(
         "\nvar image_xscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_xscale = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_yscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_yscale = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_angle = 0.0:"
         "\n\tset(value):"
         "\n\t\timage_angle = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_blend = 0xffffff:"
         "\n\tset(value):"
@@ -482,6 +508,7 @@ def _emit_object_runtime_prelude(
     object_runtime: ObjectRuntimeConfig,
     *,
     declare_members: bool,
+    emit_notification: bool = True,
 ) -> None:
     # other is the instance itself, except while a collision event runs
     # (the dispatcher sets it) and inside with blocks (the transpiler passes
@@ -498,7 +525,17 @@ def _emit_object_runtime_prelude(
         "\n\t\t_gm_depth = GMRuntime.gml_instance_depth_assign(self, value, _gm_depth)"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
         f"\nvar persistent = {str(object_runtime.persistent).lower()}"
-        "\nvar mask_index = -1"
+        "\nvar mask_index = -1:"
+        "\n\tset(value):"
+        "\n\t\tmask_index = value"
+        f"{_collision_dirty_line(True)}"
+        "\nvar _gm_collision_state = null"
+        "\nvar _gm_collision_dirty = true"
+        "\n\nfunc _gm_collision_changed():"
+        "\n\tif not _gm_collision_dirty:"
+        "\n\t\t_gm_collision_dirty = true"
+        "\n\t\tGMRuntime._gml_collision_instance_changed(self)"
+        + (f"\n\nfunc _notification(what):\n{_COLLISION_NOTIFICATION_BODY}" if emit_notification else "")
         if declare_members
         else ""
     )
@@ -598,6 +635,12 @@ def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntime
         cleanup_lines.append(body)
     cleanup_lines.append("\t_gm_unregister_instance()")
     return "\n".join(cleanup_lines)
+
+
+def _wrap_collision_notification_body(func: EventMapping, body: str, reports_collision_changes: bool) -> str:
+    if reports_collision_changes and func.godot_func == "_notification":
+        return f"{_COLLISION_NOTIFICATION_BODY}\n{body}"
+    return body
 
 
 def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
@@ -792,12 +835,18 @@ def generate_script_content(
             lines,
             sprite_runtime,
             declare_members=not inherited_sprite_runtime,
+            track_collision=uses_object_runtime,
         )
+    # The root object script reports transform changes to the collision
+    # runtime; an object's own _notification event function gets the report
+    # added to it.
+    reports_collision_changes = object_runtime is not None and base_script_path is None
     if uses_object_runtime and object_runtime is not None:
         _emit_object_runtime_prelude(
             lines,
             object_runtime,
             declare_members=base_script_path is None,
+            emit_notification="_notification" not in function_names,
         )
     if uses_motion_runtime:
         _emit_motion_runtime_prelude(
@@ -825,6 +874,7 @@ def generate_script_content(
             body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
         if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
+        body = _wrap_collision_notification_body(func, body, reports_collision_changes)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

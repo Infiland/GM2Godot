@@ -150,6 +150,7 @@ def write_generated_object(
     *,
     solid: bool = False,
     mask_sprite_name: str | None = None,
+    parent_object_names: tuple[str, ...] = (),
 ) -> None:
     """Write a converted object without events: its script and its scene.
 
@@ -166,7 +167,12 @@ def write_generated_object(
                 initial_sprite_name=sprite.name,
                 sprite_scene_paths={sprite.name: sprite_path},
             ),
-            object_runtime=ObjectRuntimeConfig(object_name=name, solid=solid, mask_sprite_name=mask_sprite_name),
+            object_runtime=ObjectRuntimeConfig(
+                object_name=name,
+                parent_object_names=parent_object_names,
+                solid=solid,
+                mask_sprite_name=mask_sprite_name,
+            ),
         ),
     )
     write_fixture_text(

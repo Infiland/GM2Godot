@@ -161,6 +161,49 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_EPSILON_OK",
         )
 
+    def test_sqrt_counts_values_within_epsilon_below_zero_as_zero(self) -> None:
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("sqrt(16)", GMRuntime.gml_sqrt(16), 4.0)
+            _expect("sqrt(0)", GMRuntime.gml_sqrt(0), 0.0)
+            _expect("sqrt(-0.000001)", GMRuntime.gml_sqrt(-0.000001), 0.0)
+            _expect("sqrt(-epsilon)", GMRuntime.gml_sqrt(-0.00001), 0.0)
+            _expect("sqrt(-0.0001)", GMRuntime.gml_sqrt(-0.0001), NAN)
+            _expect("sqrt(-1)", GMRuntime.gml_sqrt(-1), NAN)
+            GMRuntime.gml_math_set_epsilon(0.001)
+            _expect("sqrt(-0.0005) with 0.001", GMRuntime.gml_sqrt(-0.0005), 0.0)
+            _expect("sqrt(-0.002) with 0.001", GMRuntime.gml_sqrt(-0.002), NAN)
+            GMRuntime.gml_math_set_epsilon(0.00001)
+            """,
+            "GML_SQRT_OK",
+        )
+
+    def test_point_direction_follows_the_runner(self) -> None:
+        # The runner rounds point_direction to six decimals (computed with its
+        # value of pi), so vectors on the diagonals give whole angles and
+        # floor(point_direction(...) / 45) picks the expected octant.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("3,4 rounded to six decimals", absf(GMRuntime.gml_point_direction(0, 0, 3, 4) - 306.869898) < 0.000000001, true)
+            _expect("7,-3 rounded to six decimals", absf(GMRuntime.gml_point_direction(0, 0, 7, -3) - 23.198591) < 0.000000001, true)
+            _expect("from another point", absf(GMRuntime.gml_point_direction(3, 5, 11, 2) - 20.556045) < 0.000000001, true)
+            _expect("straight up", GMRuntime.gml_point_direction(10, 10, 10, 5), 90.0)
+            _expect("straight down", GMRuntime.gml_point_direction(10, 10, 10, 15), 270.0)
+            _expect("no vector", GMRuntime.gml_point_direction(10, 10, 10, 10), 0.0)
+            _expect("straight right", GMRuntime.gml_point_direction(0, 0, 5, 0), 0.0)
+            _expect("straight right is not -0", 1.0 / GMRuntime.gml_point_direction(0, 0, 5, 0), INF)
+            _expect("straight left", GMRuntime.gml_point_direction(0, 0, -5, 0), 180.0)
+            _expect("up right", GMRuntime.gml_point_direction(0, 0, 1, -1), 45.0)
+            _expect("down left", GMRuntime.gml_point_direction(0, 0, -1, 1), 225.0)
+            _expect("down left octant", floor(GMRuntime.gml_point_direction(0, 0, -1, 1) / 45.0), 5.0)
+            _expect("down right", GMRuntime.gml_point_direction(0, 0, 1, 1), 315.0)
+            _expect("degtorad uses the runner's pi / 180", GMRuntime.gml_degtorad(180), 180.0 * 0.0174532925)
+            """,
+            "GML_POINT_DIRECTION_OK",
+        )
+
     def test_round_uses_bankers_rounding(self) -> None:
         _run_runtime_checks(
             self,

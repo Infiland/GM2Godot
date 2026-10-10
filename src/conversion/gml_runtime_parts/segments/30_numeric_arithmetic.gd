@@ -1,4 +1,12 @@
+# The operators below start with the common case of two plain numbers (int
+# or float, not bool), which they handle exactly as the general code further
+# down does, without its type checks.
+
 static func gml_div(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return _gml_real_divide(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
@@ -10,8 +18,10 @@ static func gml_div(left, right):
 	# numbers (5 / 2 == 2.5); only int64 / int64 keeps integer semantics.
 	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML divide", left, right)
-	var left_value = _to_real(left)
-	var right_value = _to_real(right)
+	return _gml_real_divide(_to_real(left), _to_real(right))
+
+
+static func _gml_real_divide(left_value, right_value):
 	if right_value == 0.0:
 		if left_value == 0.0:
 			return NAN
@@ -20,6 +30,14 @@ static func gml_div(left, right):
 
 
 static func gml_int_div(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_INT and right_type == TYPE_INT and _gml_int32_pair(left, right):
+		if right == 0:
+			return gml_error("GML int32 division by zero")
+		return int(left / right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return int(float(left) / float(right))
 	if _returns_int64_arithmetic_result(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
@@ -65,11 +83,31 @@ static func gml_sqrt(value):
 		return gml_unsupported_type_error("GML sqrt", value)
 	var real_value = _to_real(value)
 	if real_value < 0.0:
+		# Like comparisons, sqrt uses math_set_epsilon: a negative value no
+		# further from 0 than the epsilon counts as 0.
+		if real_value >= -_gml_math_epsilon:
+			return 0.0
 		return NAN
 	return sqrt(real_value)
 
 
+# Whether two ints are both int32 values, which GML adds, subtracts,
+# multiplies and divides as int32 (other numbers as reals).
+static func _gml_int32_pair(left, right):
+	return left >= -2147483648 and left <= 2147483647 and right >= -2147483648 and right <= 2147483647
+
+
 static func gml_add(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left + float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left + right if _gml_int32_pair(left, right) else float(left) + float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) + right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
@@ -90,6 +128,16 @@ static func gml_add(left, right):
 
 
 static func gml_sub(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left - float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left - right if _gml_int32_pair(left, right) else float(left) - float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) - right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
@@ -102,6 +150,16 @@ static func gml_sub(left, right):
 
 
 static func gml_mul(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left * float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left * right if _gml_int32_pair(left, right) else float(left) * float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) * right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if is_string(right):
@@ -120,6 +178,14 @@ static func gml_mul(left, right):
 
 
 static func gml_mod(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_INT and right_type == TYPE_INT and _gml_int32_pair(left, right):
+		if right == 0:
+			return gml_error("GML int32 modulo by zero")
+		return left % right
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return fmod(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):

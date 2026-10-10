@@ -53,6 +53,9 @@ static func gml_path_end(current_self):
 
 
 static func gml_path_step(current_self):
+	if _gml_path_states.is_empty():
+		# No instance follows a path.
+		return null
 	for instance in _gml_motion_instances(current_self):
 		_gml_path_step_instance(instance)
 	return null

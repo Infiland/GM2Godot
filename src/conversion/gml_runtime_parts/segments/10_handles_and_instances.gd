@@ -65,10 +65,17 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		"selector_ids": selector_ids,
 		"selector_names": selector_names,
 		"destroyed": false,
-		"creation_order": _gml_instance_creation_counter
+		"creation_order": _gml_instance_creation_counter,
+		# Whether the instance keeps its own collision state (see
+		# _gml_collision_tracked_state).
+		"collision_tracked": instance is Object and _gml_collision_tracks(instance)
 	}
 	_gml_instance_creation_counter += 1
 	_gml_instance_entries[handle.index] = entry
+	if entry["collision_tracked"]:
+		# Its script reports transform changes (see _gml_collision_tracked_state).
+		instance.set_notify_local_transform(true)
+	_gml_collision_forget_box_lists(entry)
 	if instance is Object:
 		_gml_instance_handles_by_node_id[instance.get_instance_id()] = handle
 		_gml_instance_set_meta(instance, "_gm2godot_instance_id", handle.index)
@@ -96,6 +103,7 @@ static func gml_instance_unregister(instance_or_handle):
 		return false
 	_gml_instance_entries.erase(handle.index)
 	_gml_instance_handles_by_node_id.erase(entry["node_id"])
+	_gml_collision_forget_box_lists(entry)
 	_gml_instance_order_erase(_gml_instance_live_order, entry)
 	for selector_id in entry["selector_ids"]:
 		_gml_instance_index_remove(_gml_instance_live_by_object, selector_id, entry)

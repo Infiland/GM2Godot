@@ -423,13 +423,17 @@ static func _object_has_property(object_value, property_name):
 			if property.get("name") == property_name:
 				return true
 		return false
-	var cache_key = "%s:%d" % [object_value.get_class(), script.get_instance_id()]
-	var names = _gml_script_property_names_cache.get(cache_key)
+	var class_names = _gml_script_property_names_cache.get(script)
+	if class_names == null:
+		class_names = {}
+		_gml_script_property_names_cache[script] = class_names
+	var class_name_value = object_value.get_class()
+	var names = class_names.get(class_name_value)
 	if names == null:
 		names = {}
 		for property in object_value.get_property_list():
 			names[str(property.get("name"))] = true
-		_gml_script_property_names_cache[cache_key] = names
+		class_names[class_name_value] = names
 	return names.has(str(property_name))
 
 

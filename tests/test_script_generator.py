@@ -70,6 +70,74 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("func _process(delta):", content)
         self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
 
+    def test_object_runtime_reports_collision_changes(self):
+        # The runtime keeps each instance's collision state until the node's
+        # transform or a member the state depends on changes.
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="s_box",
+                sprite_scene_paths={"s_box": "res://sprites/s_box/s_box.tscn"},
+            ),
+            object_runtime=ObjectRuntimeConfig(object_name="o_box"),
+        )
+
+        self.assertIn("var _gm_collision_state = null\nvar _gm_collision_dirty = true", content)
+        self.assertIn(
+            "func _gm_collision_changed():\n\tif not _gm_collision_dirty:\n\t\t_gm_collision_dirty = true\n"
+            "\t\tGMRuntime._gml_collision_instance_changed(self)",
+            content,
+        )
+        self.assertIn(
+            "func _notification(what):\n\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
+            " or what == NOTIFICATION_EXIT_TREE:\n\t\t_gm_collision_changed()",
+            content,
+        )
+        self.assertIn("var mask_index = -1:\n\tset(value):\n\t\tmask_index = value\n\t\t_gm_collision_changed()", content)
+        for member in ("sprite_index", "image_xscale", "image_yscale", "image_angle"):
+            self.assertIn(f"\t\t{member} = value\n\t\t_gm_collision_changed()", content)
+        for member in ("image_index", "image_blend", "image_alpha"):
+            self.assertIn(f"\t\t{member} = value\n\t\t_gm_apply_", content)
+
+    def test_collision_change_reports_join_an_object_notification_event(self):
+        content = generate_script_content(
+            [{"eventType": 7, "eventNum": 30}],
+            {"_notification": "\tprint(\"closing\")"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_window"),
+        )
+
+        self.assertEqual(content.count("func _notification(what):"), 1)
+        self.assertIn(
+            "func _notification(what):\n\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
+            " or what == NOTIFICATION_EXIT_TREE:\n\t\t_gm_collision_changed()\n"
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tprint(\"closing\")",
+            content,
+        )
+
+    def test_child_objects_inherit_collision_change_reports(self):
+        content = generate_script_content(
+            [{"eventType": 7, "eventNum": 30}],
+            {"_notification": "\tprint(\"closing\")"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_child", parent_object_names=("o_parent",)),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertNotIn("_gm_collision_dirty", content)
+        self.assertNotIn("func _gm_collision_changed", content)
+        self.assertIn("func _notification(what):\n\tif what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+
+    def test_sprite_runtime_without_object_runtime_reports_nothing(self):
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                initial_sprite_name="s_box",
+                sprite_scene_paths={"s_box": "res://sprites/s_box/s_box.tscn"},
+            ),
+        )
+
+        self.assertIn("var sprite_index = ", content)
+        self.assertNotIn("_gm_collision", content)
+
     def test_object_runtime_preserves_inherited_lifecycle_when_no_local_event(self):
         content = generate_script_content(
             [],

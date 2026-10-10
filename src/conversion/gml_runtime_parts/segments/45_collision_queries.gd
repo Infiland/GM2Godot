@@ -33,6 +33,8 @@ static var _gml_collision_event_trace = []
 static var _gml_collision_compatibility_mode = null
 static var _gml_collision_sprite_cache = {}
 static var _gml_collision_state_cache = {}
+static var _gml_collision_tracked_scripts = {}
+static var _gml_collision_box_lists = {}
 static var _gml_collision_script_event_cache = {}
 static var _gml_collision_object_order_cache = null
 static var _gml_collision_object_order_source = null
@@ -49,6 +51,18 @@ static func gml_distance_to_object(current_self, target):
 	if self_state == null:
 		return GML_COLLISION_NO_INSTANCE_DISTANCE
 	var best_distance = GML_COLLISION_NO_INSTANCE_DISTANCE
+	var entries: Variant = null if target == null or is_undefined(target) else _gml_instance_target_entries(target)
+	if entries != null:
+		# An object's (or every) listed instance, as _gml_collision_find
+		# goes through them below.
+		for entry in entries:
+			var inst = entry["instance"]
+			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+				continue
+			var listed_distance = _gml_collision_bbox_gap(self_state, _gml_collision_state(inst))
+			if listed_distance < best_distance:
+				best_distance = listed_distance
+		return best_distance
 	for other_state in _gml_collision_find(GML_COLLISION_QUERY_ANY, null, target, current_self, false, false, true):
 		var distance = _gml_collision_bbox_gap(self_state, other_state)
 		if distance < best_distance:
@@ -278,11 +292,13 @@ static func _gml_collision_dispatch_instance(context, first_pool, first_index, t
 			# Two instances of the same object are tested once, in list order.
 			if second_index < first_index and second["chain"][0] == first["chain"][0]:
 				continue
+			var first_state = _gml_collision_record_state(context, first)
+			var second_state = _gml_collision_record_state(context, second)
+			if first_state == null or second_state == null or _gml_collision_boxes_apart(first_state, second_state):
+				continue
 			var pair_key = _gml_collision_pair_key(first, second)
 			if context["handled"].has(pair_key):
 				continue
-			var first_state = _gml_collision_record_state(context, first)
-			var second_state = _gml_collision_record_state(context, second)
 			if not _gml_collision_states_collide(first_state, second_state, true):
 				continue
 			context["handled"][pair_key] = true
@@ -296,6 +312,17 @@ static func _gml_collision_dispatch_instance(context, first_pool, first_index, t
 			# Events may move, change or destroy any instance.
 			context["generation"] += 1
 	return dispatched
+
+
+# Whether two bounding boxes are too far apart for _gml_collision_states_collide
+# to find a collision in either mode (a cheaper first test).
+static func _gml_collision_boxes_apart(first_state, second_state):
+	return (
+		second_state["left"] >= first_state["right"] + 1.0
+		or second_state["right"] + 1.0 <= first_state["left"]
+		or second_state["top"] >= first_state["bottom"] + 1.0
+		or second_state["bottom"] + 1.0 <= first_state["top"]
+	)
 
 
 static func _gml_collision_record_live(record):
@@ -603,10 +630,21 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 	if target == null or is_undefined(target):
 		return hits if every else null
 	var bounds = _gml_collision_query_bounds(kind, query)
+	var has_bounds = bounds != null
+	var bounds_left = bounds[0] if has_bounds else 0.0
+	var bounds_top = bounds[1] if has_bounds else 0.0
+	var bounds_right = bounds[2] if has_bounds else 0.0
+	var bounds_bottom = bounds[3] if has_bounds else 0.0
 	var entries: Variant = _gml_instance_target_entries(target)
 	var from_entries = entries != null
 	var candidates = entries if from_entries else _gml_collision_targets(target, current_self, notme)
 	var skipped = _gml_collision_self_instance(current_self) if notme and from_entries else null
+	if has_bounds and from_entries and not _gml_sequence_instances_exist:
+		var boxes: Variant = _gml_collision_box_list(_gml_collision_box_list_key(target), entries)
+		if boxes != null:
+			return _gml_collision_find_in_boxes(
+				kind, query, entries, boxes, skipped, prec, every, bounds_left, bounds_top, bounds_right, bounds_bottom
+			)
 	for candidate in candidates:
 		var inst = candidate["instance"] if from_entries else candidate
 		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
@@ -614,9 +652,18 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 		if skipped != null and is_same(inst, skipped):
 			continue
 		var state = null
-		if from_entries:
-			# A registered instance keeps its state in its registry entry. (The
-			# test below is _gml_collision_current_state's for the usual case.)
+		if not from_entries:
+			state = _gml_collision_state(inst)
+		elif candidate["collision_tracked"]:
+			# _gml_collision_tracked_state, with its test for an unchanged
+			# state written out.
+			state = inst._gm_collision_state
+			if state == null or inst._gm_collision_dirty or _gml_sequence_instances_exist or state["position"] != inst.position:
+				state = _gml_collision_tracked_state(inst)
+		else:
+			# Any other registered instance keeps its state in its registry
+			# entry. (The test below is _gml_collision_current_state's for the
+			# usual case.)
 			state = candidate.get("collision_state")
 			if (
 				state == null
@@ -628,12 +675,41 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 				state = _gml_collision_current_state(inst, cached)
 				if not is_same(state, cached):
 					candidate["collision_state"] = state
-		else:
-			state = _gml_collision_state(inst)
-		if bounds != null and (
-			state["left"] > bounds[2] or state["right"] < bounds[0] or state["top"] > bounds[3] or state["bottom"] < bounds[1]
+		if has_bounds and (
+			state["left"] > bounds_right or state["right"] < bounds_left or state["top"] > bounds_bottom or state["bottom"] < bounds_top
 		):
 			continue
+		if not _gml_collision_query_hits(kind, query, state, prec):
+			continue
+		if not every:
+			return state
+		hits.append(state)
+	return hits if every else null
+
+
+# _gml_collision_find over a list of instances whose bounding boxes are kept
+# (see _gml_collision_box_list): the instances whose boxes lie outside the
+# query's region are passed over without looking at them.
+static func _gml_collision_find_in_boxes(
+	kind, query, entries, boxes, skipped, prec, every, bounds_left, bounds_top, bounds_right, bounds_bottom
+):
+	var hits = []
+	var offset = -4
+	for candidate in entries:
+		offset += 4
+		if (
+			boxes[offset] > bounds_right
+			or boxes[offset + 2] < bounds_left
+			or boxes[offset + 1] > bounds_bottom
+			or boxes[offset + 3] < bounds_top
+		):
+			continue
+		var inst = candidate["instance"]
+		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			continue
+		if skipped != null and is_same(inst, skipped):
+			continue
+		var state = inst._gm_collision_state
 		if not _gml_collision_query_hits(kind, query, state, prec):
 			continue
 		if not every:
@@ -788,8 +864,12 @@ static func _gml_collision_compatibility():
 static func _gml_collision_set_compatibility_mode(enabled):
 	_gml_collision_compatibility_mode = null if enabled == null else gml_bool(enabled)
 	_gml_collision_state_cache.clear()
+	_gml_collision_box_lists.clear()
 	for entry in _gml_instance_live_order:
 		entry.erase("collision_state")
+		var inst = entry["instance"]
+		if entry["collision_tracked"] and is_instance_valid(inst):
+			inst._gm_collision_state = null
 	return null
 
 
@@ -879,6 +959,8 @@ static func _gml_collision_polygon_bounds(polygon):
 static func _gml_collision_state(inst):
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
 		return null
+	if _gml_collision_tracks(inst):
+		return _gml_collision_tracked_state(inst)
 	var key = inst.get_instance_id()
 	var cached = _gml_collision_state_cache.get(key)
 	var state = _gml_collision_current_state(inst, cached)
@@ -914,7 +996,108 @@ static func _gml_collision_current_state(inst, cached):
 		return cached
 	var state = _gml_collision_make_state(inst, position.x, position.y, signature)
 	state["members"] = inst is Node2D and _gml_collision_declares_members(inst)
+	state["position"] = position
 	return state
+
+
+# A converted object's instance keeps its collision state in
+# _gm_collision_state. Its script sets _gm_collision_dirty when the node's
+# transform changes (while it is in the scene tree) and in the setters of
+# sprite_index, mask_index, image_xscale, image_yscale and image_angle, so the
+# state still describes the instance while that flag is clear and the
+# instance has not moved (and no sequence moves instances); otherwise it is
+# checked against the instance as for any other instance.
+static func _gml_collision_tracked_state(inst):
+	var state = inst._gm_collision_state
+	if state != null and not inst._gm_collision_dirty and not _gml_sequence_instances_exist and state["position"] == inst.position:
+		return state
+	state = _gml_collision_current_state(inst, state)
+	inst._gm_collision_state = state
+	inst._gm_collision_dirty = false
+	return state
+
+
+# --- Bounding boxes of instance lists -------------------------------------------
+#
+# The bounding boxes of an object's instances (or of all instances), in list
+# order, are kept from one query to the next while none of those instances
+# changes. A converted object's script reports every change to its instance's
+# collision state (_gm_collision_changed calls _gml_collision_instance_changed
+# when the state was current), and instances joining or leaving the list
+# drop the boxes too. Lists with instances whose changes are not reported
+# (other scripts, or nodes outside the scene tree) keep no boxes.
+
+static func _gml_collision_instance_changed(inst):
+	if _gml_collision_box_lists.is_empty():
+		return
+	var entry: Variant = _gml_instance_entry(inst)
+	if entry != null:
+		_gml_collision_forget_box_lists(entry)
+
+
+static func _gml_collision_forget_box_lists(entry):
+	if _gml_collision_box_lists.is_empty():
+		return
+	_gml_collision_box_lists.erase(GML_INSTANCE_ALL_INDEX)
+	for selector_id in entry["selector_ids"]:
+		_gml_collision_box_lists.erase(selector_id)
+
+
+# The key a list's boxes are kept under: the object index, or `all`.
+static func _gml_collision_box_list_key(target):
+	if typeof(target) == TYPE_INT:
+		return target
+	return GML_INSTANCE_ALL_INDEX
+
+
+# A list's boxes (left, top, right, bottom per listed instance), or null when
+# they cannot be kept. Every instance's state is current when its box is
+# taken, so a kept list's instances' states (_gm_collision_state) stay
+# current too.
+static func _gml_collision_box_list(list_key, entries):
+	var boxes = _gml_collision_box_lists.get(list_key)
+	if boxes != null:
+		return boxes
+	boxes = PackedFloat64Array()
+	boxes.resize(entries.size() * 4)
+	var offset = 0
+	for entry in entries:
+		var inst = entry["instance"]
+		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			# A freed node still listed: no query region reaches it.
+			boxes[offset] = INF
+			boxes[offset + 1] = INF
+			boxes[offset + 2] = -INF
+			boxes[offset + 3] = -INF
+		elif not entry["collision_tracked"] or not inst.is_inside_tree():
+			return null
+		else:
+			var state = _gml_collision_tracked_state(inst)
+			boxes[offset] = state["left"]
+			boxes[offset + 1] = state["top"]
+			boxes[offset + 2] = state["right"]
+			boxes[offset + 3] = state["bottom"]
+		offset += 4
+	_gml_collision_box_lists[list_key] = boxes
+	return boxes
+
+
+# Whether the instance's script declares the members of a tracked collision
+# state (converted objects do).
+static func _gml_collision_tracks(inst):
+	var script = inst.get_script()
+	if script == null:
+		return false
+	var tracked = _gml_collision_tracked_scripts.get(script)
+	if tracked == null:
+		tracked = (
+			inst is Node2D
+			and _gml_collision_declares_members(inst)
+			and "_gm_collision_state" in inst
+			and "_gm_collision_dirty" in inst
+		)
+		_gml_collision_tracked_scripts[script] = tracked
+	return tracked
 
 
 static func _gml_collision_declares_members(inst):

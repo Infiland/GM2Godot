@@ -453,6 +453,154 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "rooms" / "r_second" / "r_second.tscn", second_room)
             self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_ROOM_ABORT_SMOKE_OK")
 
+    def test_create_and_destroy_after_a_room_change_request_follow_persistence(self) -> None:
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        asset_names = {"r_second", "o_spawned", "o_keeper"}
+        trigger_script = generate_script_content(
+            [
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 1, "eventNum": 0},
+                {"eventType": 3, "eventNum": 0},
+            ],
+            code_bodies={
+                "_ready": transpile_gml_code("triggered = false;", instance_variables={"triggered"}),
+                "_on_destroy": transpile_gml_code("global.trigger_destroyed = true;"),
+                "_on_step": transpile_gml_code(
+                    "if (!triggered) {\n"
+                    "    triggered = true;\n"
+                    "    room_goto(r_second);\n"
+                    "    instance_create_depth(0, 0, 0, o_spawned);\n"
+                    "    global.spawned_exists = instance_exists(o_spawned);\n"
+                    "    instance_create_depth(0, 0, 0, o_keeper);\n"
+                    "    instance_destroy();\n"
+                    "}\n",
+                    instance_variables={"triggered"},
+                    asset_names=asset_names,
+                ),
+            },
+            instance_variables={"triggered"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_trigger"),
+        )
+        spawned_script = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": transpile_gml_code("global.spawned_created = true;")},
+            object_runtime=ObjectRuntimeConfig(object_name="o_spawned"),
+        )
+        keeper_script = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={"_ready": transpile_gml_code("global.keeper_created = true;")},
+            object_runtime=ObjectRuntimeConfig(object_name="o_keeper", persistent=True),
+        )
+        checker_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var frames_in_second_room = 0
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _process(_delta):
+            \tvar scene = get_tree().current_scene
+            \tif scene == null or str(scene.name) != "r_second":
+            \t\tif Engine.get_process_frames() > 30:
+            \t\t\t_check(false, "the room change did not happen")
+            \t\treturn
+            \tframes_in_second_room += 1
+            \tif frames_in_second_room < 3:
+            \t\treturn
+            \tvar scope = GMRuntime.gml_global_scope()
+            \tif not _check(bool(scope.get("spawned_exists", false)), "the instance created after room_goto() did not exist"):
+            \t\treturn
+            \tif not _check(not scope.has("spawned_created"), "Create ran for a non-persistent instance created after room_goto()"):
+            \t\treturn
+            \tif not _check(bool(scope.get("keeper_created", false)), "Create did not run for a persistent instance"):
+            \t\treturn
+            \tif not _check(not scope.has("trigger_destroyed"), "Destroy ran after room_goto()"):
+            \t\treturn
+            \tprint("GAME_STEP_BLOCKED_EVENTS_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        rooms = {
+            "r_first": textwrap.dedent(
+                """\
+                [gd_scene load_steps=3 format=3]
+
+                [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+                [ext_resource type="PackedScene" path="res://objects/o_trigger/o_trigger.tscn" id="trigger"]
+
+                [node name="r_first" type="Node2D"]
+                script = ExtResource("room")
+                metadata/gamemaker_room_width = 320
+                metadata/gamemaker_room_height = 180
+                metadata/gamemaker_room_persistent = false
+
+                [node name="inst_trigger" parent="." instance=ExtResource("trigger")]
+                """
+            ),
+            "r_second": textwrap.dedent(
+                """\
+                [gd_scene load_steps=2 format=3]
+
+                [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+
+                [node name="r_second" type="Node2D"]
+                script = ExtResource("room")
+                metadata/gamemaker_room_width = 320
+                metadata/gamemaker_room_height = 180
+                metadata/gamemaker_room_persistent = false
+                """
+            ),
+        }
+        entries = tuple(
+            AssetRegistryEntry(
+                id=100 + order,
+                name=name,
+                kind="rooms",
+                asset_type="room",
+                type_name="Room",
+                source_path=f"rooms/{name}/{name}.yy",
+                godot_path=f"res://rooms/{name}/{name}.tscn",
+                legacy_id=f"rooms/{name}/{name}.yy",
+                metadata={"room_order": order, "width": 320, "height": 180, "persistent": False, "volume": 1.0},
+            )
+            for order, name in enumerate(rooms)
+        ) + tuple(
+            AssetRegistryEntry(
+                id=200 + order,
+                name=name,
+                kind="objects",
+                asset_type="object",
+                type_name="Object",
+                source_path=f"objects/{name}/{name}.yy",
+                godot_path=f"res://objects/{name}/{name}.tscn",
+                legacy_id=f"objects/{name}/{name}.yy",
+            )
+            for order, name in enumerate(("o_trigger", "o_spawned", "o_keeper"))
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                _project_file("GameStepBlockedEventsSmoke", "res://rooms/r_first/r_first.tscn")
+                + '\n[autoload]\n\nChecker="*res://checker.gd"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+            _write_text(project_dir / "checker.gd", checker_script)
+            for name, script in (("o_trigger", trigger_script), ("o_spawned", spawned_script), ("o_keeper", keeper_script)):
+                _write_text(project_dir / "objects" / name / f"{name}.gd", script)
+                _write_text(project_dir / "objects" / name / f"{name}.tscn", _scene(name, f"res://objects/{name}/{name}.gd"))
+            for name, scene in rooms.items():
+                _write_text(project_dir / "rooms" / name / f"{name}.tscn", scene)
+            self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_BLOCKED_EVENTS_SMOKE_OK")
+
     def test_image_index_advances_by_sprite_playback_speed(self) -> None:
         if _find_godot_binary() is None:
             self.skipTest("Godot binary not available")

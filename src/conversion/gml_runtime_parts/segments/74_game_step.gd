@@ -74,6 +74,14 @@ static func gml_event_scheduler_frame_drawable():
 	return _gml_step_frame_drawable
 
 
+static func gml_event_create_blocked(inst):
+	# Generated Create events ask this first. Like GameMaker, an instance
+	# created after a room change was requested gets no Create event unless
+	# it or the current room is persistent; it still exists until the room
+	# ends.
+	return _gml_event_scheduler_event_blocked(inst, true)
+
+
 static func gml_game_speed_fps():
 	# The game speed in steps per second: room_speed once the game has set
 	# it, otherwise the configured frame rate (option_game_speed).

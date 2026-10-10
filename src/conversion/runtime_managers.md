@@ -52,8 +52,12 @@ of the step and stay valid until the next step, including in Draw and Draw GUI.
 
 `room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`,
 `game_restart()` and `game_end()` only record the request while the frame pump
-is attached. The current event finishes, no further events run (apart from the
-Alarm and Other events of persistent instances), and that step is not drawn.
+is attached. The current event finishes and that step is not drawn. No further
+events run, apart from the Create, Destroy, Alarm and Other events of
+persistent instances or of a persistent room: instances created after the
+request get no Create event (generated Create code asks
+`GMRuntime.gml_event_create_blocked()`), and `instance_destroy()` runs no
+Destroy event.
 The change happens before the next step; after a room switch the new room steps
 and draws in the same frame. Without the frame pump (tests and tools that call
 the static runtime directly) these functions act immediately and input edges

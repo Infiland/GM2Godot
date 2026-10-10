@@ -140,7 +140,13 @@ class TestScriptGeneratorBasic(unittest.TestCase):
 
         self.assertIn("\nvar sprite_index = -1:", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
-        self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsprite_index = \"s_child\"", content)
+        self.assertIn(
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\tsprite_index = \"s_child\"",
+            content,
+        )
 
     def test_object_runtime_records_solid_metadata_for_motion_contact(self):
         content = generate_script_content(
@@ -261,6 +267,34 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         ])
         self.assertEqual(content.count("func _ready"), 1)
         self.assertIn("get_tree().auto_accept_quit = false", content)
+
+    def test_create_event_code_is_skipped_while_a_room_change_is_pending(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}, {"eventType": 7, "eventNum": 30}],
+            code_bodies={"_ready": "\tscore = 1"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_probe"),
+        )
+
+        self.assertIn(
+            "func _ready():\n"
+            "\t_gm_register_instance()\n"
+            "\t_gm_initialize_motion_runtime()\n"
+            "\tget_tree().auto_accept_quit = false\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\tscore = 1\n",
+            content,
+        )
+
+    def test_objects_without_create_code_have_no_create_guard(self):
+        content = generate_script_content(
+            [{"eventType": 3, "eventNum": 0}],
+            code_bodies={"_on_step": "\tscore = 1"},
+            object_runtime=ObjectRuntimeConfig(object_name="o_probe"),
+        )
+
+        self.assertIn("func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n", content)
+        self.assertNotIn("gml_event_create_blocked", content)
 
     def test_draw_gui_event(self):
         content = generate_script_content([{"eventType": 8, "eventNum": 64}])

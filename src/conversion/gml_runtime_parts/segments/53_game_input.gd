@@ -681,7 +681,7 @@ static func _gml_input_binding_table(instances):
 		var position = 0
 		for inst in instances:
 			position += 1
-			if inst is Object and is_instance_valid(inst):
+			if typeof(inst) == TYPE_OBJECT and is_instance_valid(inst):
 				var events = _gml_input_instance_events(inst)
 				if not events.is_empty():
 					table.append(_gml_input_row(inst, _gml_instance_entry(inst), events, position))
@@ -725,7 +725,7 @@ static func _gml_input_row(inst, entry, events, position):
 static func _gml_input_instance_events(inst):
 	# The instance's input event bindings by event type and number, read once
 	# per object script.
-	if not (inst is Object):
+	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
 		return {}
 	return _gml_step_script_info(inst).input_events
 

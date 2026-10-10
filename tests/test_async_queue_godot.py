@@ -68,6 +68,9 @@ class TestAsyncQueueGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Exercises the async queue directly: without the GameMaker frame
+            \t# pump, gml_async_dispatch() delivers immediately.
+            \tGMRuntime.gml_event_scheduler_pump_detach()
             \tGMRuntime.gml_async_event_log_clear()
             \tvar first = _listener("A")
             \tvar second = _listener("B")

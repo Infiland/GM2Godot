@@ -225,7 +225,7 @@ Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `
 | 10 | `GMAssets` | Assets, texture groups, audio groups and dynamic assets |
 | 20 | `GMRooms` | Room order, current room, transitions and layers |
 | 30 | `GMInstances` | Live instances, handles, object indices and creation order |
-| 40 | `GMEvents` | Input dispatch, Step scheduler, alarms, timelines, sequences and collision window |
+| 40 | `GMEvents` | GameMaker step loop: input latch, image animation, Step phases, alarms, timelines, sequences, collision window and room changes |
 | 50 | `GMDraw` | Ordered Draw phases, draw state, surfaces, shaders and texture-group state |
 | 60 | `GMInput` | Godot input capture and GameMaker keyboard, mouse, gamepad and gesture state |
 | 70 | `GMAudio` | Audio instances, groups, emitters and listeners |
@@ -256,21 +256,42 @@ For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Ro
 
 ### Per-frame scheduler
 
-`GMInput._input(event)` captures native input as it arrives. On the generated `GMEvents` frame pump, input event bindings are dispatched first, followed by the central scheduler:
+`GMInput._input(event)` captures native input as it arrives. Every Godot frame, the generated `GMEvents` frame pump runs one GameMaker step in the order of the GameMaker runner:
 
 ```text
-Begin Step
+latch input (pressed/released edges since the previous step)
+→ xprevious/yprevious, image animation, Animation End
+→ Begin Step
+→ Async events
+→ timelines
 → time sources
 → alarms
-→ authored sequences and timelines
+→ keyboard events (held, pressed, released)
+→ mouse events
+→ authored sequences
 → Step
 → motion/path update
+→ Outside Room, Intersect Boundary, Outside View and view boundary events
 → collision dispatch
 → End Step
-→ clear one-frame input edges
+→ Draw phases (GMDraw)
 ```
 
 Collision is therefore evaluated after motion/path updates and before End Step. Do not attach correctness to the incidental `_process()` order of individual object nodes.
+
+Input that arrives between two frames belongs to the next step. `keyboard_check_pressed()`, `keyboard_check_released()`, `mouse_check_button_pressed()` and `mouse_check_button_released()` keep their value for the whole step, including Draw and Draw GUI, and reset when the next step starts; a press and release that both happen between two steps are both reported.
+
+Keyboard state uses GameMaker's virtual key codes everywhere: the `vk_*` constants, `ord()`, `keyboard_key`, `keyboard_lastkey` and the numbers of Keyboard, Key Press and Key Release events. Godot key events are translated when they are captured, and `vk_lshift`/`vk_rshift`, `vk_lcontrol`/`vk_rcontrol` and `vk_lalt`/`vk_ralt` follow the side of the key that was pressed. In the keyboard phase each held (pressed, released) key, in key code order, runs the matching event of every instance that has one; the `<Any Key>` event follows when at least one key was in that state and the `<No Key>` event otherwise. `keyboard_clear(key)` forgets the key until it is released and pressed again, without a Key Release event and without changing `keyboard_string`.
+
+Mouse events run object by object in object index order and, for each object, from the newest instance to the oldest. An instance whose collision mask (its mask or sprite, scaled and rotated like the instance) contains the mouse position in the room gets its held, pressed and released button events, `<No Button>` when no button is held or pressed, and Mouse Enter once when the mouse moves onto it; Mouse Leave runs once when the mouse leaves it. The global button events and the mouse wheel events follow for every instance. A child object receives the keyboard and mouse events it inherits from its parents.
+
+Every instance with a sprite advances `image_index` by `image_speed` times the sprite's playback speed (frames per second divided by the game speed, or frames per game frame) before Begin Step. `image_index` keeps its fractional value, wraps into `0..image_number` in both directions and runs Animation End when it wraps; the frame shown is the integer part wrapped into the sprite's frame count. The sprite scenes of object instances never play on their own, while sprites placed on room asset layers keep their scene animation. `sprite_index` holds the sprite's asset index (or `-1`), and changing it keeps `image_index`.
+
+`room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`, `game_restart()` and `game_end()` record a request. The current event finishes and the step is not drawn. No further events run in that step, apart from the Create, Destroy, Alarm and Other events of persistent instances or of a persistent room: an instance created after the request gets no Create event, and `instance_destroy()` runs no Destroy event. The change happens at the end of the step, or right after the draw when a Draw event requested it; after a room switch the new room steps and draws in the same frame, as GameMaker does.
+
+Each phase runs for the live instances in creation order. An instance created during a phase takes part from the next phase on (one created in Begin Step gets that step's Step and End Step events), and a destroyed instance gets no further events. An instance with no speed, no gravity and no path is left alone by the motion update, as in GameMaker.
+
+`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024) and the input events (`gml_input_dispatch_trace()`, the latest 256). Tracing is meant for tests and debugging and is off by default.
 
 ### Precise sprite collision masks
 

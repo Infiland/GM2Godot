@@ -37,6 +37,9 @@ class TestPlatformServicesGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Exercises the runtime API directly: without the GameMaker frame
+            \t# pump, async events are delivered immediately.
+            \tGMRuntime.gml_event_scheduler_pump_detach()
             \tif not _check(GMRuntime.gml_steam_is_initialized() == false, "steam fallback failed"):
             \t\treturn
             \tif not _check(GMRuntime.gml_xboxlive_user_is_signed_in() == false, "xbox sign-in fallback failed"):

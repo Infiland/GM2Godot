@@ -10,13 +10,28 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
+from PIL import Image
+
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.font_atlas import (
+    BMFONT_EXTENSION,
+    FONT_ATLAS_IMAGE_EXTENSION,
+    GameMakerFontAtlasMetadata,
+    GameMakerFontAtlasPlan,
+    build_font_atlas_image,
+    font_atlas_image_name,
+    parse_gamemaker_font_atlas_metadata,
+    plan_gamemaker_font_atlas,
+    render_bmfont_import_config,
+    render_bmfont_text,
+    render_skipped_import_config,
+)
 from src.conversion.font_metadata import (
     parse_gamemaker_font_metadata,
     project_font_conversion_fields,
 )
-from src.conversion.gamemaker_json import decode_gamemaker_json
+from src.conversion.gamemaker_json import decode_gamemaker_json, read_gamemaker_json
 from src.conversion.generated_paths import (
     generated_flat_resource_path,
     generated_resource_stem,
@@ -29,6 +44,7 @@ from src.conversion.project_manifest import (
 )
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
+    ResolvedProjectSourcePath,
     resolve_project_filesystem_source_path,
     validate_project_resource_source_path,
 )
@@ -175,6 +191,44 @@ def _copy_font_file_atomically(
             shutil.copyfile(source_path, staged_path)
 
         os.replace(staged_path, destination_path)
+
+
+def _write_font_text_atomically(destination_path: str, text: str) -> None:
+    """Publish generated font text only after it has been written completely."""
+    destination_name = os.path.basename(destination_path)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination_name}.",
+        suffix=".part",
+        dir=os.path.dirname(destination_path),
+    ) as staged_dir:
+        staged_path = os.path.join(staged_dir, destination_name)
+        with open(staged_path, "w", encoding="utf-8", newline="\n") as staged_file:
+            staged_file.write(text)
+        os.replace(staged_path, destination_path)
+
+
+def _save_font_image_atomically(destination_path: str, image: Image.Image) -> None:
+    """Publish a converted atlas page only after it has been encoded completely."""
+    destination_name = os.path.basename(destination_path)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination_name}.",
+        suffix=".part",
+        dir=os.path.dirname(destination_path),
+    ) as staged_dir:
+        staged_path = os.path.join(staged_dir, destination_name)
+        image.save(staged_path, format="PNG")
+        os.replace(staged_path, destination_path)
+
+
+def read_font_atlas_metadata(yy_filesystem_path: str) -> GameMakerFontAtlasMetadata | None:
+    """Read the baked glyph table of a font ``.yy``; ``None`` when unusable."""
+    try:
+        document = read_gamemaker_json(yy_filesystem_path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document.value, dict):
+        return None
+    return parse_gamemaker_font_atlas_metadata(document.value)
 
 
 class FontConverter(BaseConverter):
@@ -624,6 +678,13 @@ class FontConverter(BaseConverter):
             return False
 
         font_name = font_data['name']
+        # GameMaker draws font assets from the atlas the IDE baked, so that
+        # atlas is the faithful source. The TTF/system paths below are only a
+        # fallback for fonts whose baked glyph data or page image is missing.
+        atlas_result = self._convert_font_atlas(resolved_yy, font_name)
+        if atlas_result is not None:
+            return atlas_result
+
         system_font_name = font_data['fontName']
         font_source_path: str | None = None
         preserve_metadata = False
@@ -736,12 +797,14 @@ class FontConverter(BaseConverter):
             self._safe_log(get_localized("Console_Convertor_Fonts_SystemFontFallback").format(
                 name=font_name, font_name=system_font_name))
 
-        if not self.compact_logging:
-            size = font_data['size']
-            self._safe_log(get_localized("Console_Convertor_Fonts_SizeNote").format(
-                name=font_name, size=size))
-
+        self._log_font_size_note(font_data)
         return font_name
+
+    def _log_font_size_note(self, font_data: FontData) -> None:
+        """Explain that TTF/SystemFont fallbacks need a size in Godot."""
+        if not self.compact_logging:
+            self._safe_log(get_localized("Console_Convertor_Fonts_SizeNote").format(
+                name=font_data['name'], size=font_data['size']))
 
     def _process_requested_font(
         self,
@@ -754,6 +817,174 @@ class FontConverter(BaseConverter):
         self._resource_started(resource_key)
         return self._process_font(yy_path)
 
+    def _font_atlas_plan(
+        self,
+        resolved_yy: ResolvedProjectSourcePath,
+        font_name: str,
+    ) -> GameMakerFontAtlasPlan | None:
+        """Return the baked atlas plan shared with the asset registry."""
+        metadata = read_font_atlas_metadata(resolved_yy.filesystem_path)
+        if metadata is None:
+            return None
+        image_name = font_atlas_image_name(resolved_yy.filesystem_path)
+        resolved_image = self._resolve_project_source(
+            image_name,
+            owner_source_path=resolved_yy.source_path,
+            resource=font_name,
+            resource_type="font",
+            field="atlas image",
+        )
+        if resolved_image is None:
+            return None
+        plan = plan_gamemaker_font_atlas(metadata, resolved_image.filesystem_path)
+        if plan is None:
+            self._safe_log(
+                f"Info: GameMaker font {font_name!r} has baked glyph data but its "
+                f"atlas image {resolved_image.source_path!r} is missing or "
+                "unreadable; converting it from its TTF/system font instead, so "
+                "glyph shapes and metrics may differ from GameMaker."
+            )
+        return plan
+
+    def _convert_font_atlas(
+        self,
+        resolved_yy: ResolvedProjectSourcePath,
+        font_name: str,
+    ) -> str | Literal[False] | None:
+        """Write the baked atlas as a BMFont; ``None`` when it does not apply."""
+        planned_path = self._planned_font_resource_path(
+            resolved_yy.filesystem_path,
+            font_name,
+        )
+        # Planning first reports a font whose glyph table lost its atlas page.
+        plan = self._font_atlas_plan(resolved_yy, font_name)
+        if planned_path is not None and not planned_path.endswith(BMFONT_EXTENSION):
+            # The registry published a TTF/SystemFont path for this font; keep
+            # the generated file consistent with the path the runtime loads.
+            return None
+        if plan is None:
+            if planned_path is None:
+                return None
+            self._safe_log(
+                f"Error: GameMaker font {font_name!r} was planned as a baked "
+                "bitmap font, but its glyph data or atlas image is no longer "
+                "available."
+            )
+            return False
+
+        output_path = self._font_output_destination(
+            resolved_yy.filesystem_path,
+            font_name,
+            generated_resource_stem(font_name) + BMFONT_EXTENSION,
+        )
+        self._write_font_atlas(plan, output_path)
+        self._report_font_atlas_conversion(plan, font_name, resolved_yy, output_path)
+        return font_name
+
+    def _write_font_atlas(self, plan: GameMakerFontAtlasPlan, output_path: str) -> None:
+        """Publish the atlas page, BMFont descriptor, and their import settings."""
+        page_path = os.path.splitext(output_path)[0] + FONT_ATLAS_IMAGE_EXTENSION
+        converted_page = build_font_atlas_image(plan)
+        if converted_page is None:
+            _copy_font_file_atomically(
+                plan.image_path,
+                page_path,
+                preserve_metadata=False,
+            )
+        else:
+            with converted_page:
+                _save_font_image_atomically(page_path, converted_page)
+        _write_font_text_atomically(
+            page_path + ".import",
+            render_skipped_import_config(),
+        )
+        _write_font_text_atomically(
+            output_path,
+            render_bmfont_text(plan, os.path.basename(page_path)),
+        )
+        _write_font_text_atomically(
+            output_path + ".import",
+            render_bmfont_import_config(self._godot_resource_path(output_path)),
+        )
+
+    def _godot_resource_path(self, filesystem_path: str) -> str:
+        relative_path = os.path.relpath(filesystem_path, self.godot_project_path)
+        return "res://" + relative_path.replace(os.sep, "/")
+
+    def _report_font_atlas_conversion(
+        self,
+        plan: GameMakerFontAtlasPlan,
+        font_name: str,
+        resolved_yy: ResolvedProjectSourcePath,
+        output_path: str,
+    ) -> None:
+        metadata = plan.metadata
+        dropped = len(metadata.rejected_glyph_keys) + len(plan.out_of_bounds_glyph_codes)
+        if dropped:
+            self._report_font_atlas_issue(
+                "GM2GD-FONT-GLYPH-INVALID",
+                (
+                    f"Warning: GameMaker font {font_name!r} has {dropped} glyph "
+                    "table entr" + ("y" if dropped == 1 else "ies") + " with "
+                    "invalid fields or cells outside its atlas image; those "
+                    "characters are not drawn."
+                ),
+                font_name,
+                resolved_yy,
+                "Regenerate the font in GameMaker so its glyph table matches "
+                "its atlas image.",
+            )
+        if metadata.uses_sdf:
+            self._report_font_atlas_issue(
+                "GM2GD-FONT-SDF-BITMAP",
+                (
+                    f"Warning: GameMaker font {font_name!r} uses a signed distance "
+                    "field atlas; it was converted to a fixed-size bitmap font at "
+                    "its native size. Unscaled text matches GameMaker, but scaled "
+                    "or rotated text is not re-sharpened and SDF font effects are "
+                    "not available."
+                ),
+                font_name,
+                resolved_yy,
+                "Disable SDF for the font in GameMaker, or provide a larger "
+                "font asset for text drawn at large scales.",
+            )
+        if not self.compact_logging:
+            self._safe_log(
+                get_localized("Console_Convertor_Fonts_Converted").format(
+                    name=font_name,
+                    output_file=os.path.basename(output_path),
+                )
+            )
+
+    def _report_font_atlas_issue(
+        self,
+        code: str,
+        message: str,
+        font_name: str,
+        resolved_yy: ResolvedProjectSourcePath,
+        workaround: str,
+    ) -> None:
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                code,
+                message,
+                source_path=resolved_yy.source_path,
+                resource=font_name,
+                resource_type="font",
+                workaround=workaround,
+            )
+        self._safe_log(message)
+
+    def _planned_font_resource_path(self, yy_path: str, font_name: str) -> str | None:
+        """Return the registry's collision-safe path for a font, if planned."""
+        resource_name = os.path.splitext(os.path.basename(yy_path))[0]
+        return (
+            self._font_output_paths.get(resource_name)
+            or self._font_output_paths.get(font_name)
+        )
+
     def _font_output_destination(
         self,
         yy_path: str,
@@ -764,11 +995,7 @@ class FontConverter(BaseConverter):
         # paths before any converter writes output.
         from src.conversion.asset_output_paths import resource_filesystem_path
 
-        resource_name = os.path.splitext(os.path.basename(yy_path))[0]
-        resource_path = (
-            self._font_output_paths.get(resource_name)
-            or self._font_output_paths.get(font_name)
-        )
+        resource_path = self._planned_font_resource_path(yy_path, font_name)
         if resource_path is None:
             output_stem, output_extension = os.path.splitext(output_filename)
             resource_path = generated_flat_resource_path(

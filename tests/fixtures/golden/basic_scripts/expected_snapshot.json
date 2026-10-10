@@ -7,11 +7,11 @@
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:dadea6f10e6234f78bd2050075a6db0b52e2f1d7e7c11db1f1c5dd147e985c28",
+    "gm2godot/gml_runtime.gd": "sha256:c29705d7dbae3229d7087cbf06f0a1724ea4bed0735a4e93876600457f446aaf",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
     "gm2godot/managers/gm_async.gd": "sha256:221d93ad94b3fde5728602622c34c9b17089d65c6b466344cad2db2fb2bfaff8",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",
-    "gm2godot/managers/gm_draw.gd": "sha256:647f9a10a11c0baa8a72edd8d8dd7ca8c5270ecf2dab0fa46dc971a9cfcf5085",
+    "gm2godot/managers/gm_draw.gd": "sha256:8e2bbb563464c6808008240d876a7c665b94be2da324b8b5e899b945cc1edc6e",
     "gm2godot/managers/gm_events.gd": "sha256:f354e3a5809e26ecb6214a522b72cdc4f739078e9ded5ba47c59fbfe66a3f0d6",
     "gm2godot/managers/gm_input.gd": "sha256:89c6730cad86822e7eef95fe51b649eaa3feb75d30381c8705cdd152bc0e276e",
     "gm2godot/managers/gm_instances.gd": "sha256:a9aa134e11c2defab7a74277614b0365f5852c725414365ff7123de88ae2fa3c",

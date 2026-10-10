@@ -227,11 +227,15 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
             "",
         ])
     if definition.draw_pump:
+        # A room change requested by a Draw event happens right after the
+        # draw; the new room then steps and draws in the same frame.
         lines.extend([
             "func _process(_delta):",
             "\tif not GMRuntimeFacade.gml_event_scheduler_frame_drawable():",
             "\t\treturn",
             "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
+            "\twhile GMRuntimeFacade.gml_event_scheduler_after_draw():",
+            "\t\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
             "",
             "",
         ])

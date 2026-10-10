@@ -18,6 +18,12 @@ from src.conversion.asset_registry import (
 )
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import transpile_gml_code
+from src.conversion.json_values import JsonObject
+from src.conversion.path_registry import (
+    PathPoint,
+    PathRegistryEntry,
+    render_path_registry_script,
+)
 from src.conversion.rooms import render_room_runtime_script
 from src.conversion.script_generator import (
     ObjectRuntimeConfig,
@@ -51,6 +57,10 @@ def _scene(name: str, script_path: str, root_type: str = "Node2D") -> str:
         script = ExtResource("1")
         """
     )
+
+
+def _event(event_type: int, event_num: int) -> JsonObject:
+    return {"eventType": event_type, "eventNum": event_num}
 
 
 def _project_file(name: str, main_scene: str) -> str:
@@ -603,6 +613,208 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             for name, scene in rooms.items():
                 _write_text(project_dir / "rooms" / name / f"{name}.tscn", scene)
             self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_BLOCKED_EVENTS_SMOKE_OK")
+
+    def test_room_change_from_path_end_keeps_the_other_events_of_persistent_instances(self) -> None:
+        # GameMaker moves every instance (running Path End events) and then
+        # runs HandleOther before it checks for a room change. After a Path
+        # End event called room_goto(), only persistent instances still get
+        # their Path End and Outside Room events, and the step ends there.
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        asset_names = {"r_first", "r_second", "path_in", "path_out"}
+
+        def log(what: str) -> str:
+            return f'array_push(global.events, room_get_name(room) + ":{what}");\n'
+
+        def object_script(name: str, path: str, events: dict[tuple[int, int], str], *, persistent: bool = False, create: str = "") -> str:
+            event_list = [_event(0, 0)] + [_event(kind, num) for kind, num in events]
+            method_names = {(7, 8): "_on_path_ended", (7, 0): "_on_outside_room", (3, 2): "_on_end_step", (8, 64): "_on_draw_gui"}
+            code_bodies = {
+                "_ready": transpile_gml_code(create + f"path_start({path}, 20, 0, true);\n", asset_names=asset_names),
+            }
+            for key, body in events.items():
+                code_bodies[method_names[key]] = transpile_gml_code(body, asset_names=asset_names)
+            return generate_script_content(
+                event_list,
+                code_bodies=code_bodies,
+                object_runtime=ObjectRuntimeConfig(object_name=name, persistent=persistent),
+            )
+
+        # Instances are created, and move, in this order. Every path is 20
+        # pixels long and ends in the first step at speed 20.
+        objects = {
+            "o_walker": object_script(
+                "o_walker",
+                "path_in",
+                {(7, 8): log("walker_path_end") + "room_goto(r_second);\n"},
+                create="global.events = [];\n",
+            ),
+            "o_follower": object_script("o_follower", "path_in", {(7, 8): log("follower_path_end")}),
+            "o_keeper": object_script(
+                "o_keeper",
+                "path_out",
+                {
+                    (7, 8): log("keeper_path_end"),
+                    (7, 0): log("keeper_outside"),
+                    (3, 2): log("keeper_end_step"),
+                    (8, 64): log("keeper_draw_gui"),
+                },
+                persistent=True,
+            ),
+            "o_drifter": object_script(
+                "o_drifter",
+                "path_out",
+                {(7, 0): log("drifter_outside"), (3, 2): log("drifter_end_step")},
+            ),
+        }
+        checker_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var frames_in_second_room = 0
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _process(_delta):
+            \tvar scene = get_tree().current_scene
+            \tif scene == null or str(scene.name) != "r_second":
+            \t\tif Engine.get_process_frames() > 30:
+            \t\t\t_check(false, "the room change did not happen")
+            \t\treturn
+            \tframes_in_second_room += 1
+            \tif frames_in_second_room < 3:
+            \t\treturn
+            \tvar events = GMRuntime.gml_global_scope().get("events", [])
+            \tvar first_room = []
+            \tfor event in events:
+            \t\tif str(event).begins_with("r_first:"):
+            \t\t\tfirst_room.append(str(event))
+            \tvar expected = ["r_first:walker_path_end", "r_first:keeper_path_end", "r_first:keeper_outside"]
+            \tif not _check(first_room == expected, "events of the step that requested the change: " + str(first_room)):
+            \t\treturn
+            \tif not _check(events.has("r_second:keeper_end_step") and events.has("r_second:keeper_draw_gui"), "the persistent instance did not carry on in the new room: " + str(events)):
+            \t\treturn
+            \tprint("GAME_STEP_PATH_END_ROOM_CHANGE_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        instance_nodes = "".join(
+            f'\n[node name="inst_{name}" parent="." instance=ExtResource("{name}")]\n' for name in objects
+        )
+        first_room = (
+            textwrap.dedent(
+                f"""\
+                [gd_scene load_steps={len(objects) + 2} format=3]
+
+                [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+                """
+            )
+            + "".join(
+                f'[ext_resource type="PackedScene" path="res://objects/{name}/{name}.tscn" id="{name}"]\n'
+                for name in objects
+            )
+            + textwrap.dedent(
+                """\
+
+                [node name="r_first" type="Node2D"]
+                script = ExtResource("room")
+                metadata/gamemaker_room_width = 320
+                metadata/gamemaker_room_height = 180
+                metadata/gamemaker_room_persistent = false
+                """
+            )
+            + instance_nodes
+        )
+        second_room = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+
+            [node name="r_second" type="Node2D"]
+            script = ExtResource("room")
+            metadata/gamemaker_room_width = 320
+            metadata/gamemaker_room_height = 180
+            metadata/gamemaker_room_persistent = false
+            """
+        )
+        path_points = {"path_in": (PathPoint(10, 10), PathPoint(30, 10)), "path_out": (PathPoint(10, 10), PathPoint(-10, 10))}
+        entries = (
+            tuple(
+                AssetRegistryEntry(
+                    id=100 + order,
+                    name=name,
+                    kind="rooms",
+                    asset_type="room",
+                    type_name="Room",
+                    source_path=f"rooms/{name}/{name}.yy",
+                    godot_path=f"res://rooms/{name}/{name}.tscn",
+                    legacy_id=f"rooms/{name}/{name}.yy",
+                    metadata={"room_order": order, "width": 320, "height": 180, "persistent": False, "volume": 1.0},
+                )
+                for order, name in enumerate(("r_first", "r_second"))
+            )
+            + tuple(
+                AssetRegistryEntry(
+                    id=200 + order,
+                    name=name,
+                    kind="objects",
+                    asset_type="object",
+                    type_name="Object",
+                    source_path=f"objects/{name}/{name}.yy",
+                    godot_path=f"res://objects/{name}/{name}.tscn",
+                    legacy_id=f"objects/{name}/{name}.yy",
+                )
+                for order, name in enumerate(objects)
+            )
+            + tuple(
+                AssetRegistryEntry(
+                    id=300 + order,
+                    name=name,
+                    kind="paths",
+                    asset_type="path",
+                    type_name="Path",
+                    source_path=f"paths/{name}/{name}.yy",
+                    godot_path=f"res://paths/{name}/{name}.tscn",
+                    legacy_id=f"paths/{name}/{name}.yy",
+                )
+                for order, name in enumerate(path_points)
+            )
+        )
+        paths = tuple(
+            PathRegistryEntry(
+                id=300 + order,
+                name=name,
+                closed=False,
+                kind=0,
+                precision=4,
+                godot_path=f"res://paths/{name}/{name}.tscn",
+                points=points,
+            )
+            for order, (name, points) in enumerate(path_points.items())
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                _project_file("GameStepPathEndRoomChangeSmoke", "res://rooms/r_first/r_first.tscn")
+                + '\n[autoload]\n\nChecker="*res://checker.gd"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+            _write_text(project_dir / "gm2godot" / "gml_path_registry.gd", render_path_registry_script(paths))
+            _write_text(project_dir / "checker.gd", checker_script)
+            for name, script in objects.items():
+                _write_text(project_dir / "objects" / name / f"{name}.gd", script)
+                _write_text(project_dir / "objects" / name / f"{name}.tscn", _scene(name, f"res://objects/{name}/{name}.gd"))
+            _write_text(project_dir / "rooms" / "r_first" / "r_first.tscn", first_room)
+            _write_text(project_dir / "rooms" / "r_second" / "r_second.tscn", second_room)
+            self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_PATH_END_ROOM_CHANGE_SMOKE_OK")
 
     def test_image_index_advances_by_sprite_playback_speed(self) -> None:
         if _find_godot_binary() is None:

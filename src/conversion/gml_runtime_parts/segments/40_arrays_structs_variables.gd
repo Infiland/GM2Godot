@@ -509,7 +509,30 @@ static func gml_call_named(function_name, args = [], caller_self = null, caller_
 	return gml_error("GML function '" + name + "' is not available")
 
 
+# A struct (the global scope too) or a live instance node, which selector
+# reads and writes use as is; null for everything that needs resolving
+# (objects, ids, handles, keywords, methods and script functions).
+static func _gml_selector_direct_target(target):
+	var target_type = typeof(target)
+	if target_type == TYPE_DICTIONARY:
+		if target.has("id") or target.has("handle"):
+			return null
+		return target
+	if target_type == TYPE_OBJECT and is_instance_valid(target) and target is Node:
+		return target
+	return null
+
+
 static func gml_selector_get(target, member_name, current_self = null, current_other = null):
+	var direct: Variant = _gml_selector_direct_target(target)
+	if direct != null:
+		return gml_struct_get(direct, member_name)
+	if typeof(target) == TYPE_OBJECT and not is_instance_valid(target):
+		return gml_undefined()
+	# An object's first instance, as with o_player.x.
+	var first: Variant = _gml_instance_object_first(target)
+	if first != null:
+		return gml_struct_get(first, member_name)
 	var script_descriptor: Variant = null
 	if target is GMLMethod:
 		script_descriptor = {"callable": target}
@@ -533,6 +556,10 @@ static func gml_selector_exists(target, member_name, current_self = null, curren
 
 
 static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):
+	var direct: Variant = _gml_selector_direct_target(target)
+	if direct != null:
+		gml_struct_set(direct, member_name, value)
+		return value
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
 		return gml_undefined()
@@ -542,6 +569,11 @@ static func gml_selector_set(target, member_name, value, current_self = null, cu
 
 
 static func gml_selector_update(target, member_name, update_callable, current_self = null, current_other = null):
+	var direct: Variant = _gml_selector_direct_target(target)
+	if direct != null:
+		var updated = update_callable.call(gml_struct_get(direct, member_name))
+		gml_struct_set(direct, member_name, updated)
+		return updated
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
 		return gml_undefined()
@@ -711,7 +743,7 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 	if object_value is Node2D and GML_OBJECT_BBOX_FIELDS.has(key):
 		return _gml_collision_instance_bbox_value(object_value, key)
 	if object_value is Node2D:
-		var in_sequence = bool(
+		var in_sequence = _gml_sequence_instances_exist and bool(
 			object_value.get_meta("gamemaker_in_sequence", false)
 		)
 		if key == "x":
@@ -754,13 +786,13 @@ static func _gml_object_builtin_field_set(object_value, member_name, value):
 		return value
 	if object_value is Node2D:
 		if key == "x":
-			if bool(object_value.get_meta("gamemaker_in_sequence", false)):
+			if _gml_sequence_instances_exist and bool(object_value.get_meta("gamemaker_in_sequence", false)):
 				object_value.global_position.x = _to_real(value)
 			else:
 				object_value.position.x = _to_real(value)
 			return value
 		if key == "y":
-			if bool(object_value.get_meta("gamemaker_in_sequence", false)):
+			if _gml_sequence_instances_exist and bool(object_value.get_meta("gamemaker_in_sequence", false)):
 				object_value.global_position.y = _to_real(value)
 			else:
 				object_value.position.y = _to_real(value)

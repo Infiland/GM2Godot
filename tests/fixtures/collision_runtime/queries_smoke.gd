@@ -73,6 +73,7 @@ func _run():
 	_run_exact_queries()
 	_run_precise_checks()
 	_run_list_checks()
+	_run_indexed_object_checks()
 	_run_mouse_checks()
 	GMRuntime._gml_collision_set_compatibility_mode(null)
 	_expect("compatibility mode falls back to the project setting", GMRuntime._gml_collision_compatibility(), true)
@@ -309,6 +310,77 @@ func _run_list_checks():
 	GMRuntime.gml_instance_destroy(far)
 	GMRuntime.gml_instance_destroy(near)
 	GMRuntime.gml_instance_destroy(mover)
+
+
+func _run_indexed_object_checks():
+	# Converted code names objects by index. Queries against an object keep
+	# each instance's collision state between queries, so whatever the
+	# bounding box depends on has to show in the very next query.
+	GMRuntime._gml_collision_set_compatibility_mode(false)
+	var o_a = GMRuntime.gml_asset_get_index("o_a")
+	var o_b = GMRuntime.gml_asset_get_index("o_b")
+	var b = _make("o_b", 100.3, 100, "spr_box16")
+	_expect("indexed object hit", GMRuntime.gml_collision_point(null, 108.1, 95, o_b, false, false), _handle(b))
+	GMRuntime._gml_collision_set_compatibility_mode(true)
+	_expect("switching the collision mode drops kept states", GMRuntime.gml_collision_point(null, 108.1, 95, o_b, false, false), _noone())
+	GMRuntime._gml_collision_set_compatibility_mode(false)
+	b.position = Vector2(200, 200)
+	_expect("moved instance leaves its old place", GMRuntime.gml_collision_point(null, 95, 95, o_b, false, false), _noone())
+	_expect("moved instance is found at its new place", GMRuntime.gml_collision_point(null, 195, 195, o_b, false, false), _handle(b))
+	b.image_xscale = 3
+	_expect("scaled instance", GMRuntime.gml_collision_point(null, 180, 195, o_b, false, false), _handle(b))
+	b.image_xscale = 1
+	_expect("unscaled instance", GMRuntime.gml_collision_point(null, 180, 195, o_b, false, false), _noone())
+	b.image_angle = 45
+	_expect("rotated instance", GMRuntime.gml_collision_point(null, 189, 200, o_b, false, false), _handle(b))
+	b.image_angle = 0
+	_expect("unrotated instance", GMRuntime.gml_collision_point(null, 189, 200, o_b, false, false), _noone())
+	b.mask_index = "spr_box2"
+	_expect("mask change", GMRuntime.gml_collision_point(null, 195, 195, o_b, false, false), _noone())
+	_expect("new mask", GMRuntime.gml_collision_point(null, 201, 201, o_b, false, false), _handle(b))
+	b.mask_index = -1
+	b.sprite_index = "spr_box2"
+	_expect("sprite change", GMRuntime.gml_collision_point(null, 195, 195, o_b, false, false), _noone())
+	b.sprite_index = "spr_box16"
+	_expect("sprite change back", GMRuntime.gml_collision_point(null, 195, 195, o_b, false, false), _handle(b))
+	_expect("indexed distance_to_object", GMRuntime.gml_distance_to_object(b, o_b), 0.0)
+	GMRuntime.gml_instance_destroy(b)
+
+	# Instances of an object, children included, in creation order.
+	var first = _make("o_a", 300, 300, "spr_box16")
+	var child = Instance.new()
+	child.position = Vector2(300, 300)
+	child.sprite_index = "spr_box16"
+	add_child(child)
+	GMRuntime.gml_instance_register(child, "o_shape", ["o_a"])
+	var second = _make("o_a", 300, 300, "spr_box16")
+	_expect("first instance in creation order", GMRuntime.gml_collision_point(null, 300, 300, o_a, false, false), _handle(first))
+	_expect("notme skips the caller", GMRuntime.gml_collision_point(first, 300, 300, o_a, false, true), _handle(child))
+	_expect("all by keyword", GMRuntime.gml_collision_point(null, 300, 300, GMRuntime.gml_instance_all(), false, false), _handle(first))
+	_expect("all by index", GMRuntime.gml_collision_point(null, 300, 300, GMRuntime.GML_INSTANCE_ALL_INDEX, false, false), _handle(first))
+	GMRuntime.gml_instance_destroy(first)
+	_expect("children count as the parent's instances", GMRuntime.gml_collision_point(null, 300, 300, o_a, false, false), _handle(child))
+	var list = GMRuntime.gml_ds_list_create()
+	_expect("indexed list count", GMRuntime.gml_collision_point_list(null, 300, 300, o_a, false, false, list, false), 2)
+	_expect("indexed list order", [GMRuntime.gml_ds_list_find_value(list, 0), GMRuntime.gml_ds_list_find_value(list, 1)], [_handle(child), _handle(second)])
+	GMRuntime.gml_ds_list_destroy(list)
+	var mover = _make("o_b", 0, 0, "spr_box16")
+	_expect("place_free without solid instances", GMRuntime.gml_place_free(mover, 300, 300), true)
+	second.solid = true
+	_expect("place_free with a solid instance", GMRuntime.gml_place_free(mover, 300, 300), false)
+	second.solid = false
+	# The place a place function tests is kept too.
+	_expect("instance at a tested place", GMRuntime.gml_instance_place(mover, 300, 310, o_a), _handle(child))
+	mover.mask_index = "spr_box2"
+	_expect("tested place with a changed mask", GMRuntime.gml_instance_place(mover, 300, 310, o_a), _noone())
+	mover.mask_index = -1
+	_expect("tested place with the mask back", GMRuntime.gml_place_meeting(mover, 300, 310, o_a), true)
+	# A node freed without being unregistered is passed over.
+	child.free()
+	_expect("freed instance is passed over", GMRuntime.gml_collision_point(null, 300, 300, o_a, false, false), _handle(second))
+	GMRuntime.gml_instance_destroy(second)
+	GMRuntime.gml_instance_destroy(mover)
+	_expect("no instances left", GMRuntime.gml_collision_point(null, 300, 300, o_a, false, false), _noone())
 
 
 func _run_mouse_checks():

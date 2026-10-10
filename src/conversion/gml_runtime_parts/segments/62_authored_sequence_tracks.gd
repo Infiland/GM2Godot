@@ -294,6 +294,7 @@ static func _gml_sequence_create_content(kind, keyframe, state):
 		content.visible = false
 	if kind == "instance":
 		content.set_meta("gamemaker_in_sequence", true)
+		_gml_sequence_instances_exist = true
 		var object_selector = asset_name
 		if entry != null and entry.has("id"):
 			object_selector = int(entry.get("id", -1))

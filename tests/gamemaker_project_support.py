@@ -34,6 +34,7 @@ class GameMakerObject:
     name: str
     events: Mapping[tuple[int, int], str]
     persistent: bool = False
+    parent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +97,11 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "name": game_object.name,
         "overriddenProperties": [],
         "parent": {"name": "Objects", "path": "folders/Objects.yy"},
-        "parentObjectId": None,
+        "parentObjectId": (
+            None
+            if game_object.parent is None
+            else {"name": game_object.parent, "path": f"objects/{game_object.parent}/{game_object.parent}.yy"}
+        ),
         "persistent": game_object.persistent,
         "physicsObject": False,
         "properties": [],

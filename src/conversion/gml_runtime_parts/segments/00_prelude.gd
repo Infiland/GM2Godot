@@ -154,8 +154,11 @@ static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
 static var _gml_instance_entries = {}
 static var _gml_instance_handles_by_node_id = {}
-static var _gml_instance_ids_by_object = {}
-static var _gml_instance_ids_by_object_name = {}
+# Registered instances in creation order, as GameMaker keeps its instance
+# lists: all of them, and by object id and object name (children included).
+static var _gml_instance_live_order = []
+static var _gml_instance_live_by_object = {}
+static var _gml_instance_live_by_object_name = {}
 static var _gml_instance_creation_counter = 0
 static var _gml_layer_handles_by_index = {}
 static var _gml_layer_handles_by_node_id = {}

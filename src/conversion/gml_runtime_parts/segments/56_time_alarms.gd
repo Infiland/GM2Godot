@@ -10,15 +10,28 @@ const GML_TIME_SOURCE_STATE_STOPPED = 3
 const GML_TIME_SOURCE_EXPIRY_AFTER = 0
 const GML_TIME_SOURCE_EXPIRY_NEAREST = 1
 const GML_TIME_SOURCE_HANDLE_KIND = "time_source"
+# GameMaker's step order (HTML5 runner GameMaker_DoAStep): the input state is
+# latched first, then every phase below runs for all instances. When an
+# event requests a room change (room_goto and friends, room_restart,
+# game_restart, game_end), no further step events run and the step stops
+# after the current phase; Draw is skipped for that step.
 const GML_EVENT_PHASE_ORDER = [
+	"animation",
 	"begin_step",
+	"async",
+	"timelines",
 	"time_sources",
 	"alarms",
+	"keyboard",
+	"mouse",
+	"sequences",
 	"step",
 	"motion",
+	"other",
 	"collision",
 	"end_step"
 ]
+const GML_EVENT_SCHEDULER_TRACE_LIMIT = 1024
 
 static var _gml_time_sources = {}
 static var _gml_time_source_next_id = 1
@@ -50,32 +63,68 @@ static func gml_event_scheduler_trace_clear():
 
 
 static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
+	# Runs one GameMaker step. Returns the step's frame number, or null when
+	# the scheduler is disabled.
 	if not _gml_event_scheduler_enabled:
 		return null
 	var frame = _gml_event_scheduler_frame_index
 	_gml_event_scheduler_frame_index += 1
 	var frames = max(1, int(delta_frames))
-	var seconds = float(delta_seconds)
-	gml_event_scheduler_dispatch_phase("begin_step", "_on_begin_step", _gml_event_scheduler_live_instances(), frame)
-	gml_time_source_tick_all(seconds, frames)
-	_gml_event_scheduler_record_phase("time_sources", "", null, frame)
-	gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
-	gml_sequence_timeline_scheduler_frame(
-		seconds,
-		frames,
-		_gml_event_scheduler_live_instances(),
-		frame
-	)
-	gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
-	_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
-	gml_collision_event_dispatch_frame(_gml_event_scheduler_live_instances(), frame)
-	gml_event_scheduler_dispatch_phase("end_step", "_on_end_step", _gml_event_scheduler_live_instances(), frame)
+	var seconds = max(float(delta_seconds), 0.0)
+	gml_input_begin_step()
+	for phase in GML_EVENT_PHASE_ORDER:
+		_gml_event_scheduler_run_phase(phase, seconds, frames, frame)
+		if gml_room_change_pending():
+			break
 	return frame
+
+
+static func _gml_event_scheduler_run_phase(phase, seconds, frames, frame):
+	match phase:
+		"animation":
+			_gml_step_update_images(_gml_event_scheduler_live_instances(), frame)
+		"begin_step":
+			gml_event_scheduler_dispatch_phase("begin_step", "_on_begin_step", _gml_event_scheduler_live_instances(), frame)
+		"async":
+			_gml_event_scheduler_record_phase("async", "", null, frame)
+			gml_async_step_flush()
+		"timelines":
+			_gml_event_scheduler_record_phase("timelines", "", null, frame)
+			gml_timeline_scheduler_frame(frames, _gml_event_scheduler_live_instances())
+		"time_sources":
+			gml_time_source_tick_all(seconds, frames)
+			_gml_event_scheduler_record_phase("time_sources", "", null, frame)
+		"alarms":
+			gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
+		"keyboard":
+			_gml_event_scheduler_record_phase("keyboard", "", null, frame)
+			# Keyboard events for held keys, then pressed, then released keys.
+			gml_input_dispatch_frame(null, [5, 9, 10])
+		"mouse":
+			_gml_event_scheduler_record_phase("mouse", "", null, frame)
+			gml_input_dispatch_frame(null, [6, 13])
+		"sequences":
+			_gml_event_scheduler_record_phase("sequences", "", null, frame)
+			# Sequences advance by their playback speed per step of game time.
+			gml_sequence_scheduler_frame(1.0 / max(_to_real(gml_game_speed_fps()), 1.0), frames)
+		"step":
+			gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
+		"motion":
+			_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
+		"other":
+			_gml_step_handle_other(_gml_event_scheduler_live_instances(), frame)
+		"collision":
+			gml_collision_event_dispatch_frame(_gml_event_scheduler_live_instances(), frame)
+		"end_step":
+			gml_event_scheduler_dispatch_phase("end_step", "_on_end_step", _gml_event_scheduler_live_instances(), frame)
+	return null
 
 
 static func gml_event_scheduler_dispatch_phase(phase, method_name, instances = null, frame = -1):
 	var targets = instances if instances is Array else _gml_event_scheduler_live_instances()
 	for inst in targets:
+		if gml_room_change_pending():
+			break
 		if not _gml_event_scheduler_instance_valid(inst):
 			continue
 		if inst.has_method(str(method_name)):
@@ -92,6 +141,17 @@ static func gml_event_scheduler_tick_alarms(instances = null, delta_frames = 1, 
 			if _gml_event_scheduler_instance_valid(inst):
 				_gml_alarm_tick_instance(inst, frame)
 	return null
+
+
+static func _gml_event_scheduler_event_blocked(inst, persistent_exempt = false):
+	# Once a room change is pending, GameMaker runs no further events. Only
+	# Create, Destroy, Alarm and Other events (persistent_exempt) still run
+	# for persistent instances and for every instance of a persistent room.
+	if not gml_room_change_pending():
+		return false
+	if not bool(persistent_exempt):
+		return true
+	return not (_gml_room_node_is_persistent(inst) or _gml_room_current_is_persistent())
 
 
 static func gml_alarm_get(inst, index):
@@ -123,19 +183,20 @@ static func gml_alarm_tick(inst, delta_frames):
 
 
 static func _gml_alarm_tick_instance(inst, frame):
+	# Like GameMaker, only alarms that have an Alarm event count down. An
+	# alarm runs its event in the step it reaches 0 and becomes -1 (inactive)
+	# on the following step.
 	var alarms = _gml_alarm_array(inst)
 	for i in range(GML_ALARM_COUNT):
+		var method_name = "_on_alarm_" + str(i)
+		if not inst.has_method(method_name):
+			continue
 		if alarms[i] < 0:
 			continue
-		if alarms[i] == 0:
-			alarms[i] = -1
-			continue
 		alarms[i] -= 1
-		if alarms[i] == 0:
-			var method_name = "_on_alarm_" + str(i)
-			if inst.has_method(method_name):
-				_gml_event_scheduler_record_phase("alarms", method_name, inst, frame)
-				inst.call(method_name)
+		if alarms[i] == 0 and not _gml_event_scheduler_event_blocked(inst, true):
+			_gml_event_scheduler_record_phase("alarms", method_name, inst, frame)
+			inst.call(method_name)
 
 
 static func _gml_alarm_array(inst):
@@ -170,7 +231,13 @@ static func _gml_event_scheduler_live_instances():
 
 
 static func _gml_event_scheduler_instance_valid(inst):
-	return inst != null and is_instance_valid(inst)
+	# Destroyed instances stop receiving events for the rest of the step.
+	if inst == null or not is_instance_valid(inst):
+		return false
+	if inst is Node and inst.is_queued_for_deletion():
+		return false
+	var entry = _gml_instance_entry(inst)
+	return entry == null or not bool(entry["destroyed"])
 
 
 static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = null, frame = -1):
@@ -183,6 +250,10 @@ static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = nu
 	if inst != null:
 		entry["instance"] = str(inst.name) if inst is Node else str(inst)
 	_gml_event_scheduler_trace.append(entry)
+	if _gml_event_scheduler_trace.size() > GML_EVENT_SCHEDULER_TRACE_LIMIT:
+		_gml_event_scheduler_trace = _gml_event_scheduler_trace.slice(
+			_gml_event_scheduler_trace.size() - GML_EVENT_SCHEDULER_TRACE_LIMIT
+		)
 
 
 static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):

@@ -63,6 +63,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "71_flex_panels.gd",
     "72_os_debug_gc.gd",
     "73_platform_services.gd",
+    "74_game_step.gd",
     "80_static_hash_clone_error.gd",
 )
 

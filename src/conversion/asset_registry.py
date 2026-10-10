@@ -87,6 +87,7 @@ from src.conversion.sound_metadata import (
     capture_sound_registry_file,
     capture_sound_registry_metadata,
 )
+from src.conversion.sprite_metadata import sprite_animation_registry_metadata
 from src.conversion.timeline_metadata import (
     TimelineMomentFields,
     capture_timeline_action_fields,
@@ -3186,6 +3187,9 @@ class AssetRegistryConverter(BaseConverter):
                 stub_path=godot_path or None,
             )
 
+        if resource.kind == "sprites":
+            return self._sprite_metadata(resource)
+
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
             if texture_group:
@@ -3205,6 +3209,14 @@ class AssetRegistryConverter(BaseConverter):
             "compression": sound.compression,
             "type": sound.sound_type,
         }
+
+    def _sprite_metadata(self, resource: _ProjectResource) -> JsonObject:
+        metadata: JsonObject = {}
+        texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
+        if texture_group:
+            metadata.update(self._texture_group_asset_metadata(texture_group))
+        metadata.update(sprite_animation_registry_metadata(resource.raw_data))
+        return metadata
 
     def _texture_group_asset_metadata(self, texture_group: str) -> JsonObject:
         metadata: JsonObject = {"texture_group": texture_group}

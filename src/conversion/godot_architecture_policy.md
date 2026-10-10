@@ -8,7 +8,10 @@ choices used for a project.
 
 - Rooms use `Node2D` roots with `res://gm2godot/gml_room_node.gd`.
 - The first GameMaker `RoomOrderNodes` entry becomes `run/main_scene`.
-- GameMaker layers become `Node2D` children with `z_index = -depth`.
+- GameMaker layers become `Node2D` children with an absolute
+  (`z_as_relative = false`) `z_index = -depth`. Depths beyond ±3072 are
+  compressed logarithmically into Godot's ±4096 `z_index` range so their
+  order is kept; instance `depth` assignments use the same mapping.
 - Every generated room has a `GMGUI` `CanvasLayer` reserved for Draw GUI phases.
 - Tile layers use Godot 4 `TileMapLayer` when the source tile data can be decoded.
 - Native Godot callbacks and signals do not define GameMaker event order; runtime
@@ -19,7 +22,7 @@ choices used for a project.
 - Renderer mode is selected from project features:
   - `godot_node_scene` for projects without explicit Draw or surface code.
   - `central_canvas_draw_manager` when Draw, shader, GPU state, or effect-layer
-    code needs ordered `CanvasItem` dispatch.
+    code needs the ordered draw-phase dispatch through `GMDraw`.
   - `surface_viewport` when surface/application-surface APIs require a
     `SubViewport`/`ViewportTexture` path.
 - Collision mode is selected from room, script, and sprite features:

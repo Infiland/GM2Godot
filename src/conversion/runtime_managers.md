@@ -47,6 +47,34 @@ timelines/sequences, input edge clearing, draw phases, GUI phases, and queued
 async delivery. Tests that depend on these phases should assert the generated
 method names or manager queues rather than incidental node order.
 
+Draw phases run once per frame from `GMRuntime.gml_draw_event_dispatch_frame()`:
+Pre Draw, Draw Begin, Draw, Draw End, Post Draw, Draw GUI Begin, Draw GUI and
+Draw GUI End, each over the visible instances from the highest depth to the
+lowest. Generated draw events are the `_on_pre_draw`, `_on_draw_begin`,
+`_on_draw`, `_on_draw_end`, `_on_post_draw`, `_on_draw_gui_begin`,
+`_on_draw_gui` and `_on_draw_gui_end` methods; Godot's own `_draw` callback is
+not used. An instance without a Draw event (own or inherited) is drawn by its
+generated sprite node, which is hidden for instances that have one. Draw calls
+add commands to runtime-owned `RenderingServer` canvas items that are cleared
+and refilled every frame and freed with their instance or room: Draw output is
+parented under the instance's canvas item so it sorts at the instance's depth;
+Draw Begin and Draw End use room-space `CanvasLayer`s at -1 and 1 (behind and in
+front of the room's layers); Pre Draw and Post Draw use window-space layers at
+-2 and 999; GUI phases draw into the room's `GMGUI` layer (1000). A blend mode,
+shader, shader uniform, texture filter or texture repeat change starts a new
+canvas item so earlier commands keep the state they were drawn with. Draw state
+set with `draw_set_*`, `gpu_set_*` and `shader_set` persists across instances,
+events and frames. A `depth` assigned inside a draw event takes effect after
+the frame's draw events, as GameMaker updates its layer lists after drawing.
+Known draw deviations: instances at the same depth draw in scene-tree order
+(GameMaker does not guarantee one); `bm_max` and `bm_min` use the nearest
+Godot canvas blend mode (add and multiply) and `bm_reverse_subtract` draws
+with normal blending; the alpha test compares each draw call's alpha rather
+than each pixel; partial `gpu_set_colourwriteenable` masks are approximated
+through the draw colour; Draw Begin, Draw and Draw End run once per frame
+rather than once per enabled view; surfaces are CPU images, so while a
+surface target is set only clears and surface copies reach it.
+
 Supported authored sequences are normalized into managed descriptors and advanced
 by `GMEvents` using either frames-per-second or frames-per-game-frame speed.
 Track/key order, assign/linear interpolation, nested state, mapped audio effects,

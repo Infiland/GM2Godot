@@ -150,6 +150,20 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_draw_surfaces_godot.py",),
     ),
     _segment(
+        "50_draw_pipeline.gd",
+        "Draw event dispatch, RenderingServer draw sinks, GPU state segments, and depth ordering.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "48_drawing_basic_forms.gd",
+            "49_drawing_surfaces.gd",
+        ),
+        tests=(
+            "tests/test_draw_event_dispatch_godot.py",
+            "tests/test_draw_pipeline_godot.py",
+        ),
+    ),
+    _segment(
         "51_particles.gd",
         "Particle system, type, emitter, and built-in effect helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "48_drawing_basic_forms.gd"),

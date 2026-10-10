@@ -90,7 +90,7 @@ class TestMapEventStatic(unittest.TestCase):
 
     def test_draw_event(self):
         m = map_event({"eventType": 8, "eventNum": 0})
-        self.assertEqual(m.godot_func, "_draw")
+        self.assertEqual(m.godot_func, "_on_draw")
         self.assertEqual(m.sort_key, 3)
         self.assertEqual(m.gml_filename, "Draw_0.gml")
 

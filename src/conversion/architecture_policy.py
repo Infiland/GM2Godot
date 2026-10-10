@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -38,6 +39,9 @@ ROOM_ROOT_POLICY_ID = "gm_room_node2d"
 LAYER_HIERARCHY_POLICY_ID = "gm_layer_depth_node2d"
 GUI_LAYER_POLICY_ID = "gm_gui_canvas_layer"
 DEPTH_MAPPING_POLICY_ID = "gamemaker_depth_to_negative_z_index"
+DEPTH_Z_LINEAR_LIMIT = 3072
+DEPTH_Z_LIMIT = 4096
+DEPTH_COMPRESSION_LIMIT = 2.0**31
 
 GODOT_ARCHITECTURE_SOURCES: JsonObject = {
     "autoload": "https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html",
@@ -381,12 +385,41 @@ def room_root_policy() -> JsonObject:
     }
 
 
+def gamemaker_depth_to_z_index(depth: float) -> int:
+    """Return the absolute Godot z_index for a GameMaker depth.
+
+    Lower GameMaker depths draw later and higher Godot z_index values draw
+    later, so the sign flips. Depths within +-3072 map one-to-one; larger
+    depths are compressed logarithmically into the rest of Godot's +-4096
+    z_index range so their order is kept. The runtime's gml_depth_to_z_index
+    uses the same mapping.
+    """
+    if math.isnan(depth):
+        return 0
+    value = float(math.floor(depth)) if math.isfinite(depth) else depth
+    magnitude = abs(value)
+    if magnitude <= DEPTH_Z_LINEAR_LIMIT:
+        z_magnitude = int(magnitude)
+    elif magnitude < DEPTH_COMPRESSION_LIMIT:
+        span = DEPTH_Z_LIMIT - DEPTH_Z_LINEAR_LIMIT
+        ratio = math.log(magnitude / DEPTH_Z_LINEAR_LIMIT) / math.log(
+            DEPTH_COMPRESSION_LIMIT / DEPTH_Z_LINEAR_LIMIT
+        )
+        z_magnitude = DEPTH_Z_LINEAR_LIMIT + int(min(span, math.ceil(span * ratio)))
+    else:
+        z_magnitude = DEPTH_Z_LIMIT
+    return -z_magnitude if value > 0 else z_magnitude
+
+
 def layer_hierarchy_policy() -> JsonObject:
     return {
         "id": LAYER_HIERARCHY_POLICY_ID,
         "layer_node": "Node2D",
         "depth_mapping": DEPTH_MAPPING_POLICY_ID,
-        "depth_expression": "Node2D.z_index = -GameMaker layer depth",
+        "depth_expression": (
+            "Node2D.z_index = -GameMaker layer depth (absolute z; depths beyond "
+            "+-3072 compressed into Godot's +-4096 range)"
+        ),
         "gui_layer": {
             "id": GUI_LAYER_POLICY_ID,
             "godot_node": "CanvasLayer",

@@ -190,7 +190,7 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 - Each room is a `Node2D` root using `res://gm2godot/gml_room_node.gd`.
 - The first ordered GameMaker room becomes the Godot main scene when it was converted successfully.
-- GameMaker layers become `Node2D` children. The depth mapping is `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later.
+- GameMaker layers become `Node2D` children with an absolute `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later. Depths within ±3072 map one to one; larger magnitudes are compressed into Godot's ±4096 `z_index` range while keeping their order.
 - Every room reserves a `GMGUI` `CanvasLayer` at layer `1000` for Draw GUI phases.
 - Decodable tile data uses Godot 4 `TileMapLayer` output.
 - Native Godot callbacks do not define GameMaker event order; the runtime managers coordinate the generated phases.
@@ -299,6 +299,8 @@ The mapping follows the GameMaker LTS [Sequence Track Struct](https://manual.gam
 Pre Draw → Draw Begin → Draw → Draw End → Post Draw
 → Draw GUI Begin → Draw GUI → Draw GUI End
 ```
+
+Each phase visits visible instances from the highest depth to the lowest; instances at the same depth keep scene-tree order, so later-created instances draw on top. An object without a Draw event keeps its default sprite node. Draw functions write into canvas items owned by the drawing instance (Draw) or by the phase's draw space (Draw Begin/End, Pre/Post Draw and the GUI phases), which are cleared at the start of every dispatched frame, while draw state (colour, alpha, font, alignment, blend mode and shader) carries across instances and frames as in GameMaker.
 
 `GMAsync` owns FIFO delivery for queued HTTP, networking, audio, platform, and extension callbacks. It scopes `async_load` to each delivered Async event. Godot signals that affect GameMaker ordering—such as supported collision, timer, animation, HTTP-completion, and audio-finished signals—must be queued through the manager identified by `architecture_policy.json`; user-authored native callbacks are outside this ordering contract unless they use the same queue.
 

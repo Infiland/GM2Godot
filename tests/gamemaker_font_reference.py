@@ -21,6 +21,10 @@ NO_WRAP_WIDTH = 10000000
 FA_LEFT, FA_CENTER, FA_RIGHT = 0, 1, 2
 FA_TOP, FA_MIDDLE, FA_BOTTOM = 0, 1, 2
 
+Colour = tuple[int, int, int, int]
+Point = tuple[float, float]
+WHITE: Colour = (255, 255, 255, 255)
+
 
 @dataclass(frozen=True)
 class ReferenceGlyph:
@@ -44,6 +48,21 @@ class ReferenceQuad:
     h: int
     atlas_x: int
     atlas_y: int
+
+
+@dataclass(frozen=True)
+class ReferenceVertexQuad:
+    """A glyph quad as ``Draw_String_GL`` builds it.
+
+    The quad covers the glyph cell plus the one texel of the atlas around it
+    that GameMaker also draws. ``points`` and ``colours`` run top-left,
+    top-right, bottom-right, bottom-left; ``source`` is the atlas rectangle.
+    """
+
+    code: int
+    points: tuple[Point, Point, Point, Point]
+    source: tuple[int, int, int, int]
+    colours: tuple[Colour, Colour, Colour, Colour]
 
 
 @dataclass(frozen=True)
@@ -235,6 +254,187 @@ class GameMakerTextReference:
                     )
                 pen += glyph.shift
         return quads
+
+    def vertex_quads(
+        self,
+        x: float,
+        y: float,
+        text: str,
+        *,
+        sep: int = -1,
+        line_width: int = -1,
+        halign: int = FA_LEFT,
+        valign: int = FA_TOP,
+        xscale: float = 1.0,
+        yscale: float = 1.0,
+        angle: float = 0.0,
+        colours: tuple[Colour, Colour, Colour, Colour] = (WHITE, WHITE, WHITE, WHITE),
+    ) -> list[ReferenceVertexQuad]:
+        """The quads ``draw_text_ext_transformed_colour`` hands the GPU.
+
+        Follows ``GR_Text_Draw`` (line steps, alignment) and ``Draw_String_GL``
+        (glyph quads, rotation about each line origin, corner colours). Text
+        without scale or rotation has its line origins snapped the way nearest
+        sampling lights the fractional quads.
+        """
+        if abs(angle) <= 0.001:
+            angle = 0.0
+        radians = math.radians(angle)
+        sine, cosine = math.sin(radians), math.cos(radians)
+        lines = self.split(text, line_width)
+        step = self.line_step(sep)
+        xsep = sine * xscale * step
+        ysep = cosine * yscale * step
+        if valign == FA_MIDDLE:
+            x -= len(lines) * xsep / 2
+            y -= len(lines) * ysep / 2
+        elif valign == FA_BOTTOM:
+            x -= len(lines) * xsep
+            y -= len(lines) * ysep
+        snap = xscale == 1.0 and yscale == 1.0 and angle == 0.0
+        quads: list[ReferenceVertexQuad] = []
+        for line in lines:
+            xoff = 0.0
+            yoff = -self.ascender_offset * yscale
+            if halign == FA_CENTER:
+                xoff = -(xscale * self.text_width(line) / 2)
+            elif halign == FA_RIGHT:
+                xoff = -(xscale * self.text_width(line))
+            line_x = x + cosine * xoff + sine * yoff
+            line_y = y - sine * xoff + cosine * yoff
+            if snap:
+                line_x, line_y = math.ceil(line_x - 0.5), math.ceil(line_y - 0.5)
+            quads.extend(
+                self._line_vertex_quads(line, (line_x, line_y), (xscale, yscale), (sine, cosine), colours)
+            )
+            x += xsep
+            y += ysep
+        return quads
+
+    def _line_vertex_quads(
+        self,
+        line: str,
+        origin: Point,
+        scale: tuple[float, float],
+        rotation: tuple[float, float],
+        colours: tuple[Colour, Colour, Colour, Colour],
+    ) -> list[ReferenceVertexQuad]:
+        origin_x, origin_y = origin
+        xscale, yscale = scale
+        sine, cosine = rotation
+
+        def place(px: float, py: float) -> Point:
+            dx, dy = px - origin_x, py - origin_y
+            return (origin_x + cosine * dx + sine * dy, origin_y - sine * dx + cosine * dy)
+
+        across = colours[0] != colours[1] or colours[2] != colours[3]
+        line_width = self.text_width(line)
+        quads: list[ReferenceVertexQuad] = []
+        pen = origin_x
+        first_left: float | None = None
+        previous: ReferenceGlyph | None = None
+        for char in line:
+            glyph = self.glyphs.get(ord(char))
+            if glyph is None:
+                continue
+            if previous is not None:
+                pen += xscale * self.kerning.get((previous.code, glyph.code), 0)
+            previous = glyph
+            if glyph.w * glyph.h > 0:
+                left = pen + (glyph.offset - 1 - self.sdf_spread) * xscale
+                top = origin_y - (1 + self.sdf_spread) * yscale
+                right = left + (glyph.w + 2) * xscale
+                bottom = top + (glyph.h + 2) * yscale
+                corner_colours = colours
+                if across:
+                    first_left = left if first_left is None else first_left
+                    start = _gradient_amount(left - first_left, line_width)
+                    finish = _gradient_amount(right - first_left, line_width)
+                    alpha = colours[0][3]
+                    corner_colours = (
+                        _merge_colour(colours[0], colours[1], start, alpha),
+                        _merge_colour(colours[0], colours[1], finish, alpha),
+                        _merge_colour(colours[3], colours[2], finish, alpha),
+                        _merge_colour(colours[3], colours[2], start, alpha),
+                    )
+                quads.append(
+                    ReferenceVertexQuad(
+                        code=glyph.code,
+                        points=(
+                            place(left, top),
+                            place(right, top),
+                            place(right, bottom),
+                            place(left, bottom),
+                        ),
+                        source=(glyph.x - 1, glyph.y - 1, glyph.w + 2, glyph.h + 2),
+                        colours=corner_colours,
+                    )
+                )
+            pen += xscale * glyph.shift
+        return quads
+
+
+def _gradient_amount(distance: float, line_width: int) -> float:
+    if line_width <= 0:
+        return 0.0 if distance == 0 else 1.0
+    return min(abs(distance) / line_width, 1.0)
+
+
+def _merge_colour(start: Colour, end: Colour, amount: float, alpha: int) -> Colour:
+    """``merge_colour`` per channel, truncated, with the given alpha."""
+    keep = 1.0 - amount
+    red, green, blue = (int(start[index] * keep + end[index] * amount) for index in range(3))
+    return (red, green, blue, alpha)
+
+
+def rasterize_vertex_quads(
+    canvas: Image.Image,
+    atlas: Image.Image,
+    quads: Iterable[ReferenceVertexQuad],
+) -> None:
+    """Draw axis-aligned quads over ``canvas`` like a GPU with nearest sampling.
+
+    A pixel is drawn when its centre lies in the quad (left and top edges
+    included), takes the atlas texel under that centre, and multiplies it by
+    the corner colours interpolated over the triangles split along the
+    top-left to bottom-right diagonal. Results blend source-over.
+    """
+    pixels = canvas.load()
+    texels = atlas.load()
+    assert pixels is not None and texels is not None
+    for quad in quads:
+        (left, top), (right, _), (_, bottom), _ = quad.points
+        source_x, source_y, source_w, source_h = quad.source
+        width, height = right - left, bottom - top
+        for row in range(math.ceil(top - 0.5), math.ceil(bottom - 0.5)):
+            v = (row + 0.5 - top) / height
+            texel_y = source_y + min(int(v * source_h), source_h - 1)
+            for column in range(math.ceil(left - 0.5), math.ceil(right - 0.5)):
+                u = (column + 0.5 - left) / width
+                texel = texels[source_x + min(int(u * source_w), source_w - 1), texel_y]
+                assert isinstance(texel, tuple)
+                colour = _corner_colour(quad.colours, u, v)
+                alpha = texel[3] / 255 * colour[3]
+                if alpha <= 0:
+                    continue
+                below = pixels[column, row]
+                assert isinstance(below, tuple)
+                pixels[column, row] = tuple(
+                    round(texel[index] / 255 * colour[index] * alpha + below[index] * (1 - alpha))
+                    for index in range(3)
+                ) + (255,)
+
+
+def _corner_colour(colours: tuple[Colour, Colour, Colour, Colour], u: float, v: float) -> tuple[float, ...]:
+    top_left, top_right, bottom_right, bottom_left = colours
+    if u >= v:
+        weights = ((top_left, 1 - u), (top_right, u - v), (bottom_right, v))
+    else:
+        weights = ((top_left, 1 - v), (bottom_right, u), (bottom_left, v - u))
+    return tuple(
+        sum(colour[index] * weight for colour, weight in weights) / (255 if index == 3 else 1)
+        for index in range(4)
+    )
 
 
 def _split_lines(text: str) -> list[str]:

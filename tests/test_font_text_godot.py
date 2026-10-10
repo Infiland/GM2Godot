@@ -2,10 +2,11 @@
 
 The fixture converts synthetic GameMaker fonts (baked atlas plus glyph table)
 with the real font converter and asset registry, then asks Godot for the
-generated runtime's text metrics, line layout and glyph quads. Every value is
-compared with ``tests.gamemaker_font_reference``, an independent model of the
-GameMaker runner. When ``xvfb-run`` is available the same text is rendered
-with the OpenGL renderer and compared with the reference pixel by pixel.
+generated runtime's text metrics, line layout and glyph quads, including
+scaled, rotated and corner-coloured text. Every value is compared with
+``tests.gamemaker_font_reference``, an independent model of the GameMaker
+runner. When ``xvfb-run`` is available the same text is rendered with the
+OpenGL renderer and compared with the reference pixel by pixel.
 """
 from __future__ import annotations
 
@@ -38,10 +39,14 @@ from tests.gamemaker_font_reference import (
     FA_MIDDLE,
     FA_RIGHT,
     FA_TOP,
+    WHITE,
+    Colour,
     GameMakerTextReference,
     ReferenceQuad,
+    ReferenceVertexQuad,
     SyntheticFont,
     draw_reference_quads,
+    rasterize_vertex_quads,
     write_font_project,
     write_gamemaker_font,
 )
@@ -49,9 +54,11 @@ from tests.godot_test_support import find_smoke_godot_binary, write_fixture_text
 
 _RESULT_PREFIX = "FONT_TEXT_RESULT "
 _CANVAS_WIDTH = 800
-_CANVAS_HEIGHT = 400
+_CANVAS_HEIGHT = 800
 _LATIN = tuple(range(32, 127))
 _SYSTEM_FONT = "fnt_system"
+_YELLOW: Colour = (255, 255, 0, 255)
+_ORANGE: Colour = (255, 128, 0, 255)
 
 
 @dataclass(frozen=True)
@@ -106,6 +113,123 @@ _CASES = (
     _TextCase("fnt_sdf", 40.5, 330.0, "SDF text\nline two"),
 )
 
+
+@dataclass(frozen=True)
+class _TransformCase:
+    """draw_text_ext_transformed_colour arguments; drawn below the plain cases."""
+
+    font: str
+    x: float
+    y: float
+    text: str
+    sep: int = -1
+    width: int = -1
+    halign: int = FA_LEFT
+    valign: int = FA_TOP
+    xscale: float = 1.0
+    yscale: float = 1.0
+    angle: float = 0.0
+    colours: tuple[Colour, Colour, Colour, Colour] | None = None
+    # Rotated quads are only compared as geometry: where a rotated texel
+    # boundary falls on a pixel centre depends on the GPU's float rounding.
+    render: bool = True
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "font": self.font,
+            "x": self.x,
+            "y": self.y,
+            "text": self.text,
+            "sep": self.sep,
+            "width": self.width,
+            "halign": self.halign,
+            "valign": self.valign,
+            "xscale": self.xscale,
+            "yscale": self.yscale,
+            "angle": self.angle,
+            "colours": None if self.colours is None else [list(colour) for colour in self.colours],
+            "render": self.render,
+        }
+
+    def vertex_quads(self, reference: GameMakerTextReference) -> list[ReferenceVertexQuad]:
+        return reference.vertex_quads(
+            self.x,
+            self.y,
+            self.text,
+            sep=self.sep,
+            line_width=self.width,
+            halign=self.halign,
+            valign=self.valign,
+            xscale=self.xscale,
+            yscale=self.yscale,
+            angle=self.angle,
+            colours=self.colours or (WHITE, WHITE, WHITE, WHITE),
+        )
+
+
+# Origins sit a quarter pixel off the grid and the scales keep every scaled
+# texel edge clear of pixel centres, so nearest sampling has no ties.
+_TRANSFORM_CASES = (
+    _TransformCase(
+        "fnt_plain", 200.25, 470.25, "Scaled\ncentre", halign=FA_CENTER, valign=FA_MIDDLE, xscale=2.0, yscale=2.0
+    ),
+    _TransformCase(
+        "fnt_kerned",
+        780.25,
+        470.25,
+        "wrapped kerned AVAV text that wraps",
+        sep=20,
+        width=120,
+        halign=FA_RIGHT,
+        valign=FA_MIDDLE,
+        xscale=0.6,
+        yscale=0.6,
+    ),
+    _TransformCase("fnt_kerned", 420.25, 520.25, "Wide To AV", xscale=2.0, yscale=1.5),
+    _TransformCase(
+        "fnt_plain",
+        300.0,
+        600.0,
+        "Rotated\nlines",
+        halign=FA_CENTER,
+        valign=FA_BOTTOM,
+        xscale=1.5,
+        yscale=0.75,
+        angle=30.0,
+        render=False,
+    ),
+    _TransformCase("fnt_kerned", 300.0, 700.0, "AVATAR\nVA", sep=18, xscale=2.0, yscale=2.0, angle=90.0, render=False),
+    _TransformCase(
+        "fnt_plain", 400.4, 640.6, "Gradient text AVA", halign=FA_CENTER, colours=(_YELLOW, _ORANGE, _YELLOW, _ORANGE)
+    ),
+    _TransformCase(
+        "fnt_kerned",
+        30.0,
+        600.0,
+        "Fade AVA To\nsecond line",
+        colours=((255, 0, 0, 200), (255, 0, 0, 200), (0, 0, 255, 200), (0, 0, 255, 200)),
+    ),
+    _TransformCase(
+        "fnt_plain",
+        30.25,
+        700.25,
+        "Scaled fade",
+        xscale=2.0,
+        yscale=2.0,
+        colours=((255, 0, 0, 255), (0, 255, 0, 255), (0, 0, 255, 255), (255, 255, 255, 255)),
+    ),
+    _TransformCase(
+        "fnt_sdf",
+        600.0,
+        700.0,
+        "SDF gradient\nturned",
+        valign=FA_MIDDLE,
+        angle=45.0,
+        colours=(_YELLOW, _ORANGE, _ORANGE, _YELLOW),
+        render=False,
+    ),
+)
+
 _MEASURED_TEXTS: tuple[tuple[str, int, int], ...] = (
     ("", -1, -1),
     ("A", -1, -1),
@@ -148,14 +272,13 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
 
         # Mirrors what Font.draw_string and Font.draw_char draw for a laid-out
         # line: shaped glyphs (or the line's own codes and pen offsets) placed
-        # at the snapped baseline, each quad at the floored pen plus the glyph
+        # from the baseline point, each quad at the floored pen plus the glyph
         # offset of a fixed-size bitmap font.
-        func _line_quads(layout, line, origin):
+        func _line_quads(layout, line, baseline):
         \tvar ts = TextServerManager.get_primary_interface()
         \tvar font = layout["font"]
         \tvar font_size = int(layout["font_size"])
         \tvar font_rid = font.get_rids()[0]
-        \tvar baseline = GMRuntime._gml_draw_text_line_baseline(origin, line, layout)
         \tvar quads = []
         \tvar codes = line["codes"]
         \tif typeof(codes) == TYPE_PACKED_INT32_ARRAY:
@@ -177,6 +300,63 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\t\t\tif quad != null:
         \t\t\t\t\tquads.append(quad)
         \t\t\tpen.x += float(glyph["advance"])
+        \treturn quads
+
+
+        func _colours(value):
+        \tif value == null:
+        \t\treturn Color.WHITE
+        \tvar colours = []
+        \tfor channels in value:
+        \t\tcolours.append(Color(channels[0] / 255.0, channels[1] / 255.0, channels[2] / 255.0, channels[3] / 255.0))
+        \treturn colours
+
+
+        func _quad_record(glyph, points, source, colors):
+        \tvar record = [glyph]
+        \tfor point in points:
+        \t\trecord.append_array([point.x, point.y])
+        \trecord.append_array([roundi(source.position.x), roundi(source.position.y), roundi(source.size.x), roundi(source.size.y)])
+        \tfor color in colors:
+        \t\trecord.append_array([color.r8, color.g8, color.b8, color.a8])
+        \treturn record
+
+
+        # The quads a transformed or corner-coloured draw puts on screen, each
+        # grown by the one-texel border GameMaker draws: glyph quads for
+        # gradients, otherwise each line's glyphs under its line transform.
+        func _transform_quads(layout, case):
+        \tvar origin = Vector2(case["x"], case["y"])
+        \tvar scale = Vector2(case["xscale"], case["yscale"])
+        \tvar rotation = float(case["angle"])
+        \tvar corners = GMRuntime._gml_draw_text_corners(_colours(case["colours"]))
+        \tvar quads = []
+        \tif corners.size() == 4:
+        \t\tvar ts = TextServerManager.get_primary_interface()
+        \t\tvar font_rid = layout["font"].get_rids()[0]
+        \t\tvar key = Vector2i(int(layout["font_size"]), 0)
+        \t\tfor quad in GMRuntime._gml_draw_text_glyph_quads(origin, layout, scale, rotation, corners):
+        \t\t\tvar page = ts.font_get_glyph_texture_size(font_rid, key, quad["glyph"])
+        \t\t\tvar uvs = quad["uvs"]
+        \t\t\tvar source = Rect2(uvs[0] * page, (uvs[2] - uvs[0]) * page)
+        \t\t\tquads.append(_quad_record(quad["glyph"], quad["points"], source, quad["colors"]))
+        \t\treturn quads
+        \tvar colors = [corners[0], corners[0], corners[0], corners[0]]
+        \tfor line in layout["lines"]:
+        \t\tvar transform = GMRuntime._gml_draw_text_line_transform(origin, line, scale, rotation)
+        \t\tfor local in _line_quads(layout, line, Vector2(0.0, float(layout["ascent"]))):
+        \t\t\tif typeof(local[0]) == TYPE_STRING:
+        \t\t\t\tquads.append(local)
+        \t\t\t\tcontinue
+        \t\t\tvar cell = Rect2(local[1] - 1.0, local[2] - 1.0, local[3] + 2.0, local[4] + 2.0)
+        \t\t\tvar points = [
+        \t\t\t\ttransform * cell.position,
+        \t\t\t\ttransform * Vector2(cell.end.x, cell.position.y),
+        \t\t\t\ttransform * cell.end,
+        \t\t\t\ttransform * Vector2(cell.position.x, cell.end.y),
+        \t\t\t]
+        \t\t\tvar source = Rect2(local[5] - 1.0, local[6] - 1.0, local[3] + 2.0, local[4] + 2.0)
+        \t\t\tquads.append(_quad_record(local[0], points, source, colors))
         \treturn quads
 
 
@@ -205,7 +385,7 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
 
         func _ready():
         \tvar data = JSON.parse_string(FileAccess.get_file_as_string(DATA_PATH))
-        \tvar result = {{"fonts": {{}}, "measures": [], "cases": []}}
+        \tvar result = {{"fonts": {{}}, "measures": [], "cases": [], "transforms": []}}
         \tfor name in data["fonts"]:
         \t\tresult["fonts"][name] = _font_record(name)
         \tfor measure in data["measures"]:
@@ -227,8 +407,15 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\tvar quads = []
         \t\tfor line in layout["lines"]:
         \t\t\tlines.append([line["x"], line["y"], line["width"]])
-        \t\t\tquads.append_array(_line_quads(layout, line, origin))
+        \t\t\tvar baseline = GMRuntime._gml_draw_text_line_baseline(origin, line, layout)
+        \t\t\tquads.append_array(_line_quads(layout, line, baseline))
         \t\tresult["cases"].append({{"line_step": layout["line_step"], "lines": lines, "quads": quads}})
+        \tfor case in data["transforms"]:
+        \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
+        \t\tGMRuntime.gml_draw_set_halign(case["halign"])
+        \t\tGMRuntime.gml_draw_set_valign(case["valign"])
+        \t\tvar layout = GMRuntime._gml_draw_text_layout(case["text"], case["sep"], case["width"])
+        \t\tresult["transforms"].append(_transform_quads(layout, case))
         \tprint({json.dumps(_RESULT_PREFIX)} + JSON.stringify(result))
         \tget_tree().quit(0)
         """
@@ -246,6 +433,15 @@ def _write_renderer(project_dir: Path, data_path: Path) -> None:
         const DATA_PATH = {json.dumps(str(data_path))}
 
 
+        func _colours(value):
+        \tif value == null:
+        \t\treturn Color.WHITE
+        \tvar colours = []
+        \tfor channels in value:
+        \t\tcolours.append(Color(channels[0] / 255.0, channels[1] / 255.0, channels[2] / 255.0, channels[3] / 255.0))
+        \treturn colours
+
+
         func _draw():
         \tvar data = JSON.parse_string(FileAccess.get_file_as_string(DATA_PATH))
         \tdraw_rect(Rect2(0, 0, {_CANVAS_WIDTH}, {_CANVAS_HEIGHT}), Color.BLACK)
@@ -255,6 +451,16 @@ def _write_renderer(project_dir: Path, data_path: Path) -> None:
         \t\tGMRuntime.gml_draw_set_valign(case["valign"])
         \t\tvar layout = GMRuntime._gml_draw_text_layout(case["text"], case["sep"], case["width"])
         \t\tGMRuntime._gml_draw_text_emit(get_canvas_item(), Vector2(case["x"], case["y"]), layout, Color.WHITE)
+        \tfor case in data["transforms"]:
+        \t\tif not case["render"]:
+        \t\t\tcontinue
+        \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
+        \t\tGMRuntime.gml_draw_set_halign(case["halign"])
+        \t\tGMRuntime.gml_draw_set_valign(case["valign"])
+        \t\tvar layout = GMRuntime._gml_draw_text_layout(case["text"], case["sep"], case["width"])
+        \t\tvar origin = Vector2(case["x"], case["y"])
+        \t\tvar scale = Vector2(case["xscale"], case["yscale"])
+        \t\tGMRuntime._gml_draw_text_on(self, origin, layout, scale, float(case["angle"]), _colours(case["colours"]), Transform2D.IDENTITY)
         """
     )
     write_fixture_text(project_dir / "font_render.gd", script)
@@ -413,6 +619,7 @@ class TestFontTextGodot(unittest.TestCase):
                         for text, sep, width in _MEASURED_TEXTS
                     ],
                     "cases": [case.to_json() for case in _CASES],
+                    "transforms": [case.to_json() for case in _TRANSFORM_CASES],
                 }
             ),
             encoding="utf-8",
@@ -579,6 +786,26 @@ class TestFontTextGodot(unittest.TestCase):
                     [_quad_tuple(quad) for quad in expected],
                 )
 
+    def test_transformed_and_coloured_text_matches_gamemaker_quads(self) -> None:
+        transforms = self._result_list("transforms")
+        self.assertEqual(len(transforms), len(_TRANSFORM_CASES))
+        for case, actual in zip(_TRANSFORM_CASES, transforms, strict=True):
+            assert isinstance(actual, list)
+            records = cast(list[object], actual)
+            expected = case.vertex_quads(self.references[case.font])
+            with self.subTest(text=case.text, scale=(case.xscale, case.yscale), angle=case.angle):
+                self.assertTrue(expected)
+                self.assertEqual(len(records), len(expected), records)
+                for record, quad in zip(records, expected, strict=True):
+                    assert isinstance(record, list)
+                    values = cast(list[float], record)
+                    self.assertEqual(values[0], quad.code)
+                    points = [coordinate for point in quad.points for coordinate in point]
+                    for actual_coordinate, expected_coordinate in zip(values[1:9], points, strict=True):
+                        self.assertAlmostEqual(actual_coordinate, expected_coordinate, places=3, msg=record)
+                    self.assertEqual(values[9:13], list(quad.source))
+                    self.assertEqual(values[13:], [channel for colour in quad.colours for channel in colour])
+
     def test_rendered_text_matches_gamemaker_pixels(self) -> None:
         if shutil.which("xvfb-run") is None:
             self.skipTest("xvfb-run is not available for an OpenGL render")
@@ -629,6 +856,12 @@ class TestFontTextGodot(unittest.TestCase):
                     valign=case.valign,
                 ),
             )
+        for transform_case in _TRANSFORM_CASES:
+            if not transform_case.render:
+                continue
+            with Image.open(self.project_dir / "fonts" / f"{transform_case.font}.png") as page:
+                atlas = page.convert("RGBA")
+            rasterize_vertex_quads(expected, atlas, transform_case.vertex_quads(self.references[transform_case.font]))
         with Image.open(frames[-1]) as frame:
             actual = frame.convert("RGB")
         self.assertEqual(actual.size, expected.size)

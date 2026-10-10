@@ -329,8 +329,14 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Fonts/Fonts.htm",
         ("Asset Management", "Drawing Sprites Text Fonts"),
-        ("tests/test_fonts.py", "tests/test_draw_sprite_text_godot.py"),
-        "Basic font conversion exists; glyph ranges, sprite fonts, SDF/MSDF, and exact text rendering remain open.",
+        (
+            "tests/test_fonts.py",
+            "tests/test_font_atlas.py",
+            "tests/test_font_text_godot.py",
+            "tests/test_draw_sprite_text_godot.py",
+        ),
+        "Baked font atlases convert to fixed-size bitmap fonts with GameMaker glyph metrics, kerning, and text layout; "
+        "sprite fonts, runtime font functions, and SDF effects remain open.",
     ),
     _entry(
         "reference_instances_objects",

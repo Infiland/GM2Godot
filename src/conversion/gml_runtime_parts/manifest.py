@@ -141,7 +141,11 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "48_drawing_basic_forms.gd",
         "Draw state, primitive drawing, sprite, text, texture, and video helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),
-        tests=("tests/test_draw_basic_godot.py", "tests/test_draw_sprite_text_godot.py"),
+        tests=(
+            "tests/test_draw_basic_godot.py",
+            "tests/test_draw_sprite_text_godot.py",
+            "tests/test_font_text_godot.py",
+        ),
     ),
     _segment(
         "49_drawing_surfaces.gd",

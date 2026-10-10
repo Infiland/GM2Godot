@@ -167,7 +167,9 @@ static func _gml_path_step_instance(instance):
 
 
 static func _gml_path_finish_instance(instance, entry):
-	if instance != null and instance.has_method("_on_path_ended"):
+	# Path End is an Other event: after a room change request only persistent
+	# instances (or every instance of a persistent room) still get it.
+	if instance != null and instance.has_method("_on_path_ended") and not _gml_event_scheduler_event_blocked(instance, true):
 		instance.call("_on_path_ended")
 	var key = _gml_path_state_key(instance)
 	if not _gml_path_states.has(key):

@@ -14,7 +14,8 @@ const GML_TIME_SOURCE_HANDLE_KIND = "time_source"
 # latched first, then every phase below runs for all instances. When an
 # event requests a room change (room_goto and friends, room_restart,
 # game_restart, game_end), no further step events run and the step stops
-# after the current phase; Draw is skipped for that step.
+# after the current phase (motion and Other events count as one phase);
+# Draw is skipped for that step.
 const GML_EVENT_PHASE_ORDER = [
 	"animation",
 	"begin_step",
@@ -110,7 +111,10 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 	_gml_step_collect_instances()
 	for phase in GML_EVENT_PHASE_ORDER:
 		_gml_event_scheduler_run_phase(phase, seconds, frames, frame)
-		if gml_room_change_pending():
+		# GameMaker moves the instances and runs HandleOther before it looks
+		# for a room change again, so a change requested by a Path End event
+		# still lets persistent instances get their Outside Room events.
+		if phase != "motion" and gml_room_change_pending():
 			break
 		_gml_step_join_created_instances()
 	_gml_step_finish()

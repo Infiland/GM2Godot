@@ -629,6 +629,8 @@ class TestGameStepGodotSmoke(unittest.TestCase):
 
             var probes = {}
             var history = {}
+            var spriteless = null
+            var spriteless_history = []
             var tick = 0
 
             """
@@ -659,6 +661,12 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(probes["fps"].image_number == 4 and probes["frames"].image_number == 2, "image_number does not follow the sprite"):
             \t\treturn
+            \t# Without a sprite image_index still advances by image_speed.
+            \tspriteless = GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(0, 0, "Instances", GMRuntime.gml_asset_get_index("o_anim"), self))
+            \tspriteless.image_speed = 0.5
+            \tspriteless.sprite_index = -1
+            \tif not _check(spriteless.image_number == 0, "image_number without a sprite"):
+            \t\treturn
 
             func _visual(probe):
             \treturn probe._gm_sprite_visual_node()
@@ -669,6 +677,7 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             \t\tvar probe = probes[key]
             \t\tvar visual = _visual(probe)
             \t\thistory[key].append([probe.image_index, visual.frame, int(probe.ended), visual.is_playing(), probe.image_number])
+            \tspriteless_history.append([spriteless.image_index, spriteless.image_number, int(spriteless.ended)])
             \tif tick == 3:
             \t\tprobes["switch"].sprite_index = GMRuntime.gml_asset_get_index("s_two")
             \t\thistory["switch"].append([probes["switch"].image_index, _visual(probes["switch"]).frame, int(probes["switch"].ended), false, probes["switch"].image_number])
@@ -718,6 +727,8 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             \tif not _expect("switch", 4, [1.25, 1, 0]):
             \t\treturn
             \tif not _expect("switch", 6, [0.25, 0, 1]):
+            \t\treturn
+            \tif not _check(spriteless_history[9] == [5.0, 0, 0], "sprite-less instance after 10 steps: " + str(spriteless_history[9])):
             \t\treturn
             \tprint("GAME_STEP_ANIMATION_SMOKE_OK")
             \tget_tree().quit(0)

@@ -100,13 +100,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "30_numeric_arithmetic.gd",
         "GML arithmetic, comparison, nullish, and boolean operators.",
         depends_on=("00_prelude.gd",),
-        tests=("tests/test_gml_runtime.py",),
+        tests=("tests/test_gml_runtime.py", "tests/test_gml_value_semantics_godot.py"),
     ),
     _segment(
         "35_maths_numbers.gd",
         "Math, number conversion, random, and geometry helpers.",
         depends_on=("00_prelude.gd", "30_numeric_arithmetic.gd"),
-        tests=("tests/test_gml_runtime.py", "tests/test_math_random_godot.py"),
+        tests=(
+            "tests/test_gml_runtime.py",
+            "tests/test_math_random_godot.py",
+            "tests/test_gml_value_semantics_godot.py",
+        ),
     ),
     _segment(
         "40_arrays_structs_variables.gd",
@@ -213,8 +217,13 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     _segment(
         "50_static_types_and_clone.gd",
         "Deep clone helpers, equality and ordering value semantics, and static type metadata.",
-        depends_on=("00_prelude.gd", "20_methods_and_exceptions.gd", "40_arrays_structs_variables.gd"),
-        tests=("tests/test_gml_runtime.py",),
+        depends_on=(
+            "00_prelude.gd",
+            "20_methods_and_exceptions.gd",
+            "35_maths_numbers.gd",
+            "40_arrays_structs_variables.gd",
+        ),
+        tests=("tests/test_gml_runtime.py", "tests/test_gml_value_semantics_godot.py"),
     ),
     _segment(
         "60_conversion_helpers.gd",

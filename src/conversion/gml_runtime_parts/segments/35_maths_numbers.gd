@@ -2,8 +2,13 @@ const GML_RANDOM_DEFAULT_SEED = 0x13579bdf
 const GML_RANDOM_MASK = 0xffffffff
 const GML_RANDOM_UNIT_DENOMINATOR = 4294967296.0
 
+const GML_MATH_DEFAULT_EPSILON = 0.00001
+const GML_MATH_MINIMUM_EPSILON = 0.00000000001
+const GML_COMPARE_UNORDERED = -2
+
 static var _gml_random_seed = GML_RANDOM_DEFAULT_SEED
 static var _gml_random_state = GML_RANDOM_DEFAULT_SEED
+static var _gml_math_epsilon = GML_MATH_DEFAULT_EPSILON
 
 
 static func gml_abs(value):
@@ -43,7 +48,41 @@ static func gml_ceil(value):
 static func gml_round(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML round", value)
-	return int(round(_to_real(value)))
+	var real_value = _to_real(value)
+	if is_nan(real_value) or is_inf(real_value):
+		return real_value
+	# GameMaker rounds exact halves to the nearest even integer (banker's
+	# rounding): round(2.5) == 2, round(3.5) == 4, round(-2.5) == -2.
+	var floor_value = floor(real_value)
+	var fraction = real_value - floor_value
+	if fraction > 0.5 or (fraction == 0.5 and fmod(floor_value, 2.0) != 0.0):
+		floor_value += 1.0
+	return int(floor_value)
+
+
+static func gml_math_set_epsilon(value):
+	var epsilon = _to_real(value)
+	if epsilon >= 0.0 and epsilon < 1.0:
+		_gml_math_epsilon = GML_MATH_MINIMUM_EPSILON if epsilon == 0.0 else epsilon
+	return gml_undefined()
+
+
+static func gml_math_get_epsilon():
+	return _gml_math_epsilon
+
+
+static func _gml_compare_reals(left_value, right_value):
+	# GameMaker compares reals with an epsilon (math_set_epsilon, 0.00001 by
+	# default): values that close compare equal for ==, !=, <, <=, > and >=.
+	# NaN is unordered, while two infinities of the same sign compare equal.
+	var difference = left_value - right_value
+	if is_nan(difference):
+		if is_inf(left_value) and is_inf(right_value):
+			return 0
+		return GML_COMPARE_UNORDERED
+	if absf(difference) <= _gml_math_epsilon:
+		return 0
+	return -1 if difference < 0.0 else 1
 
 
 static func gml_frac(value):

@@ -135,12 +135,18 @@ static func gml_eq(left, right):
 		return _gml_handle_eq(left, right)
 	if is_method(left) or is_method(right):
 		return _gml_method_same(left, right)
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if is_numeric(left) and is_numeric(right):
-		return _to_real(left) == _to_real(right)
+		return _gml_compare_numeric(left, right) == 0
 	if _is_gml_reference_value(left) or _is_gml_reference_value(right):
 		return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)
+	if is_string(left) and is_string(right):
+		return str(left) == str(right)
+	if left == null or right == null:
+		return left == right
+	# Values of different GML types (a string and a number, say) are never
+	# equal; Godot would raise "Invalid operands" for such a comparison.
+	if typeof(left) != typeof(right):
+		return false
 	return left == right
 
 
@@ -148,41 +154,43 @@ static func gml_ne(left, right):
 	return not gml_eq(left, right)
 
 
+static func _gml_compare_numeric(left, right):
+	if is_int64(left) and is_int64(right):
+		return signi(left.value - right.value)
+	return _gml_compare_reals(_to_real(left), _to_real(right))
+
+
 static func gml_lt(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) < _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order < 0
 	if is_string(left) and is_string(right):
 		return str(left) < str(right)
 	return gml_unsupported_binary_type_error("GML less-than comparison", left, right)
 
 
 static func gml_lte(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) <= _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order <= 0
 	if is_string(left) and is_string(right):
 		return str(left) <= str(right)
 	return gml_unsupported_binary_type_error("GML less-than-or-equal comparison", left, right)
 
 
 static func gml_gt(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) > _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order > 0
 	if is_string(left) and is_string(right):
 		return str(left) > str(right)
 	return gml_unsupported_binary_type_error("GML greater-than comparison", left, right)
 
 
 static func gml_gte(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) >= _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order >= 0
 	if is_string(left) and is_string(right):
 		return str(left) >= str(right)
 	return gml_unsupported_binary_type_error("GML greater-than-or-equal comparison", left, right)

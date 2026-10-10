@@ -1,4 +1,7 @@
 const GML_DRAW_DEFAULT_FONT_SIZE = 16
+const GML_FONT_POINTS_TO_PIXELS = 96.0 / 72.0
+const GML_TEXT_NO_WRAP_WIDTH = 10000000
+const GML_FONT_LAYOUT_CACHE_LIMIT = 512
 const GML_FA_LEFT = 0
 const GML_FA_CENTER = 1
 const GML_FA_RIGHT = 2
@@ -1699,49 +1702,102 @@ static func _gml_draw_text_at(x, y, text, sep, width):
 	var target = _gml_draw_target()
 	if target == null:
 		return
-	var font_info = _gml_draw_font_info()
-	var font = font_info["font"]
-	var font_size = int(font_info["font_size"])
-	var text_value = gml_string(text)
-	var lines = _gml_draw_wrapped_lines(text_value, font, font_size, sep, width)
-	var metrics = _gml_draw_line_metrics(lines, font, font_size, sep)
-	var top_left = _gml_draw_aligned_text_origin(Vector2(_to_real(x), _to_real(y)), metrics)
-	var line_step = _gml_draw_line_step(font, font_size, sep)
-	var baseline_y = top_left.y + font.get_ascent(font_size)
+	var layout = _gml_draw_text_layout(text, sep, width)
+	_gml_draw_text_emit(target.get_canvas_item(), Vector2(_to_real(x), _to_real(y)), layout, _gml_draw_current_color())
+
+
+# Text layout follows the GameMaker runner (yyFont.js GR_Text_Draw): lines come
+# from Split_TextBlock, consecutive lines are `sep` pixels apart (the font line
+# height when sep < 0), valign moves the block up by line_count * line_step
+# (half of it for fa_middle) and halign moves each line left by its GameMaker
+# width (half of it for fa_center). Positions are offsets from the draw origin
+# in unscaled, unrotated text space; apply draw_text_transformed scale and
+# rotation as the canvas transform around the origin. Each line holds:
+#   text     the characters the font has glyphs for (the runner skips the
+#            others without advancing), drawable with Font.draw_string;
+#   codes    null, or the glyph codes to draw one by one with Font.draw_char at
+#   offsets  these pen offsets (kerning applied) when Godot's shaping would
+#            change the line (kerned pairs, or default-ignorable, control or
+#            complex-script characters that GameMaker draws as plain glyphs);
+#   x, y     the pen offset of the line top-left; width is its GameMaker width.
+# Use _gml_draw_text_emit to draw a layout onto any canvas item RID.
+static func _gml_draw_text_layout(text, sep, width):
+	var info = _gml_draw_font_info()
+	var font = info["font"]
+	var font_size = int(info["font_size"])
+	var lines = _gml_font_split_text(info, gml_string(text), width)
+	var line_step = _gml_font_line_step(info, sep)
+	var y = 0.0
+	var valign = int(_gml_draw_state["valign"])
+	if valign == GML_FA_MIDDLE:
+		y -= float(lines.size()) * line_step / 2.0
+	elif valign == GML_FA_BOTTOM:
+		y -= float(lines.size()) * line_step
+	var halign = int(_gml_draw_state["halign"])
+	var laid_out = []
 	for line in lines:
-		var line_width = font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var line_x = top_left.x
-		if int(_gml_draw_state["halign"]) == GML_FA_CENTER:
-			line_x -= line_width * 0.5
-		elif int(_gml_draw_state["halign"]) == GML_FA_RIGHT:
-			line_x -= line_width
-		target.draw_string(font, Vector2(line_x, baseline_y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, _gml_draw_current_color())
-		baseline_y += line_step
+		var record = _gml_font_line_record(info, line)
+		var line_width = float(record["width"])
+		var x = 0.0
+		if halign == GML_FA_CENTER:
+			x = -line_width / 2.0
+		elif halign == GML_FA_RIGHT:
+			x = -line_width
+		laid_out.append({
+			"text": record["text"],
+			"codes": record["codes"],
+			"offsets": record["offsets"],
+			"x": x,
+			"y": y,
+			"width": line_width,
+		})
+		y += line_step
+	return {
+		"font": font,
+		"font_size": font_size,
+		"ascent": font.get_ascent(font_size),
+		"line_height": float(info["line_height"]),
+		"line_step": line_step,
+		"lines": laid_out,
+	}
+
+
+static func _gml_draw_text_emit(canvas_item, origin, layout, color):
+	var font = layout["font"]
+	var font_size = int(layout["font_size"])
+	for line in layout["lines"]:
+		var baseline = _gml_draw_text_line_baseline(origin, line, layout)
+		var codes = line["codes"]
+		if typeof(codes) != TYPE_PACKED_INT32_ARRAY:
+			if str(line["text"]) != "":
+				font.draw_string(canvas_item, baseline, line["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+			continue
+		var offsets = line["offsets"]
+		for index in range(codes.size()):
+			font.draw_char(canvas_item, baseline + Vector2(offsets[index], 0.0), codes[index], font_size, color)
+
+
+# GameMaker places each glyph quad at fractional coordinates and samples the
+# baked atlas with nearest filtering, which lights pixel ceil(edge - 0.5).
+# Godot floors bitmap glyph origins instead, so snap the pen the same way.
+static func _gml_draw_text_line_baseline(origin, line, layout):
+	var pen = origin + Vector2(float(line["x"]), float(line["y"]))
+	return Vector2(ceil(pen.x - 0.5), ceil(pen.y - 0.5) + float(layout["ascent"]))
 
 
 static func _gml_draw_text_metrics(text, sep, width):
-	var font_info = _gml_draw_font_info()
-	var font = font_info["font"]
-	var font_size = int(font_info["font_size"])
-	var lines = _gml_draw_wrapped_lines(gml_string(text), font, font_size, sep, width)
-	return _gml_draw_line_metrics(lines, font, font_size, sep)
+	var info = _gml_draw_font_info()
+	return _gml_font_lines_size(info, _gml_font_split_text(info, gml_string(text), width), sep)
 
 
-static func _gml_draw_line_metrics(lines, font, font_size, sep):
-	var max_width = 0.0
-	for line in lines:
-		max_width = max(max_width, font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x)
-	var height = font.get_height(font_size)
-	if lines.size() > 1:
-		height += _gml_draw_line_step(font, font_size, sep) * float(lines.size() - 1)
-	return Vector2(max_width, height)
+# Kept for callers that still pass a font and size: GameMaker metrics always
+# come from the current draw font.
+static func _gml_draw_line_metrics(lines, _font, _font_size, sep):
+	return _gml_font_lines_size(_gml_draw_font_info(), lines, sep)
 
 
-static func _gml_draw_line_step(font, font_size, sep):
-	var base_height = max(font.get_height(font_size), 1.0)
-	if is_numeric(sep) and _to_real(sep) >= 0.0:
-		return base_height + _to_real(sep)
-	return base_height
+static func _gml_draw_line_step(_font, _font_size, sep):
+	return _gml_font_line_step(_gml_draw_font_info(), sep)
 
 
 static func _gml_draw_aligned_text_origin(position, metrics):
@@ -1753,46 +1809,279 @@ static func _gml_draw_aligned_text_origin(position, metrics):
 	return origin
 
 
-static func _gml_draw_wrapped_lines(text, font, font_size, sep, width):
-	var wrap_width = _to_real(width) if is_numeric(width) else -1.0
-	var lines = []
-	for paragraph in str(text).split("\n"):
-		if wrap_width < 0.0:
-			lines.append(str(paragraph))
-		else:
-			lines.append_array(_gml_draw_wrap_paragraph(str(paragraph), font, font_size, wrap_width))
+static func _gml_draw_wrapped_lines(text, _font, _font_size, _sep, width):
+	return _gml_font_split_text(_gml_draw_font_info(), str(text), width).duplicate()
+
+
+static func _gml_draw_wrap_paragraph(paragraph, _font, _font_size, width):
+	return _gml_font_wrap_lines(_gml_draw_font_info(), str(paragraph), int(_to_real(width)))
+
+
+# string_width/string_height(_ext) (yyFont.js TextWidth/TextHeight and
+# GR_Text_Sizes): width is the widest line, height is (lines - 1) * line_step
+# plus one font line height, and an empty string measures 0 x 0.
+static func _gml_font_lines_size(info, lines, sep):
 	if lines.is_empty():
-		lines.append("")
+		return Vector2.ZERO
+	var max_width = 0.0
+	for line in lines:
+		max_width = max(max_width, float(_gml_font_line_record(info, str(line))["width"]))
+	var height = float(lines.size() - 1) * _gml_font_line_step(info, sep) + float(info["line_height"])
+	return Vector2(max_width, height)
+
+
+# draw_text_ext/string_*_ext take sep as an int32; a negative sep means the
+# font line height (TextHeight("M")), any other value is the full line step.
+static func _gml_font_line_step(info, sep):
+	if is_numeric(sep):
+		var step = int(_to_real(sep))
+		if step >= 0:
+			return float(step)
+	return float(info["line_height"])
+
+
+static func _gml_font_split_text(info, text, width):
+	var line_width = -1
+	if is_numeric(width):
+		line_width = int(_to_real(width))
+	var source = str(text)
+	var no_wrap = line_width < 0 or line_width == GML_TEXT_NO_WRAP_WIDTH
+	var cache: Dictionary = info["split_cache"]
+	var key = ("-:" if no_wrap else str(line_width) + ":") + source
+	if cache.has(key):
+		return cache[key]
+	var lines = _gml_font_split_lines(source) if no_wrap else _gml_font_wrap_lines(info, source, line_width)
+	if cache.size() >= GML_FONT_LAYOUT_CACHE_LIMIT:
+		cache.clear()
+	cache[key] = lines
 	return lines
 
 
-static func _gml_draw_wrap_paragraph(paragraph, font, font_size, width):
-	if paragraph == "":
-		return [""]
-	var words = paragraph.split(" ", false)
-	if words.is_empty():
-		return [paragraph]
+# Split_TextBlock without wrapping: LF and CR both end a line (a CR LF or LF CR
+# pair counts once), a trailing line break adds no empty line, and an empty
+# string has no lines at all.
+static func _gml_font_split_lines(text: String):
 	var lines = []
-	var current = ""
-	for word in words:
-		var candidate = word if current == "" else current + " " + word
-		if current != "" and font.get_string_size(candidate, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x > width:
-			lines.append(current)
-			current = word
-		else:
-			current = candidate
-	if current != "":
-		lines.append(current)
+	var length = text.length()
+	var start = 0
+	var index = 0
+	while index < length:
+		var code = text.unicode_at(index)
+		if code == 10 or code == 13:
+			lines.append(text.substr(start, index - start))
+			if index + 1 < length:
+				var next_code = text.unicode_at(index + 1)
+				if (next_code == 10 or next_code == 13) and next_code != code:
+					index += 1
+			start = index + 1
+		index += 1
+	if start < length:
+		lines.append(text.substr(start))
 	return lines
 
 
+# Split_TextBlock with a wrap width (yyFont.js): only LF ends a line, a line
+# keeps its leading spaces but drops trailing ones, it breaks after the last
+# space that fits, a word wider than the line runs on to the next space, and
+# text that cannot fit a single character stops the split.
+static func _gml_font_wrap_lines(info, text: String, line_width: int):
+	var lines = []
+	var length = text.length()
+	var start = 0
+	var end = 0
+	while start < length:
+		var total = 0.0
+		while end < length and total < line_width:
+			var space_code = text.unicode_at(end)
+			if space_code != 32:
+				break
+			total += _gml_font_shift(info, space_code)
+			end += 1
+		while end < length and total < line_width:
+			var code = text.unicode_at(end)
+			if code == 10:
+				break
+			total += _gml_font_shift(info, code)
+			end += 1
+		if total > line_width:
+			end -= 1
+			total -= _gml_font_shift(info, text.unicode_at(end))
+		if end < length and text.unicode_at(end) == 10:
+			lines.append(text.substr(start, end - start))
+		else:
+			if end == start:
+				return lines
+			end = _gml_font_wrap_break(text, start, end)
+			var line_end = end
+			if line_end > start:
+				while line_end > 0 and text.unicode_at(line_end - 1) == 32:
+					line_end -= 1
+			if line_end != start:
+				var first = mini(start, line_end)
+				lines.append(text.substr(first, maxi(start, line_end) - first))
+		end += 1
+		start = end
+	return lines
+
+
+static func _gml_font_wrap_break(text: String, start: int, end: int):
+	var length = text.length()
+	if end == length or text.unicode_at(end) == 32:
+		return end
+	var word_start = end
+	while word_start > start:
+		word_start -= 1
+		if text.unicode_at(word_start) == 32:
+			break
+	if word_start != start:
+		return word_start
+	var word_end = end
+	while word_end < length and text.unicode_at(word_end) != 32:
+		word_end += 1
+	return word_end
+
+
+# Measures and prepares one line for drawing, cached per font. The width is
+# TextWidth: the sum of glyph shifts where a character the font lacks counts
+# as the shift of the font's first glyph; kerning never affects it. Lines with
+# a kerned pair of drawn glyphs or a character shaping would alter keep their
+# glyph codes and pen offsets for drawing one glyph at a time.
+static func _gml_font_line_record(info, line: String):
+	var cache: Dictionary = info["line_cache"]
+	if cache.has(line):
+		return cache[line]
+	var width = 0.0
+	var kept = PackedInt32Array()
+	var shaped_safe = true
+	var kerning: Dictionary = info["kerning"]
+	var previous = -1
+	for index in range(line.length()):
+		var code = line.unicode_at(index)
+		var advance = _gml_font_glyph_advance(info, code)
+		if advance == null:
+			width += _gml_font_first_advance(info)
+			continue
+		width += float(advance)
+		kept.append(code)
+		if shaped_safe:
+			shaped_safe = _gml_font_code_shapes_plainly(code) and not (previous >= 0 and kerning.has(Vector2i(previous, code)))
+		previous = code
+	var record = {
+		"width": width,
+		"text": line if kept.size() == line.length() else _gml_font_codes_to_text(kept),
+		"codes": null,
+		"offsets": null,
+	}
+	if not shaped_safe:
+		record["codes"] = kept
+		record["offsets"] = _gml_font_glyph_offsets(info, kept)
+	if cache.size() >= GML_FONT_LAYOUT_CACHE_LIMIT:
+		cache.clear()
+	cache[line] = record
+	return record
+
+
+static func _gml_font_codes_to_text(codes):
+	var parts = PackedStringArray()
+	for code in codes:
+		parts.append(String.chr(code))
+	return "".join(parts)
+
+
+# Pen offsets for drawing glyphs one by one, with the runner's kerning: the
+# pair amount for the previously drawn glyph is added before each glyph.
+static func _gml_font_glyph_offsets(info, codes):
+	var offsets = PackedFloat32Array()
+	var kerning: Dictionary = info["kerning"]
+	var pen = 0.0
+	var previous = -1
+	for code in codes:
+		if previous >= 0 and not kerning.is_empty():
+			pen += float(kerning.get(Vector2i(previous, code), 0.0))
+		offsets.append(pen)
+		pen += float(_gml_font_glyph_advance(info, code))
+		previous = code
+	return offsets
+
+
+# Characters Godot's text shaping draws exactly like GameMaker: printable
+# Latin, Greek, Cyrillic and CJK text without combining marks, controls,
+# default-ignorable or right-to-left characters. A line that also contains a
+# kerned pair is drawn glyph by glyph instead (see _gml_font_line_record):
+# shaping splits kerning into half-pixel advances, rounds them and drops the
+# remainder at spaces, and kerns only within one script run.
+static func _gml_font_code_shapes_plainly(code):
+	if code < 0x20:
+		return false
+	if code < 0x7F:
+		return true
+	if code < 0xA0 or code == 0xAD:
+		return false
+	if code < 0x0300:
+		return true
+	if code >= 0x2010 and code < 0x2028:
+		return true
+	if code >= 0x2030 and code < 0x205F:
+		return true
+	if code >= 0x0370 and code < 0x0483:
+		return true
+	if code >= 0x048A and code < 0x0530:
+		return true
+	if code >= 0x3000 and code < 0x3099:
+		return code < 0x302A or code > 0x302F
+	if code >= 0x309B and code < 0x3100:
+		return true
+	if code >= 0x4E00 and code < 0xA000:
+		return true
+	if code >= 0xAC00 and code < 0xD7A4:
+		return true
+	return code >= 0xFF01 and code < 0xFF61
+
+
+# GetShift (used while wrapping): a missing character counts as a space when
+# the font has one, otherwise as the font's first glyph.
+static func _gml_font_shift(info, code):
+	var advance = _gml_font_glyph_advance(info, code)
+	if advance != null:
+		return float(advance)
+	var space = _gml_font_glyph_advance(info, 32)
+	if space != null:
+		return float(space)
+	return _gml_font_first_advance(info)
+
+
+static func _gml_font_first_advance(info):
+	var first_code = int(info["first_code"])
+	if first_code <= 0:
+		return 0.0
+	var advance = _gml_font_glyph_advance(info, first_code)
+	return 0.0 if advance == null else float(advance)
+
+
+static func _gml_font_glyph_advance(info, code):
+	var glyphs: Dictionary = info["glyphs"]
+	if glyphs.has(code):
+		return glyphs[code]
+	if bool(info["bitmap"]):
+		return null
+	var advance = null
+	if code > 0 and code <= 0x10FFFF and (code < 0xD800 or code > 0xDFFF):
+		var font = info["font"]
+		if font.has_char(code):
+			advance = font.get_char_size(code, int(info["font_size"])).x
+	glyphs[code] = advance
+	return advance
+
+
+# Resolves the current draw font to {font, font_size, line_height, ...}.
+# Converted GameMaker fonts are fixed-size bitmap FontFiles: they must be
+# drawn and measured at font.fixed_size, where their glyph table, offsets and
+# line height match the baked atlas exactly. TTF/SystemFont fallbacks use the
+# GameMaker point size at 96 DPI.
 static func _gml_draw_font_info():
 	var font_value = _gml_draw_state["font"]
 	if is_undefined(font_value) or (is_numeric(font_value) and int(_to_real(font_value)) == -1):
 		return _gml_draw_default_font_info()
-	var key = str(font_value)
-	if _gml_draw_font_cache.has(key):
-		return _gml_draw_font_cache[key]
 	_gml_asset_registry_ensure_loaded()
 	var raw_entry = _gml_asset_resolve(font_value)
 	if typeof(raw_entry) != TYPE_DICTIONARY:
@@ -1800,26 +2089,72 @@ static func _gml_draw_font_info():
 	var entry: Dictionary = raw_entry
 	if str(entry.get("type", "")) != "font":
 		return _gml_draw_default_font_info()
+	var asset_id = int(entry.get("id", -1))
+	if _gml_draw_font_cache.has(asset_id):
+		return _gml_draw_font_cache[asset_id]
 	var resource = entry.get("resource", null)
 	if resource == null and str(entry.get("godot_path", "")) != "":
 		resource = load(str(entry.get("godot_path", "")))
-	if not (resource is Font):
-		return _gml_draw_default_font_info()
-	var info = {
-		"font": resource,
-		"font_size": ThemeDB.fallback_font_size,
-		"asset": int(entry.get("id", -1))
-	}
-	_gml_draw_font_cache[key] = info
+	var info = _gml_draw_default_font_info()
+	if resource is Font:
+		var metadata = entry.get("metadata", {})
+		info = _gml_font_info_for_resource(resource, metadata if typeof(metadata) == TYPE_DICTIONARY else {}, asset_id)
+	_gml_draw_font_cache[asset_id] = info
 	return info
 
 
-static func _gml_draw_default_font_info():
+static func _gml_font_info_for_resource(font, metadata, asset_id):
+	var fixed_size = int(font.fixed_size) if font is FontFile else 0
+	if fixed_size > 0:
+		# GameMaker never substitutes glyphs from other fonts.
+		font.allow_system_fallback = false
+		return _gml_font_info_record(font, fixed_size, asset_id, true)
+	var points = metadata.get("size", 0.0)
+	var font_size = _gml_draw_default_font_size()
+	if typeof(points) == TYPE_INT or typeof(points) == TYPE_FLOAT:
+		if float(points) > 0.0:
+			font_size = maxi(1, int(round(float(points) * GML_FONT_POINTS_TO_PIXELS)))
+	return _gml_font_info_record(font, font_size, asset_id, false)
+
+
+static func _gml_font_info_record(font, font_size, asset_id, bitmap):
+	var glyphs = {}
+	var kerning = {}
+	var first_code = 32
+	if bitmap:
+		first_code = 0
+		var chars = font.get_supported_chars()
+		for index in range(chars.length()):
+			var code = chars.unicode_at(index)
+			glyphs[code] = font.get_char_size(code, font_size).x
+			if first_code <= 0 or code < first_code:
+				first_code = code
+		for pair in font.get_kerning_list(0, font_size):
+			kerning[pair] = font.get_kerning(0, font_size, pair).x
 	return {
-		"font": ThemeDB.fallback_font,
-		"font_size": ThemeDB.fallback_font_size if ThemeDB.fallback_font_size > 0 else GML_DRAW_DEFAULT_FONT_SIZE,
-		"asset": -1
+		"font": font,
+		"font_size": font_size,
+		"asset": asset_id,
+		"bitmap": bitmap,
+		"line_height": font.get_height(font_size),
+		"glyphs": glyphs,
+		"kerning": kerning,
+		"first_code": first_code,
+		"line_cache": {},
+		"split_cache": {},
 	}
+
+
+static func _gml_draw_default_font_size():
+	return ThemeDB.fallback_font_size if ThemeDB.fallback_font_size > 0 else GML_DRAW_DEFAULT_FONT_SIZE
+
+
+static func _gml_draw_default_font_info():
+	if _gml_draw_font_cache.has(-1):
+		return _gml_draw_font_cache[-1]
+	var info = _gml_font_info_record(ThemeDB.fallback_font, _gml_draw_default_font_size(), -1, false)
+	_gml_draw_font_cache[-1] = info
+	return info
 
 
 static func _gml_object_get(object_value, member_name, fallback):

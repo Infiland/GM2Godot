@@ -93,7 +93,8 @@ static func gml_layer_depth(layer, depth):
 	if not (node is CanvasItem):
 		return false
 	var resolved_depth = int(_to_real(depth))
-	node.z_index = -resolved_depth
+	node.z_as_relative = false
+	node.z_index = gml_depth_to_z_index(resolved_depth)
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
 	return true
 
@@ -162,7 +163,8 @@ static func gml_layer_create(depth, layer_name = ""):
 	var name = _gml_layer_unique_name(str(layer_name))
 	var node = Node2D.new()
 	node.name = name
-	node.z_index = -resolved_depth
+	node.z_as_relative = false
+	node.z_index = gml_depth_to_z_index(resolved_depth)
 	node.set_meta("gamemaker_layer_name", name)
 	node.set_meta("gamemaker_layer_node_name", name)
 	node.set_meta("gamemaker_layer_type", "runtime")
@@ -223,6 +225,13 @@ static func gml_layer_add_instance(layer, instance):
 		instance_node.reparent(layer_node, true)
 	else:
 		layer_node.add_child(instance_node)
+	# The instance now has the layer's depth instead of one assigned earlier.
+	if instance_node.has_meta(GML_EXPLICIT_DEPTH_META):
+		instance_node.remove_meta(GML_EXPLICIT_DEPTH_META)
+		_gml_draw_pending_depths.erase(instance_node.get_instance_id())
+		if instance_node is CanvasItem:
+			instance_node.z_as_relative = true
+			instance_node.z_index = 0
 	return true
 
 

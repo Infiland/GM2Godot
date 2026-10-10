@@ -25,11 +25,12 @@ GODOT_VALIDATION_REPORT_RELATIVE_PATH = os.path.join(
 )
 GodotValidationStatus: TypeAlias = Literal["passed", "failed", "skipped"]
 GodotOutputIssueSeverity: TypeAlias = Literal["warning", "error"]
-_LOADABLE_EXTENSIONS = (".gd", ".gdshader", ".tscn", ".tres")
+_LOADABLE_EXTENSIONS = (".fnt", ".gd", ".gdshader", ".tscn", ".tres")
 _IMPORTABLE_EXTENSIONS = (
     ".bmp",
     ".dds",
     ".exr",
+    ".fnt",
     ".hdr",
     ".jpg",
     ".jpeg",

@@ -11,6 +11,53 @@ static var _gml_room_game_ended = false
 static var _gml_room_suppress_auto_enter = false
 static var _gml_room_pending_entry = null
 static var _gml_room_transition_log = []
+# GameMaker only records room_goto/room_goto_next/room_goto_previous/
+# room_restart/game_restart/game_end requests; the current event finishes,
+# no further step events run, and the change happens before the next step
+# (the last request of a step wins). The GameMaker frame pump enables this
+# deferral. Without the pump, requests are performed immediately.
+static var _gml_room_defer_changes = false
+static var _gml_room_requested_change = null
+
+
+static func gml_room_set_deferred_changes(enabled):
+	_gml_room_defer_changes = gml_bool(enabled)
+	if not _gml_room_defer_changes:
+		_gml_room_requested_change = null
+	return null
+
+
+static func gml_room_change_pending():
+	return _gml_room_requested_change != null
+
+
+static func gml_room_apply_pending_change():
+	# Performs the requested change and returns what happened: "room" for a
+	# room switch (including room_restart), "game_restart", "game_end", or ""
+	# when nothing was requested.
+	var request = _gml_room_requested_change
+	if request == null:
+		return ""
+	_gml_room_requested_change = null
+	var kind = str(request.get("kind", ""))
+	if kind == "game_end":
+		_gml_game_end_now()
+		return kind
+	if kind == "game_restart":
+		_gml_game_restart_now()
+		return kind
+	_gml_room_change_to_entry(request["entry"], kind == "room_restart")
+	return "room"
+
+
+static func _gml_room_request_change(entry, restarting):
+	if not _gml_room_defer_changes:
+		return _gml_room_change_to_entry(entry, restarting)
+	_gml_room_requested_change = {
+		"kind": "room_restart" if bool(restarting) else "room",
+		"entry": entry,
+	}
+	return true
 
 
 static func gml_room_enter_scene(scene, force = false):
@@ -41,7 +88,7 @@ static func gml_room_goto(room_asset):
 	var entry = _gml_room_entry(room_asset)
 	if entry == null:
 		return false
-	return _gml_room_change_to_entry(entry, false)
+	return _gml_room_request_change(entry, false)
 
 
 static func gml_room_goto_next():
@@ -49,7 +96,7 @@ static func gml_room_goto_next():
 	var current_index = _gml_room_order_position(_gml_room_current_id, entries)
 	if current_index < 0 or current_index + 1 >= entries.size():
 		return false
-	return _gml_room_change_to_entry(entries[current_index + 1], false)
+	return _gml_room_request_change(entries[current_index + 1], false)
 
 
 static func gml_room_goto_previous():
@@ -57,14 +104,14 @@ static func gml_room_goto_previous():
 	var current_index = _gml_room_order_position(_gml_room_current_id, entries)
 	if current_index <= 0:
 		return false
-	return _gml_room_change_to_entry(entries[current_index - 1], false)
+	return _gml_room_request_change(entries[current_index - 1], false)
 
 
 static func gml_room_restart():
 	var entry = _gml_room_entry(_gml_room_current_id)
 	if entry == null:
 		return false
-	return _gml_room_change_to_entry(entry, true)
+	return _gml_room_request_change(entry, true)
 
 
 static func gml_game_set_speed(speed, type):
@@ -76,6 +123,15 @@ static func gml_game_set_speed(speed, type):
 
 
 static func gml_game_restart():
+	if _gml_room_ordered_entries().is_empty():
+		return false
+	if _gml_room_defer_changes:
+		_gml_room_requested_change = {"kind": "game_restart"}
+		return true
+	return _gml_game_restart_now()
+
+
+static func _gml_game_restart_now():
 	var entries = _gml_room_ordered_entries()
 	if entries.is_empty():
 		return false
@@ -88,6 +144,15 @@ static func gml_game_restart():
 
 
 static func gml_game_end():
+	if _gml_room_game_ended:
+		return null
+	if _gml_room_defer_changes:
+		_gml_room_requested_change = {"kind": "game_end"}
+		return null
+	return _gml_game_end_now()
+
+
+static func _gml_game_end_now():
 	if _gml_room_game_ended:
 		return null
 	_gml_room_game_ended = true
@@ -238,8 +303,21 @@ static func _gml_room_step_scale(delta):
 
 static func _gml_room_dispatch_lifecycle(root_node, method_name):
 	for node in _gml_room_tree_nodes(root_node):
-		if node != null and node.has_method(method_name):
-			node.call(method_name)
+		if node == null or not node.has_method(method_name):
+			continue
+		# Game/room start and end are Other events: after a room change
+		# request only persistent instances still receive them.
+		if _gml_event_scheduler_event_blocked(node, true):
+			continue
+		node.call(method_name)
+
+
+static func _gml_room_current_is_persistent():
+	var tree = _gml_room_tree()
+	if tree == null or tree.current_scene == null:
+		return false
+	var scene = tree.current_scene
+	return scene.has_meta("gamemaker_room_persistent") and bool(scene.get_meta("gamemaker_room_persistent"))
 
 
 # GameMaker starts a room by creating every instance placed in it first, and

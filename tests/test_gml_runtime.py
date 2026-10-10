@@ -323,7 +323,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("cull_clockwise", "1"),
     RuntimeValueParityCase("gpu_set_blendmode(bm_add)", "GMRuntime.gml_gpu_set_blendmode(1)"),
     RuntimeValueParityCase("gpu_get_blendmode()", "GMRuntime.gml_gpu_get_blendmode()"),
-    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(2)"),
+    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(3)"),
+    RuntimeValueParityCase("bm_max", "2"),
+    RuntimeValueParityCase("bm_min", "4"),
+    RuntimeValueParityCase("bm_reverse_subtract", "5"),
     RuntimeValueParityCase(
         "draw_circle_color(4, 5, 8, c_white, c_black, false)",
         "GMRuntime.gml_draw_circle_color(4, 5, 8, 0xffffff, 0x000000, false)",
@@ -705,6 +708,24 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("make_color_rgb(255, 128, 0)", "GMRuntime.gml_make_color_rgb(255, 128, 0)"),
     RuntimeValueParityCase("draw_set_color(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
     RuntimeValueParityCase("draw_get_color()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase("draw_set_colour(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
+    RuntimeValueParityCase("draw_get_colour()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase(
+        'draw_text_colour(1, 2, "a", c_red, c_red, c_blue, c_blue, 0.5)',
+        'GMRuntime.gml_draw_text_color(1, 2, "a", 0x0000ff, 0x0000ff, 0xff0000, 0xff0000, 0.5)',
+    ),
+    RuntimeValueParityCase(
+        "draw_line_width_colour(0, 1, 2, 3, 4, c_red, c_blue)",
+        "GMRuntime.gml_draw_line_width_color(0, 1, 2, 3, 4, 0x0000ff, 0xff0000)",
+    ),
+    RuntimeValueParityCase(
+        "draw_sprite_stretched(spr_player, 0, 1, 2, 3, 4)",
+        'GMRuntime.gml_draw_sprite_stretched(GMRuntime.gml_asset_get_index("spr_player"), 0, 1, 2, 3, 4)',
+    ),
+    RuntimeValueParityCase(
+        "draw_healthbar(0, 0, 10, 4, 50, c_black, c_red, c_lime, 0, true, true)",
+        "GMRuntime.gml_draw_healthbar(0, 0, 10, 4, 50, 0x000000, 0x0000ff, 0x00ff00, 0, true, true)",
+    ),
     RuntimeValueParityCase("draw_set_alpha(0.5)", "GMRuntime.gml_draw_set_alpha(0.5)"),
     RuntimeValueParityCase("draw_get_alpha()", "GMRuntime.gml_draw_get_alpha()"),
     RuntimeValueParityCase("draw_set_line_width(2)", "GMRuntime.gml_draw_set_line_width(2)"),
@@ -828,10 +849,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("window_restore()", "GMRuntime.gml_window_restore()"),
     RuntimeValueParityCase('screen_save("shot.png")', 'GMRuntime.gml_screen_save("shot.png")'),
     RuntimeValueParityCase('screen_save_part("shot_part.png", 0, 0, 8, 8)', 'GMRuntime.gml_screen_save_part("shot_part.png", 0, 0, 8, 8)'),
-    RuntimeValueParityCase("keyboard_check(vk_left)", "GMRuntime.gml_keyboard_check(KEY_LEFT)"),
-    RuntimeValueParityCase("keyboard_check_pressed(vk_space)", "GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)"),
-    RuntimeValueParityCase("keyboard_check_released(vk_escape)", "GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)"),
-    RuntimeValueParityCase("keyboard_clear(vk_anykey)", "GMRuntime.gml_keyboard_clear(0)"),
+    RuntimeValueParityCase("keyboard_check(vk_left)", "GMRuntime.gml_keyboard_check(37)"),
+    RuntimeValueParityCase("keyboard_check_pressed(vk_space)", "GMRuntime.gml_keyboard_check_pressed(32)"),
+    RuntimeValueParityCase("keyboard_check_released(vk_escape)", "GMRuntime.gml_keyboard_check_released(27)"),
+    RuntimeValueParityCase("keyboard_clear(vk_anykey)", "GMRuntime.gml_keyboard_clear(1)"),
     RuntimeValueParityCase("mouse_check_button(mb_left)", "GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)"),
     RuntimeValueParityCase("mouse_check_button_pressed(mb_right)", "GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)"),
     RuntimeValueParityCase("mouse_check_button_released(mb_middle)", "GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)"),
@@ -2944,6 +2965,18 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_game_step_loop_helpers(self):
+        self.assertIn("static func gml_event_scheduler_pump_attach():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_pump_detach():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_game_frame(delta_seconds = 0.0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_frame_drawable():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_change_pending():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_apply_pending_change():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_async_step_flush():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_game_speed_fps():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_image_frame_for_index(image_index, image_number):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if gml_room_change_pending():\n\t\t\tbreak", GML_RUNTIME_SCRIPT)
+
     def test_runtime_collision_event_dispatch_helpers(self):
         self.assertIn("static func gml_collision_event_dispatch_frame(instances = null, frame = -1):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_event_trace():", GML_RUNTIME_SCRIPT)
@@ -2958,15 +2991,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_draw_event_phase_order():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_draw_event_trace():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_surface_target_stack_depth():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_draw_instance_order_less(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_draw_sort_by_depth(nodes):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gm2godot_draw_event_trace_enable(enabled = true):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_input_event_dispatch_helpers(self):
         self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_input_dispatch_frame(instances = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_dispatch_frame(instances = null, event_types = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_begin_step():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_set_step_latching(enabled):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_enqueue_gesture(event_num, payload = null, global_event = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_end_frame():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_dispatch_trace():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_input_mouse_event_button_and_phase(event_num):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_dispatch_keyboard(instances, event_type):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_dispatch_mouse(instances):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_mouse_order_less(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INPUT_GAMEMAKER_KEY_CODES = {", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tKEY_LEFT: 37,", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_later(period, units, callback, repeat = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_cancel(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn('inst.call(method_name)', GML_RUNTIME_SCRIPT)

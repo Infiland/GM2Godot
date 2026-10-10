@@ -2244,6 +2244,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             ("argument", 'GMRuntime.gml_builtin_global("argument")'),
             ("argument_count", 'GMRuntime.gml_builtin_global("argument_count")'),
             ("view_xport[1]", 'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xport"), 1)'),
+            ("view_enabled", 'GMRuntime.gml_builtin_global("view_enabled")'),
+            ("view_current", 'GMRuntime.gml_builtin_global("view_current")'),
         )
 
         for source, expected in cases:
@@ -2257,6 +2259,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "image_number += 1",
             "room++",
             "view_current[0] = 1",
+            "view_current = 1",
             "delete object_index",
         ):
             with self.subTest(source=source):
@@ -2271,6 +2274,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_array_set(GMRuntime.gml_builtin_array("view_xview"), 0, position.x)',
         )
         self.assertEqual(transpile_gml_code("var bbox_left = 1; bbox_left += 1", indent=""), "var bbox_left = 1\nbbox_left = GMRuntime.gml_add(bbox_left, 1)")
+        self.assertEqual(
+            transpile_gml_code("view_enabled = true", indent=""),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "view_enabled", true)',
+        )
 
     def test_instance_target_preserves_direct_names_and_dynamic_fallback(self):
         output = transpile_gml_code(
@@ -2920,9 +2927,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ),
             'var _gml_switch_value_0 = GMRuntime.gml_builtin_global("keyboard_key")\n'
             "var _gml_switch_matched_1 = false\n"
-            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT) or GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A"))\n'
+            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, 37) or GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A"))\n'
             "while true:\n"
-            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT):\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 37):\n"
             "\t\t_gml_switch_matched_1 = true\n"
             "\tif _gml_switch_matched_1:\n"
             "\t\tpass\n"
@@ -4276,7 +4283,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_shift_keyboard_check(self):
         self.assertEqual(
             transpile_gml_code("if keyboard_check(vk_shift) { faster = true }", indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n\tfaster = true",
+            "if GMRuntime.gml_keyboard_check(16):\n\tfaster = true",
         )
 
     def test_input_bridge_helpers_lower_to_runtime(self):
@@ -4299,11 +4306,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "gamepad_set_vibration(0, 1, 0.5); gamepad_set_color(0, c_blue);",
                 indent="",
             ),
-            "pressed = GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)\n"
-            "released = GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)\n"
-            "GMRuntime.gml_keyboard_key_press(KEY_LEFT)\n"
-            "GMRuntime.gml_keyboard_key_release(KEY_LEFT)\n"
-            "GMRuntime.gml_keyboard_clear(0)\n"
+            "pressed = GMRuntime.gml_keyboard_check_pressed(32)\n"
+            "released = GMRuntime.gml_keyboard_check_released(27)\n"
+            "GMRuntime.gml_keyboard_key_press(37)\n"
+            "GMRuntime.gml_keyboard_key_release(37)\n"
+            "GMRuntime.gml_keyboard_clear(1)\n"
             "mouse_down = GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)\n"
             "mouse_pressed = GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)\n"
             "mouse_released = GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)\n"
@@ -4885,7 +4892,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 asset_names={"spr_player"},
             ),
             "GMRuntime.gml_gpu_set_blendmode(1)\n"
-            "GMRuntime.gml_draw_set_blend_mode(2)\n"
+            "GMRuntime.gml_draw_set_blend_mode(3)\n"
             "GMRuntime.gml_gpu_set_texfilter(true)\n"
             "GMRuntime.gml_texture_set_repeat(false)\n"
             "GMRuntime.gml_gpu_set_colorwriteenable(true, false, true, true)\n"
@@ -4916,9 +4923,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "texturegroup_sprites = GMRuntime.gml_texturegroup_get_sprites('Characters')",
         )
 
+    def test_gpu_state_aliases_and_colour_write_array_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "gpu_set_tex_filter(true);"
+                "old = gpu_get_tex_filter();"
+                "gpu_set_tex_repeat(false);"
+                "mask = gpu_get_colourwriteenable();"
+                "gpu_set_colourwriteenable(true, true, true, false);"
+                "gpu_set_colourwriteenable(mask);",
+                indent="",
+            ),
+            "GMRuntime.gml_gpu_set_texfilter(true)\n"
+            "old = GMRuntime.gml_gpu_get_texfilter()\n"
+            "GMRuntime.gml_gpu_set_texrepeat(false)\n"
+            "mask = GMRuntime.gml_gpu_get_colorwriteenable()\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(true, true, true, false)\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(mask)",
+        )
+
     def test_gpu_helper_arity_errors_are_deterministic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 4.*got 3"):
-            transpile_gml_code("gpu_set_colorwriteenable(true, true, true);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 1 to 4.*got 5"):
+            transpile_gml_code("gpu_set_colorwriteenable(true, true, true, true, true);", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "texturegroup_set_mode.*1 to 3.*got 4"):
             transpile_gml_code("texturegroup_set_mode(true, false, spr_player, 0);", indent="", asset_names={"spr_player"})
 
@@ -5370,13 +5396,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "if GMRuntime.gml_keyboard_check(37):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "if GMRuntime.gml_keyboard_check(39):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "if GMRuntime.gml_keyboard_check(38):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "if GMRuntime.gml_keyboard_check(40):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, 10)",
         )
 
@@ -5501,19 +5527,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n"
+            "if GMRuntime.gml_keyboard_check(16):\n"
             "\tfaster = true\n"
             "else:\n"
             "\tfaster = false\n"
             "if GMRuntime.gml_eq(faster, true):\n"
             "\tsuperSpeed = 20\n"
-            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "if GMRuntime.gml_keyboard_check(37):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "if GMRuntime.gml_keyboard_check(39):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "if GMRuntime.gml_keyboard_check(38):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "if GMRuntime.gml_keyboard_check(40):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, superSpeed)\n"
             "superSpeed = 10",
         )

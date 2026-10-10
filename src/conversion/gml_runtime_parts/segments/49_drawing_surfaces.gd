@@ -32,8 +32,7 @@ static func gml_application_surface_is_draw_enabled():
 
 
 static func gml_application_get_position():
-	var size = _gml_application_surface_size()
-	return [0, 0, size.x, size.y]
+	return _gml_display_application_position()
 
 
 static func gml_surface_create(width, height, format = GML_SURFACE_FORMAT_RGBA8UNORM):
@@ -95,8 +94,10 @@ static func gml_surface_get_height(surface):
 	return int(resolved_surface["height"])
 
 
+# draw_surface uses white and the draw alpha; draw_surface_ext its own colour
+# and alpha.
 static func gml_draw_surface(surface, x, y):
-	return gml_draw_surface_ext(surface, x, y, 1, 1, 0, 0xffffff, 1)
+	return gml_draw_surface_ext(surface, x, y, 1, 1, 0, 0xffffff, _gml_draw_state["alpha"])
 
 
 static func gml_draw_surface_ext(surface, x, y, xscale, yscale, rot, colour, alpha):
@@ -149,22 +150,7 @@ static func _gml_application_surface_ensure():
 
 
 static func _gml_application_surface_size():
-	var width = 0.0
-	var height = 0.0
-	if _gml_builtin_globals.has("room_width"):
-		width = _to_real(_gml_builtin_globals["room_width"])
-	if _gml_builtin_globals.has("room_height"):
-		height = _to_real(_gml_builtin_globals["room_height"])
-	var target = _gml_draw_current_context_target()
-	if target is CanvasItem and (width <= 0.0 or height <= 0.0):
-		var viewport_size = target.get_viewport_rect().size
-		width = viewport_size.x if width <= 0.0 else width
-		height = viewport_size.y if height <= 0.0 else height
-	if width <= 0.0:
-		width = 640.0
-	if height <= 0.0:
-		height = 480.0
-	return Vector2(width, height)
+	return _gml_display_application_surface_size()
 
 
 static func _gml_surface_make(width, height, is_application, format):
@@ -213,7 +199,7 @@ static func _gml_surface_clear_active_target(color, alpha):
 	if typeof(raw_surface) != TYPE_DICTIONARY:
 		return false
 	var active_surface: Dictionary = raw_surface
-	active_surface["image"].fill(_gml_draw_modulate(color, alpha))
+	active_surface["image"].fill(_gml_draw_colour_value(color, alpha))
 	active_surface["texture"].update(active_surface["image"])
 	return true
 

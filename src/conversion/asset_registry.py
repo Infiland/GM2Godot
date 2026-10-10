@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any, BinaryIO, Callable, ClassVar, Iterable, cast
 
 from src.conversion.animation_curve_registry import write_animation_curve_registry
+from src.conversion.audio_file_formats import godot_audio_filename
 from src.conversion.atomic_generated_text import (
     atomic_write_confined_generated_text,
     confined_generated_output_supported as _confined_asset_output_supported,
@@ -3134,7 +3135,7 @@ class AssetRegistryConverter(BaseConverter):
         )
         if sound_source is None:
             return ""
-        sound_filename = os.path.basename(sound_source.filesystem_path)
+        sound_filename = godot_audio_filename(sound_source.filesystem_path)
 
         parts = ["sounds"]
         if self.organize_sounds_by_audio_group:

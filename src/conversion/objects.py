@@ -1477,6 +1477,29 @@ class ObjectConverter(BaseConverter):
                 function_names.add(mapping.godot_func)
         return function_names
 
+    def _inherited_input_functions(
+        self,
+        parent_object_name: str | None,
+        parent_object_source_path: str | None,
+    ) -> tuple[str, ...]:
+        """Return the input event methods of an object's ancestors, nearest first."""
+        function_names: list[str] = []
+        seen: set[str] = set()
+        object_name = parent_object_name
+        source_path = parent_object_source_path
+        while object_name is not None and object_name not in seen:
+            seen.add(object_name)
+            parsed = self._parse_object_yy(object_name, source_path)
+            if parsed is None:
+                break
+            for event in parsed["event_list"]:
+                mapping = map_input_event(event) if is_input_event(event) else None
+                if mapping is not None and mapping.godot_func not in function_names:
+                    function_names.append(mapping.godot_func)
+            object_name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
+        return tuple(function_names)
+
     def _event_function_names(self, event_list: list[JsonObject]) -> set[str]:
         function_names: set[str] = set()
         for event in event_list:
@@ -1699,6 +1722,10 @@ class ObjectConverter(BaseConverter):
                 persistent=persistent,
                 inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
                 inherit_exit_tree="_exit_tree" in inherited_event_functions and "_exit_tree" not in local_event_functions,
+                inherited_input_functions=self._inherited_input_functions(
+                    parent_object_name,
+                    parent_object_source_path,
+                ),
             ),
             base_script_path=parent_script_res_path,
         )

@@ -90,6 +90,7 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_initialize_sprite_runtime",
     "_gm_room_colour_alpha",
     "_gm_sync_collision_mask_frame",
+    "_gm_sprite_visual_cache",
     "_gm_sprite_visual_node",
     "Vector2",
 })
@@ -226,6 +227,10 @@ def _extends_line(base_script_path: str | None = None) -> str:
     return f"extends {_gd_string(base_script_path)}\n"
 
 
+def _sprite_reference_expression(sprite_name: str) -> str:
+    return f"GMRuntime.gml_sprite_reference({_gd_string(sprite_name)})"
+
+
 def _emit_sprite_runtime_prelude(
     lines: list[str],
     sprite_runtime: SpriteRuntimeConfig,
@@ -251,9 +256,11 @@ def _emit_sprite_runtime_prelude(
         lines.append(f"\n\t{_gd_string(sprite_name)}: preload({_gd_string(scene_path)}),")
     lines.append("\n}\n")
 
-    initial_sprite = "null"
+    # Like GameMaker, sprite_index holds the sprite's asset index (-1 for no
+    # sprite), so it compares equal to the sprite constants in GML code.
+    initial_sprite = "-1"
     if sprite_runtime.initial_sprite_name is not None:
-        initial_sprite = _gd_string(sprite_runtime.initial_sprite_name)
+        initial_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
 
     lines.append(
         f"\nvar sprite_index = {initial_sprite}:"
@@ -266,6 +273,7 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t_gm_apply_image_index()"
         "\n\nvar image_number = 1"
         "\nvar image_speed = 1.0"
+        "\nvar _gm_sprite_visual_cache = null"
         "\nvar image_xscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_xscale = value"
@@ -320,10 +328,10 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t_gm_clear_current_sprite()"
         "\n\t\treturn"
         "\n\tvar sprite_index_type = typeof(sprite_index)"
-        "\n\tif (sprite_index_type == TYPE_INT or sprite_index_type == TYPE_FLOAT) and int(sprite_index) == -1:"
+        "\n\tif (sprite_index_type == TYPE_INT or sprite_index_type == TYPE_FLOAT) and sprite_index < 0:"
         "\n\t\t_gm_clear_current_sprite()"
         "\n\t\treturn"
-        "\n\tvar sprite_name = str(sprite_index)"
+        "\n\tvar sprite_name = GMRuntime.gml_sprite_asset_name(sprite_index)"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current != null and str(current.name) == sprite_name:"
         "\n\t\t_gm_apply_image_index()"
@@ -337,6 +345,7 @@ def _emit_sprite_runtime_prelude(
         "\n\tif current != null:"
         "\n\t\tremove_child(current)"
         "\n\t\tcurrent.queue_free()"
+        "\n\t_gm_sprite_visual_cache = null"
         "\n\tvar instance = scene.instantiate()"
         "\n\tinstance.name = sprite_name"
         "\n\tadd_child(instance)"
@@ -344,31 +353,41 @@ def _emit_sprite_runtime_prelude(
         "\n\t_gm_apply_image_index()"
         "\n\t_gm_apply_image_transform()"
         "\n\nfunc _gm_apply_image_index():"
+        # image_index keeps the value the game assigned; the visible frame
+        # is its integer part (truncated toward zero) wrapped into
+        # image_number, as GameMaker draws it. The instance's sprite never
+        # plays on its own: the step loop advances image_index instead.
         "\n\tvar sprite_node = _gm_sprite_visual_node()"
         "\n\tif sprite_node == null:"
+        "\n\t\timage_number = 0"
         "\n\t\treturn"
-        "\n\tvar frame_index = max(int(image_index), 0)"
+        "\n\tvar frame_count = 1"
         "\n\tif sprite_node is AnimatedSprite2D:"
-        "\n\t\tvar frame_count = 0"
+        "\n\t\tif not sprite_node.is_inside_tree():"
+        "\n\t\t\tsprite_node.autoplay = \"\""
+        "\n\t\telif sprite_node.is_playing():"
+        "\n\t\t\tsprite_node.pause()"
+        "\n\t\tframe_count = 0"
         "\n\t\tif sprite_node.sprite_frames != null and sprite_node.sprite_frames.has_animation(sprite_node.animation):"
         "\n\t\t\tframe_count = sprite_node.sprite_frames.get_frame_count(sprite_node.animation)"
-        "\n\t\timage_number = max(frame_count, 1)"
-        "\n\t\tif frame_count > 0:"
-        "\n\t\t\tframe_index = min(frame_index, frame_count - 1)"
-        "\n\t\tsprite_node.frame = frame_index"
-        "\n\t\tsprite_node.frame_progress = 0.0"
-        "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
+        "\n\telif sprite_node is Sprite2D:"
+        "\n\t\tframe_count = max(sprite_node.hframes * sprite_node.vframes, 1)"
+        "\n\timage_number = frame_count"
+        "\n\tif frame_count <= 0:"
         "\n\t\treturn"
-        "\n\tif sprite_node is Sprite2D:"
-        "\n\t\tvar frame_count = sprite_node.hframes * sprite_node.vframes"
-        "\n\t\timage_number = max(frame_count, 1)"
-        "\n\t\tif frame_count > 1:"
-        "\n\t\t\tsprite_node.frame = min(frame_index, frame_count - 1)"
-        "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
+        "\n\tvar frame_index = int(image_index) % frame_count"
+        "\n\tif frame_index < 0:"
+        "\n\t\tframe_index += frame_count"
+        "\n\tif sprite_node.frame != frame_index:"
+        "\n\t\tsprite_node.frame = frame_index"
+        "\n\t_gm_sync_collision_mask_frame(frame_index)"
         "\n\nfunc _gm_sync_collision_mask_frame(frame_index):"
-        "\n\tvar current = _gm_current_sprite_scene_root()"
-        "\n\tif current != null and current.has_method(\"_gm_set_collision_frame\"):"
-        "\n\t\tcurrent.call(\"_gm_set_collision_frame\", frame_index)"
+        "\n\tvar current = _gm_sprite_visual_node()"
+        "\n\twhile current != null and current != self:"
+        "\n\t\tif current.has_method(\"_gm_set_collision_frame\"):"
+        "\n\t\t\tcurrent.call(\"_gm_set_collision_frame\", frame_index)"
+        "\n\t\t\treturn"
+        "\n\t\tcurrent = current.get_parent()"
         "\n\nfunc _gm_apply_image_transform():"
         "\n\trotation_degrees = float(image_angle)"
         "\n\tscale = Vector2(float(image_xscale), float(image_yscale))"
@@ -400,16 +419,21 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t\treturn child"
         "\n\treturn null"
         "\n\nfunc _gm_sprite_visual_node():"
+        "\n\tif is_instance_valid(_gm_sprite_visual_cache) and is_ancestor_of(_gm_sprite_visual_cache):"
+        "\n\t\treturn _gm_sprite_visual_cache"
+        "\n\t_gm_sprite_visual_cache = null"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current == null:"
         "\n\t\treturn null"
         "\n\tif current is AnimatedSprite2D or current is Sprite2D:"
-        "\n\t\treturn current"
-        "\n\tvar animated_sprite = current.find_child(\"AnimatedSprite2D\", true, false)"
-        "\n\tif animated_sprite != null:"
-        "\n\t\treturn animated_sprite"
-        "\n\treturn current.find_child(\"Sprite2D\", true, false)"
+        "\n\t\t_gm_sprite_visual_cache = current"
+        "\n\telse:"
+        "\n\t\t_gm_sprite_visual_cache = current.find_child(\"AnimatedSprite2D\", true, false)"
+        "\n\t\tif _gm_sprite_visual_cache == null:"
+        "\n\t\t\t_gm_sprite_visual_cache = current.find_child(\"Sprite2D\", true, false)"
+        "\n\treturn _gm_sprite_visual_cache"
         "\n\nfunc _gm_clear_current_sprite():"
+        "\n\t_gm_sprite_visual_cache = null"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current != null:"
         "\n\t\tremove_child(current)"
@@ -425,7 +449,7 @@ def _prepend_sprite_runtime_ready_body(
 ) -> str:
     init_lines: list[str] = []
     if inherited_runtime and sprite_runtime.initial_sprite_name is not None:
-        init_lines.append(f"\tsprite_index = {_gd_string(sprite_runtime.initial_sprite_name)}")
+        init_lines.append(f"\tsprite_index = {_sprite_reference_expression(sprite_runtime.initial_sprite_name)}")
     init_lines.append("\t_gm_initialize_sprite_runtime()")
     init_body = "\n".join(init_lines)
     if body.strip() == "pass":
@@ -689,7 +713,13 @@ def generate_script_content(
 
     lines = [_extends_line(base_script_path)]
     runtime_const_inherited = base_script_path is not None and uses_object_runtime
-    if (_uses_gml_runtime(effective_code_bodies) or uses_object_runtime or uses_draw_runtime) and not runtime_const_inherited:
+    uses_runtime_const = (
+        _uses_gml_runtime(effective_code_bodies)
+        or uses_object_runtime
+        or uses_draw_runtime
+        or uses_sprite_runtime
+    )
+    if uses_runtime_const and not runtime_const_inherited:
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))

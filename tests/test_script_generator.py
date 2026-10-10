@@ -117,7 +117,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             "func _ready():\n"
             "\t_gm_register_instance()\n"
             "\t_gm_initialize_motion_runtime()\n"
-            "\tsprite_index = \"s_child\"\n"
+            "\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n"
             "\t_gm_initialize_sprite_runtime()\n"
             "\tsuper._ready()",
             content,
@@ -138,7 +138,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
 
-        self.assertIn("\nvar sprite_index = null:", content)
+        self.assertIn("\nvar sprite_index = -1:", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
         self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsprite_index = \"s_child\"", content)
 
@@ -480,7 +480,7 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('const s_enemy = "s_enemy"', content)
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
-        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)

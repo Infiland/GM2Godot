@@ -1681,7 +1681,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
-        self.assertIn("\tsprite_index = \"s_child\"\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertIn("\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n\t_gm_initialize_sprite_runtime()", content)
         self.assertIn("\tsuper._ready()", content)
 
     def test_script_event_sources_use_selected_macro_configuration(self):
@@ -2368,22 +2368,22 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _on_step():", content)
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "\tif GMRuntime.gml_keyboard_check(37):\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "\tif GMRuntime.gml_keyboard_check(39):\n"
             "\t\tposition.x = GMRuntime.gml_add(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "\tif GMRuntime.gml_keyboard_check(38):\n"
             "\t\tposition.y = GMRuntime.gml_sub(position.y, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "\tif GMRuntime.gml_keyboard_check(40):\n"
             "\t\tposition.y = GMRuntime.gml_add(position.y, 10)",
             content,
         )
@@ -2418,7 +2418,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var faster", content)
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
-        self.assertIn("\tif GMRuntime.gml_keyboard_check(KEY_SHIFT):", content)
+        self.assertIn("\tif GMRuntime.gml_keyboard_check(16):", content)
         self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
@@ -2653,7 +2653,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
         self.assertIn('"s_player": preload("res://sprites/s_player/s_player.tscn")', content)
-        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)

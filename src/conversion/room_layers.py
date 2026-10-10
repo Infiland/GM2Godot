@@ -838,6 +838,14 @@ def _asset_transform_lines(asset: JsonObject) -> list[str]:
 
 
 def _camera_node_lines(context: RoomLayerSerializationContext) -> list[str]:
+    """Emit the single Camera2D that presents the room's GameMaker views.
+
+    The view slots themselves live in the room root's ``gamemaker_views``
+    metadata; the runtime resolves ``view_camera[]`` every frame and drives
+    this camera (position, zoom, rotation) from the active view's camera.
+    GameMaker only keeps a following view inside the room, so no Camera2D
+    limits are emitted.
+    """
     if not RoomViewSettingsFields(context.room.view_settings, context.room.yy_path).enable_views:
         return []
 
@@ -846,66 +854,40 @@ def _camera_node_lines(context: RoomLayerSerializationContext) -> list[str]:
         return []
     if len(views) > 1:
         context.warn(
-            "Warning: Room {room_name} has multiple visible GameMaker views; only the first "
-            "Camera2D is enabled, additional views are preserved as disabled cameras with metadata.".format(
+            "Warning: Room {room_name} has multiple visible GameMaker views; GM2Godot presents "
+            "the first visible view through one Camera2D and keeps the other views as runtime "
+            "view state.".format(
                 room_name=context.room.name,
             )
         )
 
-    lines: list[str] = []
-    sibling_names: dict[str, int] = {}
-    for visible_index, view in enumerate(views):
-        node_name = _unique_name("ViewCamera", sibling_names)
-        xview = _coerce_float(RoomViewFields(view, "").xview_value)
-        yview = _coerce_float(RoomViewFields(view, "").yview_value)
-        wview = _coerce_float(RoomViewFields(view, "").wview_value)
-        hview = _coerce_float(RoomViewFields(view, "").hview_value)
-        xport = _coerce_float(RoomViewFields(view, "").xport_value)
-        yport = _coerce_float(RoomViewFields(view, "").yport_value)
-        wport = _coerce_float(RoomViewFields(view, "").wport_value)
-        hport = _coerce_float(RoomViewFields(view, "").hport_value)
-        object_name = RoomViewFields(view, context.room.yy_path).object_name
-
-        lines.extend([
-            f'[node name={godot_string(node_name)} type="Camera2D" parent="."]',
-            "position = Vector2({x}, {y})".format(
-                x=_format_number(xview + (wview / 2)),
-                y=_format_number(yview + (hview / 2)),
-            ),
-            f"enabled = {godot_value(visible_index == 0)}",
-            f"limit_left = {_format_number(xview)}",
-            f"limit_top = {_format_number(yview)}",
-            f"limit_right = {_format_number(xview + wview)}",
-            f"limit_bottom = {_format_number(yview + hview)}",
-        ])
-        if wview > 0 and hview > 0 and wport > 0 and hport > 0:
-            lines.append(
-                "zoom = Vector2({x}, {y})".format(
-                    x=_format_number(wport / wview),
-                    y=_format_number(hport / hview),
-                )
+    view_fields = RoomViewFields(views[0], context.room.yy_path)
+    xview = _coerce_float(view_fields.xview_value)
+    yview = _coerce_float(view_fields.yview_value)
+    wview = _coerce_float(view_fields.wview_value)
+    hview = _coerce_float(view_fields.hview_value)
+    wport = _coerce_float(view_fields.wport_value)
+    hport = _coerce_float(view_fields.hport_value)
+    lines = [
+        '[node name="ViewCamera" type="Camera2D" parent="."]',
+        "position = Vector2({x}, {y})".format(
+            x=_format_number(xview + (wview / 2)),
+            y=_format_number(yview + (hview / 2)),
+        ),
+        "ignore_rotation = false",
+        "limit_enabled = false",
+    ]
+    if wview > 0 and hview > 0 and wport > 0 and hport > 0:
+        lines.append(
+            "zoom = Vector2({x}, {y})".format(
+                x=_format_number(wport / wview),
+                y=_format_number(hport / hview),
             )
-        lines.extend([
-            f"metadata/gamemaker_view_camera = {godot_value(True)}",
-            f"metadata/gamemaker_view_enabled_camera = {godot_value(visible_index == 0)}",
-            f"metadata/gamemaker_view_visible = {godot_value(True)}",
-            f"metadata/gamemaker_view_index = {godot_value(visible_index)}",
-            f"metadata/gamemaker_view_xview = {godot_value(RoomViewFields(view, "").xview)}",
-            f"metadata/gamemaker_view_yview = {godot_value(RoomViewFields(view, "").yview)}",
-            f"metadata/gamemaker_view_wview = {godot_value(RoomViewFields(view, "").wview)}",
-            f"metadata/gamemaker_view_hview = {godot_value(RoomViewFields(view, "").hview)}",
-            f"metadata/gamemaker_view_xport = {godot_value(xport)}",
-            f"metadata/gamemaker_view_yport = {godot_value(yport)}",
-            f"metadata/gamemaker_view_wport = {godot_value(wport)}",
-            f"metadata/gamemaker_view_hport = {godot_value(hport)}",
-            f"metadata/gamemaker_view_object_name = {godot_value(object_name)}",
-            f"metadata/gamemaker_view_object_id = {godot_value(RoomViewFields(view, "").object_id)}",
-            f"metadata/gamemaker_view_hborder = {godot_value(RoomViewFields(view, "").hborder)}",
-            f"metadata/gamemaker_view_vborder = {godot_value(RoomViewFields(view, "").vborder)}",
-            f"metadata/gamemaker_view_hspeed = {godot_value(RoomViewFields(view, "").hspeed)}",
-            f"metadata/gamemaker_view_vspeed = {godot_value(RoomViewFields(view, "").vspeed)}",
-            "",
-        ])
+        )
+    lines.extend([
+        f"metadata/gamemaker_view_camera = {godot_value(True)}",
+        "",
+    ])
     return lines
 
 

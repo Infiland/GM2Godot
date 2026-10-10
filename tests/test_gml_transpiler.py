@@ -2241,6 +2241,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             ("argument", 'GMRuntime.gml_builtin_global("argument")'),
             ("argument_count", 'GMRuntime.gml_builtin_global("argument_count")'),
             ("view_xport[1]", 'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xport"), 1)'),
+            ("view_enabled", 'GMRuntime.gml_builtin_global("view_enabled")'),
+            ("view_current", 'GMRuntime.gml_builtin_global("view_current")'),
         )
 
         for source, expected in cases:
@@ -2254,6 +2256,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "image_number += 1",
             "room++",
             "view_current[0] = 1",
+            "view_current = 1",
             "delete object_index",
         ):
             with self.subTest(source=source):
@@ -2268,6 +2271,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_array_set(GMRuntime.gml_builtin_array("view_xview"), 0, position.x)',
         )
         self.assertEqual(transpile_gml_code("var bbox_left = 1; bbox_left += 1", indent=""), "var bbox_left = 1\nbbox_left = GMRuntime.gml_add(bbox_left, 1)")
+        self.assertEqual(
+            transpile_gml_code("view_enabled = true", indent=""),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "view_enabled", true)',
+        )
 
     def test_instance_target_preserves_direct_names_and_dynamic_fallback(self):
         output = transpile_gml_code(

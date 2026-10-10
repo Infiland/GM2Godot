@@ -575,6 +575,35 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertTrue(unsupported_logs)
         self.assertTrue(all(log.startswith("Info:") for log in unsupported_logs))
 
+    def test_scaling_and_window_colour_options_map_to_stretch_and_clear_colour(self) -> None:
+        with open(os.path.join(self.gm_dir, "options", "main", "options_main.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_game_speed":60,"option_window_colour":4278206719,}')
+        with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_windows_scale":0,}')
+
+        self._make_converter().update_project_settings()
+
+        with open(self.project_godot, "r", encoding="utf-8") as f:
+            content = f.read()
+        display = self._section_body(content, "display")
+        rendering = self._section_body(content, "rendering")
+        self.assertIn('window/stretch/aspect="keep"', display)
+        # 4278206719 is 0xFF0040FF: alpha FF, blue 00, green 40, red FF.
+        self.assertIn(
+            "environment/defaults/default_clear_color=Color(1, 0.25098, 0, 1)",
+            rendering,
+        )
+
+        with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_windows_scale":1,}')
+        self._make_converter().update_project_settings()
+
+        with open(self.project_godot, "r", encoding="utf-8") as f:
+            content = f.read()
+        display = self._section_body(content, "display")
+        self.assertIn('window/stretch/aspect="ignore"', display)
+        self.assertNotIn('window/stretch/aspect="keep"', display)
+
     def test_places_settings_in_canonical_sections_and_preserves_existing_settings(self) -> None:
         converter = self._make_converter()
         converter.update_project_settings()

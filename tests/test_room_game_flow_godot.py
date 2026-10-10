@@ -254,27 +254,14 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     metadata/gamemaker_room_width = 320
                     metadata/gamemaker_room_height = 180
                     metadata/gamemaker_room_persistent = false
+                    metadata/gamemaker_view_settings = {"enableViews": true}
+                    metadata/gamemaker_views = [{"visible": true, "xview": 0, "yview": 0, "wview": 100, "hview": 100, "xport": 0, "yport": 0, "wport": 100, "hport": 100, "object": "o_player", "hborder": 10, "vborder": 10, "hspeed": -1, "vspeed": -1}]
 
                     [node name="ViewCamera" type="Camera2D" parent="."]
                     position = Vector2(50, 50)
-                    enabled = true
+                    ignore_rotation = false
+                    limit_enabled = false
                     metadata/gamemaker_view_camera = true
-                    metadata/gamemaker_view_enabled_camera = true
-                    metadata/gamemaker_view_visible = true
-                    metadata/gamemaker_view_index = 0
-                    metadata/gamemaker_view_xview = 0
-                    metadata/gamemaker_view_yview = 0
-                    metadata/gamemaker_view_wview = 100
-                    metadata/gamemaker_view_hview = 100
-                    metadata/gamemaker_view_xport = 0
-                    metadata/gamemaker_view_yport = 0
-                    metadata/gamemaker_view_wport = 100
-                    metadata/gamemaker_view_hport = 100
-                    metadata/gamemaker_view_object_name = "o_player"
-                    metadata/gamemaker_view_hborder = 10
-                    metadata/gamemaker_view_vborder = 10
-                    metadata/gamemaker_view_hspeed = -1
-                    metadata/gamemaker_view_vspeed = -1
 
                     [node name="Backgrounds" type="Node2D" parent="."]
                     metadata/gamemaker_layer_name = "Backgrounds"

@@ -64,11 +64,18 @@ static func _gml_all_instance_targets():
 
 
 static func _gml_live_instance_entries():
+	# The registered instances in creation order; nodes freed without being
+	# unregistered are forgotten on the way.
 	var entries = []
-	for entry in _gml_instance_entries.values():
-		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
+	var freed = []
+	for entry in _gml_instance_live_order:
+		var instance = entry["instance"]
+		if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
+			freed.append(entry)
+		else:
 			entries.append(entry)
-	entries.sort_custom(_gml_instance_entry_order_less)
+	for entry in freed:
+		gml_instance_unregister(entry)
 	return entries
 
 
@@ -77,9 +84,20 @@ static func _gml_instance_entry_order_less(left, right):
 
 
 static func _gml_instance_entry(instance_or_handle):
-	if typeof(instance_or_handle) == TYPE_OBJECT and not is_instance_valid(instance_or_handle):
+	var value_type = typeof(instance_or_handle)
+	if value_type == TYPE_INT:
+		# A raw instance id (keywords are negative and never registered).
+		var id_entry = _gml_instance_entries.get(instance_or_handle)
+		if id_entry != null and gml_handle_is_valid(id_entry["handle"]):
+			return id_entry
 		return null
-	if typeof(instance_or_handle) == TYPE_DICTIONARY and instance_or_handle.has("handle"):
+	if value_type == TYPE_OBJECT:
+		if not is_instance_valid(instance_or_handle):
+			return null
+		if instance_or_handle is Node:
+			var node_handle = _gml_instance_handles_by_node_id.get(instance_or_handle.get_instance_id())
+			return null if node_handle == null else _gml_instance_entries.get(node_handle.index)
+	if value_type == TYPE_DICTIONARY and instance_or_handle.has("handle"):
 		return instance_or_handle
 	if is_handle(instance_or_handle):
 		if instance_or_handle.kind == GML_INSTANCE_HANDLE_KIND and _gml_instance_entries.has(instance_or_handle.index):
@@ -117,32 +135,21 @@ static func _gml_instance_selector_targets(selector):
 		var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, null, null)
 		if keyword_targets != null:
 			return keyword_targets
+	# A registered instance exists until it is unregistered, which happens
+	# right after its Destroy event: like GameMaker, the event still sees it.
 	var entry: Variant = _gml_instance_entry(selector)
 	if entry != null:
-		if entry["destroyed"]:
-			return []
 		return [entry["instance"]]
-	var object_id = _gml_object_selector_id(selector)
-	if object_id != -1 and _gml_instance_ids_by_object.has(object_id):
-		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])
-	var object_name = _gml_object_selector_name(selector)
-	if object_name != "" and _gml_instance_ids_by_object_name.has(object_name):
-		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])
+	var object_entries: Variant = _gml_instance_object_entries(selector)
+	if object_entries != null:
+		return _gml_instance_entry_targets(object_entries)
+	if _gml_object_asset_entry(selector) != null:
+		# An object without instances.
+		return []
 	return null
 
 
-static func _gml_instance_targets_from_indices(indices):
-	var targets = []
-	for handle_index in indices:
-		if not _gml_instance_entries.has(handle_index):
-			continue
-		var entry = _gml_instance_entries[handle_index]
-		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
-			targets.append(entry["instance"])
-	return targets
-
-
-static func _gml_instance_index_add(index_map, selector, handle_index):
+static func _gml_instance_index_add(index_map, selector, entry):
 	if selector == null:
 		return
 	if is_numeric(selector) and _to_int64_value(selector) == -1:
@@ -151,14 +158,13 @@ static func _gml_instance_index_add(index_map, selector, handle_index):
 		return
 	if not index_map.has(selector):
 		index_map[selector] = []
-	if not index_map[selector].has(handle_index):
-		index_map[selector].append(handle_index)
+	index_map[selector].append(entry)
 
 
-static func _gml_instance_index_remove(index_map, selector, handle_index):
+static func _gml_instance_index_remove(index_map, selector, entry):
 	if selector == null or not index_map.has(selector):
 		return
-	index_map[selector].erase(handle_index)
+	_gml_instance_order_erase(index_map[selector], entry)
 	if index_map[selector].is_empty():
 		index_map.erase(selector)
 
@@ -210,20 +216,36 @@ static func _gml_object_asset_entry(selector):
 
 
 static func _gml_instance_distance_extreme(x, y, target, nearest):
-	var targets = gml_with_targets(target)
-	if targets.is_empty():
-		return gml_instance_noone()
-	var origin = Vector2(_to_real(x), _to_real(y))
+	# GameMaker's instance_nearest/instance_furthest: the distance from (x, y)
+	# to an instance's x and y has to beat 10000000000 (nearest) or
+	# -10000000000 (furthest) and every distance before it, so the first
+	# instance wins a tie.
+	var px = _to_real(x)
+	var py = _to_real(y)
+	var best_distance = 10000000000.0 if nearest else -10000000000.0
 	var best_entry = null
-	var best_distance = 0.0
-	for instance in targets:
-		var entry: Variant = _gml_instance_entry(instance)
-		if entry == null:
+	var entries: Variant = _gml_instance_target_entries(target)
+	if entries == null:
+		entries = []
+		for instance in gml_with_targets(target):
+			var instance_entry: Variant = _gml_instance_entry(instance)
+			if instance_entry != null:
+				entries.append(instance_entry)
+	for entry in entries:
+		var instance = entry["instance"]
+		if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
 			continue
-		var distance = origin.distance_squared_to(_gml_instance_position(instance))
-		if best_entry == null or (nearest and distance < best_distance) or ((not nearest) and distance > best_distance):
-			best_entry = entry
+		var position = (
+			instance.position
+			if instance is Node2D and not _gml_sequence_instances_exist
+			else _gml_instance_position(instance)
+		)
+		var xx = px - position.x
+		var yy = py - position.y
+		var distance = sqrt(xx * xx + yy * yy)
+		if (distance < best_distance) if nearest else (distance > best_distance):
 			best_distance = distance
+			best_entry = entry
 	if best_entry == null:
 		return gml_instance_noone()
 	return best_entry["handle"]
@@ -231,7 +253,7 @@ static func _gml_instance_distance_extreme(x, y, target, nearest):
 
 static func _gml_instance_position(instance):
 	if instance is Node2D:
-		return instance.global_position
+		return _gml_collision_instance_xy(instance)
 	if instance is Object:
 		var x_value = gml_variable_instance_get(instance, "x")
 		var y_value = gml_variable_instance_get(instance, "y")
@@ -389,30 +411,28 @@ static func _to_array_index(value):
 	return resolved_index
 
 
-static var _gml_object_property_names = {}
+static var _gml_script_property_names_cache = {}
 
 
 static func _object_has_property(object_value, property_name):
-	# Property lists only change with the native class and the attached script,
-	# so their names are looked up once per class and script. Metadata entries
-	# ("metadata/...") differ per object and are never cached.
-	var name = str(property_name)
-	if name.contains("/"):
+	# get_property_list() allocates every property description, so scripted
+	# objects (all converted instances) cache their names per class + script.
+	# Scriptless objects keep the full scan: some built-in classes expose
+	# per-instance properties (e.g. shader parameters).
+	var script = object_value.get_script()
+	if script == null:
 		for property in object_value.get_property_list():
-			if property.get("name") == name:
+			if property.get("name") == property_name:
 				return true
 		return false
-	var script = object_value.get_script()
-	var key = object_value.get_class() + "#" + (str(script.get_instance_id()) if script != null else "")
-	var names = _gml_object_property_names.get(key, null)
+	var cache_key = "%s:%d" % [object_value.get_class(), script.get_instance_id()]
+	var names = _gml_script_property_names_cache.get(cache_key)
 	if names == null:
 		names = {}
 		for property in object_value.get_property_list():
-			var property_name_value = str(property.get("name", ""))
-			if not property_name_value.contains("/"):
-				names[property_name_value] = true
-		_gml_object_property_names[key] = names
-	return names.has(name)
+			names[str(property.get("name"))] = true
+		_gml_script_property_names_cache[cache_key] = names
+	return names.has(str(property_name))
 
 
 static func _gml_one_based_index(value):

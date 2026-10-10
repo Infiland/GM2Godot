@@ -72,11 +72,16 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 	if instance is Object:
 		_gml_instance_handles_by_node_id[instance.get_instance_id()] = handle
 		_gml_instance_set_meta(instance, "_gm2godot_instance_id", handle.index)
+	_gml_instance_live_order.append(entry)
 	for selector_id in selector_ids:
-		_gml_instance_index_add(_gml_instance_ids_by_object, selector_id, handle.index)
+		_gml_instance_index_add(_gml_instance_live_by_object, selector_id, entry)
 	for selector_name in selector_names:
-		_gml_instance_index_add(_gml_instance_ids_by_object_name, selector_name, handle.index)
-	_gml_builtin_globals["instance_count"] = _gml_live_instance_entries().size()
+		_gml_instance_index_add(_gml_instance_live_by_object_name, selector_name, entry)
+	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
+	if instance is Object:
+		# The collision events of the instance's object (and its parents)
+		# join the collision table as soon as the object is first seen.
+		_gml_collision_register_instance_events(instance, _gml_collision_entry_object_chain(entry))
 	return handle
 
 
@@ -86,14 +91,18 @@ static func gml_instance_unregister(instance_or_handle):
 		return false
 	entry["destroyed"] = true
 	var handle = entry["handle"]
+	if not is_same(_gml_instance_entries.get(handle.index), entry):
+		# Already forgotten.
+		return false
 	_gml_instance_entries.erase(handle.index)
 	_gml_instance_handles_by_node_id.erase(entry["node_id"])
+	_gml_instance_order_erase(_gml_instance_live_order, entry)
 	for selector_id in entry["selector_ids"]:
-		_gml_instance_index_remove(_gml_instance_ids_by_object, selector_id, handle.index)
+		_gml_instance_index_remove(_gml_instance_live_by_object, selector_id, entry)
 	for selector_name in entry["selector_names"]:
-		_gml_instance_index_remove(_gml_instance_ids_by_object_name, selector_name, handle.index)
+		_gml_instance_index_remove(_gml_instance_live_by_object_name, selector_name, entry)
 	gml_handle_invalidate(handle)
-	_gml_builtin_globals["instance_count"] = _gml_live_instance_entries().size()
+	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
 	return true
 
 
@@ -113,12 +122,25 @@ static func gml_instance_destroy(target = null):
 
 
 static func gml_instance_exists(target):
+	if _gml_instance_object_first(target) != null:
+		return true
 	return gml_with_targets(target).size() > 0
 
 
 static func gml_instance_find(target, index):
-	var targets = gml_with_targets(target)
 	var target_index = int(_to_real(index))
+	var entries: Variant = _gml_instance_target_entries(target)
+	if entries != null:
+		# The n-th live instance, passing over nodes that were freed.
+		for entry in entries:
+			var instance = entry["instance"]
+			if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
+				continue
+			if target_index == 0:
+				return entry["handle"]
+			target_index -= 1
+		return gml_instance_noone()
+	var targets = gml_with_targets(target)
 	if target_index < 0 or target_index >= targets.size():
 		return gml_instance_noone()
 	var entry = _gml_instance_entry(targets[target_index])
@@ -128,7 +150,15 @@ static func gml_instance_find(target, index):
 
 
 static func gml_instance_number(target):
-	return gml_with_targets(target).size()
+	var entries: Variant = _gml_instance_target_entries(target)
+	if entries == null:
+		return gml_with_targets(target).size()
+	var count = 0
+	for entry in entries:
+		var instance = entry["instance"]
+		if typeof(instance) != TYPE_OBJECT or is_instance_valid(instance):
+			count += 1
+	return count
 
 
 static func gml_instance_id_get(index):
@@ -156,9 +186,13 @@ static func gml_instance_create_depth(x, y, depth_value, object_selector, curren
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):
-	if typeof(target) == TYPE_OBJECT and not is_instance_valid(target):
-		# An instance whose node was freed no longer exists.
-		return []
+	if typeof(target) == TYPE_OBJECT:
+		if not is_instance_valid(target):
+			# An instance whose node was freed no longer exists.
+			return []
+		if target is Node:
+			# The instance itself (self, other, a stored instance).
+			return [target]
 	if is_undefined(target):
 		return []
 	if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND:
@@ -251,3 +285,96 @@ static func gml_handle_invalidate(handle):
 		_gml_handle_registry.erase(old_key)
 	return handle
 
+
+
+# --- Live instance lists -------------------------------------------------------
+#
+# Every registered instance is listed in creation order in
+# _gml_instance_live_order, and under each of its object selectors (its object
+# and parents, by id and by name) in _gml_instance_live_by_object(_name), as
+# GameMaker keeps an object's instances, children included, in creation
+# order. An instance stays listed until it is unregistered: right after its
+# Destroy event, or when its node leaves the tree. A node freed without being
+# unregistered is forgotten the next time a list meets it.
+
+# The first listed instance of an object given by its index, or null when
+# the value is not such an object (or an instance id), so callers fall back
+# to gml_with_targets.
+static func _gml_instance_object_first(target):
+	if typeof(target) != TYPE_INT or _gml_instance_entries.has(target):
+		return null
+	var entries = _gml_instance_live_by_object.get(target)
+	if entries == null:
+		return null
+	for entry in entries:
+		var instance = entry["instance"]
+		if typeof(instance) != TYPE_OBJECT or is_instance_valid(instance):
+			return instance
+	return null
+
+
+# The live instance list of a target that is an object given by its index
+# (children included) or `all`, or null for any other target (and for an
+# object without instances). The array is the list itself: callers only
+# read it, and skip nodes that were freed.
+static func _gml_instance_target_entries(target):
+	if typeof(target) == TYPE_INT:
+		if target == GML_INSTANCE_ALL_INDEX:
+			return _gml_instance_live_order
+		if _gml_instance_entries.has(target):
+			# An instance id.
+			return null
+		return _gml_instance_live_by_object.get(target)
+	if is_handle(target) and target.kind == GML_INSTANCE_HANDLE_KIND and target.index == GML_INSTANCE_ALL_INDEX:
+		return _gml_instance_live_order
+	return null
+
+
+# The listed instances of an object (by index or name), or null when none are
+# listed. The array is the list itself: callers copy before changing it.
+static func _gml_instance_object_entries(selector):
+	if typeof(selector) == TYPE_INT:
+		var by_index = _gml_instance_live_by_object.get(selector)
+		if by_index != null:
+			return by_index
+	var object_id = _gml_object_selector_id(selector)
+	if object_id != -1 and _gml_instance_live_by_object.has(object_id):
+		return _gml_instance_live_by_object[object_id]
+	var object_name = _gml_object_selector_name(selector)
+	if object_name != "" and _gml_instance_live_by_object_name.has(object_name):
+		return _gml_instance_live_by_object_name[object_name]
+	return null
+
+
+# The instances of listed entries, without nodes that were freed (which are
+# unregistered on the way).
+static func _gml_instance_entry_targets(entries):
+	var targets = []
+	var freed = []
+	for entry in entries:
+		var instance = entry["instance"]
+		if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
+			freed.append(entry)
+		else:
+			targets.append(instance)
+	for entry in freed:
+		gml_instance_unregister(entry)
+	return targets
+
+
+# Removes an entry from a list kept in creation order.
+static func _gml_instance_order_erase(entries, entry):
+	var order = int(entry["creation_order"])
+	var low = 0
+	var high = entries.size() - 1
+	while low <= high:
+		var middle = (low + high) >> 1
+		var middle_order = int(entries[middle]["creation_order"])
+		if middle_order < order:
+			low = middle + 1
+		elif middle_order > order:
+			high = middle - 1
+		else:
+			if is_same(entries[middle], entry):
+				entries.remove_at(middle)
+			return

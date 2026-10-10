@@ -20,6 +20,14 @@ const GML_COLLISION_TRACE_LIMIT = 256
 const GML_COLLISION_COMPATIBILITY_SETTING = "application/config/gm2godot_collision_compatibility"
 const GML_COLLISION_UNKNOWN_OBJECT_ORDER = 1000000000
 const GML_COLLISION_EVENT_PREFIX = "_on_collision_"
+# What _gml_collision_find tests instances against.
+const GML_COLLISION_QUERY_ANY = 0
+const GML_COLLISION_QUERY_POINT = 1
+const GML_COLLISION_QUERY_RECTANGLE = 2
+const GML_COLLISION_QUERY_ELLIPSE = 3
+const GML_COLLISION_QUERY_LINE = 4
+const GML_COLLISION_QUERY_INSTANCE = 5
+const GML_COLLISION_QUERY_SOLID = 6
 
 static var _gml_collision_event_trace = []
 static var _gml_collision_compatibility_mode = null
@@ -31,6 +39,9 @@ static var _gml_collision_object_order_source = null
 static var _gml_collision_registry_objects = {}
 static var _gml_collision_registered_scripts = {}
 static var _gml_collision_registry_table = null
+# Whether any instance has been placed in a sequence: until then no instance
+# carries the gamemaker_in_sequence meta and positions are plain positions.
+static var _gml_sequence_instances_exist = false
 
 
 static func gml_distance_to_object(current_self, target):
@@ -38,10 +49,7 @@ static func gml_distance_to_object(current_self, target):
 	if self_state == null:
 		return GML_COLLISION_NO_INSTANCE_DISTANCE
 	var best_distance = GML_COLLISION_NO_INSTANCE_DISTANCE
-	for inst in _gml_collision_targets(target, current_self, false):
-		var other_state = _gml_collision_state(inst)
-		if other_state == null:
-			continue
+	for other_state in _gml_collision_find(GML_COLLISION_QUERY_ANY, null, target, current_self, false, false, true):
 		var distance = _gml_collision_bbox_gap(self_state, other_state)
 		if distance < best_distance:
 			best_distance = distance
@@ -80,31 +88,21 @@ static func gml_place_free(current_self, x, y):
 	var self_state = _gml_collision_state_at(current_self, x, y)
 	if self_state == null:
 		return true
-	for inst in _gml_collision_targets(gml_instance_all(), current_self, true):
-		if not _gml_collision_instance_solid(inst):
-			continue
-		if _gml_collision_states_collide(self_state, _gml_collision_state(inst), true):
-			return false
-	return true
+	return _gml_collision_find(GML_COLLISION_QUERY_SOLID, self_state, GML_INSTANCE_ALL_INDEX, current_self, true, true, false) == null
 
 
 static func gml_instance_place(current_self, x, y, target):
 	var self_state = _gml_collision_state_at(current_self, x, y)
 	if self_state == null:
 		return gml_instance_noone()
-	for inst in _gml_collision_targets(target, current_self, true):
-		if _gml_collision_states_collide(_gml_collision_state(inst), self_state, true):
-			return _gml_collision_handle_for_instance(inst)
-	return gml_instance_noone()
+	return _gml_collision_first_handle(_gml_collision_find(GML_COLLISION_QUERY_INSTANCE, self_state, target, current_self, true, true, false))
 
 
 static func gml_instance_place_list(current_self, x, y, target, list_id, ordered):
 	var hits = []
 	var self_state = _gml_collision_state_at(current_self, x, y)
 	if self_state != null:
-		for inst in _gml_collision_targets(target, current_self, true):
-			if _gml_collision_states_collide(_gml_collision_state(inst), self_state, true):
-				hits.append(inst)
+		hits = _gml_collision_find(GML_COLLISION_QUERY_INSTANCE, self_state, target, current_self, true, true, true)
 	return _gml_collision_write_list(list_id, hits, ordered, _to_real(x), _to_real(y))
 
 
@@ -125,61 +123,35 @@ static func gml_instance_position_list(current_self, x, y, target, list_id, orde
 
 
 static func gml_collision_point(current_self, x, y, target, precise = false, notme = false):
-	var px = _to_real(x)
-	var py = _to_real(y)
-	var prec = gml_bool(precise)
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_point(_gml_collision_state(inst), px, py, prec):
-			return _gml_collision_handle_for_instance(inst)
-	return gml_instance_noone()
+	var point = [_to_real(x), _to_real(y)]
+	return _gml_collision_first_handle(_gml_collision_find(GML_COLLISION_QUERY_POINT, point, target, current_self, gml_bool(notme), gml_bool(precise), false))
 
 
 static func gml_collision_point_list(current_self, x, y, target, precise, notme, list_id, ordered):
-	var px = _to_real(x)
-	var py = _to_real(y)
-	var prec = gml_bool(precise)
-	var hits = []
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_point(_gml_collision_state(inst), px, py, prec):
-			hits.append(inst)
-	return _gml_collision_write_list(list_id, hits, ordered, px, py)
+	var point = [_to_real(x), _to_real(y)]
+	var hits = _gml_collision_find(GML_COLLISION_QUERY_POINT, point, target, current_self, gml_bool(notme), gml_bool(precise), true)
+	return _gml_collision_write_list(list_id, hits, ordered, point[0], point[1])
 
 
 static func gml_collision_rectangle(current_self, x1, y1, x2, y2, target, precise = false, notme = false):
 	var rect = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_rectangle(_gml_collision_state(inst), rect[0], rect[1], rect[2], rect[3], prec):
-			return _gml_collision_handle_for_instance(inst)
-	return gml_instance_noone()
+	return _gml_collision_first_handle(_gml_collision_find(GML_COLLISION_QUERY_RECTANGLE, rect, target, current_self, gml_bool(notme), gml_bool(precise), false))
 
 
 static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
 	var rect = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	var hits = []
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_rectangle(_gml_collision_state(inst), rect[0], rect[1], rect[2], rect[3], prec):
-			hits.append(inst)
+	var hits = _gml_collision_find(GML_COLLISION_QUERY_RECTANGLE, rect, target, current_self, gml_bool(notme), gml_bool(precise), true)
 	return _gml_collision_write_list(list_id, hits, ordered, (rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
 
 
 static func gml_collision_ellipse(current_self, x1, y1, x2, y2, target, precise = false, notme = false):
 	var rect = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_ellipse(_gml_collision_state(inst), rect[0], rect[1], rect[2], rect[3], prec):
-			return _gml_collision_handle_for_instance(inst)
-	return gml_instance_noone()
+	return _gml_collision_first_handle(_gml_collision_find(GML_COLLISION_QUERY_ELLIPSE, rect, target, current_self, gml_bool(notme), gml_bool(precise), false))
 
 
 static func gml_collision_ellipse_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
 	var rect = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	var hits = []
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_ellipse(_gml_collision_state(inst), rect[0], rect[1], rect[2], rect[3], prec):
-			hits.append(inst)
+	var hits = _gml_collision_find(GML_COLLISION_QUERY_ELLIPSE, rect, target, current_self, gml_bool(notme), gml_bool(precise), true)
 	return _gml_collision_write_list(list_id, hits, ordered, (rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
 
 
@@ -199,20 +171,12 @@ static func gml_collision_circle_list(current_self, x, y, radius, target, precis
 
 static func gml_collision_line(current_self, x1, y1, x2, y2, target, precise = false, notme = false):
 	var line = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_line(_gml_collision_state(inst), line[0], line[1], line[2], line[3], prec):
-			return _gml_collision_handle_for_instance(inst)
-	return gml_instance_noone()
+	return _gml_collision_first_handle(_gml_collision_find(GML_COLLISION_QUERY_LINE, line, target, current_self, gml_bool(notme), gml_bool(precise), false))
 
 
 static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):
 	var line = [_to_real(x1), _to_real(y1), _to_real(x2), _to_real(y2)]
-	var prec = gml_bool(precise)
-	var hits = []
-	for inst in _gml_collision_targets(target, current_self, gml_bool(notme)):
-		if _gml_collision_state_line(_gml_collision_state(inst), line[0], line[1], line[2], line[3], prec):
-			hits.append(inst)
+	var hits = _gml_collision_find(GML_COLLISION_QUERY_LINE, line, target, current_self, gml_bool(notme), gml_bool(precise), true)
 	return _gml_collision_write_list(list_id, hits, ordered, line[0], line[1])
 
 
@@ -230,113 +194,125 @@ static func gml_collision_event_trace_clear():
 # the other side, or through a parent, is not registered again. Objects are
 # visited in asset order; for every instance of the first object (children
 # included) each registered target object is tested against all of its
-# instances (children included). A colliding pair first moves both instances
-# back to their previous position when either is solid, then runs the first
-# instance's event and the second instance's event. Instances destroyed
-# earlier in the step are skipped, instances created during the collision
-# events wait for the next step, and an instance pair runs its events at
-# most once per step.
+# instances (children included), both in creation order. A colliding pair
+# first moves both instances back to their previous position when either is
+# solid, then runs the first instance's event and the second instance's
+# event. Instances destroyed earlier in the step are skipped, instances
+# created during the collision events wait for the next step, and an
+# instance pair runs its events at most once per step. A given instance list
+# limits the instances that take part.
 static func gml_collision_event_dispatch_frame(instances = null, frame = -1):
 	_gml_event_scheduler_record_phase("collision", "", null, frame)
-	var context = _gml_collision_dispatch_context(instances, frame)
-	if context["pool"].size() < 2:
-		return 0
 	var table = _gml_collision_registered_table()
+	if table["order"].is_empty():
+		return 0
+	var context = _gml_collision_dispatch_context(instances, table, frame)
 	var dispatched = 0
 	for first_name in table["order"]:
-		var first_indices = context["by_object"].get(first_name, null)
-		if first_indices == null:
+		var first_pool = context["pools"].get(first_name, null)
+		if first_pool == null:
 			continue
 		var targets = table["targets"][first_name]
-		for first_index in first_indices:
-			dispatched += _gml_collision_dispatch_instance(context, first_index, targets)
+		for first_index in range(first_pool.size()):
+			dispatched += _gml_collision_dispatch_instance(context, first_pool, first_index, targets)
 	return dispatched
 
 
-static func _gml_collision_dispatch_context(instances, frame):
-	var source = instances if instances is Array else _gml_collision_live_instances()
+# The instances of every object in the collision table as its instance list
+# stands when the collision events start, one record per instance.
+static func _gml_collision_dispatch_context(instances, table, frame):
+	var allowed = null
+	if instances is Array:
+		allowed = {}
+		for inst in instances:
+			if _gml_collision_instance_valid(inst):
+				allowed[inst.get_instance_id()] = true
 	var context = {
-		"pool": [],
-		"entries": [],
-		"chains": [],
-		"states": [],
-		"by_object": {},
+		"pools": {},
+		"records": {},
 		"handled": {},
 		"frame": frame,
+		"generation": 0,
 	}
-	var seen = {}
-	for inst in source:
-		if not _gml_collision_instance_valid(inst):
+	for object_name in table["objects"]:
+		var entries = _gml_instance_live_by_object_name.get(object_name, null)
+		if entries == null:
 			continue
-		var entry: Variant = _gml_instance_entry(inst)
-		if entry == null or entry["destroyed"]:
-			continue
-		var key = inst.get_instance_id()
-		if seen.has(key):
-			continue
-		seen[key] = true
-		var chain = _gml_collision_entry_object_chain(entry)
-		if chain.is_empty():
-			continue
-		var pool_index = context["pool"].size()
-		context["pool"].append(inst)
-		context["entries"].append(entry)
-		context["chains"].append(chain)
-		context["states"].append(null)
-		for object_name in chain:
-			if not context["by_object"].has(object_name):
-				context["by_object"][object_name] = []
-			context["by_object"][object_name].append(pool_index)
-		_gml_collision_register_instance_events(inst, chain)
+		var pool = []
+		for entry in entries:
+			var inst = entry["instance"]
+			if not _gml_collision_instance_valid(inst):
+				continue
+			var key = inst.get_instance_id()
+			if allowed != null and not allowed.has(key):
+				continue
+			var record = context["records"].get(key, null)
+			if record == null:
+				record = {
+					"inst": inst,
+					"entry": entry,
+					"chain": _gml_collision_entry_object_chain(entry),
+					"state": null,
+					"generation": -1,
+				}
+				context["records"][key] = record
+			pool.append(record)
+		if not pool.is_empty():
+			context["pools"][object_name] = pool
 	return context
 
 
-static func _gml_collision_dispatch_instance(context, first_index, targets):
+static func _gml_collision_dispatch_instance(context, first_pool, first_index, targets):
 	var dispatched = 0
-	var chains = context["chains"]
-	var pool_size = context["pool"].size()
+	var first = first_pool[first_index]
 	for second_name in targets:
-		var second_indices = context["by_object"].get(second_name, null)
-		if second_indices == null:
+		var second_pool = context["pools"].get(second_name, null)
+		if second_pool == null:
 			continue
-		for second_index in second_indices:
-			if not _gml_collision_context_live(context, first_index):
+		for second_index in range(second_pool.size()):
+			if not _gml_collision_record_live(first):
 				return dispatched
-			if second_index == first_index or not _gml_collision_context_live(context, second_index):
+			var second = second_pool[second_index]
+			if is_same(second, first) or not _gml_collision_record_live(second):
 				continue
-			# Two instances of the same object are tested once, in pool order.
-			if second_index < first_index and chains[second_index][0] == chains[first_index][0]:
+			# Two instances of the same object are tested once, in list order.
+			if second_index < first_index and second["chain"][0] == first["chain"][0]:
 				continue
-			var pair_key = min(first_index, second_index) * pool_size + max(first_index, second_index)
+			var pair_key = _gml_collision_pair_key(first, second)
 			if context["handled"].has(pair_key):
 				continue
-			var first_state = _gml_collision_context_state(context, first_index)
-			var second_state = _gml_collision_context_state(context, second_index)
+			var first_state = _gml_collision_record_state(context, first)
+			var second_state = _gml_collision_record_state(context, second)
 			if not _gml_collision_states_collide(first_state, second_state, true):
 				continue
 			context["handled"][pair_key] = true
 			dispatched += _gml_collision_dispatch_pair(
-				context["pool"][first_index],
-				chains[first_index],
-				context["pool"][second_index],
-				chains[second_index],
+				first["inst"],
+				first["chain"],
+				second["inst"],
+				second["chain"],
 				context["frame"]
 			)
 			# Events may move, change or destroy any instance.
-			context["states"].fill(null)
+			context["generation"] += 1
 	return dispatched
 
 
-static func _gml_collision_context_live(context, index):
-	return not context["entries"][index]["destroyed"] and is_instance_valid(context["pool"][index])
+static func _gml_collision_record_live(record):
+	return not record["entry"]["destroyed"] and is_instance_valid(record["inst"])
 
 
-static func _gml_collision_context_state(context, index):
-	var state = context["states"][index]
-	if state == null:
-		state = _gml_collision_state(context["pool"][index])
-		context["states"][index] = state
-	return state
+static func _gml_collision_record_state(context, record):
+	if record["generation"] != context["generation"]:
+		record["state"] = _gml_collision_state(record["inst"])
+		record["generation"] = context["generation"]
+	return record["state"]
+
+
+static func _gml_collision_pair_key(first, second):
+	var first_order = int(first["entry"]["creation_order"])
+	var second_order = int(second["entry"]["creation_order"])
+	return (min(first_order, second_order) << 32) | max(first_order, second_order)
 
 
 static func _gml_collision_dispatch_pair(first, first_chain, second, second_chain, frame):
@@ -435,28 +411,19 @@ static func _gml_collision_trace_append(record):
 		_gml_collision_event_trace.remove_at(0)
 
 
-static func _gml_collision_live_instances():
-	var instances = []
-	for entry in _gml_live_instance_entries():
-		var inst = entry["instance"]
-		if _gml_collision_instance_valid(inst):
-			instances.append(inst)
-	return instances
-
-
 static func _gml_collision_instance_valid(inst):
 	return typeof(inst) == TYPE_OBJECT and is_instance_valid(inst)
 
 
 static func _gml_collision_instance_live(inst):
 	# Destroyed instances stay valid Godot objects until the end of the frame
-	# but GameMaker stops matching them as soon as they are destroyed.
+	# but GameMaker stops matching them as soon as they are destroyed (once
+	# their Destroy event has run, when they are unregistered).
 	if not _gml_collision_instance_valid(inst):
 		return false
-	var entry: Variant = _gml_instance_entry(inst)
-	if entry == null:
-		return not _gml_instance_handles_by_node_id.has(inst.get_instance_id()) and not inst.has_meta("_gm2godot_instance_id")
-	return not entry["destroyed"]
+	if _gml_instance_entry(inst) != null:
+		return true
+	return not inst.has_meta("_gm2godot_instance_id")
 
 
 static func _gml_collision_instance_solid(inst):
@@ -553,7 +520,13 @@ static func _gml_collision_registered_table():
 		_gml_collision_add_object_pairs(object_name, targets, done)
 	var order = targets.keys()
 	order.sort_custom(_gml_collision_object_less)
-	_gml_collision_registry_table = {"order": order, "targets": targets}
+	# Every object whose instances take part, first or second.
+	var objects = {}
+	for object_name in order:
+		objects[object_name] = true
+		for target_name in targets[object_name]:
+			objects[target_name] = true
+	_gml_collision_registry_table = {"order": order, "targets": targets, "objects": objects.keys()}
 	return _gml_collision_registry_table
 
 
@@ -619,9 +592,104 @@ static func _gml_collision_object_order(object_name):
 
 # --- Targets and results ------------------------------------------------------
 
+# Tests the instances a query targets in GameMaker's order (see
+# _gml_collision_targets) and returns the collision state of the first one
+# the query hits, or null; with `every`, the states of all it hits. `query` is
+# [x, y] for a point, [x1, y1, x2, y2] for a rectangle, ellipse or line, and
+# the calling instance's (moved) state for place tests, which QUERY_SOLID
+# limits to solid instances. QUERY_ANY hits every instance with a state.
+static func _gml_collision_find(kind, query, target, current_self, notme, prec, every):
+	var hits = []
+	if target == null or is_undefined(target):
+		return hits if every else null
+	var bounds = _gml_collision_query_bounds(kind, query)
+	var entries: Variant = _gml_instance_target_entries(target)
+	var from_entries = entries != null
+	var candidates = entries if from_entries else _gml_collision_targets(target, current_self, notme)
+	var skipped = _gml_collision_self_instance(current_self) if notme and from_entries else null
+	for candidate in candidates:
+		var inst = candidate["instance"] if from_entries else candidate
+		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			continue
+		if skipped != null and is_same(inst, skipped):
+			continue
+		var state = null
+		if from_entries:
+			# A registered instance keeps its state in its registry entry. (The
+			# test below is _gml_collision_current_state's for the usual case.)
+			state = candidate.get("collision_state")
+			if (
+				state == null
+				or not state["members"]
+				or _gml_sequence_instances_exist
+				or state["signature"] != [inst.position, inst.sprite_index, inst.mask_index, inst.image_xscale, inst.image_yscale, inst.image_angle]
+			):
+				var cached = state
+				state = _gml_collision_current_state(inst, cached)
+				if not is_same(state, cached):
+					candidate["collision_state"] = state
+		else:
+			state = _gml_collision_state(inst)
+		if bounds != null and (
+			state["left"] > bounds[2] or state["right"] < bounds[0] or state["top"] > bounds[3] or state["bottom"] < bounds[1]
+		):
+			continue
+		if not _gml_collision_query_hits(kind, query, state, prec):
+			continue
+		if not every:
+			return state
+		hits.append(state)
+	return hits if every else null
+
+
+# The region (left, top, right, bottom) of a query widened by a pixel: an
+# instance whose bounding box lies outside it fails every test below, as
+# each test first compares the bounding boxes. Null for QUERY_ANY.
+static func _gml_collision_query_bounds(kind, query):
+	match kind:
+		GML_COLLISION_QUERY_POINT:
+			return [query[0] - 1.0, query[1] - 1.0, query[0] + 1.0, query[1] + 1.0]
+		GML_COLLISION_QUERY_RECTANGLE, GML_COLLISION_QUERY_ELLIPSE, GML_COLLISION_QUERY_LINE:
+			return [
+				min(query[0], query[2]) - 1.0,
+				min(query[1], query[3]) - 1.0,
+				max(query[0], query[2]) + 1.0,
+				max(query[1], query[3]) + 1.0,
+			]
+		GML_COLLISION_QUERY_INSTANCE, GML_COLLISION_QUERY_SOLID:
+			return [query["left"] - 1.0, query["top"] - 1.0, query["right"] + 1.0, query["bottom"] + 1.0]
+	return null
+
+
+static func _gml_collision_query_hits(kind, query, state, prec):
+	match kind:
+		GML_COLLISION_QUERY_POINT:
+			return _gml_collision_state_point(state, query[0], query[1], prec)
+		GML_COLLISION_QUERY_RECTANGLE:
+			return _gml_collision_state_rectangle(state, query[0], query[1], query[2], query[3], prec)
+		GML_COLLISION_QUERY_ELLIPSE:
+			return _gml_collision_state_ellipse(state, query[0], query[1], query[2], query[3], prec)
+		GML_COLLISION_QUERY_LINE:
+			return _gml_collision_state_line(state, query[0], query[1], query[2], query[3], prec)
+		GML_COLLISION_QUERY_INSTANCE:
+			# instance_place and place_meeting test the other instance against
+			# the calling one ...
+			return _gml_collision_states_collide(state, query, true)
+		GML_COLLISION_QUERY_SOLID:
+			# ... place_free the calling instance against the other one.
+			return _gml_collision_instance_solid(state["inst"]) and _gml_collision_states_collide(query, state, true)
+	return true
+
+
+static func _gml_collision_first_handle(state):
+	if state == null:
+		return gml_instance_noone()
+	return _gml_collision_handle_for_instance(state["inst"])
+
+
 static func _gml_collision_targets(target, current_self, notme):
 	var candidates = []
-	if target is Array:
+	if typeof(target) == TYPE_ARRAY:
 		for element in target:
 			for inst in _gml_collision_targets(element, current_self, notme):
 				if not candidates.has(inst):
@@ -629,19 +697,49 @@ static func _gml_collision_targets(target, current_self, notme):
 		return candidates
 	if target == null or is_undefined(target):
 		return candidates
-	for inst in gml_with_targets(target, current_self, null):
-		if not _gml_collision_instance_live(inst):
+	var entries: Variant = _gml_instance_target_entries(target)
+	if entries != null:
+		# The live instances of an object or all of them, without copying
+		# them first.
+		var skipped = _gml_collision_self_instance(current_self) if notme else null
+		for entry in entries:
+			var inst = entry["instance"]
+			if typeof(inst) == TYPE_OBJECT and not is_instance_valid(inst):
+				continue
+			if skipped != null and is_same(inst, skipped):
+				continue
+			candidates.append(inst)
+		return candidates
+	var targets = gml_with_targets(target, current_self, null)
+	# Objects and `all` only list live instances; one instance given directly
+	# (self, other, an id) may have been destroyed.
+	if targets.size() == 1 and not _gml_collision_instance_live(targets[0]):
+		return candidates
+	var self_instance = _gml_collision_self_instance(current_self) if notme else null
+	for inst in targets:
+		if not _gml_collision_instance_valid(inst):
 			continue
-		if notme and _gml_collision_same_instance(inst, current_self):
+		if self_instance != null and is_same(inst, self_instance):
 			continue
 		candidates.append(inst)
 	return candidates
 
 
-static func _gml_collision_write_list(list_id, instances, ordered, origin_x, origin_y):
+# The instance `notme` leaves out: the calling instance, with an instance id
+# or handle resolved to it.
+static func _gml_collision_self_instance(current_self):
+	if typeof(current_self) == TYPE_OBJECT and is_instance_valid(current_self) and current_self is Node:
+		return current_self
+	if current_self == null or is_undefined(current_self):
+		return null
+	var targets = gml_with_targets(current_self)
+	return targets[0] if targets.size() == 1 else null
+
+
+static func _gml_collision_write_list(list_id, states, ordered, origin_x, origin_y):
 	var records = []
-	for index in range(instances.size()):
-		var inst = instances[index]
+	for index in range(states.size()):
+		var inst = states[index]["inst"]
 		var position = _gml_collision_instance_xy(inst)
 		var dx = position.x - origin_x
 		var dy = position.y - origin_y
@@ -679,18 +777,6 @@ static func _gml_collision_handle_for_instance(instance):
 	return entry["handle"]
 
 
-static func _gml_collision_same_instance(left, right):
-	if left == null or right == null:
-		return false
-	if left is Object and right is Object and left == right:
-		return true
-	var left_entry: Variant = _gml_instance_entry(left)
-	var right_entry: Variant = _gml_instance_entry(right)
-	if left_entry == null or right_entry == null:
-		return false
-	return left_entry["handle"].index == right_entry["handle"].index
-
-
 # --- Instance bounding boxes -------------------------------------------------
 
 static func _gml_collision_compatibility():
@@ -702,6 +788,8 @@ static func _gml_collision_compatibility():
 static func _gml_collision_set_compatibility_mode(enabled):
 	_gml_collision_compatibility_mode = null if enabled == null else gml_bool(enabled)
 	_gml_collision_state_cache.clear()
+	for entry in _gml_instance_live_order:
+		entry.erase("collision_state")
 	return null
 
 
@@ -737,7 +825,7 @@ static func _gml_collision_instance_contains_point(inst, x, y):
 static func _gml_collision_instance_xy(inst):
 	if not (inst is Node2D):
 		return Vector2.ZERO
-	if bool(inst.get_meta("gamemaker_in_sequence", false)):
+	if _gml_sequence_instances_exist and bool(inst.get_meta("gamemaker_in_sequence", false)):
 		return inst.global_position
 	return inst.position
 
@@ -745,7 +833,7 @@ static func _gml_collision_instance_xy(inst):
 static func _gml_collision_set_instance_xy(inst, position):
 	if not (inst is Node2D):
 		return
-	if bool(inst.get_meta("gamemaker_in_sequence", false)):
+	if _gml_sequence_instances_exist and bool(inst.get_meta("gamemaker_in_sequence", false)):
 		inst.global_position = position
 	else:
 		inst.position = position
@@ -784,30 +872,61 @@ static func _gml_collision_polygon_bounds(polygon):
 	return Rect2(Vector2(min_x, min_y), Vector2(max_x - min_x, max_y - min_y))
 
 
+# An instance's collision state: its position, bounding box and mask. The
+# state is kept per instance and rebuilt once its position, sprite_index,
+# mask_index, image_xscale, image_yscale or image_angle differ from the values
+# it was built from. (Switching the compatibility mode drops every state.)
 static func _gml_collision_state(inst):
-	if not _gml_collision_instance_valid(inst):
+	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
 		return null
-	var position = _gml_collision_instance_xy(inst)
-	var signature = [
-		position,
-		inst.get("sprite_index"),
-		inst.get("mask_index"),
-		inst.get("image_xscale"),
-		inst.get("image_yscale"),
-		inst.get("image_angle"),
-		_gml_collision_compatibility(),
-	]
 	var key = inst.get_instance_id()
-	var cached = _gml_collision_state_cache.get(key, null)
-	if cached != null and cached["signature"] == signature:
-		return cached
-	var state = _gml_collision_make_state(inst, position.x, position.y, signature)
-	_gml_collision_state_cache[key] = state
-	if _gml_collision_state_cache.size() > 4096:
-		_gml_collision_prune_state_cache()
+	var cached = _gml_collision_state_cache.get(key)
+	var state = _gml_collision_current_state(inst, cached)
+	if not is_same(state, cached):
+		_gml_collision_state_cache[key] = state
+		if _gml_collision_state_cache.size() > 4096:
+			_gml_collision_prune_state_cache()
 	return state
 
 
+# `cached` (a state of the live instance, or null) when it still describes
+# the instance, else a new state.
+static func _gml_collision_current_state(inst, cached):
+	var position = Vector2.ZERO
+	if inst is Node2D:
+		position = inst.position
+		if _gml_sequence_instances_exist and bool(inst.get_meta("gamemaker_in_sequence", false)):
+			position = inst.global_position
+	var signature = null
+	if cached != null and cached["members"]:
+		# A Node2D whose script declares the members: read them directly.
+		signature = [position, inst.sprite_index, inst.mask_index, inst.image_xscale, inst.image_yscale, inst.image_angle]
+	else:
+		signature = [
+			position,
+			inst.get("sprite_index"),
+			inst.get("mask_index"),
+			inst.get("image_xscale"),
+			inst.get("image_yscale"),
+			inst.get("image_angle"),
+		]
+	if cached != null and cached["signature"] == signature:
+		return cached
+	var state = _gml_collision_make_state(inst, position.x, position.y, signature)
+	state["members"] = inst is Node2D and _gml_collision_declares_members(inst)
+	return state
+
+
+static func _gml_collision_declares_members(inst):
+	for member_name in ["sprite_index", "mask_index", "image_xscale", "image_yscale", "image_angle"]:
+		if not (member_name in inst):
+			return false
+	return true
+
+
+# The instance's collision state moved to (x, y), as place_meeting and the
+# other place functions test it. The last moved state is kept with the
+# instance's state, for instances that test the same place every step.
 static func _gml_collision_state_at(inst, x, y):
 	var state = _gml_collision_state(inst)
 	if state == null:
@@ -816,7 +935,22 @@ static func _gml_collision_state_at(inst, x, y):
 	var py = _to_real(y)
 	if px == state["x"] and py == state["y"]:
 		return state
-	return _gml_collision_make_state(inst, px, py, state["signature"])
+	var moved = state.get("moved")
+	if moved != null and px == moved["x"] and py == moved["y"]:
+		return moved
+	moved = {
+		"inst": inst,
+		"x": float(px),
+		"y": float(py),
+		"xscale": state["xscale"],
+		"yscale": state["yscale"],
+		"angle": state["angle"],
+		"data": state["data"],
+		"signature": state["signature"],
+	}
+	_gml_collision_compute_bbox(moved)
+	state["moved"] = moved
+	return moved
 
 
 static func _gml_collision_prune_state_cache():

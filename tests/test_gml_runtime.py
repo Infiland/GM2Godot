@@ -2067,14 +2067,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_tracks_instance_registry_and_object_selectors(self):
         self.assertIn("static var _gml_instance_entries = {}", GML_RUNTIME_SCRIPT)
-        self.assertIn("static var _gml_instance_ids_by_object = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_instance_live_order = []", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_instance_live_by_object = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_register(instance, object_selector = null, parent_selectors = []):", GML_RUNTIME_SCRIPT)
         self.assertIn('"selector_ids": selector_ids,', GML_RUNTIME_SCRIPT)
         self.assertIn('"selector_names": selector_names,', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_unregister(instance_or_handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_instance_selector_targets(selector):", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])", GML_RUNTIME_SCRIPT)
+        self.assertIn("var object_entries: Variant = _gml_instance_object_entries(selector)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_entry_targets(object_entries)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)

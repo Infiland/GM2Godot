@@ -17,8 +17,15 @@ static var _gml_input_keyboard_key = 0
 static var _gml_input_keyboard_lastkey = 0
 static var _gml_input_keyboard_string = ""
 static var _gml_input_gesture_events = []
+# Input events run while tracing is on (gml_event_scheduler_set_tracing);
+# gml_input_dispatch_trace() returns at most GML_INPUT_TRACE_LIMIT of the
+# latest records.
 static var _gml_input_dispatch_trace = []
 const GML_INPUT_TRACE_LIMIT = 256
+# The binding table of every live instance, and the instance creation counter
+# it was built at.
+static var _gml_input_live_table = []
+static var _gml_input_live_table_mark = -1
 # Input timing follows GameMaker's IO start of step: device events and the
 # simulated keyboard_key_press/keyboard_key_release update the raw state below
 # whenever they arrive, and gml_input_begin_step() latches that raw state into
@@ -375,7 +382,10 @@ static func gml_input_append_text(text):
 
 
 static func gml_input_dispatch_trace():
-	return _gml_clone_value(_gml_input_dispatch_trace, 16)
+	var trace = _gml_input_dispatch_trace
+	if trace.size() > GML_INPUT_TRACE_LIMIT:
+		trace = trace.slice(trace.size() - GML_INPUT_TRACE_LIMIT)
+	return _gml_clone_value(trace, 16)
 
 
 static func gml_input_dispatch_trace_clear():
@@ -449,26 +459,25 @@ static func gml_input_dispatch_frame(instances = null, event_types = null):
 	# mouse events (_gml_input_dispatch_mouse) and the gesture events.
 	# event_types limits the run to those event types (5 Keyboard, 9 Key
 	# Press, 10 Key Release, 6 Mouse, 13 Gesture). Without an instance list
-	# every live instance takes part, looked up again for each event type so
-	# instances created by an earlier input event join the later ones.
-	# Returns how many events ran.
+	# every live instance takes part; like GameMaker, an instance created by
+	# one input event takes part in the events that run after it. Returns how
+	# many events ran.
 	var dispatched = 0
 	for event_type in [5, 9, 10, 6, 13]:
 		if event_types is Array and not event_types.has(event_type):
 			continue
-		var table = _gml_input_binding_table(_gml_input_instance_snapshot(instances))
 		if event_type == 6:
-			dispatched += _gml_input_dispatch_mouse(table)
+			dispatched += _gml_input_dispatch_mouse(instances)
 		elif event_type == 13:
-			dispatched += _gml_input_dispatch_gestures(table)
+			dispatched += _gml_input_dispatch_gestures(_gml_input_binding_table(instances))
 		else:
-			dispatched += _gml_input_dispatch_keyboard(table, event_type)
+			dispatched += _gml_input_dispatch_keyboard(instances, event_type)
 	_gml_builtin_globals["event_data"] = {}
 	# Latched gestures belong to the step and are replaced by the next latch.
 	if not _gml_input_step_latching and (not (event_types is Array) or event_types.has(13)):
 		_gml_input_gesture_events = []
-	if _gml_input_dispatch_trace.size() > GML_INPUT_TRACE_LIMIT:
-		_gml_input_dispatch_trace = _gml_input_dispatch_trace.slice(_gml_input_dispatch_trace.size() - GML_INPUT_TRACE_LIMIT)
+	if _gml_input_dispatch_trace.size() >= GML_INPUT_TRACE_LIMIT * 2:
+		_gml_input_dispatch_trace = _gml_input_dispatch_trace.slice(-GML_INPUT_TRACE_LIMIT)
 	return dispatched
 
 
@@ -660,63 +669,71 @@ static func _gml_mouse_room_to_gui(position):
 	return Vector2((position.x - origin.x) * scale_x, (position.y - origin.y) * scale_y)
 
 
-static func _gml_input_instance_snapshot(instances):
-	if instances is Array:
-		var provided = []
-		for inst in instances:
-			provided.append(inst)
-		return provided
-	var snapshot = []
-	for entry in _gml_live_instance_entries():
-		var inst = entry.get("instance")
-		if inst != null:
-			snapshot.append(inst)
-	return snapshot
-
-
-static func _gml_input_instance_valid(inst):
-	if inst == null:
-		return false
-	if inst is Object and not is_instance_valid(inst):
-		return false
-	return true
-
-
 static func _gml_input_binding_table(instances):
-	# One row per instance with input events: the instance, its events as
-	# {event_type: {event_num: binding}}, and its object and creation order
-	# for GameMaker's mouse event order.
-	var table = []
-	var position = 0
-	for inst in instances:
-		position += 1
-		if not _gml_input_instance_valid(inst):
-			continue
-		var events = _gml_input_instance_events(inst)
-		if events.is_empty():
-			continue
-		var entry = _gml_instance_entry(inst)
-		table.append({
-			"instance": inst,
-			"events": events,
-			"object_id": int(entry["object_id"]) if entry != null else -1,
-			"object_name": str(entry["object_name"]) if entry != null else "",
-			"order": int(entry["creation_order"]) if entry != null else position,
-		})
-	return table
+	# One row per instance with input events: the instance, its registry
+	# entry, its events as {event_type: {event_num: binding}}, and its object
+	# and creation order for GameMaker's mouse event order. Without an
+	# instance list the rows cover every live instance; that table is kept
+	# until an instance is created, and destroyed instances are skipped when
+	# an event runs.
+	if instances is Array:
+		var table = []
+		var position = 0
+		for inst in instances:
+			position += 1
+			if inst is Object and is_instance_valid(inst):
+				var events = _gml_input_instance_events(inst)
+				if not events.is_empty():
+					table.append(_gml_input_row(inst, _gml_instance_entry(inst), events, position))
+		return table
+	if _gml_step_running:
+		_gml_step_join_created_instances()
+	if _gml_input_live_table_mark == _gml_instance_creation_counter:
+		return _gml_input_live_table
+	var live_table = []
+	if _gml_step_running:
+		for i in range(_gml_step_entries.size()):
+			var events = _gml_step_infos[i].input_events
+			if events.is_empty():
+				continue
+			var entry = _gml_step_entries[i]
+			if not entry["destroyed"] and is_instance_valid(entry["instance"]):
+				live_table.append(_gml_input_row(entry["instance"], entry, events, 0))
+	else:
+		for entry in _gml_live_instance_entries():
+			var inst = entry["instance"]
+			if is_instance_valid(inst):
+				var events = _gml_input_instance_events(inst)
+				if not events.is_empty():
+					live_table.append(_gml_input_row(inst, entry, events, 0))
+	_gml_input_live_table = live_table
+	_gml_input_live_table_mark = _gml_instance_creation_counter
+	return live_table
+
+
+static func _gml_input_row(inst, entry, events, position):
+	return {
+		"instance": inst,
+		"entry": entry,
+		"events": events,
+		"object_id": int(entry["object_id"]) if entry != null else -1,
+		"object_name": str(entry["object_name"]) if entry != null else "",
+		"order": int(entry["creation_order"]) if entry != null else position,
+	}
 
 
 static func _gml_input_instance_events(inst):
-	# The instance's input event bindings by event type and number, cached
-	# on the instance for its script.
-	if not (inst is Object) or not inst.has_method("_gm_input_event_bindings"):
+	# The instance's input event bindings by event type and number, read once
+	# per object script.
+	if not (inst is Object):
 		return {}
-	var script = inst.get_script()
-	if inst.has_meta("_gml_input_events"):
-		var cached = inst.get_meta("_gml_input_events")
-		if cached is Dictionary and cached.get("script") == script:
-			return cached["events"]
+	return _gml_step_script_info(inst).input_events
+
+
+static func _gml_input_read_event_bindings(inst):
 	var events = {}
+	if not inst.has_method("_gm_input_event_bindings"):
+		return events
 	var bindings = inst._gm_input_event_bindings()
 	if bindings is Array:
 		for binding in bindings:
@@ -726,24 +743,29 @@ static func _gml_input_instance_events(inst):
 			if not events.has(event_type):
 				events[event_type] = {}
 			events[event_type][int(_to_real(binding.get("event_num", 0)))] = binding
-	inst.set_meta("_gml_input_events", {"script": script, "events": events})
 	return events
 
 
-static func _gml_input_dispatch_event(table, event_type, event_num):
-	# Runs one input event for every instance in the table that has it.
+static func _gml_input_dispatch_event(instances, event_type, event_num):
+	# Runs one input event for every instance that has it.
 	var dispatched = 0
-	for row in table:
+	for row in _gml_input_binding_table(instances):
 		var events = row["events"].get(event_type)
 		if events != null and events.has(event_num):
-			dispatched += _gml_input_perform(row["instance"], events[event_num])
+			dispatched += _gml_input_perform(row, events[event_num])
 	return dispatched
 
 
-static func _gml_input_perform(inst, binding):
+static func _gml_input_perform(row, binding):
 	# Once a room change is pending no further events run, and destroyed
 	# instances get no more events.
-	if gml_room_change_pending() or not _gml_event_scheduler_instance_valid(inst):
+	if gml_room_change_pending():
+		return 0
+	var entry = row["entry"]
+	if entry != null and bool(entry["destroyed"]):
+		return 0
+	var inst = row["instance"]
+	if not _gml_event_scheduler_instance_valid(inst):
 		return 0
 	return _gml_input_dispatch_binding(inst, binding)
 
@@ -757,12 +779,13 @@ static func _gml_input_dispatch_binding(inst, binding):
 	var previous_event_data = _gml_builtin_globals["event_data"] if _gml_builtin_globals.has("event_data") else {}
 	var payload = _gml_input_binding_payload(inst, binding)
 	_gml_builtin_globals["event_data"] = payload
-	_gml_input_dispatch_trace.append({
-		"instance": str(inst.name) if inst is Node else "",
-		"event_type": event_type,
-		"event_num": event_num,
-		"method": method_name,
-	})
+	if _gml_event_scheduler_tracing:
+		_gml_input_dispatch_trace.append({
+			"instance": str(inst.name) if inst is Node else "",
+			"event_type": event_type,
+			"event_num": event_num,
+			"method": method_name,
+		})
 	inst.call(method_name)
 	_gml_builtin_globals["event_data"] = previous_event_data
 	return 1
@@ -784,7 +807,7 @@ static func _gml_input_binding_payload(inst, binding):
 	return {}
 
 
-static func _gml_input_dispatch_keyboard(table, event_type):
+static func _gml_input_dispatch_keyboard(instances, event_type):
 	# GameMaker's keyboard handling for one event type (5 Keyboard, 9 Key
 	# Press, 10 Key Release): key by key in key code order, every instance
 	# with an event for a held (pressed, released) key runs it; then the
@@ -803,8 +826,8 @@ static func _gml_input_dispatch_keyboard(table, event_type):
 		if not bool(_gml_input_keyboard_event_state(event_type).get(code, false)):
 			continue
 		any_key = true
-		dispatched += _gml_input_dispatch_event(table, event_type, code)
-	dispatched += _gml_input_dispatch_event(table, event_type, 1 if any_key else 0)
+		dispatched += _gml_input_dispatch_event(instances, event_type, code)
+	dispatched += _gml_input_dispatch_event(instances, event_type, 1 if any_key else 0)
 	return dispatched
 
 
@@ -816,7 +839,7 @@ static func _gml_input_keyboard_event_state(event_type):
 	return _gml_input_key_current
 
 
-static func _gml_input_dispatch_mouse(table):
+static func _gml_input_dispatch_mouse(instances):
 	# GameMaker's mouse handling. Object by object in object index order, and
 	# newest instance first, every instance with an instance mouse event that
 	# is under the mouse runs its held button events (left, right, middle),
@@ -826,26 +849,26 @@ static func _gml_input_dispatch_mouse(table):
 	# instance runs its global held, pressed and released button events,
 	# followed by the mouse wheel up and down events.
 	var rows = []
-	for row in table:
+	for row in _gml_input_binding_table(instances):
 		if _gml_input_has_instance_mouse_event(row["events"].get(6, {})):
 			rows.append(row)
 	rows.sort_custom(_gml_input_mouse_order_less)
 	var dispatched = 0
 	for row in rows:
-		dispatched += _gml_input_dispatch_instance_mouse(row["instance"], row["events"][6])
+		dispatched += _gml_input_dispatch_instance_mouse(row)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button(button):
-			dispatched += _gml_input_dispatch_event(table, 6, 49 + button)
+			dispatched += _gml_input_dispatch_event(instances, 6, 49 + button)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button_pressed(button):
-			dispatched += _gml_input_dispatch_event(table, 6, 52 + button)
+			dispatched += _gml_input_dispatch_event(instances, 6, 52 + button)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button_released(button):
-			dispatched += _gml_input_dispatch_event(table, 6, 55 + button)
+			dispatched += _gml_input_dispatch_event(instances, 6, 55 + button)
 	if _gml_input_mouse_wheel_up:
-		dispatched += _gml_input_dispatch_event(table, 6, 60)
+		dispatched += _gml_input_dispatch_event(instances, 6, 60)
 	if _gml_input_mouse_wheel_down:
-		dispatched += _gml_input_dispatch_event(table, 6, 61)
+		dispatched += _gml_input_dispatch_event(instances, 6, 61)
 	return dispatched
 
 
@@ -865,7 +888,12 @@ static func _gml_input_mouse_order_less(left, right):
 	return int(left["order"]) > int(right["order"])
 
 
-static func _gml_input_dispatch_instance_mouse(inst, mouse_events):
+static func _gml_input_dispatch_instance_mouse(row):
+	var inst = row["instance"]
+	var mouse_events = row["events"][6]
+	var entry = row["entry"]
+	if entry != null and bool(entry["destroyed"]):
+		return 0
 	if not _gml_event_scheduler_instance_valid(inst) or not _gml_input_mouse_test_needed(mouse_events):
 		return 0
 	var was_over = inst.has_meta("_gml_mouse_over") and bool(inst.get_meta("_gml_mouse_over"))
@@ -873,25 +901,25 @@ static func _gml_input_dispatch_instance_mouse(inst, mouse_events):
 	if not _gml_input_mouse_over_instance(inst):
 		if was_over:
 			inst.set_meta("_gml_mouse_over", false)
-			dispatched += _gml_input_perform_mouse_event(inst, mouse_events, 11)
+			dispatched += _gml_input_perform_mouse_event(row, mouse_events, 11)
 		return dispatched
 	var no_button = true
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button(button):
 			no_button = false
-			dispatched += _gml_input_perform_mouse_event(inst, mouse_events, button - 1)
+			dispatched += _gml_input_perform_mouse_event(row, mouse_events, button - 1)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button_pressed(button):
 			no_button = false
-			dispatched += _gml_input_perform_mouse_event(inst, mouse_events, button + 3)
+			dispatched += _gml_input_perform_mouse_event(row, mouse_events, button + 3)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button_released(button):
-			dispatched += _gml_input_perform_mouse_event(inst, mouse_events, button + 6)
+			dispatched += _gml_input_perform_mouse_event(row, mouse_events, button + 6)
 	if no_button:
-		dispatched += _gml_input_perform_mouse_event(inst, mouse_events, 3)
+		dispatched += _gml_input_perform_mouse_event(row, mouse_events, 3)
 	if not was_over:
 		inst.set_meta("_gml_mouse_over", true)
-		dispatched += _gml_input_perform_mouse_event(inst, mouse_events, 10)
+		dispatched += _gml_input_perform_mouse_event(row, mouse_events, 10)
 	return dispatched
 
 
@@ -930,10 +958,10 @@ static func _gml_input_mouse_over_instance(inst):
 	return gml_handle_is_valid(hit)
 
 
-static func _gml_input_perform_mouse_event(inst, mouse_events, event_num):
+static func _gml_input_perform_mouse_event(row, mouse_events, event_num):
 	if not mouse_events.has(event_num):
 		return 0
-	return _gml_input_perform(inst, mouse_events[event_num])
+	return _gml_input_perform(row, mouse_events[event_num])
 
 
 static func _gml_input_dispatch_gestures(table):
@@ -943,7 +971,7 @@ static func _gml_input_dispatch_gestures(table):
 		for event_num in gesture_events.keys():
 			var binding = gesture_events[event_num]
 			if _gml_input_gesture_event_matches(row["instance"], event_num, binding):
-				dispatched += _gml_input_perform(row["instance"], binding)
+				dispatched += _gml_input_perform(row, binding)
 	return dispatched
 
 

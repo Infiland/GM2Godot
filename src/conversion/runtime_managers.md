@@ -65,6 +65,15 @@ last until `gml_input_end_frame()`. Tests that depend on these phases should
 assert the generated method names or manager queues rather than incidental
 node order.
 
+A step keeps one list of live instances in creation order, carried over from
+the previous step: instances created during a phase join it before the next
+phase, destroyed instances are skipped. Which events, alarms, input bindings
+and Other events an object has is looked up once per object script. The
+scheduler records the events it runs (`gml_event_scheduler_trace()`) and the
+input runtime its input events (`gml_input_dispatch_trace()`) only while
+`gml_event_scheduler_set_tracing(true)` is in effect; both keep only their
+latest records.
+
 Supported authored sequences are normalized into managed descriptors and advanced
 by `GMEvents` using either frames-per-second or frames-per-game-frame speed.
 Track/key order, assign/linear interpolation, nested state, mapped audio effects,

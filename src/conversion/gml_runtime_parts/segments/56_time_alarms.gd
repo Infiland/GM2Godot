@@ -31,12 +31,32 @@ const GML_EVENT_PHASE_ORDER = [
 	"collision",
 	"end_step"
 ]
+const GML_ALARM_EVENT_METHODS = [
+	&"_on_alarm_0",
+	&"_on_alarm_1",
+	&"_on_alarm_2",
+	&"_on_alarm_3",
+	&"_on_alarm_4",
+	&"_on_alarm_5",
+	&"_on_alarm_6",
+	&"_on_alarm_7",
+	&"_on_alarm_8",
+	&"_on_alarm_9",
+	&"_on_alarm_10",
+	&"_on_alarm_11",
+]
+# gml_event_scheduler_trace() returns at most this many of the latest records.
 const GML_EVENT_SCHEDULER_TRACE_LIMIT = 1024
 
 static var _gml_time_sources = {}
 static var _gml_time_source_next_id = 1
 static var _gml_event_scheduler_enabled = true
 static var _gml_event_scheduler_frame_index = 0
+# While tracing is on, the scheduler records every event it runs
+# (gml_event_scheduler_trace) and the input runtime every input event
+# (gml_input_dispatch_trace). Tracing is off by default: games run thousands
+# of events per second, and only tests and debugging read the records.
+static var _gml_event_scheduler_tracing = false
 static var _gml_event_scheduler_trace = []
 
 
@@ -53,8 +73,21 @@ static func gml_event_scheduler_phase_order():
 	return _gml_clone_value(GML_EVENT_PHASE_ORDER, 2)
 
 
+static func gml_event_scheduler_set_tracing(enabled):
+	_gml_event_scheduler_tracing = gml_bool(enabled)
+	return null
+
+
+static func gml_event_scheduler_tracing():
+	return _gml_event_scheduler_tracing
+
+
 static func gml_event_scheduler_trace():
-	return _gml_clone_value(_gml_event_scheduler_trace, 16)
+	# The latest records, oldest first.
+	var trace = _gml_event_scheduler_trace
+	if trace.size() > GML_EVENT_SCHEDULER_TRACE_LIMIT:
+		trace = trace.slice(trace.size() - GML_EVENT_SCHEDULER_TRACE_LIMIT)
+	return _gml_clone_value(trace, 16)
 
 
 static func gml_event_scheduler_trace_clear():
@@ -72,30 +105,35 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 	var frames = max(1, int(delta_frames))
 	var seconds = max(float(delta_seconds), 0.0)
 	gml_input_begin_step()
+	# The step's instance list; instances created by a phase join it before
+	# the next phase (see 74_game_step.gd).
+	_gml_step_collect_instances()
 	for phase in GML_EVENT_PHASE_ORDER:
 		_gml_event_scheduler_run_phase(phase, seconds, frames, frame)
 		if gml_room_change_pending():
 			break
+		_gml_step_join_created_instances()
+	_gml_step_finish()
 	return frame
 
 
 static func _gml_event_scheduler_run_phase(phase, seconds, frames, frame):
 	match phase:
 		"animation":
-			_gml_step_update_images(_gml_event_scheduler_live_instances(), frame)
+			_gml_step_update_images(frame)
 		"begin_step":
-			gml_event_scheduler_dispatch_phase("begin_step", "_on_begin_step", _gml_event_scheduler_live_instances(), frame)
+			_gml_step_dispatch_method("begin_step", &"_on_begin_step", frame)
 		"async":
 			_gml_event_scheduler_record_phase("async", "", null, frame)
 			gml_async_step_flush()
 		"timelines":
 			_gml_event_scheduler_record_phase("timelines", "", null, frame)
-			gml_timeline_scheduler_frame(frames, _gml_event_scheduler_live_instances())
+			gml_timeline_scheduler_frame(frames, _gml_step_timeline_instances())
 		"time_sources":
 			gml_time_source_tick_all(seconds, frames)
 			_gml_event_scheduler_record_phase("time_sources", "", null, frame)
 		"alarms":
-			gml_event_scheduler_tick_alarms(_gml_event_scheduler_live_instances(), frames, frame)
+			_gml_step_tick_alarms(frames, frame)
 		"keyboard":
 			_gml_event_scheduler_record_phase("keyboard", "", null, frame)
 			# Keyboard events for held keys, then pressed, then released keys.
@@ -108,28 +146,29 @@ static func _gml_event_scheduler_run_phase(phase, seconds, frames, frame):
 			# Sequences advance by their playback speed per step of game time.
 			gml_sequence_scheduler_frame(1.0 / max(_to_real(gml_game_speed_fps()), 1.0), frames)
 		"step":
-			gml_event_scheduler_dispatch_phase("step", "_on_step", _gml_event_scheduler_live_instances(), frame)
+			_gml_step_dispatch_method("step", &"_on_step", frame)
 		"motion":
-			_gml_event_scheduler_dispatch_motion(_gml_event_scheduler_live_instances(), frame)
+			_gml_step_apply_motion(frame)
 		"other":
-			_gml_step_handle_other(_gml_event_scheduler_live_instances(), frame)
+			_gml_step_handle_other(frame)
 		"collision":
-			gml_collision_event_dispatch_frame(_gml_event_scheduler_live_instances(), frame)
+			gml_collision_event_dispatch_frame(_gml_step_instances(), frame)
 		"end_step":
-			gml_event_scheduler_dispatch_phase("end_step", "_on_end_step", _gml_event_scheduler_live_instances(), frame)
+			_gml_step_dispatch_method("end_step", &"_on_end_step", frame)
 	return null
 
 
 static func gml_event_scheduler_dispatch_phase(phase, method_name, instances = null, frame = -1):
 	var targets = instances if instances is Array else _gml_event_scheduler_live_instances()
+	var method = StringName(str(method_name))
 	for inst in targets:
 		if gml_room_change_pending():
 			break
 		if not _gml_event_scheduler_instance_valid(inst):
 			continue
-		if inst.has_method(str(method_name)):
+		if inst.has_method(method):
 			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
-			inst.call(str(method_name))
+			inst.call(method)
 	return null
 
 
@@ -182,20 +221,23 @@ static func gml_alarm_tick(inst, delta_frames):
 		_gml_alarm_tick_instance(inst, -1)
 
 
-static func _gml_alarm_tick_instance(inst, frame):
+static func _gml_alarm_tick_instance(inst, frame, alarm_events = null):
 	# Like GameMaker, only alarms that have an Alarm event count down. An
 	# alarm runs its event in the step it reaches 0 and becomes -1 (inactive)
-	# on the following step.
+	# on the following step. alarm_events lists the alarm numbers the
+	# instance's object has events for.
+	var events = alarm_events if alarm_events is Array else _gml_step_script_info(inst).alarm_events
+	if events.is_empty():
+		return
 	var alarms = _gml_alarm_array(inst)
-	for i in range(GML_ALARM_COUNT):
-		var method_name = "_on_alarm_" + str(i)
-		if not inst.has_method(method_name):
-			continue
+	for i in events:
 		if alarms[i] < 0:
 			continue
 		alarms[i] -= 1
 		if alarms[i] == 0 and not _gml_event_scheduler_event_blocked(inst, true):
-			_gml_event_scheduler_record_phase("alarms", method_name, inst, frame)
+			var method_name = GML_ALARM_EVENT_METHODS[i]
+			if _gml_event_scheduler_tracing:
+				_gml_event_scheduler_record_phase("alarms", method_name, inst, frame)
 			inst.call(method_name)
 
 
@@ -209,16 +251,6 @@ static func _gml_alarm_array(inst):
 			alarms[i] = -1
 		inst.set_meta("_gml_alarms", alarms)
 	return inst.get_meta("_gml_alarms")
-
-
-static func _gml_event_scheduler_dispatch_motion(instances, frame):
-	for inst in instances:
-		if not _gml_event_scheduler_instance_valid(inst):
-			continue
-		if inst.has_method("_gm_apply_motion_step"):
-			_gml_event_scheduler_record_phase("motion", "_gm_apply_motion_step", inst, frame)
-			inst.call("_gm_apply_motion_step")
-	return null
 
 
 static func _gml_event_scheduler_live_instances():
@@ -241,6 +273,8 @@ static func _gml_event_scheduler_instance_valid(inst):
 
 
 static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = null, frame = -1):
+	if not _gml_event_scheduler_tracing:
+		return
 	var entry = {
 		"frame": frame,
 		"phase": str(phase),
@@ -250,10 +284,9 @@ static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = nu
 	if inst != null:
 		entry["instance"] = str(inst.name) if inst is Node else str(inst)
 	_gml_event_scheduler_trace.append(entry)
-	if _gml_event_scheduler_trace.size() > GML_EVENT_SCHEDULER_TRACE_LIMIT:
-		_gml_event_scheduler_trace = _gml_event_scheduler_trace.slice(
-			_gml_event_scheduler_trace.size() - GML_EVENT_SCHEDULER_TRACE_LIMIT
-		)
+	# Trimmed in batches, so recording stays cheap.
+	if _gml_event_scheduler_trace.size() >= GML_EVENT_SCHEDULER_TRACE_LIMIT * 2:
+		_gml_event_scheduler_trace = _gml_event_scheduler_trace.slice(-GML_EVENT_SCHEDULER_TRACE_LIMIT)
 
 
 static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):

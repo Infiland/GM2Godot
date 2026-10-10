@@ -280,6 +280,10 @@ Every instance with a sprite advances `image_index` by `image_speed` times the s
 
 `room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`, `game_restart()` and `game_end()` record a request. The current event finishes and the step is not drawn. No further events run in that step, apart from the Create, Destroy, Alarm and Other events of persistent instances or of a persistent room: an instance created after the request gets no Create event, and `instance_destroy()` runs no Destroy event. The change happens before the next step; after a room switch the new room steps and draws in the same frame, as GameMaker does.
 
+Each phase runs for the live instances in creation order. An instance created during a phase takes part from the next phase on (one created in Begin Step gets that step's Step and End Step events), and a destroyed instance gets no further events. An instance with no speed, no gravity and no path is left alone by the motion update, as in GameMaker.
+
+`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024) and the input events (`gml_input_dispatch_trace()`, the latest 256). Tracing is meant for tests and debugging and is off by default.
+
 ### Precise sprite collision masks
 
 Version 0.7.45 derives Precise collision geometry from the alpha channel of each converted RGBA frame, clips it to the inclusive GameMaker bounding box, and includes pixels whose alpha is strictly greater than `collisionTolerance`. A static Precise mask unions every subimage before converting contiguous pixels into exact rectangle geometry. Precise Per Frame keeps separate geometry for each subimage; the generated sprite scene switches enabled shapes on `AnimatedSprite2D.frame_changed`, and generated `image_index` handling explicitly synchronizes the same frame.

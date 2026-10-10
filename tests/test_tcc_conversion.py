@@ -318,7 +318,7 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertEqual(
             object_event_source_missing,
-            [("o_animatedLEicon", "_draw")],
+            [("o_animatedLEicon", "_on_draw")],
         )
         self.assertEqual(
             object_collision_source_missing,

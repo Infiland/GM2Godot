@@ -46,7 +46,8 @@ static func gml_part_system_depth(system, depth):
 	record["depth"] = depth_value
 	var node = record.get("node", null)
 	if node is Node2D:
-		node.z_index = int(round(-depth_value))
+		node.z_as_relative = false
+		node.z_index = gml_depth_to_z_index(depth_value)
 	return null
 
 

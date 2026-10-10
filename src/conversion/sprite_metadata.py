@@ -135,6 +135,34 @@ def parse_sprite_animation_fields(data: JsonObject) -> SpriteAnimationFields | N
     return SpriteAnimationFields(playback_speed, playback_speed_type, loop, frame_durations)
 
 
+DEFAULT_SPRITE_PLAYBACK_SPEED = 30.0
+
+
+def sprite_animation_registry_metadata(data: JsonObject) -> JsonObject:
+    """Frame count and playback settings the runtime uses to advance image_index.
+
+    Sprites without readable sequence metadata use the same looping 30 FPS
+    fallback as the generated sprite scenes.
+    """
+    frames = data.get("frames")
+    frame_count = len(frames) if isinstance(frames, list) else 0
+    try:
+        animation = parse_sprite_animation_fields(data)
+    except (KeyError, TypeError, ValueError, IndexError):
+        animation = None
+    if animation is None:
+        return {
+            "frame_count": frame_count,
+            "playback_speed": DEFAULT_SPRITE_PLAYBACK_SPEED,
+            "playback_speed_type": 0,
+        }
+    return {
+        "frame_count": frame_count,
+        "playback_speed": animation.playback_speed,
+        "playback_speed_type": animation.playback_speed_type,
+    }
+
+
 @dataclass(frozen=True)
 class SpriteFrameLayerFields:
     frames: list[str]

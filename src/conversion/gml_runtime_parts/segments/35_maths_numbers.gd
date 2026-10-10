@@ -271,40 +271,47 @@ static func gml_make_color_rgb(red, green, blue):
 	return r | (g << 8) | (b << 16)
 
 
+# GameMaker's LookAtLH view matrix (row vectors, left-handed): right = up x
+# look, up = look x right, translation = -(eye . axis).
 static func gml_matrix_build_lookat(xfrom, yfrom, zfrom, xto, yto, zto, xup, yup, zup):
 	var origin = Vector3(_to_real(xfrom), _to_real(yfrom), _to_real(zfrom))
 	var target = Vector3(_to_real(xto), _to_real(yto), _to_real(zto))
-	var forward = (target - origin).normalized()
-	if forward.length_squared() <= 0.000001:
-		forward = Vector3(0.0, 0.0, -1.0)
+	var look = (target - origin).normalized()
+	if look.length_squared() <= 0.000001:
+		look = Vector3(0.0, 0.0, 1.0)
 	var up = Vector3(_to_real(xup), _to_real(yup), _to_real(zup)).normalized()
 	if up.length_squared() <= 0.000001:
 		up = Vector3(0.0, 1.0, 0.0)
-	var right = forward.cross(up).normalized()
+	var right = up.cross(look).normalized()
 	if right.length_squared() <= 0.000001:
 		right = Vector3(1.0, 0.0, 0.0)
-	up = right.cross(forward).normalized()
+	up = look.cross(right).normalized()
 	return [
-		right.x, up.x, -forward.x, 0.0,
-		right.y, up.y, -forward.y, 0.0,
-		right.z, up.z, -forward.z, 0.0,
-		-right.dot(origin), -up.dot(origin), forward.dot(origin), 1.0
+		right.x, up.x, look.x, 0.0,
+		right.y, up.y, look.y, 0.0,
+		right.z, up.z, look.z, 0.0,
+		-origin.dot(right), -origin.dot(up), -origin.dot(look), 1.0
 	]
 
 
+# GameMaker's OrthoLH projection; a zero size or depth gives the identity.
 static func gml_matrix_build_projection_ortho(width, height, znear, zfar):
-	var resolved_width = max(abs(_to_real(width)), 0.000001)
-	var resolved_height = max(abs(_to_real(height)), 0.000001)
+	var resolved_width = _to_real(width)
+	var resolved_height = _to_real(height)
 	var near_z = _to_real(znear)
 	var far_z = _to_real(zfar)
-	var depth = far_z - near_z
-	if abs(depth) <= 0.000001:
-		depth = 1.0
+	if resolved_width == 0.0 or resolved_height == 0.0 or near_z == far_z:
+		return [
+			1.0, 0.0, 0.0, 0.0,
+			0.0, 1.0, 0.0, 0.0,
+			0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 0.0, 1.0
+		]
 	return [
 		2.0 / resolved_width, 0.0, 0.0, 0.0,
 		0.0, 2.0 / resolved_height, 0.0, 0.0,
-		0.0, 0.0, 1.0 / depth, 0.0,
-		0.0, 0.0, -near_z / depth, 1.0
+		0.0, 0.0, 1.0 / (far_z - near_z), 0.0,
+		0.0, 0.0, near_z / (near_z - far_z), 1.0
 	]
 
 

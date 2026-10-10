@@ -233,9 +233,13 @@ static func gml_builtin_global(name):
 	if key == "keyboard_string":
 		return _gml_input_keyboard_string
 	if key == "mouse_x":
-		return gml_display_mouse_get_x()
+		return gml_window_views_mouse_get_x()
 	if key == "mouse_y":
-		return gml_display_mouse_get_y()
+		return gml_window_views_mouse_get_y()
+	if key == "view_enabled":
+		return gml_view_get_enabled()
+	if key == "view_current":
+		return gml_view_get_current()
 	if key == "mouse_wheel_up":
 		return _gml_input_mouse_wheel_up
 	if key == "mouse_wheel_down":

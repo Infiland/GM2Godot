@@ -128,6 +128,10 @@ static func gml_async_next_request_id():
 
 static func gml_async_dispatch(kind, payload, handler_name = ""):
 	var request_id = _gml_async_enqueue(kind, payload, handler_name, false)
+	# Under the GameMaker frame pump, async events wait for the async phase of
+	# the next step, like GameMaker's async queue.
+	if gml_event_scheduler_pump_attached():
+		return request_id
 	if _gml_async_active_depth == 0:
 		gml_async_queue_flush()
 	else:
@@ -154,6 +158,20 @@ static func gml_async_queue_flush(max_events = -1):
 		_gml_async_deliver(event)
 		dispatched += 1
 	return dispatched
+
+
+static func gml_async_step_flush():
+	# The async phase of a step delivers the events queued before it began;
+	# events queued by their handlers wait for the next step.
+	return gml_async_queue_flush(_gml_async_queue.size())
+
+
+static func gml_async_frame_pump():
+	# GMAsync calls this once per frame. The GameMaker frame pump delivers
+	# async events inside the step instead.
+	if gml_event_scheduler_pump_attached():
+		return 0
+	return gml_async_queue_flush()
 
 
 static func gml_async_queue_size():
@@ -319,6 +337,8 @@ static func _gml_async_handler_names(kind, handler_name):
 
 static func _gml_async_schedule_flush():
 	if _gml_async_flush_scheduled or _gml_async_queue.is_empty():
+		return
+	if gml_event_scheduler_pump_attached():
 		return
 	var main_loop = Engine.get_main_loop()
 	if not (main_loop is SceneTree):

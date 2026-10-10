@@ -74,6 +74,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \treturn true
 
         func _ready():
+        \t# Checks the input bridge without the GameMaker frame pump, where
+        \t# input changes are visible at once (tests/test_game_step_godot.py
+        \t# covers the step-latched input of a running game).
+        \tGMRuntime.gml_event_scheduler_pump_detach()
         \tGMRuntime.gml_input_begin_frame()
         \tGMRuntime.gml_input_set_key_state(KEY_SPACE, true)
         \tif not _check(GMRuntime.gml_keyboard_check(KEY_SPACE), "keyboard held state missing"):
@@ -122,8 +126,9 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tGMRuntime.gml_input_append_text("a")
         \tif not _check(GMRuntime.gml_builtin_global("keyboard_string") == "a", "keyboard_string mismatch"):
         \t\treturn
-        \tGMRuntime.gml_keyboard_clear(0)
-        \tif not _check(GMRuntime.gml_builtin_global("keyboard_string") == "", "keyboard_clear did not reset string"):
+        \t# Like GameMaker, keyboard_clear() leaves keyboard_string alone.
+        \tGMRuntime.gml_keyboard_clear(1)
+        \tif not _check(GMRuntime.gml_builtin_global("keyboard_string") == "a", "keyboard_clear changed keyboard_string"):
         \t\treturn
         \tvar probe = InputProbe.new()
         \tprobe.name = "Probe"

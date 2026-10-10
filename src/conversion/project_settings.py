@@ -491,6 +491,14 @@ class ProjectSettingsConverter(BaseConverter):
             (f"option_{self.gm_platform}_version", self.gm_platform, "application", "config/version", "string"),
             ("option_windows_use_splash", "windows", "application", "boot_splash/show_image", "bool"),
             ("option_game_speed", "main", "application", "run/max_fps", "int"),
+            ("option_draw_colour", "main", "gm2godot", "draw/initial_colour", "colour"),
+            (
+                "option_legacy_primitive_drawing",
+                "main",
+                "gm2godot",
+                "draw/legacy_primitive_drawing",
+                "bool",
+            ),
             (
                 "option_collision_compatibility",
                 "main",
@@ -533,6 +541,20 @@ class ProjectSettingsConverter(BaseConverter):
                 "display",
                 "window/size/mode",
                 "fullscreen",
+            ),
+            (
+                f"option_{self.gm_platform}_scale",
+                self.gm_platform,
+                "display",
+                "window/stretch/aspect",
+                "stretch_aspect",
+            ),
+            (
+                "option_window_colour",
+                "main",
+                "rendering",
+                "environment/defaults/default_clear_color",
+                "godot_colour",
             ),
         ]
 
@@ -611,7 +633,35 @@ class ProjectSettingsConverter(BaseConverter):
             return 1 if self._bool_option(value) else 0
         if value_kind == "fullscreen":
             return 3 if self._bool_option(value) else 0
+        if value_kind == "stretch_aspect":
+            # GameMaker's Scaling option: 0 = "Keep aspect ratio" (letterboxed),
+            # 1 = "Full scale" (stretched to the window).
+            return "ignore" if self._int_option(value) == 1 else "keep"
+        if value_kind == "godot_colour":
+            return self._godot_colour(value)
+        if value_kind == "colour":
+            # GameMaker stores the colour as 0xAABBGGRR; the runtime uses BGR.
+            return self._int_option(value) & 0xFFFFFF
         return value
+
+    @classmethod
+    def _godot_colour(cls, value: object) -> str:
+        """Convert a GameMaker BGR(A) colour to an opaque Godot ``Color``.
+
+        The window colour clears the display around and between viewports,
+        which is always opaque, so the stored alpha byte is ignored.
+        """
+        packed = cls._int_option(value) & 0xFFFFFF
+        components = (packed & 0xFF, (packed >> 8) & 0xFF, (packed >> 16) & 0xFF)
+        return "Color({r}, {g}, {b}, 1)".format(
+            r=cls._colour_component(components[0]),
+            g=cls._colour_component(components[1]),
+            b=cls._colour_component(components[2]),
+        )
+
+    @staticmethod
+    def _colour_component(value: int) -> str:
+        return format(round(value / 255.0, 6), "g")
 
     @staticmethod
     def _bool_option(value: object) -> bool:
@@ -636,6 +686,8 @@ class ProjectSettingsConverter(BaseConverter):
     def _format_godot_value(value: object, value_kind: str | None = None) -> str:
         if value_kind == "string":
             return format_godot_string(str(value))
+        if value_kind == "godot_colour":
+            return str(value)
         if isinstance(value, bool):
             return "true" if value else "false"
         if isinstance(value, (int, float)) and not isinstance(value, bool):

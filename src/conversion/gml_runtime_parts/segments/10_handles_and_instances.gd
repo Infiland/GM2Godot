@@ -113,7 +113,9 @@ static func gml_instance_destroy(target = null):
 		if entry == null or entry["destroyed"]:
 			continue
 		entry["destroyed"] = true
-		if instance != null and instance.has_method("_on_destroy"):
+		# After a room change request GameMaker skips the Destroy event,
+		# unless the instance or the current room is persistent.
+		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
 			instance.call("_on_destroy")
 		gml_instance_unregister(entry["handle"])
 		if instance is Node and instance.is_inside_tree():

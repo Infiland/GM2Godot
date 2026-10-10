@@ -405,11 +405,16 @@ class GMLExpressionAPITests(unittest.TestCase):
         self.assertFalse(uses_direct_builtin_instance_members(scope_context))
         self.assertTrue(uses_direct_builtin_instance_members(ScopeContext()))
 
-        member = parse_gml_expression("self.x")
+        member = parse_gml_expression("self.score")
         self.assertIsInstance(member, Member)
         assert isinstance(member, Member)
         self.assertFalse(uses_direct_member_access(member, scope_context))
         self.assertTrue(uses_direct_member_access(member, ScopeContext()))
+        # Built-in instance variables such as x are not script variables of
+        # the converted instance (x is its position).
+        builtin_member = parse_gml_expression("self.x")
+        assert isinstance(builtin_member, Member)
+        self.assertFalse(uses_direct_member_access(builtin_member, ScopeContext()))
         indirect_member = Member(Name("value"), "x")
         self.assertFalse(uses_direct_member_access(indirect_member, scope_context))
 

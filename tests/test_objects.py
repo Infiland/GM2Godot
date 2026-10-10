@@ -1705,7 +1705,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
-        self.assertIn("\tsprite_index = \"s_child\"\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertIn("\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n\t_gm_initialize_sprite_runtime()", content)
         self.assertIn("\tsuper._ready()", content)
 
     def test_script_event_sources_use_selected_macro_configuration(self):
@@ -2359,6 +2359,53 @@ class TestScriptGeneration(unittest.TestCase):
         )
         self.assertNotIn("super._ready()", child_content)
 
+    def test_child_input_bindings_include_inherited_input_events(self):
+        """A child with input events of its own still runs the ones it inherits."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 6, "eventNum": 11}])
+        self._setup_object(
+            "o_parent",
+            event_list=[{"eventType": 9, "eventNum": 89}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_grandparent",
+        )
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 9, "eventNum": 27}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_parent",
+        )
+        event_files = {
+            "o_grandparent": ("Mouse_11.gml",),
+            "o_parent": ("KeyPress_89.gml", "Mouse_4.gml"),
+            "o_child": ("KeyPress_27.gml", "Mouse_4.gml"),
+        }
+        for object_name, file_names in event_files.items():
+            for file_name in file_names:
+                with open(
+                    os.path.join(self.gm_dir, "objects", object_name, file_name),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    f.write("handled = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+        bindings = child_content[child_content.index("func _gm_input_event_bindings():"):]
+        bindings = bindings[: bindings.index("\t]")]
+        self.assertEqual(
+            [line.strip() for line in bindings.splitlines()[2:]],
+            [
+                '{"event_type": 9, "event_num": 27, "method": "_gm_input_key_press_27"},',
+                '{"event_type": 6, "event_num": 4, "method": "_gm_input_mouse_4"},',
+                '{"event_type": 9, "event_num": 89, "method": "_gm_input_key_press_89"},',
+                '{"event_type": 6, "event_num": 11, "method": "_gm_input_mouse_11"},',
+            ],
+        )
+        self.assertNotIn("func _gm_input_key_press_89", child_content)
+        self.assertNotIn("func _gm_input_mouse_11", child_content)
+
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce the scheduler Step callback."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])
@@ -2392,22 +2439,22 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _on_step():", content)
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "\tif GMRuntime.gml_keyboard_check(37):\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "\tif GMRuntime.gml_keyboard_check(39):\n"
             "\t\tposition.x = GMRuntime.gml_add(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "\tif GMRuntime.gml_keyboard_check(38):\n"
             "\t\tposition.y = GMRuntime.gml_sub(position.y, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "\tif GMRuntime.gml_keyboard_check(40):\n"
             "\t\tposition.y = GMRuntime.gml_add(position.y, 10)",
             content,
         )
@@ -2442,7 +2489,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var faster", content)
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
-        self.assertIn("\tif GMRuntime.gml_keyboard_check(KEY_SHIFT):", content)
+        self.assertIn("\tif GMRuntime.gml_keyboard_check(16):", content)
         self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
@@ -2677,12 +2724,18 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
         self.assertIn('"s_player": preload("res://sprites/s_player/s_player.tscn")', content)
-        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
-        self.assertIn("\t_gm_initialize_sprite_runtime()\n\timage_index = 2", content)
+        self.assertIn(
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\timage_index = 2",
+            content,
+        )
         self.assertIn("\tsprite_index = s_enemy", content)
         self.assertNotIn("\n\nvar image_index\n", content)
         self.assertNotIn("\n\nvar sprite_index\n", content)
@@ -2700,7 +2753,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("func _physics_process(delta):", content)
 
     def test_script_with_draw_event(self):
-        """eventType 8, eventNum 0 should produce func _draw()."""
+        """eventType 8, eventNum 0 should produce func _on_draw()."""
         self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2708,7 +2761,7 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _draw():", content)
+        self.assertIn("func _on_draw():", content)
 
     def test_script_with_cleanup_event(self):
         """eventType 12 should produce func _exit_tree()."""

@@ -45,7 +45,7 @@ def _write_smoke_scene(project_dir: Path) -> None:
         func _on_draw_begin():
         \ttrace.append(name + ":begin")
 
-        func _draw():
+        func _on_draw():
         \tif custom_draw:
         \t\ttrace.append(name + ":draw")
 
@@ -126,6 +126,7 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tdefaulted.configure("Default", 0, trace)
         \tadd_child(defaulted)
 
+        \tGMRuntime.gm2godot_draw_event_trace_enable(true)
         \tGMRuntime.gml_draw_event_trace_clear()
         \tvar dispatched = GMRuntime.gml_draw_event_dispatch_frame([front, back, hidden, defaulted])
         \tif not _check(dispatched == 20, "draw dispatch count mismatch: " + str(dispatched)):

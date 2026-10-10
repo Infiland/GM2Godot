@@ -160,13 +160,31 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "48_drawing_basic_forms.gd",
         "Draw state, primitive drawing, sprite, text, texture, and video helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),
-        tests=("tests/test_draw_basic_godot.py", "tests/test_draw_sprite_text_godot.py"),
+        tests=(
+            "tests/test_draw_basic_godot.py",
+            "tests/test_draw_sprite_text_godot.py",
+            "tests/test_font_text_godot.py",
+        ),
     ),
     _segment(
         "49_drawing_surfaces.gd",
         "Surface handles, application surface state, and surface draw targets.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "48_drawing_basic_forms.gd"),
         tests=("tests/test_draw_surfaces_godot.py",),
+    ),
+    _segment(
+        "50_draw_pipeline.gd",
+        "Draw event dispatch, RenderingServer draw sinks, GPU state segments, and depth ordering.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "48_drawing_basic_forms.gd",
+            "49_drawing_surfaces.gd",
+        ),
+        tests=(
+            "tests/test_draw_event_dispatch_godot.py",
+            "tests/test_draw_pipeline_godot.py",
+        ),
     ),
     _segment(
         "51_particles.gd",
@@ -317,6 +335,21 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "Platform service bridge hooks for Steam, achievements, media, and OS services.",
         depends_on=("00_prelude.gd", "67_async_runtime.gd", "72_os_debug_gc.gd"),
         tests=("tests/test_platform_services_godot.py",),
+    ),
+    _segment(
+        "74_game_step.gd",
+        "GameMaker step loop: frame pump, image animation, Other events, and room-change abort.",
+        depends_on=(
+            "00_prelude.gd",
+            "15_asset_registry.gd",
+            "45_collision_queries.gd",
+            "52_cameras_display.gd",
+            "53_game_input.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+            "67_async_runtime.gd",
+        ),
+        tests=("tests/test_game_step_godot.py", "tests/test_event_scheduler_godot.py"),
     ),
     _segment(
         "80_static_hash_clone_error.gd",

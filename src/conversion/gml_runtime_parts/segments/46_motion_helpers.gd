@@ -164,9 +164,8 @@ static func _gml_motion_instances(target):
 static func _gml_motion_step_instance(instance):
 	if not (instance is Node2D):
 		return
-	var previous = _gml_motion_position(instance)
-	_gml_motion_write(instance, "xprevious", previous.x)
-	_gml_motion_write(instance, "yprevious", previous.y)
+	# xprevious/yprevious hold the position from the start of the step; the
+	# step loop records them before Begin Step.
 
 	var hspeed_value = _gml_motion_real(instance, "hspeed", 0.0)
 	var vspeed_value = _gml_motion_real(instance, "vspeed", 0.0)

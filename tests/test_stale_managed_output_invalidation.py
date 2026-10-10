@@ -156,7 +156,7 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
             self.godot_dir / "project.godot",
             (
                 'config_version=5\n\n[application]\nconfig/name="User Project"\n'
-                "\n[display]\nwindow/size/viewport_width=777\n"
+                "\n[display]\nwindow/energy_saving/keep_screen_on=false\n"
             ),
         )
         self.running = threading.Event()
@@ -510,7 +510,7 @@ class TestStaleManagedOutputInvalidation(unittest.TestCase):
             f'{self.ROOM_NAME}.tscn"',
             project,
         )
-        self.assertIn("window/size/viewport_width=777", project)
+        self.assertIn("window/energy_saving/keep_screen_on=false", project)
         self._assert_absent_from_inventory(outputs)
         self._assert_user_file_preserved()
 

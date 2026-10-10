@@ -36,6 +36,9 @@ class TestBuffersGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Exercises the runtime API directly: without the GameMaker frame
+            \t# pump, async events are delivered immediately.
+            \tGMRuntime.gml_event_scheduler_pump_detach()
             \tvar buf = GMRuntime.gml_buffer_create(2, 1, 4)
             \tif not _check(GMRuntime.gml_buffer_exists(buf), "buffer should exist"):
             \t\treturn

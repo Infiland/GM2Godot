@@ -190,7 +190,7 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 - Each room is a `Node2D` root using `res://gm2godot/gml_room_node.gd`.
 - The first ordered GameMaker room becomes the Godot main scene when it was converted successfully.
-- GameMaker layers become `Node2D` children. The depth mapping is `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later.
+- GameMaker layers become `Node2D` children with an absolute `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later. Depths within ±3072 map one to one; larger magnitudes are compressed into Godot's ±4096 `z_index` range while keeping their order.
 - Every room reserves a `GMGUI` `CanvasLayer` at layer `1000` for Draw GUI phases.
 - Decodable tile data uses Godot 4 `TileMapLayer` output.
 - Native Godot callbacks do not define GameMaker event order; the runtime managers coordinate the generated phases.
@@ -206,6 +206,15 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 The policy is a conversion-time description, not proof of gameplay parity. Inspect its `project_features`, `renderer`, `collision`, `audio`, `file_buffer_network`, `runtime_managers`, and `signal_queue_policy` fields together with diagnostics. The canonical, implementation-facing policy is [`godot_architecture_policy.md`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/godot_architecture_policy.md).
 
+### Window, application surface and views
+
+- The first room in room order sizes GameMaker's application surface: the bounding box of its visible viewports when views are enabled, otherwise the room size. GM2Godot writes that size to `display/window/size/viewport_width` and `viewport_height` with the `viewport` stretch mode, so the root viewport plays the application surface: every room renders at that resolution and is scaled into the window. The platform Scaling option selects the `keep` (letterboxed) or `ignore` (full scale) stretch aspect, and the window colour becomes the default clear colour.
+- Each room root stores its eight view slots in `metadata/gamemaker_views`. When the room enters the tree the runtime creates one camera per view slot, exposes them through `view_camera[]` and the other view arrays, and destroys them when a non-persistent room ends.
+- Once per frame, after End Step and before drawing, visible views follow their target object or instance with GameMaker's border, speed and room-clamp rules. The first visible view is shown through the room's single `ViewCamera` `Camera2D`, whose position, zoom and rotation come from the view rectangle or from custom view/projection matrices, mapped onto the view's scaled viewport. Further visible views keep their state, and the mouse resolves through them, but they are not rendered; a runtime diagnostic reports this.
+- `window_set_size()` and the other window functions change only the window; the application surface keeps its size and `application_get_position()` reports its letterboxed rectangle in the window.
+- The `GMGUI` layer maps GUI coordinates onto the application surface: 1:1 by default, scaled by `display_set_gui_size()`, or relative to the window with `display_set_gui_maximise()`. The setting persists across rooms.
+- `mouse_x`/`mouse_y` resolve through the visible views (the last visible view containing the point first), `window_mouse_get_*` report window pixels, and `device_mouse_*_to_gui` report GUI coordinates.
+
 ## Runtime facade and autoload managers
 
 Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `GMRuntime.gml_*`. That static compatibility facade is the stable call-site boundary. The generated autoloads under `res://gm2godot/managers/` divide lifecycle ownership into explicit domains and register in this order:
@@ -216,7 +225,7 @@ Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `
 | 10 | `GMAssets` | Assets, texture groups, audio groups and dynamic assets |
 | 20 | `GMRooms` | Room order, current room, transitions and layers |
 | 30 | `GMInstances` | Live instances, handles, object indices and creation order |
-| 40 | `GMEvents` | Input dispatch, Step scheduler, alarms, timelines, sequences and collision window |
+| 40 | `GMEvents` | GameMaker step loop: input latch, image animation, Step phases, alarms, timelines, sequences, collision window and room changes |
 | 50 | `GMDraw` | Ordered Draw phases, draw state, surfaces, shaders and texture-group state |
 | 60 | `GMInput` | Godot input capture and GameMaker keyboard, mouse, gamepad and gesture state |
 | 70 | `GMAudio` | Audio instances, groups, emitters and listeners |
@@ -249,21 +258,42 @@ For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Ro
 
 ### Per-frame scheduler
 
-`GMInput._input(event)` captures native input as it arrives. On the generated `GMEvents` frame pump, input event bindings are dispatched first, followed by the central scheduler:
+`GMInput._input(event)` captures native input as it arrives. Every Godot frame, the generated `GMEvents` frame pump runs one GameMaker step in the order of the GameMaker runner:
 
 ```text
-Begin Step
+latch input (pressed/released edges since the previous step)
+→ xprevious/yprevious, image animation, Animation End
+→ Begin Step
+→ Async events
+→ timelines
 → time sources
 → alarms
-→ authored sequences and timelines
+→ keyboard events (held, pressed, released)
+→ mouse events
+→ authored sequences
 → Step
 → motion/path update
+→ Outside Room, Intersect Boundary, Outside View and view boundary events
 → collision dispatch
 → End Step
-→ clear one-frame input edges
+→ Draw phases (GMDraw)
 ```
 
 Collision is therefore evaluated after motion/path updates and before End Step. Do not attach correctness to the incidental `_process()` order of individual object nodes.
+
+Input that arrives between two frames belongs to the next step. `keyboard_check_pressed()`, `keyboard_check_released()`, `mouse_check_button_pressed()` and `mouse_check_button_released()` keep their value for the whole step, including Draw and Draw GUI, and reset when the next step starts; a press and release that both happen between two steps are both reported.
+
+Keyboard state uses GameMaker's virtual key codes everywhere: the `vk_*` constants, `ord()`, `keyboard_key`, `keyboard_lastkey` and the numbers of Keyboard, Key Press and Key Release events. Godot key events are translated when they are captured, and `vk_lshift`/`vk_rshift`, `vk_lcontrol`/`vk_rcontrol` and `vk_lalt`/`vk_ralt` follow the side of the key that was pressed. In the keyboard phase each held (pressed, released) key, in key code order, runs the matching event of every instance that has one; the `<Any Key>` event follows when at least one key was in that state and the `<No Key>` event otherwise. `keyboard_clear(key)` forgets the key until it is released and pressed again, without a Key Release event and without changing `keyboard_string`.
+
+Mouse events run object by object in object index order and, for each object, from the newest instance to the oldest. An instance whose collision mask (its mask or sprite, scaled and rotated like the instance) contains the mouse position in the room gets its held, pressed and released button events, `<No Button>` when no button is held or pressed, and Mouse Enter once when the mouse moves onto it; Mouse Leave runs once when the mouse leaves it. The global button events and the mouse wheel events follow for every instance. A child object receives the keyboard and mouse events it inherits from its parents.
+
+Every instance with a sprite advances `image_index` by `image_speed` times the sprite's playback speed (frames per second divided by the game speed, or frames per game frame) before Begin Step. `image_index` keeps its fractional value, wraps into `0..image_number` in both directions and runs Animation End when it wraps; the frame shown is the integer part wrapped into the sprite's frame count. The sprite scenes of object instances never play on their own, while sprites placed on room asset layers keep their scene animation. `sprite_index` holds the sprite's asset index (or `-1`), and changing it keeps `image_index`.
+
+`room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`, `game_restart()` and `game_end()` record a request. The current event finishes and the step is not drawn. No further events run in that step, apart from the Create, Destroy, Alarm and Other events of persistent instances or of a persistent room: an instance created after the request gets no Create event, and `instance_destroy()` runs no Destroy event. The change happens at the end of the step, or right after the draw when a Draw event requested it; after a room switch the new room steps and draws in the same frame, as GameMaker does.
+
+Each phase runs for the live instances in creation order. An instance created during a phase takes part from the next phase on (one created in Begin Step gets that step's Step and End Step events), and a destroyed instance gets no further events. An instance with no speed, no gravity and no path is left alone by the motion update, as in GameMaker.
+
+`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024) and the input events (`gml_input_dispatch_trace()`, the latest 256). Tracing is meant for tests and debugging and is off by default.
 
 ### Precise sprite collision masks
 
@@ -301,6 +331,8 @@ The mapping follows the GameMaker LTS [Sequence Track Struct](https://manual.gam
 Pre Draw → Draw Begin → Draw → Draw End → Post Draw
 → Draw GUI Begin → Draw GUI → Draw GUI End
 ```
+
+Each phase visits visible instances from the highest depth to the lowest; instances at the same depth keep scene-tree order, so later-created instances draw on top. An object without a Draw event keeps its default sprite node. Draw functions write into canvas items owned by the drawing instance (Draw) or by the phase's draw space (Draw Begin/End, Pre/Post Draw and the GUI phases), which are cleared at the start of every dispatched frame, while draw state (colour, alpha, font, alignment, blend mode and shader) carries across instances and frames as in GameMaker.
 
 `GMAsync` owns FIFO delivery for queued HTTP, networking, audio, platform, and extension callbacks. It scopes `async_load` to each delivered Async event. Godot signals that affect GameMaker ordering—such as supported collision, timer, animation, HTTP-completion, and audio-finished signals—must be queued through the manager identified by `architecture_policy.json`; user-authored native callbacks are outside this ordering contract unless they use the same queue.
 
@@ -399,6 +431,7 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 | Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
 | Advanced particle behavior | Authored systems and room elements instantiate managed emitters, but legacy field modifiers and engine-specific distribution, timing, wiggle, flipbook, and secondary-spawn details need diagnostics-guided visual review. |
 | Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
+| Multiple views and view surfaces | Only the first visible view is drawn; further views keep their camera state and mouse mapping, so split-screen layouts need a custom `SubViewport` setup. Views assigned to `view_surface_id` are not rendered into their surface, and camera begin, end and update scripts do not run. |
 | Shaders and GPU state | Supported 2D attributes, varyings, uniforms, base-texture sampling, and matrix transforms compile under exact Godot 4.7.2; custom vertex streams, macros, 3D/clip-space logic, multi-pass effects, GPU state, and visual parity remain manual review areas. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |
 | `game_end` | Maps to `SceneTree.quit()`; platform-specific close prompts and window behavior are not emulated. |

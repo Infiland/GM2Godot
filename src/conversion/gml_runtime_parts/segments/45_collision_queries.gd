@@ -445,7 +445,7 @@ static func _gml_collision_live_instances():
 
 
 static func _gml_collision_instance_valid(inst):
-	return inst is Object and is_instance_valid(inst)
+	return typeof(inst) == TYPE_OBJECT and is_instance_valid(inst)
 
 
 static func _gml_collision_instance_live(inst):

@@ -232,7 +232,7 @@ static func gml_physics_joint_delete(joint_id):
 		return null
 	record["valid"] = false
 	var node = record.get("node", null)
-	if node is Node and is_instance_valid(node):
+	if is_instance_valid(node) and node is Node:
 		if node.is_inside_tree():
 			node.queue_free()
 		else:
@@ -339,7 +339,7 @@ static func _gml_physics_fixture_remove_bindings(handle):
 	if not is_handle(handle) or not _gml_physics_fixture_bindings.has(handle.index):
 		return
 	for node in _gml_physics_fixture_bindings[handle.index]:
-		if node is Node and is_instance_valid(node):
+		if is_instance_valid(node) and node is Node:
 			node.queue_free()
 		_gml_physics_fixture_bindings.erase(handle.index)
 

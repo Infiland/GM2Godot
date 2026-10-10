@@ -782,7 +782,7 @@ static func _gml_particle_scene_parent():
 
 
 static func _gml_particle_free_node(node):
-	if node is Node and is_instance_valid(node):
+	if is_instance_valid(node) and node is Node:
 		if node.is_inside_tree():
 			node.queue_free()
 		else:

@@ -69,7 +69,7 @@ _IMAGE_EXTENSIONS = frozenset(
 _AUDIO_EXTENSIONS = frozenset(
     {".aac", ".flac", ".m4a", ".mp3", ".ogg", ".opus", ".wav"}
 )
-_FONT_EXTENSIONS = frozenset({".otf", ".ttf", ".woff", ".woff2"})
+_FONT_EXTENSIONS = frozenset({".fnt", ".otf", ".ttf", ".woff", ".woff2"})
 
 InventoryOwnerClass = Literal["converter_step", "shared_owner"]
 

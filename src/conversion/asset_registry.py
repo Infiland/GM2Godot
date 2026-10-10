@@ -27,6 +27,14 @@ from src.conversion.extension_registry import (
     extension_stub_resource_path,
     write_extension_compatibility_outputs,
 )
+from src.conversion.font_atlas import (
+    BMFONT_EXTENSION,
+    GameMakerFontAtlasPlan,
+    font_atlas_image_name,
+    font_registry_metadata,
+    parse_gamemaker_font_atlas_metadata,
+    plan_gamemaker_font_atlas,
+)
 from src.conversion.font_metadata import (
     capture_font_registry_bundle_fields,
     capture_font_registry_system_name,
@@ -663,6 +671,7 @@ class AssetRegistryConverter(BaseConverter):
             self.gm_project_path
         )
         self._system_font_paths: dict[str, str | None] = {}
+        self._font_atlas_plans: dict[tuple[str, str, str], GameMakerFontAtlasPlan | None] = {}
         self._timeline_action_source_failures: set[tuple[str, str]] = set()
         self._sequence_incomplete_resources: set[tuple[str, str]] = set()
 
@@ -3188,9 +3197,19 @@ class AssetRegistryConverter(BaseConverter):
 
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
-            if texture_group:
-                return self._texture_group_asset_metadata(texture_group)
-            return {}
+            metadata: JsonObject = (
+                self._texture_group_asset_metadata(texture_group)
+                if texture_group
+                else {}
+            )
+            if resource.kind == "fonts":
+                metadata.update(
+                    font_registry_metadata(
+                        resource.raw_data,
+                        bitmap=godot_path.endswith(BMFONT_EXTENSION),
+                    )
+                )
+            return metadata
 
         if resource.kind != "sounds":
             return {}
@@ -3969,8 +3988,39 @@ class AssetRegistryConverter(BaseConverter):
                 ordered.append(name)
         return {name: index for index, name in enumerate(ordered)}
 
+    def _font_atlas_plan(self, resource: _ProjectResource) -> GameMakerFontAtlasPlan | None:
+        """Mirror the font converter's baked-atlas decision for one font."""
+        cache_key = self._resource_key(resource)
+        if cache_key in self._font_atlas_plans:
+            return self._font_atlas_plans[cache_key]
+        plan: GameMakerFontAtlasPlan | None = None
+        metadata = parse_gamemaker_font_atlas_metadata(resource.raw_data)
+        if metadata is not None and resource.yy_path:
+            resolved_image = self._resolve_project_source(
+                font_atlas_image_name(resource.yy_path),
+                owner_source_path=resource.source_path,
+                resource=resource.name,
+                resource_type="font",
+                field="atlas image",
+            )
+            if resolved_image is not None:
+                plan = plan_gamemaker_font_atlas(
+                    metadata,
+                    resolved_image.filesystem_path,
+                )
+        self._font_atlas_plans[cache_key] = plan
+        return plan
+
     def _font_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         subfolder = self._get_subfolder_from_resource(resource)
+        if self._font_atlas_plan(resource) is not None:
+            return self._flat_resource_path(
+                "fonts",
+                subfolder,
+                resource.name,
+                BMFONT_EXTENSION,
+                suffix=suffix,
+            )
         bundle = capture_font_registry_bundle_fields(resource.raw_data)
         ttf_name = bundle.ttf_name
         if bundle.include_ttf and ttf_name:

@@ -233,15 +233,17 @@ See [`runtime_managers.md`](https://github.com/Infiland/GM2Godot/blob/main/src/c
 
 ### Room entry and transitions
 
-Generated object `_ready()` methods register the instance, initialize motion state, and run converted Create behavior when present. The generated room root then performs the room-entry sequence:
+Generated object `_ready()` methods register the instance, initialize motion state, and run converted Create behavior when present. As in GameMaker, every instance placed in a room exists before the first Create event runs: when the room scene enters the tree, the room root registers its placed instances in the room's creation order and holds them out of the tree. The room root then performs the room-entry sequence:
 
 1. Register layer and view metadata.
 2. Instantiate authored room particle-layer systems.
 3. Update the current room and room globals.
-4. Run instance creation code in declared GameMaker creation order.
+4. Add the held instances back one at a time in the declared GameMaker creation order: each runs its Create event, then its instance creation code, before the next one is added. An instance destroyed before its turn is never added.
 5. Dispatch Game Start once for the running game.
 6. Run room creation code.
 7. Dispatch Room Start.
+
+In object events, instance creation code and timeline moments, `other` is the instance itself, as in GameMaker, except inside collision events and `with` blocks. Room creation code runs with the room root as both `self` and `other`.
 
 For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, restores those instances, and runs the entry sequence for the new scene.
 
@@ -314,7 +316,7 @@ Runtime state has three practical ownership levels:
 | Autoload manager buckets | Domain registries, queue metadata and future migrated runtime state | Across generated room scene changes |
 | Room/object scene state | Layer nodes, object instances, transient draw/collision data | Normally one room or frame unless explicitly preserved |
 
-Persistent **instances** are reparented across generated room transitions. Their instance creation code is not rerun after restoration. Full persistent **room** state is not preserved: the generated scene enters again and lifecycle/room creation behavior runs, with a runtime warning. This is a deliberate, reported deviation rather than silent parity.
+Persistent **instances** are reparented across generated room transitions. As in GameMaker, an instance kept from an earlier visit stands in for the copy placed in the room when that room is entered again, so its Create event and instance creation code do not run again. Full persistent **room** state is not preserved: the generated scene enters again and lifecycle/room creation behavior runs, with a runtime warning. This is a deliberate, reported deviation rather than silent parity.
 
 One-frame input edges, collision pairs, transient draw state, room-local layers, and non-persistent instances should be reset at their documented frame or room boundary. Add a regression test whenever custom runtime work moves state between ownership levels.
 

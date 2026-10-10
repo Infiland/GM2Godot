@@ -5570,7 +5570,10 @@ class TestAssetRegistryConverter(unittest.TestCase):
             "folders/Timelines.yy",
             {"momentList": [{"moment": 3, "eventFile": "Moment_3.gml"}]},
         )
-        _write_file(os.path.join(self.gm_dir, "timelines", "tl_intro", "Moment_3.gml"), "x = 42;\n")
+        _write_file(
+            os.path.join(self.gm_dir, "timelines", "tl_intro", "Moment_3.gml"),
+            "x = 42;\nwith (other) y = 7;\n",
+        )
         self._write_resource(
             "extensions",
             "AdSDK",
@@ -5633,6 +5636,8 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertIn('"name": "ac_fade"', curve_registry)
         self.assertIn("static func execute(_gm_instance):", timeline_script)
         self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "x", 42)', timeline_script)
+        # GameMaker runs timeline moments with the instance as both self and other.
+        self.assertIn("GMRuntime.gml_with_targets(_gm_instance, _gm_instance, _gm_instance)", timeline_script)
         self.assertEqual(extension_report["mapped_functions"], ["ads_show_rewarded"])
         self.assertEqual(extension_report["stubs"][0]["path"], "res://addons/gm2godot_extensions/adsdk/adsdk_extension.gd")
 

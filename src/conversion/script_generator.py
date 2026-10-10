@@ -441,9 +441,12 @@ def _emit_object_runtime_prelude(
     *,
     declare_members: bool,
 ) -> None:
+    # other is the instance itself, except while a collision event runs
+    # (the dispatcher sets it) and inside with blocks (the transpiler passes
+    # the outer instance).
     member_lines = (
         "\n\nvar id = GMRuntime.gml_instance_noone()"
-        "\nvar other = GMRuntime.gml_instance_noone()"
+        "\nvar other = self"
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         "\nvar depth = 0"
         f"\nvar solid = {str(object_runtime.solid).lower()}"

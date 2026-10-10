@@ -32,8 +32,7 @@ static func gml_application_surface_is_draw_enabled():
 
 
 static func gml_application_get_position():
-	var size = _gml_application_surface_size()
-	return [0, 0, size.x, size.y]
+	return _gml_display_application_position()
 
 
 static func gml_surface_create(width, height, format = GML_SURFACE_FORMAT_RGBA8UNORM):
@@ -149,22 +148,7 @@ static func _gml_application_surface_ensure():
 
 
 static func _gml_application_surface_size():
-	var width = 0.0
-	var height = 0.0
-	if _gml_builtin_globals.has("room_width"):
-		width = _to_real(_gml_builtin_globals["room_width"])
-	if _gml_builtin_globals.has("room_height"):
-		height = _to_real(_gml_builtin_globals["room_height"])
-	var target = _gml_draw_current_context_target()
-	if target is CanvasItem and (width <= 0.0 or height <= 0.0):
-		var viewport_size = target.get_viewport_rect().size
-		width = viewport_size.x if width <= 0.0 else width
-		height = viewport_size.y if height <= 0.0 else height
-	if width <= 0.0:
-		width = 640.0
-	if height <= 0.0:
-		height = 480.0
-	return Vector2(width, height)
+	return _gml_display_application_surface_size()
 
 
 static func _gml_surface_make(width, height, is_application, format):

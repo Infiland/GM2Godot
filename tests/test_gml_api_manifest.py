@@ -146,7 +146,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(surface_create.issue_number, 492)
         self.assertEqual(camera_create.status, "partial")
         self.assertEqual(camera_create.issue_number, 493)
-        self.assertEqual(camera_create_view.status, "partial")
+        self.assertEqual(camera_create_view.status, "implemented")
         self.assertEqual(camera_create_view.issue_number, 493)
         self.assertEqual(view_set_surface_id.status, "partial")
         self.assertEqual(view_set_surface_id.issue_number, 493)

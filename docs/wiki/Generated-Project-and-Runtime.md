@@ -206,6 +206,15 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 The policy is a conversion-time description, not proof of gameplay parity. Inspect its `project_features`, `renderer`, `collision`, `audio`, `file_buffer_network`, `runtime_managers`, and `signal_queue_policy` fields together with diagnostics. The canonical, implementation-facing policy is [`godot_architecture_policy.md`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/godot_architecture_policy.md).
 
+### Window, application surface and views
+
+- The first room in room order sizes GameMaker's application surface: the bounding box of its visible viewports when views are enabled, otherwise the room size. GM2Godot writes that size to `display/window/size/viewport_width` and `viewport_height` with the `viewport` stretch mode, so the root viewport plays the application surface: every room renders at that resolution and is scaled into the window. The platform Scaling option selects the `keep` (letterboxed) or `ignore` (full scale) stretch aspect, and the window colour becomes the default clear colour.
+- Each room root stores its eight view slots in `metadata/gamemaker_views`. When the room enters the tree the runtime creates one camera per view slot, exposes them through `view_camera[]` and the other view arrays, and destroys them when a non-persistent room ends.
+- Once per frame, after End Step and before drawing, visible views follow their target object or instance with GameMaker's border, speed and room-clamp rules. The first visible view is shown through the room's single `ViewCamera` `Camera2D`, whose position, zoom and rotation come from the view rectangle or from custom view/projection matrices, mapped onto the view's scaled viewport. Further visible views keep their state, and the mouse resolves through them, but they are not rendered; a runtime diagnostic reports this.
+- `window_set_size()` and the other window functions change only the window; the application surface keeps its size and `application_get_position()` reports its letterboxed rectangle in the window.
+- The `GMGUI` layer maps GUI coordinates onto the application surface: 1:1 by default, scaled by `display_set_gui_size()`, or relative to the window with `display_set_gui_maximise()`. The setting persists across rooms.
+- `mouse_x`/`mouse_y` resolve through the visible views (the last visible view containing the point first), `window_mouse_get_*` report window pixels, and `device_mouse_*_to_gui` report GUI coordinates.
+
 ## Runtime facade and autoload managers
 
 Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `GMRuntime.gml_*`. That static compatibility facade is the stable call-site boundary. The generated autoloads under `res://gm2godot/managers/` divide lifecycle ownership into explicit domains and register in this order:
@@ -397,6 +406,7 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 | Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
 | Advanced particle behavior | Authored systems and room elements instantiate managed emitters, but legacy field modifiers and engine-specific distribution, timing, wiggle, flipbook, and secondary-spawn details need diagnostics-guided visual review. |
 | Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
+| Multiple views and view surfaces | Only the first visible view is drawn; further views keep their camera state and mouse mapping, so split-screen layouts need a custom `SubViewport` setup. Views assigned to `view_surface_id` are not rendered into their surface, and camera begin, end and update scripts do not run. |
 | Shaders and GPU state | Supported 2D attributes, varyings, uniforms, base-texture sampling, and matrix transforms compile under exact Godot 4.7.2; custom vertex streams, macros, 3D/clip-space logic, multi-pass effects, GPU state, and visual parity remain manual review areas. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |
 | `game_end` | Maps to `SceneTree.quit()`; platform-specific close prompts and window behavior are not emulated. |

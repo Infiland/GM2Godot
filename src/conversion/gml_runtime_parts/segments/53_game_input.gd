@@ -264,19 +264,19 @@ static func gml_mouse_check_button_released(button):
 
 
 static func gml_display_mouse_get_x():
-	return _gml_input_mouse_position.x
+	return _gml_display_mouse_screen_position().x
 
 
 static func gml_display_mouse_get_y():
-	return _gml_input_mouse_position.y
+	return _gml_display_mouse_screen_position().y
 
 
 static func gml_device_mouse_x_to_gui(device):
-	return _gml_mouse_room_to_gui(_gml_input_mouse_position).x
+	return int(_gml_mouse_room_to_gui(_gml_input_mouse_position).x)
 
 
 static func gml_device_mouse_y_to_gui(device):
-	return _gml_mouse_room_to_gui(_gml_input_mouse_position).y
+	return int(_gml_mouse_room_to_gui(_gml_input_mouse_position).y)
 
 
 static func gml_gamepad_is_connected(device):
@@ -340,13 +340,9 @@ static func _gml_gamepad_axis_key(device, axis):
 	return str(int(_to_real(device))) + ":" + str(int(_to_real(axis)))
 
 
+# Input positions are in viewport (application surface) coordinates.
 static func _gml_mouse_room_to_gui(position):
-	var gui_size = _gml_display_gui_dimensions()
-	var source_size = _gml_display_gui_source_dimensions()
-	var origin = _gml_display_gui_origin()
-	var scale_x = gui_size.x / source_size.x if source_size.x > 0.0 else 1.0
-	var scale_y = gui_size.y / source_size.y if source_size.y > 0.0 else 1.0
-	return Vector2((position.x - origin.x) * scale_x, (position.y - origin.y) * scale_y)
+	return _gml_display_viewport_to_gui(position)
 
 
 static func _gml_input_instance_snapshot(instances):
@@ -520,16 +516,17 @@ static func _gml_input_any_mouse_button_down():
 static func _gml_input_instance_contains_mouse(inst):
 	if inst == null:
 		return false
+	var mouse_room_position = _gml_mouse_room_position()
 	if inst.has_method("_gm_input_contains_point"):
-		return bool(inst.call("_gm_input_contains_point", _gml_input_mouse_position.x, _gml_input_mouse_position.y))
+		return bool(inst.call("_gm_input_contains_point", mouse_room_position.x, mouse_room_position.y))
 	if inst is Control:
-		return inst.get_global_rect().has_point(_gml_input_mouse_position)
+		return inst.get_global_rect().has_point(mouse_room_position)
 	if inst is Node2D:
 		var radius = 0.0
 		if inst.has_meta("gamemaker_collision_radius"):
 			radius = max(_to_real(inst.get_meta("gamemaker_collision_radius")), 0.0)
 		if radius > 0.0:
-			return inst.global_position.distance_to(_gml_input_mouse_position) <= radius
+			return inst.global_position.distance_to(mouse_room_position) <= radius
 	_gml_input_dispatch_trace.append({
 		"diagnostic": "missing_mouse_mask",
 		"instance": str(inst.name) if inst is Node else "",
@@ -552,15 +549,17 @@ static func _gml_input_normalize_gesture_payload(payload):
 	var result = {}
 	for key in payload.keys():
 		result[key] = payload[key]
+	var room_position = _gml_mouse_room_position()
+	var window_position = _gml_display_window_mouse_position()
 	if not result.has("posX"):
-		result["posX"] = _gml_input_mouse_position.x
+		result["posX"] = room_position.x
 	if not result.has("posY"):
-		result["posY"] = _gml_input_mouse_position.y
+		result["posY"] = room_position.y
 	if not result.has("rawposX"):
-		result["rawposX"] = result["posX"]
+		result["rawposX"] = window_position.x
 	if not result.has("rawposY"):
-		result["rawposY"] = result["posY"]
-	var gui_position = _gml_mouse_room_to_gui(Vector2(_to_real(result["posX"]), _to_real(result["posY"])))
+		result["rawposY"] = window_position.y
+	var gui_position = _gml_mouse_room_to_gui(_gml_input_mouse_position)
 	if not result.has("guiposX"):
 		result["guiposX"] = gui_position.x
 	if not result.has("guiposY"):
@@ -573,13 +572,15 @@ static func _gml_input_normalize_gesture_payload(payload):
 
 
 static func _gml_input_touch_payload(event, gesture_name):
+	var room_position = _gml_view_viewport_to_room(event.position)
+	var window_position = _gml_display_viewport_to_window_transform() * event.position
 	var payload = {
 		"gesture": 0,
 		"touch": int(event.index),
-		"posX": event.position.x,
-		"posY": event.position.y,
-		"rawposX": event.position.x,
-		"rawposY": event.position.y,
+		"posX": room_position.x,
+		"posY": room_position.y,
+		"rawposX": window_position.x,
+		"rawposY": window_position.y,
 		"name": str(gesture_name),
 	}
 	var gui_position = _gml_mouse_room_to_gui(event.position)

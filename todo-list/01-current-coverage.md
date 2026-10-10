@@ -32,10 +32,12 @@ This file records what the current codebase appears to support. Partial features
 - [x] Generate an audio group map.
 - [ ] Partial: full compression, preload, streaming, platform format, positional emitter/listener, and async audio semantics.
 
-- [x] Convert fonts from bundled TTFs or system font lookup.
+- [x] Convert fonts from their baked GameMaker atlas and glyph table into fixed-size bitmap fonts.
+- [x] Lay out and measure text with GameMaker glyph shifts, offsets, kerning, line height, alignment, and wrapping.
+- [x] Convert fonts without a baked atlas from bundled TTFs or system font lookup.
 - [x] Generate fallback `SystemFont` resources.
 - [x] Preserve selected bold, italic, anti-aliasing, and subfolder metadata.
-- [ ] Partial: glyph ranges, sprite fonts, SDF/MSDF behavior, texture group behavior, and exact GameMaker text rendering.
+- [ ] Partial: sprite fonts, runtime font functions, SDF effects and scaled SDF sharpness, and texture group behavior.
 
 - [x] Copy included files from `datafiles/` into the generated Godot project.
 - [x] Copy note text files and preserve note subfolders.

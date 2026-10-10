@@ -49,7 +49,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
 
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn("var id = GMRuntime.gml_instance_noone()", content)
-        self.assertIn("var other = GMRuntime.gml_instance_noone()", content)
+        self.assertIn("var other = self", content)
         self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
         self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)

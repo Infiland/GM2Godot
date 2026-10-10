@@ -64,6 +64,9 @@ def render_room_runtime_script() -> str:
         "extends Node2D\n\n"
         'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
         f'const GM2GODOT_ROOM_ROOT_POLICY = "{ROOM_ROOT_POLICY_ID}"\n\n'
+        "func _enter_tree():\n"
+        "\tGMRuntime.gml_room_prepare_scene(self)\n"
+        "\n\n"
         "func _ready():\n"
         "\tGMRuntime.gml_room_enter_scene(self)\n"
         "\n\n"
@@ -414,6 +417,9 @@ class RoomConverter(BaseConverter):
                         "room creation code",
                         asset_names=asset_names,
                         top_level_global_scope=True,
+                        # GameMaker runs room creation code with one stand-in
+                        # instance as both self and other.
+                        other_expression="self",
                     )
             except _RoomCreationCodeBlocked:
                 has_creation_code_blocker = True
@@ -449,7 +455,9 @@ class RoomConverter(BaseConverter):
                     event,
                     asset_names=asset_names,
                     self_expression="_gm_instance",
-                    other_expression="GMRuntime.gml_instance_noone()",
+                    # Like its Create event, an instance's creation code runs
+                    # with the instance as both self and other.
+                    other_expression="_gm_instance",
                     instance_target="_gm_instance",
                 )
             except _RoomCreationCodeBlocked:

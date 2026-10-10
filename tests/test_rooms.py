@@ -35,7 +35,11 @@ from src.conversion.room_layers import (
     is_empty_gamemaker_tile,
     serialize_room_layers,
 )
-from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
+from src.conversion.rooms import (
+    ROOM_RUNTIME_SCRIPT_RELATIVE_PATH,
+    RoomConverter,
+    render_room_runtime_script,
+)
 from src.conversion.tileset_metadata import select_tileset_room_layout
 
 
@@ -1988,8 +1992,8 @@ class TestRoomConverter(unittest.TestCase):
             "r_exec",
             "InstanceCreationCode_inst_player.gml",
         )
-        _write_file(room_creation_path, 'room_trace = "room creation";\n')
-        _write_file(instance_code_path, 'x = 42; custom_value = "instance creation";\n')
+        _write_file(room_creation_path, 'room_trace = "room creation";\nscr_note(other);\n')
+        _write_file(instance_code_path, 'x = 42; custom_value = "instance creation";\nscr_note(other);\n')
         self._write_room(
             "r_exec",
             creation_code_file="RoomCreationCode.gml",
@@ -2025,6 +2029,20 @@ class TestRoomConverter(unittest.TestCase):
             'GMRuntime.gml_variable_instance_set(_gm_instance, "custom_value", "instance creation")',
             script,
         )
+        # GameMaker runs creation code with the running instance (a stand-in
+        # instance for room creation code) as both self and other.
+        self.assertIn('GMRuntime.gml_call_named("scr_note", [self], self, self)', script)
+        self.assertIn(
+            'GMRuntime.gml_call_named("scr_note", [_gm_instance], _gm_instance, _gm_instance)',
+            script,
+        )
+        self.assertNotIn("gml_instance_noone()", script)
+
+    def test_room_node_holds_placed_instances_until_the_room_starts(self):
+        script = render_room_runtime_script()
+
+        self.assertIn("func _enter_tree():\n\tGMRuntime.gml_room_prepare_scene(self)", script)
+        self.assertIn("func _ready():\n\tGMRuntime.gml_room_enter_scene(self)", script)
 
     def test_instance_creation_code_blocker_skips_room_and_completes_safe_sibling(self):
         self._write_yyp(

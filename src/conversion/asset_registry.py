@@ -3879,7 +3879,9 @@ class AssetRegistryConverter(BaseConverter):
                 event=f"timeline moment {frame}",
                 preserve_source_comments=True,
                 self_expression="_gm_instance",
-                other_expression="GMRuntime.gml_instance_noone()",
+                # GameMaker runs timeline moments with the instance as both
+                # self and other.
+                other_expression="_gm_instance",
                 instance_target="_gm_instance",
             )
         except GMLTranspileError as exc:

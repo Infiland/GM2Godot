@@ -1,5 +1,8 @@
 const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"
 const GML_ROOM_UNSUPPORTED_EXIT_MESSAGE = "GM2Godot maps game_end to SceneTree.quit(); platform-specific close prompts and window behavior are not emulated."
+const GML_ROOM_PREPARED_META = "_gm2godot_room_prepared"
+const GML_ROOM_HELD_INSTANCES_META = "_gm2godot_room_held_instances"
+const GML_ROOM_UNORDERED_INSTANCE = 1073741824
 
 static var _gml_room_current_id = -1
 static var _gml_room_previous_id = -1
@@ -17,6 +20,7 @@ static func gml_room_enter_scene(scene, force = false):
 		return false
 	var entry = _gml_room_pending_entry if _gml_room_pending_entry != null else _gml_room_entry_for_scene(scene)
 	if entry == null:
+		_gml_room_create_instances(scene)
 		return false
 	_gml_room_pending_entry = null
 	gml_layer_register_scene(scene)
@@ -24,7 +28,7 @@ static func gml_room_enter_scene(scene, force = false):
 	_gml_particle_room_enter_scene(scene)
 	_gml_room_update_current(entry, scene)
 	_gml_room_warn_persistent_room(scene)
-	_gml_room_run_instance_creation_code(scene)
+	_gml_room_create_instances(scene)
 	if not _gml_room_game_started:
 		_gml_room_game_started = true
 		_gml_room_dispatch_lifecycle(scene, "_on_game_start")
@@ -238,15 +242,156 @@ static func _gml_room_dispatch_lifecycle(root_node, method_name):
 			node.call(method_name)
 
 
-static func _gml_room_run_instance_creation_code(scene):
-	if scene == null or not scene.has_method("_gm2godot_run_instance_creation_code"):
-		return
-	for entry in _gml_room_instance_creation_code_entries(scene):
-		var node = entry["node"]
-		if _gml_room_node_was_restored_persistent(node):
-			_gml_room_warn_persistent_instance_creation_code(node)
+# GameMaker starts a room by creating every instance placed in it first, and
+# only then runs their Create events and creation code, one instance at a time
+# in the room's creation order; Game Start, the room creation code and Room
+# Start follow. The room node calls this when its scene enters the tree,
+# before the instances do: the placed instances are registered in creation
+# order, so instance_exists, instance_number and with see all of them from the
+# first Create event on, and they are held out of the tree until
+# gml_room_enter_scene adds them back one at a time, after the room, its
+# layers and its views are current.
+static func gml_room_prepare_scene(scene):
+	if not (scene is Node) or scene.has_meta(GML_ROOM_PREPARED_META):
+		return false
+	scene.set_meta(GML_ROOM_PREPARED_META, true)
+	var preserved_names = _gml_room_preserved_persistent_names()
+	var held = []
+	var parents = {}
+	var traversal_order = 0
+	for node in _gml_room_tree_nodes(scene):
+		if node == scene or not _gml_room_node_is_placed_instance(node):
 			continue
-		scene.call("_gm2godot_run_instance_creation_code", node)
+		var parent = node.get_parent()
+		if not parents.has(parent.get_instance_id()):
+			parents[parent.get_instance_id()] = {"parent": parent, "children": parent.get_children()}
+		if preserved_names.has(_gml_room_instance_name(node)):
+			# The persistent instance kept from an earlier visit stands in for it.
+			parent.remove_child(node)
+			node.queue_free()
+			continue
+		held.append({
+			"node": node,
+			"parent": parent,
+			"order_index": _gml_room_creation_order_index(node),
+			"traversal_order": traversal_order,
+		})
+		traversal_order += 1
+	held.sort_custom(_gml_room_creation_code_entry_less)
+	for record in held:
+		record["node"].call("_gm_register_instance")
+	for record in held:
+		record["parent"].remove_child(record["node"])
+		# Re-added later; the scene becomes its owner again then.
+		record["node"].owner = null
+	scene.set_meta(GML_ROOM_HELD_INSTANCES_META, {"instances": held, "parents": parents.values()})
+	return true
+
+
+static func _gml_room_node_is_placed_instance(node):
+	return (
+		node is Node
+		and node.has_meta("gamemaker_layer_element_type")
+		and str(node.get_meta("gamemaker_layer_element_type")) == "instance"
+		and node.has_method("_gm_register_instance")
+	)
+
+
+static func _gml_room_instance_name(node):
+	if node is Node and node.has_meta("gamemaker_instance_name") and node.get_meta("gamemaker_instance_name") != null:
+		return str(node.get_meta("gamemaker_instance_name"))
+	return ""
+
+
+static func _gml_room_creation_order_index(node):
+	if node.has_meta("gamemaker_instance_creation_order_index"):
+		var metadata_order = node.get_meta("gamemaker_instance_creation_order_index")
+		if metadata_order != null:
+			return int(metadata_order)
+	return GML_ROOM_UNORDERED_INSTANCE
+
+
+static func _gml_room_preserved_persistent_names():
+	var names = {}
+	var tree = _gml_room_tree()
+	if tree == null or tree.root == null:
+		return names
+	var persistent_root = tree.root.get_node_or_null(GML_ROOM_PERSISTENT_ROOT_NAME)
+	if persistent_root == null:
+		return names
+	for node in persistent_root.get_children():
+		var instance_name = _gml_room_instance_name(node)
+		if instance_name != "":
+			names[instance_name] = true
+	return names
+
+
+# Adds the held instances back in creation order: each runs its Create event
+# as it joins the scene, then its instance creation code, before the next
+# instance is created. Instances the scene did not hold back (restored
+# persistent instances, hand-made scenes) only run their creation code.
+static func _gml_room_create_instances(scene):
+	var held = {"instances": [], "parents": []}
+	if scene.has_meta(GML_ROOM_HELD_INSTANCES_META):
+		held = scene.get_meta(GML_ROOM_HELD_INSTANCES_META)
+		scene.remove_meta(GML_ROOM_HELD_INSTANCES_META)
+	var steps = []
+	steps.append_array(held["instances"])
+	steps.append_array(_gml_room_instance_creation_code_entries(scene))
+	steps.sort_custom(_gml_room_creation_code_entry_less)
+	for step in steps:
+		var node = step["node"]
+		if not is_instance_valid(node):
+			continue
+		if step.has("parent") and not _gml_room_add_held_instance(scene, node, step["parent"]):
+			continue
+		_gml_room_run_instance_creation_code(scene, node)
+	_gml_room_restore_child_order(held["parents"])
+
+
+static func _gml_room_add_held_instance(scene, node, parent):
+	# An instance destroyed before its turn (by an earlier Create event or
+	# creation code) never joins the room and runs no Create event; neither
+	# does one whose room was left meanwhile. (GameMaker's HTML5 runner still
+	# runs the Create event and creation code of such an instance, which it
+	# only removes at the end of the step; a destroyed instance cannot run
+	# events here without being registered again.)
+	var entry: Variant = _gml_instance_entry(node)
+	if entry == null or entry["destroyed"] or not scene.is_inside_tree():
+		if entry != null:
+			gml_instance_unregister(node)
+		node.queue_free()
+		return false
+	if not is_instance_valid(parent) or not parent.is_inside_tree():
+		parent = scene
+	parent.add_child(node)
+	if scene.is_ancestor_of(node):
+		node.owner = scene
+	return true
+
+
+static func _gml_room_run_instance_creation_code(scene, node):
+	if not scene.has_method("_gm2godot_run_instance_creation_code") or not _gml_room_node_has_creation_code(node):
+		return
+	# A persistent instance brought along from another room was created
+	# there; like GameMaker, its creation code does not run again.
+	if _gml_room_node_was_restored_persistent(node):
+		return
+	scene.call("_gm2godot_run_instance_creation_code", node)
+
+
+# Puts the room's own nodes back in their scene order (the room editor's
+# order within each layer); instances created meanwhile follow them.
+static func _gml_room_restore_child_order(parents):
+	for record in parents:
+		var parent = record["parent"]
+		if not is_instance_valid(parent):
+			continue
+		var index = 0
+		for child in record["children"]:
+			if is_instance_valid(child) and child.get_parent() == parent:
+				parent.move_child(child, index)
+				index += 1
 
 
 static func _gml_room_run_room_creation_code(scene):
@@ -258,25 +403,22 @@ static func _gml_room_instance_creation_code_entries(root_node):
 	var entries = []
 	var traversal_order = 0
 	for node in _gml_room_tree_nodes(root_node):
-		if node == root_node:
+		if node == root_node or not _gml_room_node_has_creation_code(node):
 			continue
-		if not node.has_meta("gamemaker_has_creation_code") or not bool(node.get_meta("gamemaker_has_creation_code")):
-			continue
-		if node.has_meta("gamemaker_creation_code_file_exists") and not bool(node.get_meta("gamemaker_creation_code_file_exists")):
-			continue
-		var order_index = 1073741824
-		if node.has_meta("gamemaker_instance_creation_order_index"):
-			var metadata_order = node.get_meta("gamemaker_instance_creation_order_index")
-			if metadata_order != null:
-				order_index = int(metadata_order)
 		entries.append({
 			"node": node,
-			"order_index": order_index,
+			"order_index": _gml_room_creation_order_index(node),
 			"traversal_order": traversal_order,
 		})
 		traversal_order += 1
 	entries.sort_custom(_gml_room_creation_code_entry_less)
 	return entries
+
+
+static func _gml_room_node_has_creation_code(node):
+	if not node.has_meta("gamemaker_has_creation_code") or not bool(node.get_meta("gamemaker_has_creation_code")):
+		return false
+	return not (node.has_meta("gamemaker_creation_code_file_exists") and not bool(node.get_meta("gamemaker_creation_code_file_exists")))
 
 
 static func _gml_room_creation_code_entry_less(left, right):
@@ -339,18 +481,6 @@ static func _gml_room_node_was_restored_persistent(node):
 		and node.has_meta("_gm2godot_room_restored_persistent")
 		and bool(node.get_meta("_gm2godot_room_restored_persistent"))
 	)
-
-
-static func _gml_room_warn_persistent_instance_creation_code(node):
-	if node == null:
-		return
-	if node.has_meta("_gm2godot_persistent_creation_code_warning_emitted") and bool(node.get_meta("_gm2godot_persistent_creation_code_warning_emitted")):
-		return
-	node.set_meta("_gm2godot_persistent_creation_code_warning_emitted", true)
-	var instance_name = str(node.name)
-	if node.has_meta("gamemaker_instance_name"):
-		instance_name = str(node.get_meta("gamemaker_instance_name"))
-	push_warning("GM2Godot preserves persistent instance " + instance_name + " across room transitions; its instance creation code is not rerun after restore.")
 
 
 static func _gml_room_warn_persistent_room(scene):

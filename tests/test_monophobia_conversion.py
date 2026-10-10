@@ -87,16 +87,15 @@ class TestMonophobiaConversion(unittest.TestCase):
             converter.convert(cls.monophobia_path, "windows", cls.godot_dir, settings),
         )
         expected_outcome = ConversionOutcome(
-            state="partial",
+            state="success",
             steps=completed_conversion_step_ledger(all_keys),
             resources=ConversionCounts(
                 requested=450,
                 executed=450,
-                # Three rooms remain skipped for their known missing sidecars;
-                # the registry now also skips the three rows whose scenes are
-                # intentionally absent.
-                completed=444,
-                skipped=6,
+                # Rooms whose creation-code sidecars are missing still convert:
+                # GameMaker runs a missing creation-code file as empty code.
+                completed=450,
+                skipped=0,
             ),
         )
         if outcome != expected_outcome:
@@ -118,7 +117,7 @@ class TestMonophobiaConversion(unittest.TestCase):
         )
         if missing_markers:
             raise AssertionError(
-                "Monophobia's expected missing sidecar skips were not reported: "
+                "Monophobia's expected missing sidecar warnings were not reported: "
                 + ", ".join(missing_markers)
             )
 
@@ -220,21 +219,6 @@ class TestMonophobiaConversion(unittest.TestCase):
         self.assertEqual(
             warning_signatures,
             [
-                (
-                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
-                    "r_endlessroad",
-                    "None",
-                ),
-                (
-                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
-                    "r_house",
-                    "None",
-                ),
-                (
-                    "GM2GD-ASSET-REGISTRY-OUTPUT-UNAVAILABLE",
-                    "r_road2",
-                    "None",
-                ),
                 (
                     "GM2GD-ROOM-CREATION-MISSING",
                     "r_endlessroad",

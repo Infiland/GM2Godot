@@ -399,7 +399,7 @@ class RoomConverter(BaseConverter):
         has_creation_code_blocker = False
         if room_creation_code.has_code:
             try:
-                self._require_creation_code_source(
+                if self._require_creation_code_source(
                     room_creation_code,
                     room_name=room.name,
                     event="room creation code",
@@ -407,14 +407,14 @@ class RoomConverter(BaseConverter):
                         "Warning: Missing GameMaker room creation code file for room "
                         f"{room.name}: {room_creation_code.source_path}"
                     ),
-                )
-                room_creation_body = self._transpile_creation_code(
-                    room_creation_code.source_path,
-                    room.name,
-                    "room creation code",
-                    asset_names=asset_names,
-                    top_level_global_scope=True,
-                )
+                ):
+                    room_creation_body = self._transpile_creation_code(
+                        room_creation_code.source_path,
+                        room.name,
+                        "room creation code",
+                        asset_names=asset_names,
+                        top_level_global_scope=True,
+                    )
             except _RoomCreationCodeBlocked:
                 has_creation_code_blocker = True
 
@@ -432,7 +432,7 @@ class RoomConverter(BaseConverter):
             instance_name = _instance_name(instance)
             event = f"instance creation code for {instance_name}"
             try:
-                self._require_creation_code_source(
+                if not self._require_creation_code_source(
                     creation_code,
                     room_name=room.name,
                     event=event,
@@ -441,7 +441,8 @@ class RoomConverter(BaseConverter):
                         f"room {room.name}, instance {instance_name}: "
                         f"{creation_code.source_path}"
                     ),
-                )
+                ):
+                    continue
                 body = self._transpile_creation_code(
                     creation_code.source_path,
                     room.name,
@@ -479,9 +480,15 @@ class RoomConverter(BaseConverter):
         room_name: str,
         event: str,
         missing_message: str,
-    ) -> None:
+    ) -> bool:
+        """Return whether declared creation code has a readable source file.
+
+        GameMaker runs a declared creation-code file that is absent on disk as
+        empty code, so the room still converts without it. Rejected (unsafe)
+        source paths still block the room.
+        """
         if metadata.exists:
-            return
+            return True
         if metadata.path_rejected:
             raise _RoomCreationCodeBlocked(
                 f"Rejected declared {event} source for room {room_name}"
@@ -496,12 +503,13 @@ class RoomConverter(BaseConverter):
                 resource_type="room",
                 event=event,
                 workaround=(
-                    "Restore the declared GameMaker creation-code source or remove "
-                    "the stale creation-code declaration before converting this room."
+                    "GameMaker runs a missing creation-code file as empty code, so the "
+                    "room was converted without it. Restore the source file if the "
+                    "creation code was not meant to be empty."
                 ),
             )
         self._safe_log(missing_message)
-        raise _RoomCreationCodeBlocked(missing_message)
+        return False
 
     def _transpile_creation_code(
         self,

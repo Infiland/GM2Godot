@@ -1384,7 +1384,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('extends "res://gm2godot/gml_room_node.gd"', script)
         self.assertIn("func _gm2godot_room_creation_code():", script)
 
-    def test_missing_room_creation_code_skips_room_with_structured_diagnostic(self):
+    def test_missing_room_creation_code_converts_room_as_empty_code(self):
         self._write_yyp(["r_missing_code"])
         missing_path = os.path.join(
             self.gm_dir, "rooms", "r_missing_code", "MissingCreationCode.gml"
@@ -1402,11 +1402,18 @@ class TestRoomConverter(unittest.TestCase):
         counts = converter.conversion_step_result().resources
         self.assertEqual(counts.requested, 1)
         self.assertEqual(counts.executed, 1)
-        self.assertEqual(counts.completed, 0)
-        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
         self.assertEqual(counts.failed, 0)
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(self.godot_dir, "rooms", "r_missing_code", "r_missing_code.tscn")
+            )
+        )
         self.assertFalse(
-            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_missing_code"))
+            os.path.exists(
+                os.path.join(self.godot_dir, "rooms", "r_missing_code", "r_missing_code.gd")
+            )
         )
         missing_logs = [
             log
@@ -2129,7 +2136,7 @@ class TestRoomConverter(unittest.TestCase):
             (diagnostic, startup_diagnostics[0]),
         )
 
-    def test_missing_instance_creation_code_skips_room_with_structured_diagnostic(self):
+    def test_missing_instance_creation_code_converts_room_as_empty_code(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player")
         self._write_object_scene("o_player")
@@ -2161,12 +2168,20 @@ class TestRoomConverter(unittest.TestCase):
         counts = converter.conversion_step_result().resources
         self.assertEqual(counts.requested, 1)
         self.assertEqual(counts.executed, 1)
-        self.assertEqual(counts.completed, 0)
-        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
         self.assertEqual(counts.failed, 0)
+        content = self._read_scene("r_missing_instance_code")
+        self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
+        self.assertIn("metadata/gamemaker_creation_code_file_exists = false", content)
         self.assertFalse(
             os.path.exists(
-                os.path.join(self.godot_dir, "rooms", "r_missing_instance_code")
+                os.path.join(
+                    self.godot_dir,
+                    "rooms",
+                    "r_missing_instance_code",
+                    "r_missing_instance_code.gd",
+                )
             )
         )
         missing_logs = [
@@ -2481,6 +2496,12 @@ class TestRoomConverter(unittest.TestCase):
                             creation_code_file="RoomCreationCode.gml" if name == "r_blocked" else "",
                         ),
                     )
+                    if name == "r_blocked":
+                        # Untranspilable creation code blocks the first room.
+                        _write_file(
+                            os.path.join(gm_dir, "rooms", name, "RoomCreationCode.gml"),
+                            "room_value = @;\n",
+                        )
                 project_path = os.path.join(godot_dir, "project.godot")
                 initial = (
                     '[application]\nconfig/name="Existing"\n'

@@ -324,12 +324,7 @@ static func gml_draw_text_ext(x, y, text, sep, width):
 
 
 static func gml_draw_text_transformed(x, y, text, xscale, yscale, angle):
-	var target = _gml_draw_target()
-	if target == null:
-		return null
-	target.draw_set_transform(Vector2(_to_real(x), _to_real(y)), deg_to_rad(-_to_real(angle)), Vector2(_to_real(xscale), _to_real(yscale)))
-	_gml_draw_text_at(0, 0, text, -1, -1)
-	target.draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_gml_draw_text_at(x, y, text, -1, -1, xscale, yscale, angle)
 	return null
 
 
@@ -1698,12 +1693,59 @@ static func _gml_draw_tileset_resource(tileset):
 	return null
 
 
-static func _gml_draw_text_at(x, y, text, sep, width):
+# Draws text like GR_Text_Draw: xscale/yscale and angle (degrees,
+# counter-clockwise) transform it around (x, y), and colours is null (the draw
+# colour and alpha), one Color, or four Colors for the corners (top-left,
+# top-right, bottom-right, bottom-left) of draw_text_colour. `base` is the draw
+# transform the target keeps outside this call.
+static func _gml_draw_text_at(x, y, text, sep, width, xscale = 1.0, yscale = 1.0, angle = 0.0, colours = null, base = Transform2D.IDENTITY):
 	var target = _gml_draw_target()
 	if target == null:
 		return
 	var layout = _gml_draw_text_layout(text, sep, width)
-	_gml_draw_text_emit(target.get_canvas_item(), Vector2(_to_real(x), _to_real(y)), layout, _gml_draw_current_color())
+	var scale = Vector2(_to_real(xscale), _to_real(yscale))
+	_gml_draw_text_on(target, Vector2(_to_real(x), _to_real(y)), layout, scale, _to_real(angle), colours, base)
+
+
+# Draws a layout on `target`, a CanvasItem or any draw target with
+# get_canvas_item() and draw_set_transform_matrix(). Untransformed text snaps
+# to whole pixels like nearest sampling does; scaled or rotated lines are drawn
+# under their own transform (see _gml_draw_text_line_transform), leaving the
+# target at `base`. Corner gradients on a converted bitmap font are drawn as
+# GameMaker's glyph quads; other fonts draw them in the average colour.
+static func _gml_draw_text_on(target, origin, layout, scale, angle, colours, base):
+	var corners = _gml_draw_text_corners(colours)
+	# The runner only rotates glyphs when |angle| > 0.001 degrees.
+	var rotation = angle if absf(angle) > 0.001 else 0.0
+	if corners.size() == 4:
+		if bool(layout["bitmap"]):
+			var canvas_item = target.get_canvas_item()
+			for quad in _gml_draw_text_glyph_quads(origin, layout, scale, rotation, corners):
+				RenderingServer.canvas_item_add_primitive(canvas_item, quad["points"], quad["colors"], quad["uvs"], quad["texture"])
+			return
+		corners = [(corners[0] + corners[1] + corners[2] + corners[3]) / 4.0]
+	if scale == Vector2.ONE and rotation == 0.0:
+		_gml_draw_text_emit(target.get_canvas_item(), origin, layout, corners[0])
+		return
+	var pen = Vector2(0.0, float(layout["ascent"]))
+	for line in layout["lines"]:
+		target.draw_set_transform_matrix(base * _gml_draw_text_line_transform(origin, line, scale, rotation))
+		_gml_draw_text_emit_line(target.get_canvas_item(), line, layout, corners[0], pen)
+	target.draw_set_transform_matrix(base)
+
+
+static func _gml_draw_text_corners(colours):
+	if colours is Color:
+		return [colours]
+	if (colours is Array or colours is PackedColorArray) and colours.size() >= 4:
+		var corners = []
+		for index in range(4):
+			var value = colours[index]
+			corners.append(value if value is Color else _gml_draw_color(value))
+		if corners[0] == corners[1] and corners[1] == corners[2] and corners[2] == corners[3]:
+			return [corners[0]]
+		return corners
+	return [_gml_draw_current_color()]
 
 
 # Text layout follows the GameMaker runner (yyFont.js GR_Text_Draw): lines come
@@ -1711,8 +1753,8 @@ static func _gml_draw_text_at(x, y, text, sep, width):
 # height when sep < 0), valign moves the block up by line_count * line_step
 # (half of it for fa_middle) and halign moves each line left by its GameMaker
 # width (half of it for fa_center). Positions are offsets from the draw origin
-# in unscaled, unrotated text space; apply draw_text_transformed scale and
-# rotation as the canvas transform around the origin. Each line holds:
+# in unscaled, unrotated text space (_gml_draw_text_line_transform places a
+# line for draw_text_transformed). Each line holds:
 #   text     the characters the font has glyphs for (the runner skips the
 #            others without advancing), drawable with Font.draw_string;
 #   codes    null, or the glyph codes to draw one by one with Font.draw_char at
@@ -1720,7 +1762,8 @@ static func _gml_draw_text_at(x, y, text, sep, width):
 #            change the line (kerned pairs, or default-ignorable, control or
 #            complex-script characters that GameMaker draws as plain glyphs);
 #   x, y     the pen offset of the line top-left; width is its GameMaker width.
-# Use _gml_draw_text_emit to draw a layout onto any canvas item RID.
+# Use _gml_draw_text_emit to draw a layout onto any canvas item RID, or
+# _gml_draw_text_on for scaled, rotated or corner-coloured text.
 static func _gml_draw_text_layout(text, sep, width):
 	var info = _gml_draw_font_info()
 	var font = info["font"]
@@ -1755,6 +1798,8 @@ static func _gml_draw_text_layout(text, sep, width):
 	return {
 		"font": font,
 		"font_size": font_size,
+		"bitmap": bool(info["bitmap"]),
+		"info": info,
 		"ascent": font.get_ascent(font_size),
 		"line_height": float(info["line_height"]),
 		"line_step": line_step,
@@ -1763,18 +1808,129 @@ static func _gml_draw_text_layout(text, sep, width):
 
 
 static func _gml_draw_text_emit(canvas_item, origin, layout, color):
+	for line in layout["lines"]:
+		_gml_draw_text_emit_line(canvas_item, line, layout, color, _gml_draw_text_line_baseline(origin, line, layout))
+
+
+# Draws one laid-out line with its pen starting on the baseline point `pen`.
+# Keep `pen` whole: Godot floors the position of fixed-size bitmap glyphs.
+static func _gml_draw_text_emit_line(canvas_item, line, layout, color, pen):
 	var font = layout["font"]
 	var font_size = int(layout["font_size"])
+	var codes = line["codes"]
+	if typeof(codes) != TYPE_PACKED_INT32_ARRAY:
+		if str(line["text"]) != "":
+			font.draw_string(canvas_item, pen, line["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+		return
+	var offsets = line["offsets"]
+	for index in range(codes.size()):
+		font.draw_char(canvas_item, pen + Vector2(offsets[index], 0.0), codes[index], font_size, color)
+
+
+# The draw transform for one laid-out line of draw_text_transformed
+# (GR_Text_Draw): the text scales and rotates (counter-clockwise degrees)
+# around the draw origin, alignment offsets included, except that the runner
+# moves from line to line by sin(angle) * xscale * step across and
+# cos(angle) * yscale * step down. Draw the line's glyphs from the local pen
+# (0, ascent) under it. Without scale or rotation the origin snaps to whole
+# pixels like _gml_draw_text_emit.
+static func _gml_draw_text_line_transform(origin, line, scale, rotation):
+	var line_x = float(line["x"])
+	var line_y = float(line["y"])
+	if scale == Vector2.ONE and rotation == 0.0:
+		var pen = origin + Vector2(line_x, line_y)
+		return Transform2D(0.0, Vector2(ceil(pen.x - 0.5), ceil(pen.y - 0.5)))
+	var radians = deg_to_rad(rotation)
+	var across = line_x * scale.x
+	var position = origin + Vector2(
+		sin(radians) * scale.x * line_y + cos(radians) * across,
+		cos(radians) * scale.y * line_y - sin(radians) * across
+	)
+	return Transform2D(-radians, scale, 0.0, position)
+
+
+# The glyph quads Draw_String_GL emits for corner-coloured text on a converted
+# bitmap font, in draw space: each glyph cell plus the one texel of its page
+# that GameMaker draws around it, with page texture, UVs and corner colours.
+# When the top or the bottom colours differ, each vertex takes the top
+# (c1 to c2) and bottom (c4 to c3) colours at its distance from the line's
+# first quad over the line's unscaled width, capped at 1, with channels
+# truncated like merge_colour and the top-left alpha; otherwise each cell
+# fades from its top colours to its bottom colours.
+static func _gml_draw_text_glyph_quads(origin, layout, scale, rotation, corners):
+	var quads = []
+	var info = layout["info"]
+	var font_rid = layout["font"].get_rids()[0]
+	var server = TextServerManager.get_primary_interface()
+	var key = Vector2i(int(layout["font_size"]), 0)
+	var ascent = float(layout["ascent"])
+	var across = corners[0] != corners[1] or corners[2] != corners[3]
 	for line in layout["lines"]:
-		var baseline = _gml_draw_text_line_baseline(origin, line, layout)
-		var codes = line["codes"]
-		if typeof(codes) != TYPE_PACKED_INT32_ARRAY:
-			if str(line["text"]) != "":
-				font.draw_string(canvas_item, baseline, line["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
-			continue
-		var offsets = line["offsets"]
+		var transform = _gml_draw_text_line_transform(origin, line, scale, rotation)
+		var codes = _gml_font_line_codes(line)
+		var offsets = line["offsets"] if typeof(line["codes"]) == TYPE_PACKED_INT32_ARRAY else _gml_font_glyph_offsets(info, codes)
+		var line_width = float(line["width"])
+		var first_left = null
 		for index in range(codes.size()):
-			font.draw_char(canvas_item, baseline + Vector2(offsets[index], 0.0), codes[index], font_size, color)
+			var glyph = codes[index]
+			var size = server.font_get_glyph_size(font_rid, key, glyph)
+			if size.x <= 0.0 or size.y <= 0.0:
+				continue
+			var page_size = server.font_get_glyph_texture_size(font_rid, key, glyph)
+			var uv = server.font_get_glyph_uv_rect(font_rid, key, glyph)
+			var low = Vector2(minf(1.0, uv.position.x), minf(1.0, uv.position.y))
+			var high = Vector2(minf(1.0, page_size.x - uv.end.x), minf(1.0, page_size.y - uv.end.y))
+			var cell_position = Vector2(float(offsets[index]), ascent) + server.font_get_glyph_offset(font_rid, key, glyph) - low
+			var cell = Rect2(cell_position, size + low + high)
+			var source = Rect2((uv.position - low) / page_size, cell.size / page_size)
+			var colors = PackedColorArray([corners[0], corners[1], corners[2], corners[3]])
+			if across:
+				var left = cell.position.x * scale.x
+				if first_left == null:
+					first_left = left
+				var start = _gml_draw_text_gradient_amount(left - first_left, line_width)
+				var finish = _gml_draw_text_gradient_amount(cell.end.x * scale.x - first_left, line_width)
+				var alpha = corners[0].a
+				colors = PackedColorArray([
+					_gml_draw_text_merge_colour(corners[0], corners[1], start, alpha),
+					_gml_draw_text_merge_colour(corners[0], corners[1], finish, alpha),
+					_gml_draw_text_merge_colour(corners[3], corners[2], finish, alpha),
+					_gml_draw_text_merge_colour(corners[3], corners[2], start, alpha),
+				])
+			quads.append({
+				"glyph": glyph,
+				"texture": server.font_get_glyph_texture_rid(font_rid, key, glyph),
+				"points": PackedVector2Array([
+					transform * cell.position,
+					transform * Vector2(cell.end.x, cell.position.y),
+					transform * cell.end,
+					transform * Vector2(cell.position.x, cell.end.y),
+				]),
+				"uvs": PackedVector2Array([
+					source.position,
+					Vector2(source.end.x, source.position.y),
+					source.end,
+					Vector2(source.position.x, source.end.y),
+				]),
+				"colors": colors,
+			})
+	return quads
+
+
+static func _gml_draw_text_gradient_amount(distance, line_width):
+	if line_width <= 0.0:
+		return 0.0 if distance == 0.0 else 1.0
+	return minf(absf(distance) / line_width, 1.0)
+
+
+static func _gml_draw_text_merge_colour(from, to, amount, alpha):
+	var keep = 1.0 - amount
+	return Color(
+		floorf(from.r8 * keep + to.r8 * amount) / 255.0,
+		floorf(from.g8 * keep + to.g8 * amount) / 255.0,
+		floorf(from.b8 * keep + to.b8 * amount) / 255.0,
+		alpha
+	)
 
 
 # GameMaker places each glyph quad at fractional coordinates and samples the
@@ -1788,33 +1944,6 @@ static func _gml_draw_text_line_baseline(origin, line, layout):
 static func _gml_draw_text_metrics(text, sep, width):
 	var info = _gml_draw_font_info()
 	return _gml_font_lines_size(info, _gml_font_split_text(info, gml_string(text), width), sep)
-
-
-# Kept for callers that still pass a font and size: GameMaker metrics always
-# come from the current draw font.
-static func _gml_draw_line_metrics(lines, _font, _font_size, sep):
-	return _gml_font_lines_size(_gml_draw_font_info(), lines, sep)
-
-
-static func _gml_draw_line_step(_font, _font_size, sep):
-	return _gml_font_line_step(_gml_draw_font_info(), sep)
-
-
-static func _gml_draw_aligned_text_origin(position, metrics):
-	var origin = position
-	if int(_gml_draw_state["valign"]) == GML_FA_MIDDLE:
-		origin.y -= metrics.y * 0.5
-	elif int(_gml_draw_state["valign"]) == GML_FA_BOTTOM:
-		origin.y -= metrics.y
-	return origin
-
-
-static func _gml_draw_wrapped_lines(text, _font, _font_size, _sep, width):
-	return _gml_font_split_text(_gml_draw_font_info(), str(text), width).duplicate()
-
-
-static func _gml_draw_wrap_paragraph(paragraph, _font, _font_size, width):
-	return _gml_font_wrap_lines(_gml_draw_font_info(), str(paragraph), int(_to_real(width)))
 
 
 # string_width/string_height(_ext) (yyFont.js TextWidth/TextHeight and
@@ -1860,7 +1989,7 @@ static func _gml_font_split_text(info, text, width):
 # Split_TextBlock without wrapping: LF and CR both end a line (a CR LF or LF CR
 # pair counts once), a trailing line break adds no empty line, and an empty
 # string has no lines at all.
-static func _gml_font_split_lines(text: String):
+static func _gml_font_split_lines(text):
 	var lines = []
 	var length = text.length()
 	var start = 0
@@ -1884,7 +2013,7 @@ static func _gml_font_split_lines(text: String):
 # keeps its leading spaces but drops trailing ones, it breaks after the last
 # space that fits, a word wider than the line runs on to the next space, and
 # text that cannot fit a single character stops the split.
-static func _gml_font_wrap_lines(info, text: String, line_width: int):
+static func _gml_font_wrap_lines(info, text, line_width):
 	var lines = []
 	var length = text.length()
 	var start = 0
@@ -1924,7 +2053,7 @@ static func _gml_font_wrap_lines(info, text: String, line_width: int):
 	return lines
 
 
-static func _gml_font_wrap_break(text: String, start: int, end: int):
+static func _gml_font_wrap_break(text, start, end):
 	var length = text.length()
 	if end == length or text.unicode_at(end) == 32:
 		return end
@@ -1946,7 +2075,7 @@ static func _gml_font_wrap_break(text: String, start: int, end: int):
 # as the shift of the font's first glyph; kerning never affects it. Lines with
 # a kerned pair of drawn glyphs or a character shaping would alter keep their
 # glyph codes and pen offsets for drawing one glyph at a time.
-static func _gml_font_line_record(info, line: String):
+static func _gml_font_line_record(info, line):
 	var cache: Dictionary = info["line_cache"]
 	if cache.has(line):
 		return cache[line]
@@ -1986,6 +2115,18 @@ static func _gml_font_codes_to_text(codes):
 	for code in codes:
 		parts.append(String.chr(code))
 	return "".join(parts)
+
+
+# The glyph codes a laid-out line draws.
+static func _gml_font_line_codes(line):
+	var codes = line["codes"]
+	if typeof(codes) == TYPE_PACKED_INT32_ARRAY:
+		return codes
+	var text = str(line["text"])
+	var result = PackedInt32Array()
+	for index in range(text.length()):
+		result.append(text.unicode_at(index))
+	return result
 
 
 # Pen offsets for drawing glyphs one by one, with the runner's kerning: the

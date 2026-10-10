@@ -33,7 +33,7 @@ This file records what the current codebase appears to support. Partial features
 - [ ] Partial: full compression, preload, streaming, platform format, positional emitter/listener, and async audio semantics.
 
 - [x] Convert fonts from their baked GameMaker atlas and glyph table into fixed-size bitmap fonts.
-- [x] Lay out and measure text with GameMaker glyph shifts, offsets, kerning, line height, alignment, and wrapping.
+- [x] Lay out, measure, and draw text with GameMaker glyph shifts, offsets, kerning, line height, alignment, wrapping, and `draw_text_transformed` line placement.
 - [x] Convert fonts without a baked atlas from bundled TTFs or system font lookup.
 - [x] Generate fallback `SystemFont` resources.
 - [x] Preserve selected bold, italic, anti-aliasing, and subfolder metadata.

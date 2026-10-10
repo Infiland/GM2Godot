@@ -7,7 +7,7 @@ from src.conversion.script_generator import generate_script_content
 class TestDrawEvents(unittest.TestCase):
     def test_maps_draw_event_family(self):
         cases = [
-            (0, "_draw", 3, "Draw_0.gml"),
+            (0, "_on_draw", 3, "Draw_0.gml"),
             (64, "_on_draw_gui", 15, "Draw_64.gml"),
             (65, "_on_resize", 6, "Draw_65.gml"),
             (72, "_on_draw_begin", 16, "Draw_72.gml"),
@@ -35,7 +35,7 @@ class TestDrawEvents(unittest.TestCase):
         ])
 
         for function_name in (
-            "_draw",
+            "_on_draw",
             "_on_draw_gui",
             "_on_resize",
             "_on_draw_begin",

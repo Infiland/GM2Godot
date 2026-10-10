@@ -491,6 +491,14 @@ class ProjectSettingsConverter(BaseConverter):
             (f"option_{self.gm_platform}_version", self.gm_platform, "application", "config/version", "string"),
             ("option_windows_use_splash", "windows", "application", "boot_splash/show_image", "bool"),
             ("option_game_speed", "main", "application", "run/max_fps", "int"),
+            ("option_draw_colour", "main", "gm2godot", "draw/initial_colour", "colour"),
+            (
+                "option_legacy_primitive_drawing",
+                "main",
+                "gm2godot",
+                "draw/legacy_primitive_drawing",
+                "bool",
+            ),
             (
                 f"option_{self.gm_platform}_vsync",
                 self.gm_platform,
@@ -604,6 +612,9 @@ class ProjectSettingsConverter(BaseConverter):
             return 1 if self._bool_option(value) else 0
         if value_kind == "fullscreen":
             return 3 if self._bool_option(value) else 0
+        if value_kind == "colour":
+            # GameMaker stores the colour as 0xAABBGGRR; the runtime uses BGR.
+            return self._int_option(value) & 0xFFFFFF
         return value
 
     @staticmethod

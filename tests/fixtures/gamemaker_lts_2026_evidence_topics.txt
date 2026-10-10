@@ -153,6 +153,8 @@ GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_general.h
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_part.htm
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_part_ext.htm
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_pos.htm
+GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_stretched.htm
+GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_stretched_ext.htm
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_tiled.htm
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_sprite_tiled_ext.htm
 GameMaker_Language/GML_Reference/Drawing/Sprites_And_Tiles/draw_tile.htm
@@ -180,8 +182,13 @@ GameMaker_Language/GML_Reference/Drawing/Text/draw_set_font.htm
 GameMaker_Language/GML_Reference/Drawing/Text/draw_set_halign.htm
 GameMaker_Language/GML_Reference/Drawing/Text/draw_set_valign.htm
 GameMaker_Language/GML_Reference/Drawing/Text/draw_text.htm
+GameMaker_Language/GML_Reference/Drawing/Text/draw_text_colour.htm
 GameMaker_Language/GML_Reference/Drawing/Text/draw_text_ext.htm
+GameMaker_Language/GML_Reference/Drawing/Text/draw_text_ext_colour.htm
+GameMaker_Language/GML_Reference/Drawing/Text/draw_text_ext_transformed.htm
+GameMaker_Language/GML_Reference/Drawing/Text/draw_text_ext_transformed_colour.htm
 GameMaker_Language/GML_Reference/Drawing/Text/draw_text_transformed.htm
+GameMaker_Language/GML_Reference/Drawing/Text/draw_text_transformed_colour.htm
 GameMaker_Language/GML_Reference/Drawing/Textures/Textures.htm
 GameMaker_Language/GML_Reference/Drawing/Textures/texture_set_stage.htm
 GameMaker_Language/GML_Reference/Drawing/Videos/Videos.htm

@@ -63,8 +63,10 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "yprevious",
     "ystart",
 })
+# Members the object runtime prelude declares for its own bookkeeping.
+_OBJECT_RUNTIME_MEMBER_NAMES = frozenset({"_gm_depth"})
 _DRAW_RUNTIME_FUNCTIONS = frozenset({
-    "_draw",
+    "_on_draw",
     "_on_draw_begin",
     "_on_draw_end",
     "_on_draw_gui",
@@ -73,7 +75,7 @@ _DRAW_RUNTIME_FUNCTIONS = frozenset({
     "_on_post_draw",
     "_on_pre_draw",
 })
-_SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
+_SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | _OBJECT_RUNTIME_MEMBER_NAMES | frozenset({
     "AnimatedSprite2D",
     "CanvasItem",
     "Color",
@@ -201,6 +203,7 @@ def _valid_instance_variables(instance_variables: Iterable[str] | None) -> list[
         name for name in instance_variables
         if _IDENTIFIER_RE.match(name) and name not in _SCRIPT_BUILTIN_VARIABLES
         and name not in _NATIVE_NODE2D_MEMBER_VARIABLES
+        and name not in _OBJECT_RUNTIME_MEMBER_NAMES
     )
 
 
@@ -443,7 +446,12 @@ def _emit_object_runtime_prelude(
         "\n\nvar id = GMRuntime.gml_instance_noone()"
         "\nvar other = GMRuntime.gml_instance_noone()"
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
-        "\nvar depth = 0"
+        "\nvar _gm_depth = 0.0"
+        "\nvar depth:"
+        "\n\tget:"
+        "\n\t\treturn GMRuntime.gml_instance_depth_get(self, _gm_depth)"
+        "\n\tset(value):"
+        "\n\t\t_gm_depth = GMRuntime.gml_instance_depth_assign(self, value, _gm_depth)"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
         f"\nvar persistent = {str(object_runtime.persistent).lower()}"
         if declare_members
@@ -460,7 +468,7 @@ def _emit_object_runtime_prelude(
         f"\n\tpersistent = {str(object_runtime.persistent).lower()}"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
-        "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"
+        "\n\t_gm_depth = GMRuntime.gml_instance_depth_initial(self, _gm_depth)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"solid\", solid)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"persistent\", persistent)"
         "\n\tset_meta(\"gamemaker_persistent\", persistent)"

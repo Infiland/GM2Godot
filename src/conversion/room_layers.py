@@ -5,7 +5,10 @@ import os
 import re
 from typing import NamedTuple, Protocol
 
-from src.conversion.architecture_policy import layer_policy_metadata_lines
+from src.conversion.architecture_policy import (
+    gamemaker_depth_to_z_index,
+    layer_policy_metadata_lines,
+)
 from src.conversion.gamemaker_json import decode_gamemaker_json
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.room_creation_code import (
@@ -317,7 +320,7 @@ def _layer_node_lines(
     layer_fields = RoomLayerFields(layer, "")
     visible = layer_fields.visible
     depth = _coerce_int(layer_fields.depth)
-    z_index = -depth
+    z_index = gamemaker_depth_to_z_index(depth)
 
     lines = [
         f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
@@ -327,6 +330,8 @@ def _layer_node_lines(
             y=_format_number(layer_fields.y),
         ),
         f"z_index = {z_index}",
+        # Layers nest in the scene tree but GameMaker depth is absolute.
+        "z_as_relative = false",
         f"metadata/gamemaker_layer_name = {godot_value(original_name)}",
         f"metadata/gamemaker_layer_node_name = {godot_value(node_name)}",
         f"metadata/gamemaker_layer_type = {godot_value(resource_type)}",

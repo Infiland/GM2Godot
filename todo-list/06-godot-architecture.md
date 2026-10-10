@@ -67,7 +67,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 
 ## Event Architecture
 
-- [x] Some Godot callbacks are generated directly, such as `_ready`, `_process`, `_physics_process`, `_draw`, and `_exit_tree` mappings.
+- [x] Some Godot callbacks are generated directly, such as `_ready`, `_process`, `_physics_process` and `_exit_tree` mappings; GameMaker draw events become `_on_draw*` methods that the runtime draw pipeline calls.
 - [ ] Centralize event order in `GMEvents` instead of relying only on Godot callback order.
 - [ ] Use Godot `_process` as a frame pump, not as the final GameMaker Step semantic.
 - [ ] Use `_physics_process` carefully because GameMaker Begin Step is not identical to Godot fixed physics order.

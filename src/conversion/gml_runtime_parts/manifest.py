@@ -313,6 +313,21 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_platform_services_godot.py",),
     ),
     _segment(
+        "74_game_step.gd",
+        "GameMaker step loop: frame pump, image animation, Other events, and room-change abort.",
+        depends_on=(
+            "00_prelude.gd",
+            "15_asset_registry.gd",
+            "45_collision_queries.gd",
+            "52_cameras_display.gd",
+            "53_game_input.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+            "67_async_runtime.gd",
+        ),
+        tests=("tests/test_game_step_godot.py", "tests/test_event_scheduler_godot.py"),
+    ),
+    _segment(
         "80_static_hash_clone_error.gd",
         "Late compatibility wrappers for static, hash, clone, and error helpers.",
         depends_on=("00_prelude.gd", "20_methods_and_exceptions.gd", "50_static_types_and_clone.gd", "60_conversion_helpers.gd"),

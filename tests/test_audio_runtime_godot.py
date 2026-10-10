@@ -29,6 +29,9 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \treturn true
 
         func _ready():
+        \t# Exercises the runtime API directly: without the GameMaker frame
+        \t# pump, async events are delivered immediately.
+        \tGMRuntime.gml_event_scheduler_pump_detach()
         \tif AudioServer.get_bus_index("audiogroup_music") == -1:
         \t\tAudioServer.add_bus()
         \t\tAudioServer.set_bus_name(AudioServer.get_bus_count() - 1, "audiogroup_music")

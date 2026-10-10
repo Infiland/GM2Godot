@@ -45,7 +45,8 @@ def godot_audio_filename(source_path: StrPath) -> str:
     Files that already carry a supported extension keep their name; files with
     no recognised extension get the extension of the container they hold.
     """
-    filename = os.path.basename(os.fspath(source_path))
+    path_text = source_path if isinstance(source_path, str) else source_path.__fspath__()
+    filename = os.path.basename(path_text)
     if os.path.splitext(filename)[1].lower() in GODOT_AUDIO_EXTENSIONS:
         return filename
     detected_extension = sniff_audio_extension(source_path)

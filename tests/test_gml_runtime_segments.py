@@ -41,6 +41,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "47_paths_motion_planning.gd",
     "48_drawing_basic_forms.gd",
     "49_drawing_surfaces.gd",
+    "50_draw_pipeline.gd",
     "51_particles.gd",
     "52_cameras_display.gd",
     "53_game_input.gd",

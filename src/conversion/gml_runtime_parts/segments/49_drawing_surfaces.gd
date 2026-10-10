@@ -94,8 +94,10 @@ static func gml_surface_get_height(surface):
 	return int(resolved_surface["height"])
 
 
+# draw_surface uses white and the draw alpha; draw_surface_ext its own colour
+# and alpha.
 static func gml_draw_surface(surface, x, y):
-	return gml_draw_surface_ext(surface, x, y, 1, 1, 0, 0xffffff, 1)
+	return gml_draw_surface_ext(surface, x, y, 1, 1, 0, 0xffffff, _gml_draw_state["alpha"])
 
 
 static func gml_draw_surface_ext(surface, x, y, xscale, yscale, rot, colour, alpha):
@@ -197,7 +199,7 @@ static func _gml_surface_clear_active_target(color, alpha):
 	if typeof(raw_surface) != TYPE_DICTIONARY:
 		return false
 	var active_surface: Dictionary = raw_surface
-	active_surface["image"].fill(_gml_draw_modulate(color, alpha))
+	active_surface["image"].fill(_gml_draw_colour_value(color, alpha))
 	active_surface["texture"].update(active_surface["image"])
 	return true
 

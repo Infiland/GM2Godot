@@ -51,7 +51,7 @@ def _write_object(project_dir: Path, name: str) -> None:
         object_dir / f"{name}.gd",
         generate_script_content(
             [{"eventType": 8, "eventNum": 0}],
-            code_bodies={"_draw": transpile_gml_code(draw_source)},
+            code_bodies={"_on_draw": transpile_gml_code(draw_source)},
             instance_variables={"draw_ok"},
             object_runtime=ObjectRuntimeConfig(object_name=name),
         ),
@@ -97,10 +97,13 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_handle_is_valid(handle), "drawer was not created"):
         \t\treturn
         \tvar drawer = GMRuntime.gml_handle_resolve(handle)
-        \tdrawer.queue_redraw()
-        \tawait get_tree().process_frame
-        \tawait get_tree().process_frame
+        \tGMRuntime.gml_draw_event_dispatch_frame()
         \tif not _check(abs(float(drawer.draw_ok) - 0.5) <= 0.01, "draw event did not execute through runtime helpers"):
+        \t\treturn
+        \tvar sink = GMRuntime.gm2godot_draw_debug_sink_for(drawer, "draw")
+        \tif not _check(int(sink.get("commands", 0)) >= 6, "draw commands did not reach the instance canvas item: " + str(sink)):
+        \t\treturn
+        \tif not _check(sink["parent"] == drawer.get_canvas_item(), "instance draw sink is not parented to the instance"):
         \t\treturn
         \tvar stream = VideoStreamTheora.new()
         \tGMRuntime.gml_video_open(stream)
@@ -187,6 +190,8 @@ class TestDrawBasicGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("DRAW_SMOKE_OK", output)
+        self.assertNotIn("Drawing is only allowed", output)
+        self.assertNotIn("SCRIPT ERROR", output)
 
 
 if __name__ == "__main__":

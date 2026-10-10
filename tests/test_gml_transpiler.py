@@ -4806,7 +4806,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 asset_names={"spr_player"},
             ),
             "GMRuntime.gml_gpu_set_blendmode(1)\n"
-            "GMRuntime.gml_draw_set_blend_mode(2)\n"
+            "GMRuntime.gml_draw_set_blend_mode(3)\n"
             "GMRuntime.gml_gpu_set_texfilter(true)\n"
             "GMRuntime.gml_texture_set_repeat(false)\n"
             "GMRuntime.gml_gpu_set_colorwriteenable(true, false, true, true)\n"
@@ -4837,9 +4837,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "texturegroup_sprites = GMRuntime.gml_texturegroup_get_sprites('Characters')",
         )
 
+    def test_gpu_state_aliases_and_colour_write_array_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "gpu_set_tex_filter(true);"
+                "old = gpu_get_tex_filter();"
+                "gpu_set_tex_repeat(false);"
+                "mask = gpu_get_colourwriteenable();"
+                "gpu_set_colourwriteenable(true, true, true, false);"
+                "gpu_set_colourwriteenable(mask);",
+                indent="",
+            ),
+            "GMRuntime.gml_gpu_set_texfilter(true)\n"
+            "old = GMRuntime.gml_gpu_get_texfilter()\n"
+            "GMRuntime.gml_gpu_set_texrepeat(false)\n"
+            "mask = GMRuntime.gml_gpu_get_colorwriteenable()\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(true, true, true, false)\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(mask)",
+        )
+
     def test_gpu_helper_arity_errors_are_deterministic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 4.*got 3"):
-            transpile_gml_code("gpu_set_colorwriteenable(true, true, true);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 1 to 4.*got 5"):
+            transpile_gml_code("gpu_set_colorwriteenable(true, true, true, true, true);", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "texturegroup_set_mode.*1 to 3.*got 4"):
             transpile_gml_code("texturegroup_set_mode(true, false, spr_player, 0);", indent="", asset_names={"spr_player"})
 

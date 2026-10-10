@@ -2335,6 +2335,53 @@ class TestScriptGeneration(unittest.TestCase):
         )
         self.assertNotIn("super._ready()", child_content)
 
+    def test_child_input_bindings_include_inherited_input_events(self):
+        """A child with input events of its own still runs the ones it inherits."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 6, "eventNum": 11}])
+        self._setup_object(
+            "o_parent",
+            event_list=[{"eventType": 9, "eventNum": 89}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_grandparent",
+        )
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 9, "eventNum": 27}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_parent",
+        )
+        event_files = {
+            "o_grandparent": ("Mouse_11.gml",),
+            "o_parent": ("KeyPress_89.gml", "Mouse_4.gml"),
+            "o_child": ("KeyPress_27.gml", "Mouse_4.gml"),
+        }
+        for object_name, file_names in event_files.items():
+            for file_name in file_names:
+                with open(
+                    os.path.join(self.gm_dir, "objects", object_name, file_name),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    f.write("handled = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+        bindings = child_content[child_content.index("func _gm_input_event_bindings():"):]
+        bindings = bindings[: bindings.index("\t]")]
+        self.assertEqual(
+            [line.strip() for line in bindings.splitlines()[2:]],
+            [
+                '{"event_type": 9, "event_num": 27, "method": "_gm_input_key_press_27"},',
+                '{"event_type": 6, "event_num": 4, "method": "_gm_input_mouse_4"},',
+                '{"event_type": 9, "event_num": 89, "method": "_gm_input_key_press_89"},',
+                '{"event_type": 6, "event_num": 11, "method": "_gm_input_mouse_11"},',
+            ],
+        )
+        self.assertNotIn("func _gm_input_key_press_89", child_content)
+        self.assertNotIn("func _gm_input_mouse_11", child_content)
+
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce the scheduler Step callback."""
         self._setup_object("o_test", event_list=[{"eventType": 3, "eventNum": 0}])

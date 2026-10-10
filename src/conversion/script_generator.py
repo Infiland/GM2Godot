@@ -147,6 +147,11 @@ class ObjectRuntimeConfig:
     persistent: bool = False
     inherit_ready: bool = False
     inherit_exit_tree: bool = False
+    # Input event methods (``_gm_input_*``) that ancestor objects define. An
+    # object with input events of its own lists them in its binding table
+    # too, because GameMaker runs inherited events the object does not
+    # override.
+    inherited_input_functions: tuple[str, ...] = ()
 
 
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
@@ -562,10 +567,17 @@ def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
     return f"{begin_line}\n{body}\n{end_line}"
 
 
-def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -> str:
+def _render_input_event_bindings_body(
+    input_functions: Sequence[EventMapping],
+    inherited_input_functions: Iterable[str] = (),
+) -> str:
+    function_names = [func.godot_func for func in input_functions]
+    function_names += [
+        name for name in dict.fromkeys(inherited_input_functions) if name not in function_names
+    ]
     binding_lines = ["\treturn ["]
-    for func in input_functions:
-        match = re.match(r"^_gm_input_(keyboard|mouse|key_press|key_release|gesture)_(-?\d+)$", func.godot_func)
+    for function_name in function_names:
+        match = re.match(r"^_gm_input_(keyboard|mouse|key_press|key_release|gesture)_(-?\d+)$", function_name)
         if match is None:
             continue
         family = match.group(1)
@@ -578,7 +590,7 @@ def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -
         }[family]
         event_num = int(match.group(2))
         binding_lines.append(
-            f'\t\t{{"event_type": {event_type}, "event_num": {event_num}, "method": {_gd_string(func.godot_func)}}},'
+            f'\t\t{{"event_type": {event_type}, "event_num": {event_num}, "method": {_gd_string(function_name)}}},'
         )
     binding_lines.append("\t]")
     return "\n".join(binding_lines)
@@ -668,7 +680,10 @@ def generate_script_content(
     if input_functions:
         effective_code_bodies.setdefault(
             "_gm_input_event_bindings",
-            _render_input_event_bindings_body(_deduplicate_functions(input_functions)),
+            _render_input_event_bindings_body(
+                _deduplicate_functions(input_functions),
+                object_runtime.inherited_input_functions if object_runtime is not None else (),
+            ),
         )
     if collision_bindings:
         effective_code_bodies.setdefault(

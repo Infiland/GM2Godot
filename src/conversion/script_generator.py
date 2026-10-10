@@ -45,6 +45,7 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "image_speed",
     "image_xscale",
     "image_yscale",
+    "mask_index",
     "path_index",
     "path_position",
     "path_scale",
@@ -146,6 +147,7 @@ class ObjectRuntimeConfig:
     persistent: bool = False
     inherit_ready: bool = False
     inherit_exit_tree: bool = False
+    mask_sprite_name: str | None = None
 
 
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
@@ -446,8 +448,16 @@ def _emit_object_runtime_prelude(
         "\nvar depth = 0"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
         f"\nvar persistent = {str(object_runtime.persistent).lower()}"
+        "\nvar mask_index = -1"
         if declare_members
         else ""
+    )
+    # Every instance starts with its own object's collision mask; -1 means
+    # the sprite is the mask.
+    initial_mask = (
+        f"GMRuntime.gml_asset_get_index({_gd_string(object_runtime.mask_sprite_name)})"
+        if object_runtime.mask_sprite_name
+        else "-1"
     )
     lines.append(
         member_lines
@@ -458,6 +468,7 @@ def _emit_object_runtime_prelude(
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         f"\n\tsolid = {str(object_runtime.solid).lower()}"
         f"\n\tpersistent = {str(object_runtime.persistent).lower()}"
+        f"\n\tmask_index = {initial_mask}"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"

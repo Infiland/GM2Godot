@@ -518,23 +518,18 @@ static func _gml_input_any_mouse_button_down():
 
 
 static func _gml_input_instance_contains_mouse(inst):
+	# GameMaker runs an instance's mouse events while the mouse (mouse_x and
+	# mouse_y, in room coordinates) is over the instance's collision mask,
+	# tested precisely when the mask is precise. Instances without a sprite or
+	# mask never get them.
 	if inst == null:
 		return false
+	var mouse = Vector2(_to_real(gml_builtin_global("mouse_x")), _to_real(gml_builtin_global("mouse_y")))
 	if inst.has_method("_gm_input_contains_point"):
-		return bool(inst.call("_gm_input_contains_point", _gml_input_mouse_position.x, _gml_input_mouse_position.y))
+		return bool(inst.call("_gm_input_contains_point", mouse.x, mouse.y))
 	if inst is Control:
-		return inst.get_global_rect().has_point(_gml_input_mouse_position)
-	if inst is Node2D:
-		var radius = 0.0
-		if inst.has_meta("gamemaker_collision_radius"):
-			radius = max(_to_real(inst.get_meta("gamemaker_collision_radius")), 0.0)
-		if radius > 0.0:
-			return inst.global_position.distance_to(_gml_input_mouse_position) <= radius
-	_gml_input_dispatch_trace.append({
-		"diagnostic": "missing_mouse_mask",
-		"instance": str(inst.name) if inst is Node else "",
-	})
-	return true
+		return inst.get_global_rect().has_point(mouse)
+	return _gml_collision_instance_contains_point(inst, mouse.x, mouse.y)
 
 
 static func _gml_input_gesture_event_matches(inst, event_num, binding):

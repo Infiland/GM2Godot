@@ -506,7 +506,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         os.makedirs(os.path.join(self.gm_dir, "options", "main"), exist_ok=True)
         os.makedirs(os.path.join(self.gm_dir, "options", "windows"), exist_ok=True)
         with open(os.path.join(self.gm_dir, "options", "main", "options_main.yy"), "w", encoding="utf-8") as f:
-            f.write('{"option_game_speed":144,}')
+            f.write('{"option_game_speed":144,"option_collision_compatibility":true,}')
         with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
             f.write(
                 "{"
@@ -564,6 +564,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn('config/version="123"', content)
         self.assertIn("boot_splash/show_image=false", content)
         self.assertIn("run/max_fps=144", content)
+        self.assertIn("config/gm2godot_collision_compatibility=true", content)
         self.assertIn("window/vsync/vsync_mode=0", content)
         self.assertIn("window/size/resizable=true", content)
         self.assertIn("window/size/borderless=false", content)
@@ -590,6 +591,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn('config/description="true"', application)
         self.assertIn('config/version="123"', application)
         self.assertIn("run/max_fps=144", application)
+        self.assertIn("config/gm2godot_collision_compatibility=true", application)
         self.assertNotIn("window/", application)
         self.assertNotIn("textures/canvas_textures/default_texture_filter", application)
 
@@ -705,6 +707,8 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
                 '\t\t"description_type": type_string(typeof(ProjectSettings.get_setting('
                 '"application/config/description"))),\n'
                 '\t\t"max_fps": ProjectSettings.get_setting("application/run/max_fps"),\n'
+                '\t\t"collision_compatibility": ProjectSettings.get_setting('
+                '"application/config/gm2godot_collision_compatibility"),\n'
                 '\t\t"vsync": ProjectSettings.get_setting("display/window/vsync/vsync_mode"),\n'
                 '\t\t"resizable": ProjectSettings.get_setting("display/window/size/resizable"),\n'
                 '\t\t"borderless": ProjectSettings.get_setting("display/window/size/borderless"),\n'
@@ -765,6 +769,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
             settings,
             {
                 "borderless": False,
+                "collision_compatibility": True,
                 "description": "true",
                 "description_type": "String",
                 "legacy_mode": False,

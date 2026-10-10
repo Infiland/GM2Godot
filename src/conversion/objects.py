@@ -122,6 +122,7 @@ class ParsedObject(TypedDict):
     source_path: str
     sprite_name: str | None
     sprite_source_path: str | None
+    mask_sprite_name: str | None
     parent_object_name: str | None
     parent_object_source_path: str | None
     event_list: list[JsonObject]
@@ -1000,16 +1001,29 @@ class ObjectConverter(BaseConverter):
                 object_name=object_name,
             )
 
-            return ParsedObject(
+            parsed_object = ParsedObject(
                 source_path=resolved_object.source_path,
                 sprite_name=sprite_reference[0] if sprite_reference is not None else None,
                 sprite_source_path=sprite_reference[1] if sprite_reference is not None else None,
+                mask_sprite_name=None,
                 parent_object_name=parent_reference[0] if parent_reference is not None else None,
                 parent_object_source_path=parent_reference[1] if parent_reference is not None else None,
                 event_list=event_list,
                 solid=bool(data.get("solid", False)),
                 persistent=bool(data.get("persistent", False)),
             )
+            # The object's collision mask ("Collision Mask" in the object
+            # editor) starts every instance's mask_index.
+            mask_reference = self._resolve_resource_reference(
+                data.get("spriteMaskId"),
+                owner_source_path=resolved_object.source_path,
+                owner_name=object_name,
+                field="spriteMaskId",
+                resource_kind="sprites",
+            )
+            if mask_reference is not None:
+                parsed_object["mask_sprite_name"] = mask_reference[0]
+            return parsed_object
         except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             self._safe_log(get_localized("Console_Convertor_Objects_ParseError").format(
                 yy_path=yy_path, object_name=object_name))
@@ -1697,6 +1711,7 @@ class ObjectConverter(BaseConverter):
                 ),
                 solid=solid,
                 persistent=persistent,
+                mask_sprite_name=parsed["mask_sprite_name"],
                 inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
                 inherit_exit_tree="_exit_tree" in inherited_event_functions and "_exit_tree" not in local_event_functions,
             ),

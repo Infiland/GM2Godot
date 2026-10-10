@@ -492,6 +492,13 @@ class ProjectSettingsConverter(BaseConverter):
             ("option_windows_use_splash", "windows", "application", "boot_splash/show_image", "bool"),
             ("option_game_speed", "main", "application", "run/max_fps", "int"),
             (
+                "option_collision_compatibility",
+                "main",
+                "application",
+                "config/gm2godot_collision_compatibility",
+                "bool",
+            ),
+            (
                 f"option_{self.gm_platform}_vsync",
                 self.gm_platform,
                 "display",

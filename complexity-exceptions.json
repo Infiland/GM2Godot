@@ -563,8 +563,8 @@
     {
       "path": "src/conversion/gml_transpiler_parts/emitter.py",
       "function": "_emit_name",
-      "measured_complexity": 20,
-      "ceiling": 20,
+      "measured_complexity": 19,
+      "ceiling": 19,
       "reason": "Preserve locals/static/asset-global precedence and resolve_asset_names=False checks.",
       "removal_action": "Separate nonlocal builtin/legacy and instance resolution.",
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-ac0c1a7f90ca0a8f"

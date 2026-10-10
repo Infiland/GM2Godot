@@ -1485,7 +1485,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("project_choose(items[index + 1], other.value)"),
             "GMRuntime.gml_call_named("
             '"project_choose", [GMRuntime.gml_array_get(items, GMRuntime.gml_add(index, 1)), '
-            "other.value], self, other)",
+            'GMRuntime.gml_selector_get(other, "value")], self, other)',
         )
 
     def test_parses_array_literals(self):
@@ -1668,7 +1668,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("mystruct[$ key_name]"),
             "GMRuntime.gml_struct_get(mystruct, key_name)",
         )
-        self.assertEqual(transpile_gml_expression("other.value"), "other.value")
+        self.assertEqual(
+            transpile_gml_expression("other.value"),
+            'GMRuntime.gml_selector_get(other, "value")',
+        )
 
     def test_transpiles_struct_variable_functions_through_runtime(self):
         self.assertEqual(
@@ -3290,6 +3293,75 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_collision_circle_list(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false, hits, true)',
         )
 
+    def test_free_empty_list_and_ellipse_collision_queries_pass_self(self):
+        asset_names = {"o_wall"}
+
+        self.assertEqual(
+            transpile_gml_expression("place_free(x + 1, y)"),
+            "GMRuntime.gml_place_free(self, GMRuntime.gml_add(position.x, 1), position.y)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("place_empty(x, y)"),
+            "GMRuntime.gml_place_empty(self, position.x, position.y)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("place_empty(x, y, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_place_empty(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("position_empty(mouse_x, mouse_y)"),
+            'GMRuntime.gml_position_empty(self, GMRuntime.gml_builtin_global("mouse_x"), '
+            'GMRuntime.gml_builtin_global("mouse_y"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("distance_to_point(10, 20)"),
+            "GMRuntime.gml_distance_to_point(self, 10, 20)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_ellipse(0, 0, 10, 8, o_wall, true, true)", asset_names=asset_names),
+            'GMRuntime.gml_collision_ellipse(self, 0, 0, 10, 8, GMRuntime.gml_asset_get_index("o_wall"), true, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_ellipse_list(0, 0, 10, 8, o_wall, false, true, hits, true)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_ellipse_list(self, 0, 0, 10, 8, GMRuntime.gml_asset_get_index("o_wall"), false, true, hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_place_list(x, y, o_wall, hits, true)", asset_names=asset_names),
+            'GMRuntime.gml_instance_place_list(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_wall"), hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_position_list(4, 5, all, hits, false)"),
+            "GMRuntime.gml_instance_position_list(self, 4, 5, GMRuntime.gml_instance_all(), hits, false)",
+        )
+
+    def test_builtin_instance_members_use_runtime_lookups(self):
+        self.assertEqual(
+            transpile_gml_expression("bbox_bottom <= platform.bbox_top"),
+            'GMRuntime.gml_lte(GMRuntime.gml_struct_get(self, "bbox_bottom"), '
+            'GMRuntime.gml_selector_get(platform, "bbox_top"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) left = bbox_left;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "left", '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "bbox_left"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("other.hp -= 1; x = other.x; other.speed = 3;", indent=""),
+            'GMRuntime.gml_selector_update(other, "hp", func(_gml_selector_value_0): '
+            "return GMRuntime.gml_sub(_gml_selector_value_0, 1))\n"
+            'position.x = GMRuntime.gml_selector_get(other, "x")\n'
+            'GMRuntime.gml_selector_set(other, "speed", 3)',
+        )
+        self.assertEqual(
+            transpile_gml_code("self.speed = 3; total = self.hp;", indent=""),
+            'GMRuntime.gml_selector_set(self, "speed", 3)\n'
+            "total = self.hp",
+        )
+
     def test_motion_helpers_pass_self_and_sync_motion_assignments(self):
         self.assertEqual(
             transpile_gml_expression("motion_set(180, 4)"),
@@ -3314,6 +3386,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("place_snapped(16, 16)"),
             "GMRuntime.gml_place_snapped(self, 16, 16)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_outside_solid(90, -1)"),
+            "GMRuntime.gml_move_outside_solid(self, 90, -1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_outside_all(180, 8)"),
+            "GMRuntime.gml_move_outside_all(self, 180, 8)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_wrap(true, false, sprite_get_width(spr))"),
+            "GMRuntime.gml_move_wrap(self, true, false, GMRuntime.gml_sprite_get_width(spr))",
         )
         self.assertEqual(
             transpile_gml_code("speed = 5; direction = 90; hspeed += 2; vspeed--;", indent=""),
@@ -4142,7 +4226,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_code("var x = 1; self.x += x;", indent=""),
-            "var x = 1\nself.x = GMRuntime.gml_add(self.x, x)",
+            "var x = 1\n"
+            'GMRuntime.gml_selector_update(self, "x", func(_gml_selector_value_0): '
+            "return GMRuntime.gml_add(_gml_selector_value_0, x))",
         )
 
     def test_transpiles_if_blocks(self):
@@ -5343,6 +5429,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "image_alpha = 0.5",
         )
         self.assertEqual(instance_variables, set())
+
+    def test_mask_index_is_a_builtin_instance_variable(self):
+        instance_variables: set[str] = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                "mask_index = s_hitbox; if (mask_index == -1) mask_index = sprite_index;",
+                indent="",
+                asset_names={"s_hitbox"},
+                instance_variables=instance_variables,
+            ),
+            'mask_index = GMRuntime.gml_asset_get_index("s_hitbox")\n'
+            "if GMRuntime.gml_eq(mask_index, -1):\n"
+            "\tmask_index = sprite_index",
+        )
+        self.assertEqual(instance_variables, set())
+        self.assertEqual(
+            transpile_gml_code("other.mask_index = s_hitbox", indent="", asset_names={"s_hitbox"}),
+            'GMRuntime.gml_selector_set(other, "mask_index", GMRuntime.gml_asset_get_index("s_hitbox"))',
+        )
+
+    def test_sprite_get_name_reads_the_asset_registry(self):
+        self.assertEqual(
+            transpile_gml_expression("sprite_get_name(sprite_index)"),
+            "GMRuntime.gml_sprite_get_name(sprite_index)",
+        )
 
     def test_path_builtins_are_predeclared_instance_state(self):
         instance_variables: set[str] = set()

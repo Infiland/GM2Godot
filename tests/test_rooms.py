@@ -485,6 +485,13 @@ class TestRoomConverter(unittest.TestCase):
         with open(script_path, "r", encoding="utf-8") as f:
             return f.read()
 
+    def _root_metadata_json(self, content: str, key: str) -> Any:
+        prefix = f"metadata/{key} = "
+        for line in content.splitlines():
+            if line.startswith(prefix):
+                return json.loads(line[len(prefix):])
+        self.fail(f"scene has no metadata/{key}")
+
     def test_generates_minimal_room_scene_with_metadata(self):
         self._write_yyp(["r_test"])
         room_yy_path = self._write_room(
@@ -2291,16 +2298,38 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_camera")
 
-        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]', content)
-        self.assertIn('position = Vector2(420, 380)', content)
-        self.assertIn('enabled = true', content)
-        self.assertIn('metadata/gamemaker_view_visible = true', content)
-        self.assertIn('limit_left = 100', content)
-        self.assertIn('limit_top = 200', content)
-        self.assertIn('limit_right = 740', content)
-        self.assertIn('limit_bottom = 560', content)
-        self.assertIn('zoom = Vector2(2, 2)', content)
-        self.assertIn('metadata/gamemaker_view_object_name = "o_player"', content)
+        self.assertIn(
+            '[node name="ViewCamera" type="Camera2D" parent="."]\n'
+            "position = Vector2(420, 380)\n"
+            "ignore_rotation = false\n"
+            "limit_enabled = false\n"
+            "zoom = Vector2(2, 2)\n"
+            "metadata/gamemaker_view_camera = true\n",
+            content,
+        )
+        self.assertNotIn("limit_left", content)
+        views = self._root_metadata_json(content, "gamemaker_views")
+        self.assertEqual(len(views), 8)
+        self.assertEqual(
+            views[0],
+            {
+                "visible": True,
+                "xview": 100,
+                "yview": 200,
+                "wview": 640,
+                "hview": 360,
+                "xport": 0,
+                "yport": 0,
+                "wport": 1280,
+                "hport": 720,
+                "object": "o_player",
+                "hborder": 32,
+                "vborder": 16,
+                "hspeed": -1,
+                "vspeed": 4,
+            },
+        )
+        self.assertFalse(views[1]["visible"])
         self.assertFalse(any("follows object o_player" in log for log in self.logs))
 
     def test_multiple_visible_views_disable_additional_cameras_and_warn(self):
@@ -2317,9 +2346,11 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_cameras")
 
-        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\nenabled = true', content)
-        self.assertIn('[node name="ViewCamera_2" type="Camera2D" parent="."]\nposition = Vector2(480, 90)\nenabled = false', content)
-        self.assertEqual(content.count("metadata/gamemaker_view_visible = true"), 2)
+        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\n', content)
+        self.assertEqual(content.count('type="Camera2D"'), 1)
+        views = self._root_metadata_json(content, "gamemaker_views")
+        self.assertEqual([view["visible"] for view in views[:3]], [True, True, False])
+        self.assertEqual(views[1]["xview"], 320)
         self.assertTrue(any("multiple visible GameMaker views" in log for log in self.logs))
 
     def test_room_inheritance_resolves_settings_and_layers(self):
@@ -2348,8 +2379,8 @@ class TestRoomConverter(unittest.TestCase):
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])
-        self._write_room("r_second")
-        self._write_room("r_first")
+        self._write_room("r_second", width=800, height=600)
+        self._write_room("r_first", width=640, height=480)
         self._write_project_godot(
             '[application]\n'
             'config/name="Existing"\n'
@@ -2357,6 +2388,7 @@ class TestRoomConverter(unittest.TestCase):
             '\n'
             '[display]\n'
             'window/size/viewport_width=1280\n'
+            'mouse_cursor/custom_image="res://cursor.png"\n'
         )
 
         self._make_converter().convert_all()
@@ -2368,9 +2400,69 @@ class TestRoomConverter(unittest.TestCase):
         self.assertNotIn('run/main_scene="res://old.tscn"', content)
         self.assertIn('config/name="Existing"', content)
         self.assertIn('[display]', content)
-        self.assertIn('window/size/viewport_width=1280', content)
+        self.assertIn('mouse_cursor/custom_image="res://cursor.png"', content)
+        self.assertNotIn('window/size/viewport_width=1280', content)
+        self.assertIn('window/size/viewport_width=640', content)
+        self.assertIn('window/size/viewport_height=480', content)
+        self.assertIn('window/stretch/mode="viewport"', content)
         self.assertTrue(any("startup scene" in log.lower() for log in self.logs))
         self.assertTrue(any("r_first" in log for log in self.logs))
+        self.assertTrue(any("application surface size 640x480" in log for log in self.logs))
+
+    def test_first_room_visible_viewports_size_the_application_surface(self):
+        self._write_yyp(["r_first", "r_second"], room_order=["r_first", "r_second"])
+        self._write_room(
+            "r_first",
+            width=2000,
+            height=1000,
+            views=[
+                {
+                    "visible": True,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 0,
+                    "yport": 0,
+                    "wport": 640,
+                    "hport": 640,
+                },
+                {
+                    "visible": False,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 0,
+                    "yport": 0,
+                    "wport": 4000,
+                    "hport": 4000,
+                },
+                {
+                    "visible": True,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 600,
+                    "yport": 100,
+                    "wport": 100,
+                    "hport": 600,
+                },
+            ],
+            view_settings={"enableViews": True},
+        )
+        self._write_room("r_second", width=320, height=240)
+        self._write_project_godot()
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('window/size/viewport_width=700', content)
+        self.assertIn('window/size/viewport_height=700', content)
+        self.assertIn('window/stretch/mode="viewport"', content)
 
     def test_sets_project_startup_scene_to_first_room_subfolder_path(self):
         self._write_yyp(["r_intro"])

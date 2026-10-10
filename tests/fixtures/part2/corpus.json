@@ -182,7 +182,7 @@
       "id": "gui_scaling_cameras",
       "feature": "GUI size and view coordinate transforms",
       "pixel_check": false,
-      "assertion_paths": ["tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_multiview_viewport_state_and_diagnostics"]
+      "assertion_paths": ["tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_views_cameras_window_gui_and_mouse"]
     },
     {
       "id": "tile_layer_data",

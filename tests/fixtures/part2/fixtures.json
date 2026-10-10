@@ -214,7 +214,7 @@
         "display_set_gui_size is visible through display_get_gui_width/height."
       ],
       "godot_assertion_paths": [
-        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_camera_helpers_sync_view_arrays_and_gui_size"
+        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_views_cameras_window_gui_and_mouse"
       ],
       "unsupported_api_issue_refs": []
     },
@@ -247,14 +247,14 @@
       "game_maker_source_path": "source/multiview_viewport_backend.gml",
       "game_maker_expectation": "Two visible views preserve viewport rectangles, convert window mouse coordinates through the selected view, and store view_surface_id while reporting the unsupported render-backed SubViewport behavior.",
       "expected_godot_assertions": [
-        "Converted Camera2D metadata initializes view visibility and viewport rectangles.",
+        "Converted room view metadata initializes view visibility and viewport rectangles.",
         "view_set_xport/yport/wport/hport update runtime state.",
         "window_view_mouse_get_x/y convert through view viewport and view rectangle scale.",
         "GUI mouse conversion remains available while multi-view compatibility state is active.",
         "Multiple active views and view_surface_id assignments record deterministic backend diagnostics."
       ],
       "godot_assertion_paths": [
-        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_multiview_viewport_state_and_diagnostics"
+        "tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_views_cameras_window_gui_and_mouse"
       ],
       "unsupported_api_issue_refs": [
         {

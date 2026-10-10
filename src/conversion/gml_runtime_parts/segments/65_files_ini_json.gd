@@ -9,9 +9,12 @@ const GML_FILE_BIN_READ = 0
 const GML_FILE_BIN_WRITE = 1
 const GML_FILE_BIN_READ_WRITE = 2
 
-static var _gml_ini_config = ConfigFile.new()
+# The open INI file: its sections by name, each holding its keys and their
+# value text, in file order.
+static var _gml_ini_sections = {}
 static var _gml_ini_path = ""
 static var _gml_ini_open = false
+static var _gml_ini_changed = false
 static var _gml_included_file_registry_loaded = false
 static var _gml_included_file_registry_available = false
 static var _gml_included_file_registry_requires_content_receipts = false
@@ -295,81 +298,95 @@ static func gml_filename_change_ext(path, extension):
 	return base + ext
 
 
+# INI files follow GameMaker's format and rules: every value is kept as
+# text, a file is only written by ini_close after something changed it, and
+# opening an INI file closes the one still open. ini_open reads the save
+# area first and falls back to the included file of the same name.
 static func gml_ini_open(path):
-	var read_path = _gml_file_resolve_path(path, false)
+	if _gml_ini_open:
+		gml_ini_close()
 	var write_path = _gml_file_resolve_path(path, true)
-	_gml_ini_config = ConfigFile.new()
-	if FileAccess.file_exists(read_path):
-		var err = _gml_ini_config.load(read_path)
-		if err != OK:
-			return gml_error("GML ini_open failed: " + gml_string(path))
-	_gml_ini_path = write_path
-	_gml_ini_open = true
+	var sections = _gml_ini_load_sections(write_path)
+	if sections.is_empty():
+		var read_path = _gml_file_resolve_path(path, false)
+		if read_path != write_path:
+			sections = _gml_ini_load_sections(read_path)
+	_gml_ini_begin(sections, write_path)
+	return null
+
+
+static func gml_ini_open_from_string(content):
+	if _gml_ini_open:
+		gml_ini_close()
+	# An INI opened from a string has no file; ini_close only returns it.
+	_gml_ini_begin(_gml_ini_parse(gml_string(content)), "")
 	return null
 
 
 static func gml_ini_close():
-	if _gml_ini_open and _gml_ini_path != "":
+	if not _gml_ini_open:
+		return gml_undefined()
+	var text = _gml_ini_text(_gml_ini_sections)
+	if _gml_ini_changed and _gml_ini_path != "":
 		_gml_file_ensure_parent_directory(_gml_ini_path)
-		_gml_ini_config.save(_gml_ini_path)
-	_gml_ini_config = ConfigFile.new()
-	_gml_ini_path = ""
+		var file = FileAccess.open(_gml_ini_path, FileAccess.WRITE)
+		if file != null:
+			file.store_string(text)
+			file.close()
+	_gml_ini_begin({}, "")
 	_gml_ini_open = false
-	return null
+	return text
 
 
 static func gml_ini_read_string(section, key, default_value):
-	if not _gml_ini_open:
-		return default_value
-	return str(_gml_ini_config.get_value(str(section), str(key), default_value))
+	var value: Variant = _gml_ini_value(section, key)
+	if value == null:
+		return gml_string(default_value)
+	return value
 
 
 static func gml_ini_read_real(section, key, default_value):
-	if not _gml_ini_open:
-		return default_value
-	var value = _gml_ini_config.get_value(str(section), str(key), default_value)
-	if is_number(value):
-		return value
-	var text = str(value).strip_edges()
-	if text.is_valid_int():
-		return int(text)
-	return text.to_float()
+	var value: Variant = _gml_ini_value(section, key)
+	if value == null:
+		if is_string(default_value):
+			return _gml_ini_text_to_real(default_value)
+		return float(_to_real(default_value))
+	return _gml_ini_text_to_real(value)
 
 
 static func gml_ini_write_string(section, key, value):
-	_gml_ini_ensure_open()
-	_gml_ini_config.set_value(str(section), str(key), gml_string(value))
+	_gml_ini_set_value(section, key, gml_string(value))
 	return null
 
 
 static func gml_ini_write_real(section, key, value):
-	_gml_ini_ensure_open()
-	_gml_ini_config.set_value(str(section), str(key), _to_real(value))
+	_gml_ini_set_value(section, key, _gml_ini_real_text(_to_real(value)))
 	return null
 
 
 static func gml_ini_section_exists(section):
-	if not _gml_ini_open:
-		return false
-	return _gml_ini_config.has_section(str(section))
+	return _gml_ini_open and _gml_ini_sections.has(gml_string(section))
 
 
 static func gml_ini_key_exists(section, key):
-	if not _gml_ini_open:
-		return false
-	return _gml_ini_config.has_section_key(str(section), str(key))
+	return _gml_ini_value(section, key) != null
 
 
 static func gml_ini_key_delete(section, key):
-	if _gml_ini_open:
-		_gml_ini_config.erase_section_key(str(section), str(key))
-	return null
+	if _gml_ini_value(section, key) == null:
+		return false
+	_gml_ini_sections[gml_string(section)].erase(gml_string(key))
+	_gml_ini_changed = true
+	return true
 
 
 static func gml_ini_section_delete(section):
-	if _gml_ini_open:
-		_gml_ini_config.erase_section(str(section))
-	return null
+	var name = gml_string(section)
+	if not _gml_ini_open or not _gml_ini_sections.has(name):
+		return false
+	_gml_ini_sections.erase(name)
+	_gml_ini_changed = true
+	return true
 
 
 static func gml_json_encode(value):
@@ -803,11 +820,147 @@ static func _gml_file_ensure_parent_directory(path):
 		DirAccess.make_dir_recursive_absolute(directory)
 
 
-static func _gml_ini_ensure_open():
+static func _gml_ini_begin(sections, path):
+	_gml_ini_sections = sections
+	_gml_ini_path = path
+	_gml_ini_open = true
+	_gml_ini_changed = false
+
+
+static func _gml_ini_value(section, key):
 	if not _gml_ini_open:
-		_gml_ini_config = ConfigFile.new()
-		_gml_ini_path = GML_FILE_USER_ROOT + "/default.ini"
-		_gml_ini_open = true
+		return null
+	var keys = _gml_ini_sections.get(gml_string(section), null)
+	if keys == null:
+		return null
+	return keys.get(gml_string(key), null)
+
+
+static func _gml_ini_set_value(section, key, text):
+	if not _gml_ini_open:
+		# GameMaker stops with an error here; keep the value in a default file.
+		_gml_ini_begin({}, GML_FILE_USER_ROOT + "/default.ini")
+	var name = gml_string(section)
+	if not _gml_ini_sections.has(name):
+		_gml_ini_sections[name] = {}
+	_gml_ini_sections[name][gml_string(key)] = text
+	_gml_ini_changed = true
+
+
+static func _gml_ini_load_sections(path):
+	if path == "" or not FileAccess.file_exists(path):
+		return {}
+	return _gml_ini_parse(FileAccess.get_file_as_string(path))
+
+
+# Reads INI text the way GameMaker does: [section] headers, key=value lines
+# and comment lines starting with ; or #. A value in double or single quotes
+# runs to the closing quote; an unquoted value runs to the end of the line or
+# to a ; or # comment (a backslash keeps the next character) and loses its
+# surrounding spaces; a value starting with [ or { runs to the end of the
+# line. Lines before the first section and keys without a value are ignored.
+static func _gml_ini_parse(text):
+	var sections = {}
+	var current = null
+	var source = str(text).trim_prefix(char(0xfeff))
+	for raw_line in source.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+		var line = raw_line.strip_edges(true, false)
+		if line == "" or line.begins_with(";") or line.begins_with("#"):
+			continue
+		if line.begins_with("["):
+			var close = line.find("]")
+			if close < 0:
+				continue
+			var name = line.substr(1, close - 1)
+			if not sections.has(name):
+				sections[name] = {}
+			current = sections[name]
+			continue
+		var equals = line.find("=")
+		if current == null or equals < 0:
+			continue
+		var value: Variant = _gml_ini_parse_value(line.substr(equals + 1))
+		if value != null:
+			current[line.substr(0, equals).strip_edges(false, true)] = value
+	return sections
+
+
+static func _gml_ini_parse_value(text):
+	var value = text.strip_edges(true, false)
+	if value == "" or value.begins_with(";") or value.begins_with("#"):
+		return null
+	var first = value.substr(0, 1)
+	if first == "\"" or first == "'":
+		var close = value.find(first, 1)
+		return value.substr(1) if close < 0 else value.substr(1, close - 1)
+	if first == "[" or first == "{":
+		return value.strip_edges(false, true)
+	var end = 0
+	while end < value.length():
+		var character = value.substr(end, 1)
+		if character == ";" or character == "#":
+			break
+		end += 2 if character == "\\" else 1
+	return value.substr(0, end).strip_edges(false, true)
+
+
+# Writes INI text as GameMaker does: values in double quotes, or in single
+# quotes when they contain a double quote, with CR LF line ends.
+static func _gml_ini_text(sections):
+	var lines = []
+	for name in sections.keys():
+		lines.append("[" + str(name) + "]")
+		var keys = sections[name]
+		for key in keys.keys():
+			var value = str(keys[key])
+			if not value.contains("\""):
+				value = "\"" + value + "\""
+			elif not value.contains("'"):
+				value = "'" + value + "'"
+			lines.append(str(key) + "=" + value)
+	var text = ""
+	for line in lines:
+		text += line + "\r\n"
+	return text
+
+
+# The number at the start of the text, like GameMaker's number parsing for
+# INI values; text that does not start with a number reads as 0.
+static func _gml_ini_text_to_real(text):
+	var value = str(text).strip_edges()
+	var lowered = value.to_lower().trim_prefix("+")
+	if lowered.begins_with("inf"):
+		return INF
+	if lowered.begins_with("-inf"):
+		return -INF
+	if lowered.begins_with("nan"):
+		return NAN
+	var matched = _gml_ini_number_pattern().search(value)
+	if matched == null:
+		return 0.0
+	return matched.get_string().to_float()
+
+
+static var _gml_ini_number_regex = null
+
+
+static func _gml_ini_number_pattern():
+	if _gml_ini_number_regex == null:
+		_gml_ini_number_regex = RegEx.create_from_string("^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?")
+	return _gml_ini_number_regex
+
+
+# ini_write_real stores the shortest text that reads back as the same number,
+# as GameMaker does: whole numbers have no decimals.
+static func _gml_ini_real_text(value):
+	var number = float(value)
+	if is_nan(number):
+		return "NaN"
+	if is_inf(number):
+		return "Infinity" if number > 0.0 else "-Infinity"
+	if number == floor(number) and abs(number) < 1e18:
+		return str(int(number))
+	return var_to_str(number)
 
 
 static func _gml_json_compatible(value):

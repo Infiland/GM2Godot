@@ -7358,10 +7358,11 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
             "yes",
             "yes",
             "GameMaker_Language/GML_Reference/File_Handling/File_Handling.htm",
-            "Implemented through a GMRuntime-owned ConfigFile-backed INI compatibility layer.",
+            "GameMaker INI format and rules: text values, written by ini_close only after a change, the save area read before included files.",
         )
         for name in (
             "ini_open",
+            "ini_open_from_string",
             "ini_close",
             "ini_read_string",
             "ini_read_real",

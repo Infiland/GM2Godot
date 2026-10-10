@@ -334,6 +334,7 @@ _FILE_ARITY: dict[str, tuple[int, int | None]] = {
     "filename_path": (1, 1),
     "filename_change_ext": (2, 2),
     "ini_open": (1, 1),
+    "ini_open_from_string": (1, 1),
     "ini_close": (0, 0),
     "ini_read_string": (3, 3),
     "ini_read_real": (3, 3),

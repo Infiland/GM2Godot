@@ -958,6 +958,7 @@ FILE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "filename_path": "gml_filename_path",
     "filename_change_ext": "gml_filename_change_ext",
     "ini_open": "gml_ini_open",
+    "ini_open_from_string": "gml_ini_open_from_string",
     "ini_close": "gml_ini_close",
     "ini_read_string": "gml_ini_read_string",
     "ini_read_real": "gml_ini_read_real",

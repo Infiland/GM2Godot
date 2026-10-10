@@ -32,6 +32,11 @@ from src.conversion.room_creation_code import (
     resolve_instance_creation_code,
     resolve_room_creation_code,
 )
+from src.conversion.room_display import (
+    application_surface_display_settings,
+    application_surface_size,
+    room_view_entries,
+)
 from src.conversion.room_layers import godot_string, serialize_room_layers
 from src.conversion.room_metadata import (
     RoomInstanceFields,
@@ -64,6 +69,9 @@ def render_room_runtime_script() -> str:
         "extends Node2D\n\n"
         'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
         f'const GM2GODOT_ROOM_ROOT_POLICY = "{ROOM_ROOT_POLICY_ID}"\n\n'
+        "func _enter_tree():\n"
+        "\tGMRuntime._gml_view_room_prepare(self)\n"
+        "\n\n"
         "func _ready():\n"
         "\tGMRuntime.gml_room_enter_scene(self)\n"
         "\n\n"
@@ -343,6 +351,7 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_inherit_creation_order = {json.dumps(room.inherit_creation_order)}',
             f'metadata/gamemaker_view_settings = {json.dumps(room.view_settings)}',
             f'metadata/gamemaker_view_count = {json.dumps(room_value_length(room.views))}',
+            f'metadata/gamemaker_views = {json.dumps(room_view_entries(room.views, room.room_settings, room.yy_path))}',
             f'metadata/gamemaker_physics_world = {json.dumps(physics_settings.physics_world)}',
             f'metadata/gamemaker_physics_gravity_x = {json.dumps(physics_settings.gravity_x)}',
             f'metadata/gamemaker_physics_gravity_y = {json.dumps(physics_settings.gravity_y)}',
@@ -878,10 +887,34 @@ class RoomConverter(BaseConverter):
                     scene_path=scene_path,
                 )
             )
+            self._set_application_surface_display(project_file, first_room)
         else:
             self._log_startup_warning(
                 "Warning: project.godot not found; could not set startup scene."
             )
+
+    def _set_application_surface_display(
+        self, project_file: GodotProjectFile, first_room: IndexedRoom
+    ) -> None:
+        """Size the root viewport like GameMaker's application surface.
+
+        GameMaker derives the application surface (and the initial window)
+        from the first room: the visible viewports' bounding box when views
+        are enabled, otherwise the room size. Later rooms are scaled onto
+        that fixed surface, which Godot's ``viewport`` stretch mode mirrors.
+        """
+        width, height = application_surface_size(
+            first_room.room_settings,
+            first_room.view_settings,
+            first_room.views,
+            first_room.yy_path,
+        )
+        for section, key, value in application_surface_display_settings(width, height):
+            project_file.set_setting(section, key, value)
+        self.log_callback(
+            "Set Godot viewport to the GameMaker application surface size "
+            f"{width}x{height} from first room {first_room.name}"
+        )
 
     @staticmethod
     def _clear_stale_managed_main_scene(

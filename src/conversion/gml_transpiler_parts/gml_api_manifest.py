@@ -4064,7 +4064,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Audio/audio_sound_gain.htm",
-        "Applies immediate asset-level or sound-instance gain changes; timed fades are accepted but not interpolated.",
+        "Sets asset-level or sound-instance gain (gains above 1 allowed) with GameMaker's linear millisecond fades.",
     ),
     _entry(
         "audio_sound_pitch",
@@ -4153,14 +4153,14 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "audio_group_set_gain",
         "Audio",
-        "partial",
+        "implemented",
         "src.conversion.gml_runtime_parts.segments.54_audio_runtime",
         "yes",
         "yes",
-        "partial",
+        "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Audio/Audio_Groups/audio_group_set_gain.htm",
-        "Applies immediate generated group gain to active players; timed gain interpolation is accepted but not scheduled.",
+        "Sets the generated group gain for active and future players with GameMaker's linear millisecond fades.",
     ),
     _entry(
         "audio_group_get_gain",

@@ -175,7 +175,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "54_audio_runtime.gd",
         "Audio bus, emitter, listener, sync-group, and playback helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),
-        tests=("tests/test_audio_runtime_godot.py",),
+        tests=("tests/test_audio_runtime_godot.py", "tests/test_audio_gain_fades_godot.py"),
     ),
     _segment(
         "55_room_game_flow.gd",

@@ -1628,7 +1628,8 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
-        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()", content)
+        self.assertIn("\t_gm_constructed = true\n\t_gm_register_instance()", content)
         self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
 
     def test_script_records_persistent_object_state(self):
@@ -1673,10 +1674,7 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
-        self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
-            content,
-        )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
 
     def test_child_object_reuses_inherited_sprite_runtime_members(self):
         self._setup_object(
@@ -1798,7 +1796,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertIn("func _ready():", content)
-        self.assertIn("\t_gm_register_instance()", content)
+        self.assertIn("\t_gm_construct_instance()", content)
 
     def test_script_transpiles_create_event_gml_body(self):
         """Simple expression/operator GML bodies should populate event functions."""
@@ -2724,8 +2722,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
+        self.assertIn("\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n", content)
         self.assertIn(
-            "\t_gm_initialize_sprite_runtime()\n"
+            "\t_gm_construct_instance()\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\timage_index = 2",

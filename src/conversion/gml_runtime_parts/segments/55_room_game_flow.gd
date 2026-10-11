@@ -382,7 +382,10 @@ static func gml_room_prepare_scene(scene):
 		traversal_order += 1
 	held.sort_custom(_gml_room_creation_code_entry_less)
 	for record in held:
-		record["node"].call("_gm_register_instance")
+		# Built like GameMaker's CreateInstance, before any Create event: an
+		# earlier Create event sees its start position and image settings.
+		var node = record["node"]
+		node.call("_gm_construct_instance" if node.has_method("_gm_construct_instance") else "_gm_register_instance")
 	for record in held:
 		record["parent"].remove_child(record["node"])
 		# Re-added later; the scene becomes its owner again then.

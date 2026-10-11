@@ -13,10 +13,12 @@ from tests.gamemaker_project_support import (
     GameMakerObject,
     GameMakerProject,
     GameMakerRoom,
+    GameMakerSprite,
     InstanceLayer,
     RoomInstance,
     add_probe_autoload,
     convert_gamemaker_project,
+    import_converted_project,
     run_converted_project,
     write_gamemaker_project,
 )
@@ -226,6 +228,96 @@ _RESTART_TRACE = [
 ]
 
 
+# GameMaker builds every instance once, before its Create event: a placed
+# instance gets its start position (xstart, xprevious) and its room
+# placement's scale, angle and image_index before the first Create event of
+# the room runs, so an earlier instance's Create event already sees them.
+# event_inherited() runs only the parent's event code: the instance keeps its
+# own sprite, its start position and what its Create event set before the
+# call. Sprites are not inherited: a child object without a sprite of its own
+# starts with none (-1), with or without a Create event of its own.
+_CONSTRUCT_PROJECT = GameMakerProject(
+    name="BuildOnce",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    sprites=(GameMakerSprite("s_parent"), GameMakerSprite("s_child"), GameMakerSprite("s_grandchild", frames=4)),
+    objects=(
+        GameMakerObject("o_parent", {EVENT_CREATE: 'trace("create_parent");\n'}, sprite="s_parent"),
+        GameMakerObject(
+            "o_child",
+            {EVENT_CREATE: 'trace("create_child");\nevent_inherited();\n'},
+            sprite="s_child",
+            parent="o_parent",
+        ),
+        GameMakerObject(
+            "o_grandchild",
+            {
+                EVENT_CREATE: (
+                    "x = 200;\nhspeed = 3;\nimage_index = 2;\nimage_speed = 0;\nevent_inherited();\n"
+                    'trace("grandchild:" + sprite_get_name(sprite_index) + ":xstart=" + string(xstart)\n'
+                    '    + ":xprevious=" + string(xprevious) + ":hspeed=" + string(hspeed)\n'
+                    '    + ":image_index=" + string(image_index) + ":image_speed=" + string(image_speed));\n'
+                ),
+            },
+            sprite="s_grandchild",
+            parent="o_child",
+        ),
+        GameMakerObject(
+            "o_reader",
+            {
+                EVENT_CREATE: (
+                    "var placed = instance_find(o_placed, 0);\n"
+                    'trace("reader:xstart=" + string(placed.xstart) + ":ystart=" + string(placed.ystart)\n'
+                    '    + ":xprevious=" + string(placed.xprevious) + ":xscale=" + string(placed.image_xscale)\n'
+                    '    + ":yscale=" + string(placed.image_yscale) + ":angle=" + string(placed.image_angle)\n'
+                    '    + ":image_index=" + string(placed.image_index));\n'
+                ),
+            },
+        ),
+        GameMakerObject("o_placed", {EVENT_CREATE: 'trace("create_placed");\n'}, sprite="s_grandchild"),
+        GameMakerObject(
+            "o_spriteless",
+            {EVENT_CREATE: 'trace("spriteless:" + string(sprite_index));\nevent_inherited();\n'},
+            parent="o_parent",
+        ),
+        GameMakerObject(
+            "o_spriteless_quiet",
+            {EVENT_ROOM_START: 'trace("spriteless_quiet:" + string(sprite_index));\n'},
+            parent="o_parent",
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_build",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_reader", "o_reader", 0, 0),
+                        RoomInstance("inst_placed", "o_placed", 16, 24, scale_x=2, scale_y=3, rotation=45, image_index=2),
+                        RoomInstance("inst_grandchild", "o_grandchild", 10, 10),
+                        RoomInstance("inst_spriteless", "o_spriteless", 0, 0),
+                        RoomInstance("inst_spriteless_quiet", "o_spriteless_quiet", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_reader", "inst_placed", "inst_grandchild", "inst_spriteless", "inst_spriteless_quiet"),
+        ),
+    ),
+)
+_CONSTRUCT_TRACE = [
+    "reader:xstart=16:ystart=24:xprevious=16:xscale=2:yscale=3:angle=45:image_index=2",
+    "create_placed",
+    "create_child",
+    "create_parent",
+    "grandchild:s_grandchild:xstart=10:xprevious=10:hspeed=3:image_index=2:image_speed=0",
+    "spriteless:-1",
+    "create_parent",
+    "create_parent",
+    "spriteless_quiet:-1",
+]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
@@ -235,6 +327,9 @@ class TestRoomLifecycleGodot(unittest.TestCase):
 
     def test_game_restart_removes_persistent_instances_and_call_later_sources(self) -> None:
         self.assertEqual(self._run_trace(_RESTART_PROJECT), _RESTART_TRACE)
+
+    def test_instances_are_built_once_before_their_create_events(self) -> None:
+        self.assertEqual(self._run_trace(_CONSTRUCT_PROJECT), _CONSTRUCT_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()
@@ -246,6 +341,9 @@ class TestRoomLifecycleGodot(unittest.TestCase):
             write_gamemaker_project(root / "gamemaker", project)
             convert_gamemaker_project(root / "gamemaker", root / "godot")
             add_probe_autoload(root / "godot", _PROBE)
+            if project.sprites:
+                imported = import_converted_project(godot_binary, root / "godot")
+                self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)
             result = run_converted_project(godot_binary, root / "godot")
             output = result.stdout + result.stderr
 

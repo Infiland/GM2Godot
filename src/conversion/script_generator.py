@@ -69,6 +69,7 @@ _OBJECT_RUNTIME_MEMBER_NAMES = frozenset({
     "_gm_collision_changed",
     "_gm_collision_dirty",
     "_gm_collision_state",
+    "_gm_constructed",
     "_gm_depth",
 })
 _DRAW_RUNTIME_FUNCTIONS = frozenset({
@@ -503,12 +504,33 @@ def _prepend_sprite_runtime_ready_body(
     return f"{init_body}\n{body}"
 
 
+def _sprite_runtime_construct_lines(
+    sprite_runtime: SpriteRuntimeConfig,
+    *,
+    inherited_runtime: bool,
+) -> list[str]:
+    # Sprites are not inherited in GameMaker: every instance starts with its
+    # own object's sprite, or none (-1). The script that declares
+    # sprite_index starts it with its own sprite; a child script sets its own.
+    lines: list[str] = []
+    if inherited_runtime:
+        initial_sprite = (
+            "-1"
+            if sprite_runtime.initial_sprite_name is None
+            else _sprite_reference_expression(sprite_runtime.initial_sprite_name)
+        )
+        lines.append(f"\tsprite_index = {initial_sprite}")
+    lines.append("\t_gm_initialize_sprite_runtime()")
+    return lines
+
+
 def _emit_object_runtime_prelude(
     lines: list[str],
     object_runtime: ObjectRuntimeConfig,
     *,
     declare_members: bool,
     emit_notification: bool = True,
+    sprite_construct_lines: Sequence[str] = (),
 ) -> None:
     # other is the instance itself, except while a collision event runs
     # (the dispatcher sets it) and inside with blocks (the transpiler passes
@@ -531,6 +553,7 @@ def _emit_object_runtime_prelude(
         f"{_collision_dirty_line(True)}"
         "\nvar _gm_collision_state = null"
         "\nvar _gm_collision_dirty = true"
+        "\nvar _gm_constructed = false"
         "\n\nfunc _gm_collision_changed():"
         "\n\tif not _gm_collision_dirty:"
         "\n\t\t_gm_collision_dirty = true"
@@ -569,7 +592,23 @@ def _emit_object_runtime_prelude(
         "\n\nfunc _gm_unregister_instance():"
         "\n\tif has_meta(\"_gm2godot_room_preserving_persistent\") and get_meta(\"_gm2godot_room_preserving_persistent\"):"
         "\n\t\treturn"
-        "\n\tGMRuntime.gml_instance_unregister(id)\n"
+        "\n\tGMRuntime.gml_instance_unregister(id)"
+        # GameMaker builds an instance once, before its Create event: it is
+        # registered, xstart/ystart and xprevious/yprevious take its
+        # position, and it gets its object's sprite and its room placement's
+        # image settings. Each object script has its own construction (the
+        # most derived one runs), and the Create events of parent objects,
+        # which event_inherited() runs, do not build the instance again.
+        # Placed instances are built when their room starts, before the
+        # first Create event (gml_room_prepare_scene).
+        "\n\nfunc _gm_construct_instance():"
+        "\n\tif _gm_constructed:"
+        "\n\t\treturn"
+        "\n\t_gm_constructed = true"
+        "\n\t_gm_register_instance()"
+        "\n\t_gm_initialize_motion_runtime()"
+        + "".join(f"\n{line}" for line in sprite_construct_lines)
+        + "\n"
     )
 
 
@@ -614,7 +653,7 @@ def _guard_create_event_body(body: str) -> str:
 
 
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    init_lines = ["\t_gm_register_instance()", "\t_gm_initialize_motion_runtime()"]
+    init_lines = ["\t_gm_construct_instance()"]
     should_call_parent_ready = object_runtime.inherit_ready
     if should_call_parent_ready and body.strip() == "pass":
         init_lines.append("\tsuper._ready()")
@@ -842,11 +881,21 @@ def generate_script_content(
     # added to it.
     reports_collision_changes = object_runtime is not None and base_script_path is None
     if uses_object_runtime and object_runtime is not None:
+        # A child of an object with the sprite runtime starts with its own
+        # sprite (or none) even when its code never names a sprite member.
+        constructs_sprite = sprite_runtime is not None and (
+            uses_sprite_runtime or sprite_runtime.inherit_runtime is True
+        )
         _emit_object_runtime_prelude(
             lines,
             object_runtime,
             declare_members=base_script_path is None,
             emit_notification="_notification" not in function_names,
+            sprite_construct_lines=(
+                _sprite_runtime_construct_lines(sprite_runtime, inherited_runtime=inherited_sprite_runtime)
+                if constructs_sprite and sprite_runtime is not None
+                else ()
+            ),
         )
     if uses_motion_runtime:
         _emit_motion_runtime_prelude(
@@ -862,7 +911,7 @@ def generate_script_content(
             wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
             if wrap_body is not None:
                 body = wrap_body(func, body, function_names)
-        if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready":
+        if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready" and not uses_object_runtime:
             body = _prepend_sprite_runtime_ready_body(
                 body,
                 sprite_runtime,

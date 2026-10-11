@@ -242,7 +242,7 @@ See [`runtime_managers.md`](https://github.com/Infiland/GM2Godot/blob/main/src/c
 
 ### Room entry and transitions
 
-Generated object `_ready()` methods register the instance, initialize motion state, and run converted Create behavior when present. As in GameMaker, every instance placed in a room exists before the first Create event runs: when the room scene enters the tree, the room root registers its placed instances in the room's creation order and holds them out of the tree. The room root then performs the room-entry sequence:
+Generated object `_ready()` methods build the instance and run converted Create behavior when present. Building happens once per instance, in the object's own `_gm_construct_instance()`: it registers the instance, sets `xstart`/`ystart` and `xprevious`/`yprevious` from its position, and gives it its own object's sprite (`-1` for an object without one; sprites are not inherited) and its room placement's image settings. The Create events of parent objects, which `event_inherited()` runs, do not build it again. As in GameMaker, every instance placed in a room is built before the first Create event runs: when the room scene enters the tree, the room root builds its placed instances in the room's creation order and holds them out of the tree. The room root then performs the room-entry sequence:
 
 1. Register layer and view metadata.
 2. Instantiate authored room particle-layer systems.

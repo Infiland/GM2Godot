@@ -2804,10 +2804,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_room_flow_helpers_use_registry_order_and_lifecycle(self):
         self.assertIn('const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_enter_scene(scene, force = false):", GML_RUNTIME_SCRIPT)
-        # Placed instances are registered before any Create event and join
-        # the room one at a time, in creation order, when it starts.
+        # Placed instances are built (registered, with their start position
+        # and image settings) before any Create event and join the room one
+        # at a time, in creation order, when it starts.
         self.assertIn("static func gml_room_prepare_scene(scene):", GML_RUNTIME_SCRIPT)
-        self.assertIn('record["node"].call("_gm_register_instance")', GML_RUNTIME_SCRIPT)
+        self.assertIn('node.call("_gm_construct_instance" if node.has_method("_gm_construct_instance") else "_gm_register_instance")', GML_RUNTIME_SCRIPT)
         self.assertIn("_gml_room_create_instances(scene)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_goto(room_asset):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_goto_next():", GML_RUNTIME_SCRIPT)

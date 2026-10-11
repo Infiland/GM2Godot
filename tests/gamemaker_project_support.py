@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from PIL import Image
+
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.gui.setting_value import SettingValue
 from tests.godot_test_support import write_fixture_text
@@ -35,6 +37,17 @@ class GameMakerObject:
     events: Mapping[tuple[int, int], str]
     persistent: bool = False
     parent: str | None = None
+    sprite: str | None = None
+
+
+@dataclass(frozen=True)
+class GameMakerSprite:
+    """A sprite of ``frames`` solid frames, ``width`` by ``height`` pixels, origin at the top left."""
+
+    name: str
+    width: int = 16
+    height: int = 16
+    frames: int = 1
 
 
 @dataclass(frozen=True)
@@ -44,6 +57,10 @@ class RoomInstance:
     x: float
     y: float
     creation_code: str | None = None
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    rotation: float = 0.0
+    image_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -61,6 +78,7 @@ class GameMakerRoom:
     creation_code: str | None = None
     width: int = 320
     height: int = 240
+    persistent: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,6 +87,7 @@ class GameMakerProject:
     objects: Sequence[GameMakerObject]
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
+    sprites: Sequence[GameMakerSprite] = ()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -108,7 +127,11 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "resourceType": "GMObject",
         "resourceVersion": "2.0",
         "solid": False,
-        "spriteId": None,
+        "spriteId": (
+            None
+            if game_object.sprite is None
+            else {"name": game_object.sprite, "path": f"sprites/{game_object.sprite}/{game_object.sprite}.yy"}
+        ),
         "spriteMaskId": None,
         "visible": True,
     }
@@ -122,7 +145,7 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "frozen": False,
         "hasCreationCode": instance.creation_code is not None,
         "ignore": False,
-        "imageIndex": 0,
+        "imageIndex": instance.image_index,
         "imageSpeed": 1.0,
         "inheritCode": False,
         "inheritedItemId": None,
@@ -136,9 +159,9 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "properties": [],
         "resourceType": "GMRInstance",
         "resourceVersion": "2.0",
-        "rotation": 0.0,
-        "scaleX": 1.0,
-        "scaleY": 1.0,
+        "rotation": instance.rotation,
+        "scaleX": instance.scale_x,
+        "scaleY": instance.scale_y,
         "x": instance.x,
         "y": instance.y,
     }
@@ -198,7 +221,7 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
         "roomSettings": {
             "Height": room.height,
             "inheritRoomSettings": False,
-            "persistent": False,
+            "persistent": room.persistent,
             "Width": room.width,
         },
         "sequenceId": None,
@@ -213,9 +236,66 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
     }
 
 
+def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
+    sprite_dir = project_dir / "sprites" / sprite.name
+    layer_name = f"{sprite.name}_layer"
+    frame_names = [f"{sprite.name}_frame_{index}" for index in range(sprite.frames)]
+    for frame_name in frame_names:
+        frame_path = sprite_dir / "layers" / frame_name / f"{layer_name}.png"
+        frame_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGBA", (sprite.width, sprite.height), (255, 255, 255, 255)).save(frame_path)
+    _write_json(
+        sprite_dir / f"{sprite.name}.yy",
+        {
+            "$GMSprite": "v2",
+            "%Name": sprite.name,
+            "name": sprite.name,
+            "resourceType": "GMSprite",
+            "resourceVersion": "2.0",
+            "width": sprite.width,
+            "height": sprite.height,
+            "origin": 0,
+            "bboxMode": 0,
+            "bbox_left": 0,
+            "bbox_right": sprite.width - 1,
+            "bbox_top": 0,
+            "bbox_bottom": sprite.height - 1,
+            "collisionKind": 1,
+            "collisionTolerance": 0,
+            "frames": [
+                {"$GMSpriteFrame": "v1", "name": frame_name, "resourceType": "GMSpriteFrame", "resourceVersion": "2.0"}
+                for frame_name in frame_names
+            ],
+            "layers": [
+                {"$GMImageLayer": "", "name": layer_name, "visible": True, "resourceType": "GMImageLayer", "resourceVersion": "2.0"}
+            ],
+            "sequence": {
+                "xorigin": 0,
+                "yorigin": 0,
+                "playbackSpeed": 0.0,
+                "playbackSpeedType": 0,
+                "playback": 1,
+                "tracks": [
+                    {
+                        "keyframes": {
+                            "Keyframes": [
+                                {"Key": float(index), "Length": 1.0, "Channels": {"0": {"Id": {"name": frame_name}}}}
+                                for index, frame_name in enumerate(frame_names)
+                            ]
+                        }
+                    }
+                ],
+            },
+        },
+    )
+
+
 def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> None:
-    """Write the project's .yyp, objects, rooms and scripts."""
+    """Write the project's .yyp, sprites, objects, rooms and scripts."""
     resources: list[dict[str, object]] = []
+    for sprite in project.sprites:
+        _write_sprite(project_dir, sprite)
+        resources.append({"id": {"name": sprite.name, "path": f"sprites/{sprite.name}/{sprite.name}.yy"}})
     for script_name, source in project.scripts.items():
         script_dir = project_dir / "scripts" / script_name
         _write_json(
@@ -318,6 +398,20 @@ def add_probe_autoload(godot_dir: Path, probe_source: str) -> None:
     else:
         settings += "\n[autoload]\n\n" + entry
     settings_path.write_text(settings, encoding="utf-8")
+
+
+def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    """Import a converted project's resources (sprite images), as the editor does before a run."""
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
 
 
 def run_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:

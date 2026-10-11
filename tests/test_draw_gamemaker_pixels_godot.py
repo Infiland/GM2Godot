@@ -6,15 +6,19 @@ draws:
 
 - a line covers the same pixels whichever end it starts from (yyWebGL.js
   WebGL_draw_line_width_color_RELEASE builds the same quad either way);
+- draw_roundrect's corner ellipses are xrad by yrad, capped at the rectangle,
+  so a corner's radius is half of them (yyWebGL.js
+  WebGL_draw_roundrect_color_EXT_RELEASE, ported below);
 """
 from __future__ import annotations
 
+import math
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import ClassVar
 
@@ -26,6 +30,7 @@ from tests.godot_test_support import find_smoke_godot_binary, write_fixture_text
 _SIZE = 128
 _FRAME = (5, 3)
 _BLACK = (0, 0, 0)
+_WHITE = (255, 255, 255)
 Pixel = tuple[int, int, int]
 Region = tuple[int, int, int, int]
 
@@ -43,6 +48,16 @@ _LINE_PAIRS = (
 )
 _LINE_REGION = (0, 0, 64, 32)
 
+# (x1, y1, x2, y2, xrad, yrad, circle precision); None radii use draw_roundrect.
+_ROUNDRECTS = (
+    (4, 36, 43, 65, 20, 20, 64),
+    (50, 36, 73, 48, None, None, 24),
+    (80, 36, 89, 65, 30, 8, 32),
+    (96, 36, 123, 49, 12, 26, 16),
+    (50, 54, 73, 72, 1, 3, 24),
+)
+_ROUNDRECT_REGION = (0, 34, 128, 76)
+
 
 # The scene draws every case in _ready; `tex` is a 5x3 texture whose texels
 # all differ and `tm` a hidden tilemap layer of two white 4x4 cells.
@@ -50,6 +65,12 @@ def _draw_script() -> str:
     calls: list[str] = ["gml_draw_set_color(0xffffff)"]
     for forward, backward in _LINE_PAIRS:
         calls += [forward, backward]
+    for x1, y1, x2, y2, xrad, yrad, precision in _ROUNDRECTS:
+        calls.append(f"gml_draw_set_circle_precision({precision})")
+        if xrad is None:
+            calls.append(f"gml_draw_roundrect({x1}, {y1}, {x2}, {y2}, false)")
+        else:
+            calls.append(f"gml_draw_roundrect_ext({x1}, {y1}, {x2}, {y2}, {xrad}, {yrad}, false)")
     body = "".join(f"\tGMRuntime.{call}\n" for call in calls)
     return (
         "extends Node2D\n\n"
@@ -101,6 +122,41 @@ def _project_settings() -> str:
         "textures/canvas_textures/default_texture_filter=0\n"
         "environment/defaults/default_clear_color=Color(0, 0, 0, 1)\n"
     )
+
+
+def _roundrect_rim(x1: float, y1: float, x2: float, y2: float, xrad: float, yrad: float, steps: int) -> list[tuple[float, float]]:
+    """The rim of WebGL_draw_roundrect_color_EXT_RELEASE (without the legacy offset)."""
+    left, right = min(x1, x2), max(x1, x2)
+    top, bottom = min(y1, y2), max(y1, y2)
+    w = min(xrad, abs(right - left))
+    h = min(yrad, abs(bottom - top))
+    xm, ym = (left + right) * 0.5, (top + bottom) * 0.5
+    rx = abs(right - left) * 0.5 - w * 0.5
+    ry = abs(bottom - top) * 0.5 - h * 0.5
+    cosines = [1.0] + [math.cos(i * 2 * math.pi / steps) for i in range(1, steps)] + [1.0]
+    sines = [0.0] + [math.sin(i * 2 * math.pi / steps) for i in range(1, steps)] + [0.0]
+    quarter = steps // 4
+    rim: list[tuple[float, float]] = []
+    for corner, (sx, sy) in enumerate(((1, 1), (-1, 1), (-1, -1), (1, -1))):
+        for i in range(corner * quarter, (corner + 1) * quarter + 1):
+            rim.append((xm + sx * rx + w * cosines[i] / 2, ym + sy * ry + h * sines[i] / 2))
+    return rim
+
+
+def _convex_coverage(rim: list[tuple[float, float]], px: float, py: float) -> bool | None:
+    """Whether the convex rim covers a point; None when it lies on the rim."""
+    edges = [(rim[i], rim[(i + 1) % len(rim)]) for i in range(len(rim))]
+    edges = [(a, b) for a, b in edges if math.dist(a, b) > 1e-9]
+    area = sum(a[0] * b[1] - b[0] * a[1] for a, b in edges)
+    orientation = 1.0 if area > 0 else -1.0
+    inside = True
+    for (ax, ay), (bx, by) in edges:
+        distance = orientation * ((bx - ax) * (py - ay) - (by - ay) * (px - ax)) / math.dist((ax, ay), (bx, by))
+        if distance < -1e-3:
+            return False
+        if distance <= 1e-3:
+            inside = False
+    return True if inside else None
 
 
 def _region_pixels(image: Image.Image, region: Region) -> Iterable[tuple[int, int, Pixel]]:
@@ -174,6 +230,15 @@ class TestDrawGameMakerPixelsGodot(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.workspace.cleanup()
 
+    def _assert_region(self, region: Region, expected: Callable[[int, int], Pixel | None]) -> None:
+        self.assertEqual(self.frame.size, (_SIZE, _SIZE))
+        wrong = [
+            (x, y, actual, want)
+            for x, y, actual in _region_pixels(self.frame, region)
+            if (want := expected(x, y)) is not None and actual != want
+        ]
+        self.assertEqual(wrong, [], f"{len(wrong)} pixels differ from GameMaker (x, y, actual, expected)")
+
     def test_lines_light_the_same_pixels_whichever_end_they_start_from(self) -> None:
         self.assertEqual(self.frame.size, (_SIZE, _SIZE))
         forward = {(x, y): pixel for x, y, pixel in _region_pixels(self.frame, _LINE_REGION)}
@@ -185,6 +250,22 @@ class TestDrawGameMakerPixelsGodot(unittest.TestCase):
         self.assertGreater(sum(pixel != _BLACK for pixel in forward.values()), 100)
         differing = sorted(point for point in forward if forward[point] != backward[point])
         self.assertEqual(differing, [], "pixels a reversed line lights differently")
+
+    def test_roundrect_corners_are_half_of_xrad_and_yrad(self) -> None:
+        rims = [_roundrect_rim(x1, y1, x2, y2, 10 if xr is None else xr, 10 if yr is None else yr, steps)
+                for x1, y1, x2, y2, xr, yr, steps in _ROUNDRECTS]
+
+        # Pixel centres on a rim edge depend on the GPU's fill rule.
+        def expected(x: int, y: int) -> Pixel | None:
+            for rim in rims:
+                covered = _convex_coverage(rim, x + 0.5, y + 0.5)
+                if covered is None:
+                    return None
+                if covered:
+                    return _WHITE
+            return _BLACK
+
+        self._assert_region(_ROUNDRECT_REGION, expected)
 
 
 if __name__ == "__main__":

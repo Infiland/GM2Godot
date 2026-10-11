@@ -1329,6 +1329,10 @@ static func _gml_draw_ellipse_shape(cx, cy, rx, ry, centre_colour, edge_colour, 
 	_gml_draw_fan_or_outline(target, centre, rim, centre_colour, edge_colour, outline)
 
 
+# GameMaker (WebGL_draw_roundrect_color_EXT_RELEASE) takes xrad and yrad as
+# the width and height of each corner's ellipse, capped at the rectangle's
+# size, so a corner's radius is half of them; draw_roundrect uses 10. Each
+# corner arc has a quarter of draw_set_circle_precision's segments.
 static func _gml_draw_roundrect_shape(x1, y1, x2, y2, xrad, yrad, centre_colour, edge_colour, outline):
 	var target = _gml_draw_target()
 	if target == null:
@@ -1337,21 +1341,21 @@ static func _gml_draw_roundrect_shape(x1, y1, x2, y2, xrad, yrad, centre_colour,
 	var top = min(_gml_draw_real(y1), _gml_draw_real(y2))
 	var right = max(_gml_draw_real(x1), _gml_draw_real(x2))
 	var bottom = max(_gml_draw_real(y1), _gml_draw_real(y2))
-	var radius_x = min(abs(_gml_draw_real(xrad)) if xrad != null else 10.0, (right - left) * 0.5)
-	var radius_y = min(abs(_gml_draw_real(yrad)) if yrad != null else 10.0, (bottom - top) * 0.5)
-	var corner_steps = max(int(_gml_draw_circle_steps() / 4), 1)
-	var centres = [
-		Vector2(right - radius_x, top + radius_y),
-		Vector2(left + radius_x, top + radius_y),
-		Vector2(left + radius_x, bottom - radius_y),
-		Vector2(right - radius_x, bottom - radius_y),
-	]
+	var corner_size = Vector2(
+		min(_gml_draw_real(xrad) if xrad != null else 10.0, right - left),
+		min(_gml_draw_real(yrad) if yrad != null else 10.0, bottom - top)
+	)
+	var middle = Vector2((left + right) * 0.5, (top + bottom) * 0.5)
+	var inset = (Vector2(right - left, bottom - top) - corner_size) * 0.5
+	var steps = _gml_draw_circle_steps()
+	var corner_points = max(int(steps / 4), 1)
 	var rim = PackedVector2Array()
 	for corner in range(4):
-		for step in range(corner_steps + 1):
-			var angle = (float(corner) + float(step) / float(corner_steps)) * PI * 0.5
-			rim.append(centres[corner] + Vector2(cos(angle) * radius_x, -sin(angle) * radius_y))
-	_gml_draw_fan_or_outline(target, Vector2((left + right) * 0.5, (top + bottom) * 0.5), rim, centre_colour, edge_colour, outline)
+		var centre = middle + inset * Vector2(1.0 if corner == 0 or corner == 3 else -1.0, 1.0 if corner < 2 else -1.0)
+		for index in range(corner * corner_points, (corner + 1) * corner_points + 1):
+			var angle = 0.0 if index == steps else TAU * float(index) / float(steps)
+			rim.append(centre + Vector2(cos(angle), sin(angle)) * corner_size * 0.5)
+	_gml_draw_fan_or_outline(target, middle, rim, centre_colour, edge_colour, outline)
 
 
 static func _gml_draw_fan_or_outline(target, centre, rim, centre_colour, edge_colour, outline):

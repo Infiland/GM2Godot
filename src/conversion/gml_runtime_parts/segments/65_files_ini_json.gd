@@ -926,19 +926,17 @@ static func _gml_ini_text(sections):
 
 # The number at the start of the text, like GameMaker's number parsing for
 # INI values; text that does not start with a number reads as 0.
+# The runner reads an INI real with JavaScript's parseFloat (yyIniFile.js):
+# after leading white space, the decimal number or signed "Infinity" the
+# text starts with, and NaN when it starts with neither.
 static func _gml_ini_text_to_real(text):
-	var value = str(text).strip_edges()
-	var lowered = value.to_lower().trim_prefix("+")
-	if lowered.begins_with("inf"):
-		return INF
-	if lowered.begins_with("-inf"):
-		return -INF
-	if lowered.begins_with("nan"):
-		return NAN
-	var matched = _gml_ini_number_pattern().search(value)
+	var matched = _gml_ini_number_pattern().search(str(text).strip_edges(true, false))
 	if matched == null:
-		return 0.0
-	return matched.get_string().to_float()
+		return NAN
+	var number = matched.get_string()
+	if number.ends_with("Infinity"):
+		return -INF if number.begins_with("-") else INF
+	return number.to_float()
 
 
 static var _gml_ini_number_regex = null
@@ -946,7 +944,7 @@ static var _gml_ini_number_regex = null
 
 static func _gml_ini_number_pattern():
 	if _gml_ini_number_regex == null:
-		_gml_ini_number_regex = RegEx.create_from_string("^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?")
+		_gml_ini_number_regex = RegEx.create_from_string("^[+-]?(Infinity|(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?)")
 	return _gml_ini_number_regex
 
 

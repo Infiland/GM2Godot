@@ -480,8 +480,17 @@ static func gml_variable_instance_exists(instance_value, member_name):
 	return gml_selector_exists(instance_value, member_name)
 
 
+# Unlike o_enemy.hp = 0, variable_instance_set(o_enemy, "hp", 0) sets one
+# instance: the first one the object (or all) selects.
 static func gml_variable_instance_set(instance_value, member_name, value):
-	return gml_selector_set(instance_value, member_name, value)
+	var instance: Variant = _gml_selector_direct_target(instance_value)
+	if instance == null:
+		var targets = gml_with_targets(instance_value)
+		if targets.is_empty():
+			return gml_undefined()
+		instance = targets[0]
+	gml_struct_set(instance, member_name, value)
+	return value
 
 
 static func gml_variable_instance_get_names(instance_value):
@@ -548,11 +557,13 @@ static func gml_selector_get(target, member_name, current_self = null, current_o
 	return gml_struct_get(targets[0], member_name)
 
 
+# variable_instance_exists looks at one instance: the first one an object
+# (or all) selects.
 static func gml_selector_exists(target, member_name, current_self = null, current_other = null):
-	for instance in gml_with_targets(target, current_self, current_other):
-		if gml_struct_exists(instance, member_name):
-			return true
-	return false
+	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		return false
+	return gml_struct_exists(targets[0], member_name)
 
 
 static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):

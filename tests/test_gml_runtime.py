@@ -2067,7 +2067,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_selector_get(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_get(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_exists(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if gml_struct_exists(instance, member_name):\n\t\t\treturn true", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_exists(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_update(target, member_name, update_callable, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
@@ -2658,8 +2658,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_instance_exists(instance_value, member_name):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_exists(instance_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_set(instance_value, member_name, value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_selector_set(instance_value, member_name, value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("for instance in gml_with_targets(target, current_self, current_other):", GML_RUNTIME_SCRIPT)
+        # variable_instance_set and variable_instance_exists use the first
+        # instance an object selects; o_enemy.hp = 0 sets them all.
+        self.assertIn(
+            "\t\tvar targets = gml_with_targets(instance_value)\n"
+            "\t\tif targets.is_empty():\n"
+            "\t\t\treturn gml_undefined()\n"
+            "\t\tinstance = targets[0]\n"
+            "\tgml_struct_set(instance, member_name, value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return gml_struct_exists(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_scope_is_a_shared_struct_for_instance_apis(self):

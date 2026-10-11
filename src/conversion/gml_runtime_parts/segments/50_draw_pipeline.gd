@@ -44,9 +44,10 @@ const GML_DRAW_SPACE_LAYER_SPECS = {
 	"draw_end": {"name": "_GM2GodotDrawEnd", "layer": 1, "follow_viewport": true, "room_space": true},
 	"post_draw": {"name": "_GM2GodotPostDraw", "layer": 999, "follow_viewport": false, "room_space": false},
 }
-const GML_DEPTH_Z_LINEAR_LIMIT = 3072
+# Godot's CanvasItem z_index range is -4096..4096.
 const GML_DEPTH_Z_LIMIT = 4096
-const GML_DEPTH_COMPRESSION_LIMIT = 2147483648.0
+# Truncated depths are 64-bit integers; larger magnitudes saturate.
+const GML_DEPTH_INTEGER_LIMIT = 9.0e18
 
 static var _gml_draw_sinks = {}
 static var _gml_draw_space_layers = {}
@@ -62,6 +63,17 @@ static var _gml_draw_material_pool = {}
 static var _gml_draw_script_methods = {}
 static var _gml_draw_hidden_visuals = {}
 static var _gml_draw_pending_depths = {}
+# GameMaker gives every distinct depth its own layer and draws layers from the
+# highest depth to the lowest, so two different depths never tie. Every node
+# whose absolute z_index stands for a depth (layers, instances with an assigned
+# depth, particle systems) is tracked here by instance id. While all depths in
+# use fit Godot's z_index range the z_index is -depth; once one does not, the
+# distinct depths in use are ranked into the range (_gml_depth_flush).
+static var _gml_depth_nodes = {}
+static var _gml_depth_values = {}
+static var _gml_depth_ranked = false
+static var _gml_depth_ranked_z = {}
+static var _gml_depth_dirty = false
 static var _gml_draw_trace_enabled = false
 static var _gml_draw_group_scan_counter = -1
 # Dispatch is not re-entrant, so every dispatched event reuses this context.
@@ -516,6 +528,7 @@ static func gml_draw_event_dispatch_frame(instances = null):
 		_gml_application_surface_ensure()
 	_gml_camera_update_visible_views()
 	_gml_draw_sinks_begin_frame()
+	_gml_depth_flush()
 	if _gml_draw_trace_enabled:
 		_gml_draw_trace_trim()
 	var creation_mark = _gml_instance_creation_counter
@@ -527,6 +540,7 @@ static func gml_draw_event_dispatch_frame(instances = null):
 	_gml_draw_frame_finish(plan["drawers"], creation_mark)
 	_gml_draw_dispatch_active = false
 	_gml_draw_apply_pending_depths()
+	_gml_depth_flush()
 	return dispatched
 
 
@@ -544,6 +558,11 @@ static func gm2godot_draw_runtime_shutdown():
 	_gml_draw_script_methods.clear()
 	_gml_draw_hidden_visuals.clear()
 	_gml_draw_pending_depths.clear()
+	_gml_depth_nodes.clear()
+	_gml_depth_values.clear()
+	_gml_depth_ranked = false
+	_gml_depth_ranked_z.clear()
+	_gml_depth_dirty = false
 	_gml_draw_group_scan_counter = -1
 	_gml_draw_gpu_state_cache = null
 	_gml_draw_gpu_state_cache_version = -1
@@ -581,21 +600,94 @@ static func _gml_draw_real(value):
 	return _to_real(value)
 
 
-static func gml_depth_to_z_index(depth):
-	var value = floor(_to_real(depth))
+# GameMaker depth is an integer: fractional depths are truncated toward zero.
+static func gml_depth_truncate(depth):
+	var value = _gml_draw_real(depth)
 	if is_nan(value):
 		return 0
-	var magnitude = abs(value)
-	var z_magnitude = GML_DEPTH_Z_LIMIT
-	if magnitude <= GML_DEPTH_Z_LINEAR_LIMIT:
-		z_magnitude = int(magnitude)
-	elif magnitude < GML_DEPTH_COMPRESSION_LIMIT:
-		var span = float(GML_DEPTH_Z_LIMIT - GML_DEPTH_Z_LINEAR_LIMIT)
-		var ratio = log(magnitude / float(GML_DEPTH_Z_LINEAR_LIMIT)) / log(GML_DEPTH_COMPRESSION_LIMIT / float(GML_DEPTH_Z_LINEAR_LIMIT))
-		z_magnitude = GML_DEPTH_Z_LINEAR_LIMIT + int(min(span, ceil(span * ratio)))
-	if value > 0.0:
-		return -z_magnitude
-	return z_magnitude
+	return int(clamp(value, -GML_DEPTH_INTEGER_LIMIT, GML_DEPTH_INTEGER_LIMIT))
+
+
+# The absolute z_index a GameMaker depth draws at.
+static func gml_depth_to_z_index(depth):
+	return _gml_depth_z(gml_depth_truncate(depth))
+
+
+static func _gml_depth_z(depth):
+	if _gml_depth_ranked:
+		var z_value = _gml_depth_ranked_z.get(depth, null)
+		if z_value != null:
+			return z_value
+	return clampi(-depth, -GML_DEPTH_Z_LIMIT, GML_DEPTH_Z_LIMIT)
+
+
+# Gives node the absolute z_index of a truncated GameMaker depth and tracks it.
+# A depth beyond Godot's z_index range, or one the ranking has no z_index for
+# yet, re-ranks the depths in use before the next frame is drawn.
+static func _gml_depth_track(node, depth):
+	var node_id = node.get_instance_id()
+	var previous = _gml_depth_values.get(node_id, null)
+	if previous != depth:
+		if previous == null:
+			_gml_depth_nodes[node_id] = node
+		_gml_depth_values[node_id] = depth
+		if _gml_depth_ranked:
+			if not _gml_depth_ranked_z.has(depth):
+				_gml_depth_dirty = true
+		elif depth < -GML_DEPTH_Z_LIMIT or depth > GML_DEPTH_Z_LIMIT:
+			_gml_depth_dirty = true
+	if node.z_as_relative:
+		node.z_as_relative = false
+	var z_value = _gml_depth_z(depth)
+	if node.z_index != z_value:
+		node.z_index = z_value
+
+
+static func _gml_depth_forget(node_id):
+	if _gml_depth_values.erase(node_id):
+		_gml_depth_nodes.erase(node_id)
+
+
+# Each distinct depth in use keeps -depth where the depths around it leave
+# room in Godot's z_index range and is ranked into the range where they do
+# not, so distinct depths stay strictly ordered (up to 8193 at once, the size
+# of the range). The converter ranks room layers the same way.
+static func _gml_depth_flush():
+	if not _gml_depth_dirty:
+		return
+	_gml_depth_dirty = false
+	var in_use = {}
+	for node_id in _gml_depth_values.keys():
+		if not is_instance_valid(_gml_depth_nodes[node_id]):
+			_gml_depth_forget(node_id)
+			continue
+		in_use[_gml_depth_values[node_id]] = true
+	var depths = in_use.keys()
+	depths.sort()
+	var count = depths.size()
+	_gml_depth_ranked = count > 0 and (depths[0] < -GML_DEPTH_Z_LIMIT or depths[count - 1] > GML_DEPTH_Z_LIMIT)
+	_gml_depth_ranked_z = {}
+	if _gml_depth_ranked:
+		for index in range(count):
+			var depth = depths[index]
+			# index depths draw above this one and count - 1 - index below it.
+			var lowest = -GML_DEPTH_Z_LIMIT + count - 1 - index
+			var z_value = lowest if -depth < lowest else mini(-depth, GML_DEPTH_Z_LIMIT - index)
+			_gml_depth_ranked_z[depth] = clampi(z_value, -GML_DEPTH_Z_LIMIT, GML_DEPTH_Z_LIMIT)
+	for node_id in _gml_depth_values.keys():
+		var node = _gml_depth_nodes[node_id]
+		var z_value = _gml_depth_z(_gml_depth_values[node_id])
+		if node.z_index != z_value:
+			node.z_index = z_value
+
+
+# A new room keeps the tracked nodes that still exist (persistent instances);
+# its layers are then registered and the depths in use ranked again.
+static func _gml_depth_room_reset():
+	for node_id in _gml_depth_values.keys():
+		if not is_instance_valid(_gml_depth_nodes[node_id]):
+			_gml_depth_forget(node_id)
+	_gml_depth_dirty = true
 
 
 # Assigning depth moves a GameMaker instance to (a layer at) that depth. Godot
@@ -618,11 +710,7 @@ static func gml_instance_depth_assign(instance, value, current = null):
 
 
 static func _gml_instance_apply_depth_z(instance, depth):
-	var z_value = gml_depth_to_z_index(depth)
-	if instance.z_as_relative:
-		instance.z_as_relative = false
-	if instance.z_index != z_value:
-		instance.z_index = z_value
+	_gml_depth_track(instance, gml_depth_truncate(depth))
 
 
 static func _gml_draw_apply_pending_depths():
@@ -935,9 +1023,9 @@ static func _gml_draw_registered_instances():
 	return nodes
 
 
-# Orders nodes from the highest depth to the lowest; nodes at the same depth
-# keep their given (tree) order. Instances whose depth was never assigned have
-# their layer's depth, looked up once per parent node.
+# Orders nodes from the highest depth to the lowest; nodes at the same
+# (truncated) depth keep their given (tree) order. Instances whose depth was
+# never assigned have their layer's depth, looked up once per parent node.
 static func _gml_draw_sort_by_depth(nodes):
 	var buckets = {}
 	var depths = []
@@ -950,11 +1038,11 @@ static func _gml_draw_sort_by_depth(nodes):
 				depth = layer_depths[parent]
 			else:
 				depth = _gml_instance_layer_depth(inst)
-				if depth != null and is_nan(depth):
-					depth = 0.0
+				if depth != null:
+					depth = gml_depth_truncate(depth)
 				layer_depths[parent] = depth
 		if depth == null:
-			depth = _gml_draw_instance_depth(inst)
+			depth = gml_depth_truncate(_gml_draw_instance_depth(inst))
 		var bucket = buckets.get(depth, null)
 		if bucket == null:
 			bucket = []

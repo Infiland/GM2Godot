@@ -6,7 +6,7 @@ import re
 from typing import NamedTuple, Protocol
 
 from src.conversion.architecture_policy import (
-    gamemaker_depth_to_z_index,
+    gamemaker_depth_z_indices,
     layer_policy_metadata_lines,
 )
 from src.conversion.gamemaker_json import decode_gamemaker_json
@@ -142,6 +142,8 @@ class RoomLayerSerializationContext:
         self.creation_code_source_resolver = creation_code_source_resolver
         self.ext_resource_ids: dict[tuple[str, str], str] = {}
         self.creation_order = _instance_creation_order(room)
+        # Layer z_index values are ranked over every layer depth in the room.
+        self.layer_z_indices = gamemaker_depth_z_indices(_room_layer_depths(room))
 
     def ext_resource_id(self, resource_type: str, resource_path: str) -> str:
         key = (resource_type, resource_path)
@@ -283,7 +285,9 @@ def _serialize_layer(
             )
         )
 
-    lines.extend(_layer_node_lines(layer, node_name, parent_path, original_name, resource_type))
+    lines.extend(
+        _layer_node_lines(layer, node_name, parent_path, original_name, resource_type, context.layer_z_indices)
+    )
 
     child_parent_path = node_name if parent_path == "." else f"{parent_path}/{node_name}"
 
@@ -316,11 +320,12 @@ def _layer_node_lines(
     parent_path: str,
     original_name: str,
     resource_type: JsonValue,
+    layer_z_indices: dict[int, int],
 ) -> list[str]:
     layer_fields = RoomLayerFields(layer, "")
     visible = layer_fields.visible
     depth = _coerce_int(layer_fields.depth)
-    z_index = gamemaker_depth_to_z_index(depth)
+    z_index = layer_z_indices[depth]
 
     lines = [
         f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
@@ -1334,6 +1339,16 @@ def _layer_element_type_for_asset_type(asset_type: str) -> str:
 def _child_layers(layer: JsonObject) -> list[JsonObject]:
     layer_fields = RoomLayerFields(layer, "")
     return layer_fields.children
+
+
+def _room_layer_depths(room: RoomLayerRoom) -> list[int]:
+    depths: list[int] = []
+    pending = [layer for layer in iter_room_field_values(room.layers) if isinstance(layer, dict)]
+    while pending:
+        layer = pending.pop()
+        depths.append(_coerce_int(RoomLayerFields(layer, "").depth))
+        pending.extend(_child_layers(layer))
+    return depths
 
 
 def _item_names(items: list[JsonObject]) -> list[str]:

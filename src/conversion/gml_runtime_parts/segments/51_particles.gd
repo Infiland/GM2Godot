@@ -46,8 +46,7 @@ static func gml_part_system_depth(system, depth):
 	record["depth"] = depth_value
 	var node = record.get("node", null)
 	if node is Node2D:
-		node.z_as_relative = false
-		node.z_index = gml_depth_to_z_index(depth_value)
+		_gml_depth_track(node, gml_depth_truncate(depth_value))
 	return null
 
 
@@ -784,6 +783,7 @@ static func _gml_particle_scene_parent():
 
 static func _gml_particle_free_node(node):
 	if is_instance_valid(node) and node is Node:
+		_gml_depth_forget(node.get_instance_id())
 		if node.is_inside_tree():
 			node.queue_free()
 		else:

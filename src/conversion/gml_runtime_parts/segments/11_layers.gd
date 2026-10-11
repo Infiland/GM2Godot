@@ -11,6 +11,7 @@ const GML_TILEMAP_GODOT_TRANSPOSE = 1 << 14
 static func gml_layer_register_scene(scene, clear_existing = true):
 	if clear_existing:
 		_gml_layer_clear_registry()
+		_gml_depth_room_reset()
 	if not (scene is Node):
 		return false
 	for node in _gml_layer_tree_nodes(scene):
@@ -18,6 +19,8 @@ static func gml_layer_register_scene(scene, clear_existing = true):
 			continue
 		if _gml_layer_node_has_metadata(node):
 			_gml_layer_register_node(node)
+	if clear_existing:
+		_gml_depth_flush()
 	return true
 
 
@@ -92,10 +95,9 @@ static func gml_layer_depth(layer, depth):
 	var node = handle.reference
 	if not (node is CanvasItem):
 		return false
-	var resolved_depth = int(_to_real(depth))
-	node.z_as_relative = false
-	node.z_index = gml_depth_to_z_index(resolved_depth)
+	var resolved_depth = gml_depth_truncate(depth)
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
+	_gml_depth_track(node, resolved_depth)
 	return true
 
 
@@ -159,12 +161,10 @@ static func gml_layer_create(depth, layer_name = ""):
 	var parent = _gml_layer_current_scene()
 	if parent == null:
 		return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
-	var resolved_depth = int(_to_real(depth))
+	var resolved_depth = gml_depth_truncate(depth)
 	var name = _gml_layer_unique_name(str(layer_name))
 	var node = Node2D.new()
 	node.name = name
-	node.z_as_relative = false
-	node.z_index = gml_depth_to_z_index(resolved_depth)
 	node.set_meta("gamemaker_layer_name", name)
 	node.set_meta("gamemaker_layer_node_name", name)
 	node.set_meta("gamemaker_layer_type", "runtime")
@@ -188,6 +188,7 @@ static func gml_layer_destroy(layer):
 		_gml_layer_unregister_handle(handle)
 		return false
 	for child in _gml_layer_tree_nodes(node):
+		_gml_depth_forget(child.get_instance_id())
 		var instance_handle = _gml_instance_handle_for_node(child)
 		if gml_handle_is_valid(instance_handle):
 			gml_instance_unregister(instance_handle)
@@ -229,6 +230,7 @@ static func gml_layer_add_instance(layer, instance):
 	if instance_node.has_meta(GML_EXPLICIT_DEPTH_META):
 		instance_node.remove_meta(GML_EXPLICIT_DEPTH_META)
 		_gml_draw_pending_depths.erase(instance_node.get_instance_id())
+		_gml_depth_forget(instance_node.get_instance_id())
 		if instance_node is CanvasItem:
 			instance_node.z_as_relative = true
 			instance_node.z_index = 0
@@ -478,6 +480,8 @@ static func _gml_layer_register_node(node):
 	var handle = gml_handle_register(GML_LAYER_HANDLE_KIND, node, _gml_layer_node_display_name(node))
 	_gml_layer_store_handle(handle)
 	node.set_meta("_gm2godot_layer_id", handle.index)
+	if node is CanvasItem and node.has_meta("gamemaker_layer_depth"):
+		_gml_depth_track(node, gml_depth_truncate(node.get_meta("gamemaker_layer_depth")))
 	return handle
 
 

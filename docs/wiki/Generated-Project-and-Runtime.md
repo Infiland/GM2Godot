@@ -190,7 +190,7 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 - Each room is a `Node2D` root using `res://gm2godot/gml_room_node.gd`.
 - The first ordered GameMaker room becomes the Godot main scene when it was converted successfully.
-- GameMaker layers become `Node2D` children with an absolute `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later. Depths within ±3072 map one to one; larger magnitudes are compressed into Godot's ±4096 `z_index` range while keeping their order.
+- GameMaker layers become `Node2D` children with an absolute `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later. Fractional depths are truncated toward zero, like GameMaker. Every distinct depth keeps its own `z_index`: when a depth in use is beyond Godot's ±4096 `z_index` range, the distinct depths in use (layers, instance depths, particle systems) are ranked into that range in depth order, which stays exact for up to 8193 distinct depths at once.
 - Every room reserves a `GMGUI` `CanvasLayer` at layer `1000` for Draw GUI phases.
 - Decodable tile data uses Godot 4 `TileMapLayer` output.
 - Native Godot callbacks do not define GameMaker event order; the runtime managers coordinate the generated phases.

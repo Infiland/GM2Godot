@@ -117,6 +117,27 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["ok:7", "method:mono!110:2", "sum:6"])
 
+    def test_increments_inside_methods_run_when_the_method_runs(self) -> None:
+        scripts = {
+            "scr_counter": (
+                "function count_up(_limit) {\n"
+                "    var _step = function(_to) {\n"
+                "        var _n = 0;\n"
+                "        for (var _i = 0; _i < _to; _i++) { _n++; }\n"
+                "        var _before = _n--;\n"
+                "        return string(_before) + \":\" + string(++_n);\n"
+                "    };\n"
+                "    return _step(_limit) + \"/\" + _step(_limit + 1);\n"
+                "}\n"
+            ),
+        }
+        create_code = 'trace("count:" + count_up(2));\n'
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["count:2:2/3:3"])
+
 
 if __name__ == "__main__":
     unittest.main()

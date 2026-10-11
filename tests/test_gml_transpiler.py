@@ -1130,6 +1130,41 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         # A local that reuses no enclosing name keeps its own name.
         self.assertIn("\t\t\tvar _i = 0\n", code)
 
+    def test_increments_inside_methods_stay_in_the_method_body(self):
+        # A method's ++ and -- run each time the method is called, not where
+        # the method is declared.
+        code = transpile_gml_code(
+            "var f = function() {\n"
+            "    var _n = 0;\n"
+            "    for (var _i = 0; _i < 3; _i++) { _n++; }\n"
+            "    return [_n--, ++_n];\n"
+            "};\n"
+            "var g = [function(a) { a--; return a; }, j++];\n"
+        )
+
+        self.assertEqual(
+            code,
+            "\tvar f = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _n = 0\n"
+            "\t\tvar _i = 0\n"
+            "\t\twhile GMRuntime.gml_lt(_i, 3):\n"
+            "\t\t\t_n = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t\t_i = GMRuntime.gml_add(_i, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_0 = _n\n"
+            "\t\t_n = GMRuntime.gml_sub(_gm2gd_mutation_value_0, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_1 = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t_n = _gm2gd_mutation_value_1\n"
+            "\t\treturn [_gm2gd_mutation_value_0, _gm2gd_mutation_value_1]\n"
+            "\t)\n"
+            "\tvar _gm2gd_mutation_value_0 = j\n"
+            "\tj = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "\tvar g = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null, a = null):\n"
+            "\t\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\t\ta = GMRuntime.gml_sub(a, 1)\n"
+            "\t\treturn a\n"
+            "\t), _gm2gd_mutation_value_0]",
+        )
+
     def test_method_rebinding_resolves_script_asset_callable_metadata(self):
         self.assertEqual(
             transpile_gml_expression(

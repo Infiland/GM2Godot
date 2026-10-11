@@ -77,6 +77,7 @@ from src.localization import get_localized
 _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
     r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
 )
+_GML_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SCRIPT_ASSIGNMENT_OPERATORS = frozenset(ASSIGNMENT_OPERATORS) | frozenset({"++", "--"})
 _SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS = (
     BUILTIN_GLOBAL_VARIABLES
@@ -1171,6 +1172,7 @@ class ObjectConverter(BaseConverter):
         direct_reference_names: set[str] | None = None,
         enum_values: Mapping[str, Mapping[str, int]] | None = None,
         macro_values: Mapping[str, str] | None = None,
+        inherited_member_names: frozenset[str] | None = None,
     ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap], bool]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
@@ -1256,8 +1258,15 @@ class ObjectConverter(BaseConverter):
                 )
             )
 
+        # A child object's script declares (and reads directly) only the
+        # variables no ancestor script can declare already.
+        own_variables = (
+            instance_variables
+            if inherited_member_names is None
+            else instance_variables - inherited_member_names
+        )
         direct_names = (
-            set(_valid_instance_variables(instance_variables))
+            set(_valid_instance_variables(own_variables))
             if direct_instance_variables is None
             else set(direct_instance_variables)
         )
@@ -1548,6 +1557,56 @@ class ObjectConverter(BaseConverter):
             ),
         )
 
+    def _ancestor_member_names(
+        self,
+        parent_object_name: str,
+        parent_object_source_path: str | None,
+        project_script_instance_variables: set[str] | None,
+        macro_values: Mapping[str, str] | None,
+    ) -> frozenset[str] | None:
+        """Return every name an object's ancestor scripts may declare as a member.
+
+        An ancestor script declares the instance variables its events assign
+        (the root object the project scripts' ones too), and each of them
+        appears in the ancestor's event code, in a project macro or among the
+        script variables: a name found in none of them is free for the
+        object's own script. Returns None when an ancestor cannot be read.
+        """
+        names: set[str] = set(project_script_instance_variables or ())
+        for macro_value in (macro_values or {}).values():
+            names.update(_GML_IDENTIFIER_RE.findall(str(macro_value)))
+        seen: set[str] = set()
+        object_name: str | None = parent_object_name
+        source_path = parent_object_source_path
+        while object_name is not None:
+            if object_name in seen:
+                return None
+            seen.add(object_name)
+            parsed = self._parse_object_yy(object_name, source_path)
+            if parsed is None:
+                return None
+            for event in parsed["event_list"]:
+                mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+                if mapping is None or not mapping.gml_filename:
+                    continue
+                event_source_path = self._event_source_path(
+                    parsed["source_path"],
+                    object_name,
+                    mapping,
+                )
+                if event_source_path is None:
+                    if event.get("isDnD") is True:
+                        continue
+                    return None
+                try:
+                    with open(event_source_path, "r", encoding="utf-8") as f:
+                        names.update(_GML_IDENTIFIER_RE.findall(f.read()))
+                except (OSError, UnicodeDecodeError):
+                    return None
+            object_name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
+        return frozenset(names)
+
     def _object_inherits_sprite_runtime(
         self,
         object_name: str | None,
@@ -1683,6 +1742,19 @@ class ObjectConverter(BaseConverter):
         object_dir = os.path.dirname(tscn_path)
         script_res_path = self._object_script_res_path(object_name, subfolder)
 
+        # Names a child object's ancestors may declare as members; null for a
+        # root object, and for a child whose ancestors cannot all be read
+        # (it then declares none of its own).
+        inherited_member_names: frozenset[str] | None = None
+        if parent_object_name is not None:
+            ancestor_names = self._ancestor_member_names(
+                parent_object_name,
+                parent_object_source_path,
+                project_script_instance_variables,
+                macro_values,
+            )
+            if ancestor_names is not None:
+                inherited_member_names = ancestor_names | frozenset(asset_names or ())
         (
             code_bodies,
             instance_variables,
@@ -1699,10 +1771,15 @@ class ObjectConverter(BaseConverter):
                 if parent_object_name is None
                 else None
             ),
-            direct_instance_variables=set() if parent_object_name is not None else None,
+            direct_instance_variables=(
+                set()
+                if parent_object_name is not None and inherited_member_names is None
+                else None
+            ),
             direct_reference_names=set(sprite_scene_paths or {}),
             enum_values=enum_values,
             macro_values=macro_values,
+            inherited_member_names=inherited_member_names,
         )
         if has_event_blocker:
             # An object is one logical resource. Publishing a script with only
@@ -1719,7 +1796,13 @@ class ObjectConverter(BaseConverter):
         script_content = generate_script_content(
             event_list,
             code_bodies=code_bodies,
-            instance_variables=instance_variables if parent_object_name is None else set(),
+            instance_variables=(
+                instance_variables
+                if parent_object_name is None
+                else set()
+                if inherited_member_names is None
+                else instance_variables - inherited_member_names
+            ),
             sprite_runtime=SpriteRuntimeConfig(
                 initial_sprite_name=sprite_name,
                 sprite_scene_paths=sprite_scene_paths,

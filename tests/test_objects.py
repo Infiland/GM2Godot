@@ -1094,10 +1094,8 @@ class TestObjectSourceContainment(unittest.TestCase):
         self.assertTrue(script.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('"target_object": "o_bullet"', script)
         self.assertIn("func _on_collision_o_bullet():", script)
-        self.assertIn(
-            'GMRuntime.gml_variable_instance_set(self, "safe_collision", true)',
-            script,
-        )
+        self.assertIn("\nvar safe_collision\n", script)
+        self.assertIn("\tsafe_collision = true", script)
         generated = self._all_generated_text()
         self.assertIn("res://sprites/s_real/s_real.tscn", generated)
         self.assertNotIn("UNTRUSTED_", generated)
@@ -2326,9 +2324,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn(
-            '\tGMRuntime.gml_variable_instance_set(self, "child_before", true)\n'
+            "\tchild_before = true\n"
             "\tsuper._ready()\n"
-            '\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
+            "\tchild_after = true",
             child_content,
         )
 
@@ -2353,10 +2351,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(child_gd_path, "r", encoding="utf-8") as f:
             child_content = f.read()
 
-        self.assertIn(
-            '\tpass\n\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
-            child_content,
-        )
+        self.assertIn("\tpass\n\tchild_after = true", child_content)
         self.assertNotIn("super._ready()", child_content)
 
     def test_child_input_bindings_include_inherited_input_events(self):

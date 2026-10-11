@@ -175,6 +175,91 @@ def _write_smoke_scene(project_dir: Path) -> None:
     _write_text(project_dir / "smoke.tscn", smoke_scene)
 
 
+_CLEAR_SMOKE_SCRIPT = textwrap.dedent(
+    """\
+    extends Node
+
+    const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+    var _failures = []
+
+    func _expect(label, condition):
+    \tif not condition:
+    \t\t_failures.append(label)
+
+    func _held(button):
+    \treturn GMRuntime.gml_mouse_check_button(button)
+
+    func _ready():
+    \t# Drives the step latch by hand, as the GameMaker frame pump does.
+    \tGMRuntime.gml_event_scheduler_pump_detach()
+    \tGMRuntime.gml_input_set_step_latching(true)
+
+    \t# mouse_clear: the button reads as up at once and stays up while held;
+    \t# its release is still reported and a new press is seen again.
+    \tGMRuntime.gml_input_set_mouse_button_state(MOUSE_BUTTON_LEFT, true)
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("left press latched", _held(1) and GMRuntime.gml_mouse_check_button_pressed(1))
+    \tGMRuntime.gml_mouse_clear(1)
+    \t_expect("mouse_clear releases the button at once", not _held(1))
+    \t_expect("mouse_clear clears the press edge", not GMRuntime.gml_mouse_check_button_pressed(1))
+    \t_expect("mb_any sees no cleared button", not _held(-1))
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("a cleared button stays up while held", not _held(1) and not GMRuntime.gml_mouse_check_button_pressed(1))
+    \tGMRuntime.gml_input_set_mouse_button_state(MOUSE_BUTTON_LEFT, false)
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("the release of a cleared button is reported", GMRuntime.gml_mouse_check_button_released(1))
+    \tGMRuntime.gml_input_set_mouse_button_state(MOUSE_BUTTON_LEFT, true)
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("a new press is seen after the release", _held(1) and GMRuntime.gml_mouse_check_button_pressed(1))
+
+    \t# mb_any clears mb_left, mb_right and mb_middle only. A press that
+    \t# arrived after this step latched still belongs to the next step.
+    \tGMRuntime.gml_input_set_mouse_button_state(MOUSE_BUTTON_XBUTTON1, true)
+    \tGMRuntime.gml_input_begin_step()
+    \tGMRuntime.gml_input_set_mouse_button_state(MOUSE_BUTTON_RIGHT, true)
+    \tGMRuntime.gml_mouse_clear(-1)
+    \t_expect("mb_any clears the left button", not _held(1))
+    \t_expect("mb_any leaves the side buttons", _held(4))
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("left stays cleared on the next step", not _held(1))
+    \t_expect("a press after the latch is seen on the next step", _held(2) and GMRuntime.gml_mouse_check_button_pressed(2))
+
+    \t# io_clear: keys and buttons read as up for the rest of the step,
+    \t# keyboard_key, keyboard_lastkey and keyboard_string are reset and the
+    \t# wheel is cleared. Held keys come back on the next step; held mouse
+    \t# buttons stay up like after mouse_clear.
+    \tGMRuntime.gml_input_set_key_state(KEY_A, true)
+    \tGMRuntime.gml_input_set_key_state(KEY_B, true)
+    \tGMRuntime.gml_input_append_text("ab")
+    \tGMRuntime.gml_input_set_mouse_wheel(true, false)
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("keys latched", GMRuntime.gml_keyboard_check(KEY_A) and GMRuntime.gml_keyboard_check_pressed(KEY_B))
+    \t_expect("keyboard_key latched", GMRuntime.gml_builtin_global("keyboard_key") != 0)
+    \t_expect("wheel latched", GMRuntime.gml_builtin_global("mouse_wheel_up"))
+    \tGMRuntime.gml_io_clear()
+    \t_expect("io_clear releases held keys", not GMRuntime.gml_keyboard_check(KEY_A) and not GMRuntime.gml_keyboard_check(KEY_B))
+    \t_expect("io_clear clears key press edges", not GMRuntime.gml_keyboard_check_pressed(KEY_B))
+    \t_expect("io_clear leaves no key for vk_anykey", not GMRuntime.gml_keyboard_check(1) and GMRuntime.gml_keyboard_check(0))
+    \t_expect("io_clear resets keyboard_key", GMRuntime.gml_builtin_global("keyboard_key") == 0)
+    \t_expect("io_clear resets keyboard_lastkey", GMRuntime.gml_builtin_global("keyboard_lastkey") == 0)
+    \t_expect("io_clear resets keyboard_string", GMRuntime.gml_builtin_global("keyboard_string") == "")
+    \t_expect("io_clear clears the wheel", not GMRuntime.gml_builtin_global("mouse_wheel_up"))
+    \t_expect("io_clear releases mouse buttons", not _held(2) and not _held(4) and not GMRuntime.gml_mouse_check_button_pressed(2))
+    \tGMRuntime.gml_input_begin_step()
+    \t_expect("a held key is seen again on the next step", GMRuntime.gml_keyboard_check(KEY_A) and not GMRuntime.gml_keyboard_check_pressed(KEY_A))
+    \t_expect("held mouse buttons stay up after io_clear", not _held(2) and not _held(4))
+
+    \tif _failures.is_empty():
+    \t\tprint("INPUT_CLEAR_SMOKE_OK")
+    \telse:
+    \t\tfor failure in _failures:
+    \t\t\tprint("FAIL " + failure)
+    \tget_tree().quit(0 if _failures.is_empty() else 1)
+    """
+)
+
+
 class TestGameInputGodotSmoke(unittest.TestCase):
     def test_input_bridge_tracks_edges_and_coordinates(self) -> None:
         godot_binary = _find_godot_binary()
@@ -215,6 +300,40 @@ class TestGameInputGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("GAME_INPUT_SMOKE_OK", output)
+
+    def test_io_clear_and_mouse_clear_follow_gamemaker(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                '[application]\nconfig/name="InputClearSmoke"\nrun/main_scene="res://smoke.tscn"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "smoke.gd", _CLEAR_SMOKE_SCRIPT)
+            _write_text(
+                project_dir / "smoke.tscn",
+                '[gd_scene load_steps=2 format=3]\n\n[ext_resource type="Script" path="res://smoke.gd" id="1"]\n\n'
+                '[node name="Smoke" type="Node"]\nscript = ExtResource("1")\n',
+            )
+            godot_env = dict(os.environ)
+            godot_env["HOME"] = str(project_dir)
+            result = subprocess.run(
+                [godot_binary, "--headless", "--path", str(project_dir), "--scene", "res://smoke.tscn", "--quit-after", "10"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+                env=godot_env,
+            )
+            output = result.stdout + result.stderr
+
+        self.assertIn("INPUT_CLEAR_SMOKE_OK", output)
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("SCRIPT ERROR", output)
 
 
 if __name__ == "__main__":

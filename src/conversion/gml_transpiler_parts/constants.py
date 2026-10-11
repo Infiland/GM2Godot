@@ -1342,6 +1342,8 @@ INPUT_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "mouse_check_button": "gml_mouse_check_button",
     "mouse_check_button_pressed": "gml_mouse_check_button_pressed",
     "mouse_check_button_released": "gml_mouse_check_button_released",
+    "mouse_clear": "gml_mouse_clear",
+    "io_clear": "gml_io_clear",
     "display_mouse_get_x": "gml_display_mouse_get_x",
     "display_mouse_get_y": "gml_display_mouse_get_y",
     "display_mouse_set": "gml_display_mouse_set",

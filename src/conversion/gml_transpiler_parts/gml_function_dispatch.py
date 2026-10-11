@@ -525,6 +525,8 @@ _INPUT_ARITY: dict[str, tuple[int, int | None]] = {
     "mouse_check_button": (1, 1),
     "mouse_check_button_pressed": (1, 1),
     "mouse_check_button_released": (1, 1),
+    "mouse_clear": (1, 1),
+    "io_clear": (0, 0),
     "display_mouse_get_x": (0, 0),
     "display_mouse_get_y": (0, 0),
     "display_mouse_set": (2, 2),

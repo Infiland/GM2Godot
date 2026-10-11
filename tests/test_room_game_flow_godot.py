@@ -232,7 +232,7 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     \tvar background = room.get_node("Backgrounds/BackgroundVisual")
                     \tif not _check(abs(camera.position.x - 260.0) < 0.01, "Camera2D did not follow target on x"):
                     \t\treturn
-                    \tif not _check(background.scroll_offset.x > 0.0, "Background Parallax2D did not scroll"):
+                    \tif not _check(background.position.x > 0.0, "Background did not scroll"):
                     \t\treturn
                     \tprint("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK")
                     \tget_tree().quit(0)
@@ -267,15 +267,12 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     metadata/gamemaker_layer_name = "Backgrounds"
                     metadata/gamemaker_layer_type = "GMRBackgroundLayer"
 
-                    [node name="BackgroundVisual" type="Parallax2D" parent="Backgrounds"]
-                    repeat_size = Vector2(320, 0)
-                    repeat_times = 3
-                    scroll_offset = Vector2(0, 0)
+                    [node name="BackgroundVisual" type="Node2D" parent="Backgrounds"]
                     metadata/gamemaker_layer_element_type = "background"
                     metadata/gamemaker_background_visual = true
+                    metadata/gamemaker_background_htiled = true
                     metadata/gamemaker_background_hspeed = 2
                     metadata/gamemaker_background_vspeed = 0
-                    metadata/gamemaker_background_runtime_support = true
 
                     [node name="Target" type="Node2D" parent="."]
                     script = ExtResource("target")

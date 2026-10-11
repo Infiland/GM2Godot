@@ -683,16 +683,32 @@ class TestRoomConverter(unittest.TestCase):
             '[ext_resource type="PackedScene" path="res://sprites/s_background/s_background.tscn" id="1"]',
             content,
         )
-        self.assertIn(
-            '[node name="s_background" parent="Backgrounds" instance=ExtResource("1")]',
-            content,
-        )
+        # The layer node carries the layer offset; the element holds the
+        # blend and alpha, its sprite scene only supplies frames, and the
+        # runtime draws them through the Tiles region from the sprite's
+        # top-left corner (backgrounds ignore the sprite origin).
         self.assertIn('position = Vector2(16, 32)', content)
+        self.assertIn('[node name="s_background" type="Node2D" parent="Backgrounds"]', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "background"', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
+        self.assertIn(
+            '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]\n'
+            "visible = false\n"
+            "metadata/gamemaker_background_frames = true\n",
+            content,
+        )
+        self.assertIn(
+            '[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]\n'
+            "texture_repeat = 2\n"
+            "centered = false\n"
+            "region_enabled = true\n"
+            "metadata/gamemaker_background_tiles = true\n",
+            content,
+        )
+        self.assertNotIn("Parallax2D", content)
 
-    def test_sprite_background_layer_with_scrolling_uses_parallax_runtime(self):
+    def test_tiled_scrolling_sprite_background_is_drawn_by_the_runtime(self):
         self._write_yyp(["r_background"], extra_resources=[("sprites", "s_background")])
         self._write_sprite("s_background")
         self._write_sprite_scene("s_background")
@@ -711,14 +727,21 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_background")
 
-        self.assertIn('[node name="s_background" type="Parallax2D" parent="Backgrounds"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 768)', content)
-        self.assertIn('scroll_offset = Vector2(0, 0)', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
+        # Tiling repeats the sprite at its own size over whatever the view
+        # shows, which the runtime works out every frame; nothing in the
+        # scene repeats at the room size.
+        self.assertIn('[node name="s_background" type="Node2D" parent="Backgrounds"]', content)
+        self.assertIn('metadata/gamemaker_background_htiled = true', content)
+        self.assertIn('metadata/gamemaker_background_vtiled = true', content)
+        self.assertIn('metadata/gamemaker_background_hspeed = 1', content)
+        self.assertIn('metadata/gamemaker_background_vspeed = -2', content)
         self.assertIn(
             '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]',
             content,
         )
+        self.assertIn('[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]', content)
+        self.assertNotIn("Parallax2D", content)
+        self.assertNotIn("repeat_size", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_background_layer_preserves_scrolling_tiling_runtime_metadata(self):
@@ -748,11 +771,9 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_background_stretch = true', content)
         self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
-        self.assertIn('[node name="BackgroundVisual" type="Parallax2D" parent="MovingBackground"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 0)', content)
-        self.assertIn('repeat_times = 3', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
-        self.assertIn('[node name="BackgroundColor" type="ColorRect" parent="MovingBackground/BackgroundVisual"]', content)
+        # A colour fills whatever is drawn, whatever the layer offset.
+        self.assertIn('[node name="BackgroundVisual" type="ColorRect" parent="MovingBackground"]', content)
+        self.assertNotIn("Parallax2D", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_layer_depth_maps_to_inverse_z_index(self):

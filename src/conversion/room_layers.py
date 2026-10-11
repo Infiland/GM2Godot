@@ -51,6 +51,8 @@ GAMEMAKER_TILE_ROTATE_BIT = 1 << 30
 GODOT_TILE_TRANSFORM_FLIP_H = 1 << 12
 GODOT_TILE_TRANSFORM_FLIP_V = 1 << 13
 GODOT_TILE_TRANSFORM_TRANSPOSE = 1 << 14
+# CanvasItem.TEXTURE_REPEAT_ENABLED
+_GODOT_TEXTURE_REPEAT_ENABLED = 2
 
 
 class GameMakerTile(NamedTuple):
@@ -913,7 +915,7 @@ def _background_visual_lines(
                 )
             )
             return []
-        return _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, context)
+        return _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id)
 
     return _background_color_lines(layer, parent_path, context)
 
@@ -921,28 +923,15 @@ def _background_visual_lines(
 def _background_color_lines(
     layer: JsonObject, parent_path: str, context: RoomLayerSerializationContext
 ) -> list[str]:
+    # GameMaker fills the area being drawn with the colour, whatever the layer
+    # offset; the runtime keeps this rectangle over the visible part of the
+    # room (see _gml_room_update_background_layers).
     layer_fields = RoomLayerFields(layer, "")
     width, height = _room_size(context)
-    if _background_needs_runtime(layer):
-        node_name = "BackgroundVisual"
-        child_path = f"{parent_path}/{node_name}"
-        lines = _background_parallax_lines(layer, parent_path, node_name, "color", context)
-        lines.extend([
-            f'[node name="BackgroundColor" type="ColorRect" parent={godot_string(child_path)}]',
-            "visible = true",
-            "position = Vector2(0, 0)",
-            "size = Vector2({width}, {height})".format(
-                width=_format_number(width),
-                height=_format_number(height),
-            ),
-            "color = {color}".format(color=_godot_color(layer_fields.background_colour)),
-            "",
-        ])
-        return lines
-
     lines = [
         f'[node name="BackgroundVisual" type="ColorRect" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(layer_fields.visible)}",
+        "mouse_filter = 2",
         "position = Vector2(0, 0)",
         "size = Vector2({width}, {height})".format(
             width=_format_number(width),
@@ -960,39 +949,43 @@ def _background_sprite_lines(
     parent_path: str,
     sprite_name: str,
     ext_resource_id: str,
-    context: RoomLayerSerializationContext,
 ) -> list[str]:
+    """Emit a sprite background element.
+
+    The element node sits at the layer's offset and carries the background's
+    blend and alpha. Its sprite scene instance stays hidden and only supplies
+    the current frame; the runtime draws that frame from its top-left corner
+    (GameMaker ignores the sprite origin for backgrounds), repeated along the
+    tiled axes over the visible part of the room, through the region of the
+    ``Tiles`` Sprite2D (see _gml_room_update_background_layers).
+    """
     layer_fields = RoomLayerFields(layer, "")
     node_name = _sanitize_node_name(sprite_name) or "BackgroundSprite"
-    if _background_needs_runtime(layer):
-        child_path = f"{parent_path}/{node_name}"
-        visual_name = _sanitize_node_name(sprite_name + "Visual") or "BackgroundSpriteVisual"
-        lines = _background_parallax_lines(layer, parent_path, node_name, "sprite", context)
-        lines.extend([
-            '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
-                name=godot_string(visual_name),
-                parent=godot_string(child_path),
-                resource_id=ext_resource_id,
-            ),
-            "visible = true",
-            "position = Vector2(0, 0)",
-            "modulate = {color}".format(color=_godot_color(layer_fields.sprite_colour)),
-            "",
-        ])
-        return lines
-
+    child_path = f"{parent_path}/{node_name}"
+    visual_name = _sanitize_node_name(sprite_name + "Visual") or "BackgroundSpriteVisual"
     lines = [
-        '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
-            name=godot_string(node_name),
-            parent=godot_string(parent_path),
-            resource_id=ext_resource_id,
-        ),
+        f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(layer_fields.visible)}",
-        "position = Vector2(0, 0)",
         "modulate = {color}".format(color=_godot_color(layer_fields.sprite_colour)),
     ]
     lines.extend(_background_metadata_lines(layer, "sprite"))
-    lines.append("")
+    lines.extend([
+        "",
+        '[node name={name} parent={parent} instance=ExtResource("{resource_id}")]'.format(
+            name=godot_string(visual_name),
+            parent=godot_string(child_path),
+            resource_id=ext_resource_id,
+        ),
+        "visible = false",
+        "metadata/gamemaker_background_frames = true",
+        "",
+        f'[node name="Tiles" type="Sprite2D" parent={godot_string(child_path)}]',
+        f"texture_repeat = {_GODOT_TEXTURE_REPEAT_ENABLED}",
+        "centered = false",
+        "region_enabled = true",
+        "metadata/gamemaker_background_tiles = true",
+        "",
+    ])
     return lines
 
 
@@ -1021,56 +1014,6 @@ def _background_metadata_lines(layer: JsonObject, visual_type: str) -> list[str]
     ):
         _append_optional_metadata(lines, layer, source_key, metadata_key)
     return lines
-
-
-def _background_parallax_lines(
-    layer: JsonObject,
-    parent_path: str,
-    node_name: str,
-    visual_type: str,
-    context: RoomLayerSerializationContext,
-) -> list[str]:
-    layer_fields = RoomLayerFields(layer, "")
-    repeat_x, repeat_y = _background_repeat_size(layer, context)
-    lines = [
-        f'[node name={godot_string(node_name)} type="Parallax2D" parent={godot_string(parent_path)}]',
-        f"visible = {godot_value(layer_fields.visible)}",
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(layer_fields.x),
-            y=_format_number(layer_fields.y),
-        ),
-        "repeat_size = Vector2({x}, {y})".format(
-            x=_format_number(repeat_x),
-            y=_format_number(repeat_y),
-        ),
-        "repeat_times = 3",
-        "scroll_offset = Vector2(0, 0)",
-    ]
-    lines.extend(_background_metadata_lines(layer, visual_type))
-    lines.append("metadata/gamemaker_background_runtime_support = true")
-    lines.append("")
-    return lines
-
-
-def _background_needs_runtime(layer: JsonObject) -> bool:
-    layer_fields = RoomLayerFields(layer, "")
-    return (
-        _truthy(layer_fields.htiled)
-        or _truthy(layer_fields.vtiled)
-        or _nonzero(layer_fields.hspeed_raw)
-        or _nonzero(layer_fields.vspeed_raw)
-    )
-
-
-def _background_repeat_size(
-    layer: JsonObject, context: RoomLayerSerializationContext
-) -> tuple[JsonValue, JsonValue]:
-    layer_fields = RoomLayerFields(layer, "")
-    width, height = _room_size(context)
-    return (
-        width if _truthy(layer_fields.htiled) else 0,
-        height if _truthy(layer_fields.vtiled) else 0,
-    )
 
 
 def _background_sprite_name(layer: JsonObject) -> str | None:
@@ -1386,17 +1329,6 @@ def _godot_rotation_degrees(value: JsonValue) -> str:
     except (TypeError, ValueError):
         number = 0.0
     return _format_number(-number)
-
-
-def _truthy(value: JsonValue) -> bool:
-    return bool(value)
-
-
-def _nonzero(value: JsonValue) -> bool:
-    try:
-        return float(value) != 0.0 if isinstance(value, (str, int, float)) else False
-    except (TypeError, ValueError):
-        return False
 
 
 def _sanitize_node_name(name: JsonValue) -> str:

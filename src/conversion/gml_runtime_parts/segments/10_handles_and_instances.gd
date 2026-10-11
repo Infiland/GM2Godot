@@ -135,7 +135,7 @@ static func gml_instance_destroy(target = null):
 		# After a room change request GameMaker skips the Destroy event,
 		# unless the instance or the current room is persistent.
 		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
-			instance.call("_on_destroy")
+			_gml_instance_perform_own_event(instance, "_on_destroy")
 		_gml_instance_clean_up(instance, entry)
 		gml_instance_unregister(entry["handle"])
 		if instance is Node and instance.is_inside_tree():
@@ -153,7 +153,21 @@ static func _gml_instance_clean_up(instance, entry):
 		return
 	entry["cleaned_up"] = true
 	if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance) and instance.has_method("_on_clean_up"):
-		instance.call("_on_clean_up")
+		_gml_instance_perform_own_event(instance, "_on_clean_up")
+
+
+# Runs an event that GameMaker performs on an instance by itself (Destroy,
+# Clean Up) with other being the instance, also when a collision event (where
+# other is the instance collided with) set it off; the caller's other comes
+# back afterwards.
+static func _gml_instance_perform_own_event(instance, method_name):
+	var has_other = "other" in instance
+	var previous_other = instance.get("other") if has_other else null
+	if has_other:
+		instance.set("other", instance)
+	instance.call(method_name)
+	if has_other and is_instance_valid(instance):
+		instance.set("other", previous_other)
 
 
 # Runs the Clean Up event of the instances under root_node (every instance

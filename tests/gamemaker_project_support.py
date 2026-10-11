@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from PIL import Image
+
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.gui.setting_value import SettingValue
 from tests.godot_test_support import write_fixture_text
@@ -37,6 +39,19 @@ class GameMakerObject:
     events: Mapping[tuple[int, int], str]
     persistent: bool = False
     parent: str | None = None
+    sprite: str | None = None
+    # Collision events: the other object's name -> GML source.
+    collisions: Mapping[str, str] = field(default_factory=dict[str, str])
+
+
+@dataclass(frozen=True)
+class GameMakerSprite:
+    """A one-frame sprite: a filled rectangle with its origin at the top left
+    and a rectangle collision mask."""
+
+    name: str
+    width: int
+    height: int
 
 
 @dataclass(frozen=True)
@@ -71,6 +86,7 @@ class GameMakerProject:
     objects: Sequence[GameMakerObject]
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
+    sprites: Sequence[GameMakerSprite] = ()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -94,7 +110,8 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
                 "resourceVersion": "2.0",
             }
             for event_type, event_number in game_object.events
-        ],
+        ]
+        + [_collision_event_yy(target) for target in game_object.collisions],
         "managed": True,
         "name": game_object.name,
         "overriddenProperties": [],
@@ -110,10 +127,78 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "resourceType": "GMObject",
         "resourceVersion": "2.0",
         "solid": False,
-        "spriteId": None,
+        "spriteId": (
+            None
+            if game_object.sprite is None
+            else {"name": game_object.sprite, "path": f"sprites/{game_object.sprite}/{game_object.sprite}.yy"}
+        ),
         "spriteMaskId": None,
         "visible": True,
     }
+
+
+def _collision_event_yy(target: str) -> dict[str, object]:
+    return {
+        "$GMEvent": "v1",
+        "%Name": "",
+        "collisionObjectId": {"name": target, "path": f"objects/{target}/{target}.yy"},
+        "eventNum": 0,
+        "eventType": 4,
+        "isDnD": False,
+        "name": "",
+        "resourceType": "GMEvent",
+        "resourceVersion": "2.0",
+    }
+
+
+def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
+    sprite_dir = project_dir / "sprites" / sprite.name
+    frame_name = f"{sprite.name}_frame"
+    layer_name = f"{sprite.name}_layer"
+    image_path = sprite_dir / "layers" / frame_name / f"{layer_name}.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGBA", (sprite.width, sprite.height), (255, 255, 255, 255)).save(image_path)
+    _write_json(
+        sprite_dir / f"{sprite.name}.yy",
+        {
+            "$GMSprite": "v2",
+            "%Name": sprite.name,
+            "name": sprite.name,
+            "resourceType": "GMSprite",
+            "resourceVersion": "2.0",
+            "width": sprite.width,
+            "height": sprite.height,
+            "origin": 0,
+            "bboxMode": 0,
+            "bbox_left": 0,
+            "bbox_right": sprite.width - 1,
+            "bbox_top": 0,
+            "bbox_bottom": sprite.height - 1,
+            "collisionKind": 1,
+            "collisionTolerance": 0,
+            "frames": [
+                {"$GMSpriteFrame": "v1", "name": frame_name, "resourceType": "GMSpriteFrame", "resourceVersion": "2.0"}
+            ],
+            "layers": [
+                {
+                    "$GMImageLayer": "",
+                    "name": layer_name,
+                    "visible": True,
+                    "resourceType": "GMImageLayer",
+                    "resourceVersion": "2.0",
+                }
+            ],
+            "parent": {"name": "Sprites", "path": "folders/Sprites.yy"},
+            "sequence": {
+                "xorigin": 0,
+                "yorigin": 0,
+                "playbackSpeed": 0.0,
+                "playbackSpeedType": 0,
+                "playback": 1,
+                "tracks": [{"keyframes": {"Keyframes": [{"Key": 0.0, "Length": 1.0, "Channels": {"0": {"Id": {"name": frame_name}}}}]}}],
+            },
+        },
+    )
 
 
 def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
@@ -218,6 +303,9 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
 def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> None:
     """Write the project's .yyp, objects, rooms and scripts."""
     resources: list[dict[str, object]] = []
+    for sprite in project.sprites:
+        _write_sprite(project_dir, sprite)
+        resources.append({"id": {"name": sprite.name, "path": f"sprites/{sprite.name}/{sprite.name}.yy"}})
     for script_name, source in project.scripts.items():
         script_dir = project_dir / "scripts" / script_name
         _write_json(
@@ -241,6 +329,8 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
         for (event_type, event_number), source in game_object.events.items():
             prefix = _EVENT_FILE_PREFIXES[event_type]
             write_fixture_text(object_dir / f"{prefix}_{event_number}.gml", source)
+        for target, source in game_object.collisions.items():
+            write_fixture_text(object_dir / f"Collision_{target}.gml", source)
         resources.append(
             {"id": {"name": game_object.name, "path": f"objects/{game_object.name}/{game_object.name}.yy"}}
         )
@@ -327,6 +417,20 @@ def run_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float 
     environment["HOME"] = str(godot_dir)
     return subprocess.run(
         [godot_binary, "--headless", "--log-file", str(godot_dir / "godot.log"), "--path", str(godot_dir)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
+
+
+def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    """Import a converted project's assets (sprite images) before it runs."""
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
         capture_output=True,
         text=True,
         timeout=timeout,

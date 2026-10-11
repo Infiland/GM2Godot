@@ -2108,7 +2108,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return _gml_instance_entry_targets(object_entries)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_instance_perform_own_event(instance, "_on_destroy")', GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_collision_queries_use_gamemaker_masks(self):

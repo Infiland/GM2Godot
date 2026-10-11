@@ -80,6 +80,53 @@ _DESTROY_OTHER_TRACE = [
     "collision:other_is_b=yes",
 ]
 
+# Once an event has requested a room change, no collision event runs any more
+# in that step, a persistent instance's neither (HTML5 runner:
+# yyObject.PerformEvent returns once New_Room is set, except for some events
+# of persistent instances, which collisions are not).
+_COLLISION_ROOM_CHANGE_PROJECT = GameMakerProject(
+    name="CollisionRoomChange",
+    scripts=_SCRIPTS,
+    sprites=(_BOX,),
+    objects=(
+        GameMakerObject(
+            "o_a",
+            {},
+            sprite="spr_box",
+            collisions={"o_b": 'trace("collision_a:" + string(x));\nroom_goto(r_two);\n'},
+        ),
+        GameMakerObject("o_b", {}, sprite="spr_box", collisions={"o_a": 'trace("collision_b:" + string(x));\n'}),
+        GameMakerObject(
+            "o_keep",
+            {},
+            persistent=True,
+            sprite="spr_box",
+            collisions={"o_b": 'trace("collision_keep");\n'},
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_a", "o_a", 0, 0),
+                        RoomInstance("inst_b", "o_b", 4, 0),
+                        RoomInstance("inst_a2", "o_a", 100, 0),
+                        RoomInstance("inst_b2", "o_b", 104, 0),
+                        RoomInstance("inst_keep", "o_keep", 2, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_a", "inst_b", "inst_a2", "inst_b2", "inst_keep"),
+        ),
+        GameMakerRoom("r_two", layers=(InstanceLayer("Instances", 0, ()),), creation_order=()),
+    ),
+)
+_COLLISION_ROOM_CHANGE_TRACE = ["collision_a:0"]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -95,6 +142,9 @@ func _process(_delta):
 class TestInstanceEventsGodot(unittest.TestCase):
     def test_destroy_and_clean_up_run_with_other_being_the_instance(self) -> None:
         self.assertEqual(self._run_trace(_DESTROY_OTHER_PROJECT), _DESTROY_OTHER_TRACE)
+
+    def test_no_collision_event_runs_once_a_room_change_is_pending(self) -> None:
+        self.assertEqual(self._run_trace(_COLLISION_ROOM_CHANGE_PROJECT), _COLLISION_ROOM_CHANGE_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

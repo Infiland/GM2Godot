@@ -164,6 +164,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
             "tests/test_draw_basic_godot.py",
             "tests/test_draw_sprite_text_godot.py",
             "tests/test_font_text_godot.py",
+            "tests/test_font_view_render_godot.py",
         ),
     ),
     _segment(

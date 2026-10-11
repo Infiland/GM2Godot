@@ -126,6 +126,12 @@ class GMLMethod:
 			if receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF_OTHER:
 				call_args.append(method_other)
 			call_args.append_array(args)
+			# A GML call may pass more arguments than the function declares
+			# (array_foreach and array_find_index pass the index too); the
+			# GDScript callable takes only those it declares.
+			var declared_count = function_value.get_argument_count()
+			if call_args.size() > declared_count:
+				call_args.resize(declared_count)
 			return function_value.callv(call_args)
 		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():
 			var method_name = function_value.get_method()

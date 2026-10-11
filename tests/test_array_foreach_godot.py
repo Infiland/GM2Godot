@@ -42,7 +42,13 @@ class TestArrayForeachGodotSmoke(unittest.TestCase):
                 var _rebound = method(_target_scope, method(_source_scope, function() {
                     return value;
                 }));
-                return [_output, _bound(), _bound_same_name(), _rebound()];
+                // A call may pass more arguments than the function declares.
+                var _single = [];
+                array_foreach([4, 5], method({_single}, function(_value) {
+                    array_push(_single, _value);
+                }));
+                var _first = function(_a) { return _a; };
+                return [_output, _bound(), _bound_same_name(), _rebound(), _single, _first(6, 7)];
                 """
             ),
             indent="\t",
@@ -102,7 +108,7 @@ class TestArrayForeachGodotSmoke(unittest.TestCase):
 
             func _ready():
             \tvar binding_result = _run_transpiled_binding_probe()
-            \tif not _check(binding_result == [[10, 20, 30], 7, 7, 13], "transpiled method callback lost its bound struct scope"):
+            \tif not _check(binding_result == [[10, 20, 30], 7, 7, 13, [4, 5], 6], "transpiled method callback lost its bound struct scope or an extra argument"):
             \t\treturn
 
             \tvar callback = GMRuntime.gml_method(self, Callable(self, "_collect"))

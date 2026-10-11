@@ -115,11 +115,27 @@ def _write_scripts(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(get_tree().current_scene.find_child("PersistentProbe", true, false) != null, "persistent probe did not survive transition"):
         \t\treturn
+        \t# Room changes are recorded only while tracing is on (off by default).
+        \tif not _check(GMRuntime.gml_room_transition_log().is_empty(), "room change recorded with tracing off"):
+        \t\treturn
+        \tGMRuntime.gml_event_scheduler_set_tracing(true)
         \tif not _check(GMRuntime.gml_room_restart(), "room_restart failed"):
         \t\treturn
         \tawait get_tree().process_frame
         \tif not _check(get_tree().current_scene.name == "r_two", "restart changed room"):
         \t\treturn
+        \tvar transitions = GMRuntime.gml_room_transition_log()
+        \tif not _check(transitions == [{"room": "r_two", "room_id": GMRuntime.gml_asset_get_index("r_two"), "restart": true}], "room transition log: " + str(transitions)):
+        \t\treturn
+        \t# The log keeps only the latest room changes.
+        \tfor _restart in range(2 * GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT):
+        \t\tGMRuntime.gml_room_restart()
+        \t\tawait get_tree().process_frame
+        \tif not _check(GMRuntime.gml_room_transition_log().size() == GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT, "room transition log size " + str(GMRuntime.gml_room_transition_log().size())):
+        \t\treturn
+        \tif not _check(GMRuntime._gml_room_transition_log.size() < 2 * GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT, "room transition log kept growing"):
+        \t\treturn
+        \tGMRuntime.gml_event_scheduler_set_tracing(false)
         \tif not _check(GMRuntime.gml_room_goto_previous(), "room_goto_previous failed"):
         \t\treturn
         \tawait get_tree().process_frame
@@ -494,11 +510,11 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     "--scene",
                     "res://rooms/r_one/r_one.tscn",
                     "--quit-after",
-                    "10",
+                    "400",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=20,
+                timeout=60,
                 check=False,
                 env=godot_env,
             )

@@ -293,7 +293,7 @@ Every instance with a sprite advances `image_index` by `image_speed` times the s
 
 Each phase runs for the live instances in creation order. An instance created during a phase takes part from the next phase on (one created in Begin Step gets that step's Step and End Step events), and a destroyed instance gets no further events. An instance with no speed, no gravity and no path is left alone by the motion update, as in GameMaker.
 
-`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024), the input events (`gml_input_dispatch_trace()`, the latest 256) and the collision events and solid move-backs (`gml_collision_event_trace()`, the latest 256). Tracing is meant for tests and debugging and is off by default, so a running game keeps no record of its events, as in GameMaker.
+`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024), the input events (`gml_input_dispatch_trace()`, the latest 256), the collision events and solid move-backs (`gml_collision_event_trace()`, the latest 256), the delivered async events (`gml_async_event_log()`, the latest 256) and the room changes (`gml_room_transition_log()`, the latest 64). Tracing is meant for tests and debugging and is off by default, so a running game keeps no record of its events, as in GameMaker.
 
 ### Precise sprite collision masks
 

@@ -55,10 +55,12 @@ static var _gml_event_scheduler_enabled = true
 static var _gml_event_scheduler_frame_index = 0
 # While tracing is on, the scheduler records every event it runs
 # (gml_event_scheduler_trace), the input runtime every input event
-# (gml_input_dispatch_trace) and the collision runtime every collision event
-# and solid move back (gml_collision_event_trace). Tracing is off by default:
-# games run thousands of events per second, GameMaker keeps no such record,
-# and only tests and debugging read the records.
+# (gml_input_dispatch_trace), the collision runtime every collision event
+# and solid move back (gml_collision_event_trace), the async runtime every
+# async event it delivers (gml_async_event_log) and the room runtime every
+# room change (gml_room_transition_log); each keeps only its latest records.
+# Tracing is off by default: games run thousands of events per second,
+# GameMaker keeps no such record, and only tests and debugging read them.
 static var _gml_event_scheduler_tracing = false
 static var _gml_event_scheduler_trace = []
 

@@ -1,3 +1,8 @@
+# While tracing is on (gml_event_scheduler_set_tracing), every delivered async
+# event is recorded; gml_async_event_log() returns at most this many of the
+# latest records.
+const GML_ASYNC_EVENT_LOG_LIMIT = 256
+
 static var _gml_async_next_request_id_value = 1
 static var _gml_async_event_log = []
 static var _gml_async_queue = []
@@ -183,7 +188,11 @@ static func gml_async_queue_snapshot():
 
 
 static func gml_async_event_log():
-	return _gml_clone_value(_gml_async_event_log, 16)
+	# The latest records, oldest first.
+	var records = _gml_async_event_log
+	if records.size() > GML_ASYNC_EVENT_LOG_LIMIT:
+		records = records.slice(records.size() - GML_ASYNC_EVENT_LOG_LIMIT)
+	return _gml_clone_value(records, 16)
 
 
 static func gml_async_event_log_clear():
@@ -362,15 +371,19 @@ static func _gml_async_deliver(event):
 	if main_loop is SceneTree:
 		listener_count = _gml_async_dispatch_node(main_loop.root, handler_names)
 	_gml_async_active_depth -= 1
-	_gml_async_event_log.append({
-		"kind": kind,
-		"handler": handler_name,
-		"handlers": handler_names,
-		"payload": _gml_clone_value(payload, 16),
-		"queue_sequence": event.get("queue_sequence", 0),
-		"dispatch_sequence": _gml_async_dispatch_sequence,
-		"listener_count": listener_count,
-	})
+	if _gml_event_scheduler_tracing:
+		_gml_async_event_log.append({
+			"kind": kind,
+			"handler": handler_name,
+			"handlers": handler_names,
+			"payload": _gml_clone_value(payload, 16),
+			"queue_sequence": event.get("queue_sequence", 0),
+			"dispatch_sequence": _gml_async_dispatch_sequence,
+			"listener_count": listener_count,
+		})
+		# Trimmed in batches, so recording stays cheap.
+		if _gml_async_event_log.size() >= GML_ASYNC_EVENT_LOG_LIMIT * 2:
+			_gml_async_event_log = _gml_async_event_log.slice(-GML_ASYNC_EVENT_LOG_LIMIT)
 	if _gml_async_active_depth == 0:
 		_gml_builtin_globals["async_load"] = {}
 	return listener_count

@@ -6,6 +6,8 @@ const GML_VIEW_CAMERA_NODE_PATH = ^"ViewCamera"
 const GML_VIEW_PRESENTER_READY_META = "_gm2godot_view_presenter"
 const GML_VIEW_CAMERA_NODE_META = "gamemaker_view_camera"
 const GML_VIEW_STATE_META = "_gm2godot_view_state"
+# Hides the room's own canvas while views are enabled and none is visible.
+const GML_VIEW_ROOM_HIDER_NAME = "_GM2GodotRoomHidden"
 const GML_VIEW_GUI_LAYER_NAME = "GMGUI"
 const GML_VIEW_GUI_LAYER_PATH = ^"GMGUI"
 const GML_VIEW_GUI_LAYER_POLICY_META = "gm2godot_gui_layer_policy"
@@ -1407,6 +1409,7 @@ static func _gml_camera_target_is_set(target):
 static func _gml_view_present(state):
 	if not (state is Dictionary):
 		return
+	_gml_view_show_room(state["scene"], _gml_view_room_drawn(state))
 	var camera_node = _gml_view_presenter(state["scene"])
 	if camera_node == null:
 		return
@@ -1451,6 +1454,36 @@ static func _gml_view_present(state):
 			changed = true
 		if changed:
 			camera_node.force_update_scroll()
+
+
+# GameMaker draws the room once per visible view, or once as a whole when
+# views are disabled; with views enabled and none visible nothing of the room
+# is drawn and the window colour shows (yyRoom.js DrawViews).
+static func _gml_view_room_drawn(state):
+	if not bool(state["enabled"]):
+		return true
+	for visible in state["arrays"]["view_visible"]:
+		if _gml_view_flag(visible):
+			return true
+	return false
+
+
+# The room's nodes all render on the viewport's own canvas; a transparent
+# CanvasModulate on it hides them, leaving the window-space Pre Draw, Post
+# Draw and GUI layers.
+static func _gml_view_show_room(scene, shown):
+	if not (scene is Node) or not is_instance_valid(scene):
+		return
+	var hider = scene.get_node_or_null(NodePath(GML_VIEW_ROOM_HIDER_NAME))
+	if hider == null:
+		if shown:
+			return
+		hider = CanvasModulate.new()
+		hider.name = GML_VIEW_ROOM_HIDER_NAME
+		hider.color = Color(0, 0, 0, 0)
+		scene.add_child(hider, false, Node.INTERNAL_MODE_BACK)
+	if hider.visible == shown:
+		hider.visible = not shown
 
 
 # One-time Camera2D setup: GameMaker views have no limits, smoothing or drag,

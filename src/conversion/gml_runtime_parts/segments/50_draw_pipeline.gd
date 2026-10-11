@@ -14,6 +14,8 @@ const GML_DRAW_INSTANCE_GROUP = &"_gm2godot_draw_instances"
 const GML_EXPLICIT_DEPTH_META = &"_gm2godot_explicit_depth"
 const GML_DRAW_GUI_LAYER_NAME = "GMGUI"
 const GML_DRAW_GUI_LAYER_INDEX = 1000
+# The draw phases that draw the room through its views.
+const GML_DRAW_ROOM_PHASES = ["draw_begin", "draw", "draw_end"]
 const GML_DRAW_PHASE_SPACES = {
 	"pre_draw": GML_DRAW_SPACE_PRE_DRAW,
 	"draw_begin": GML_DRAW_SPACE_BEGIN,
@@ -522,8 +524,14 @@ static func gml_draw_event_dispatch_frame(instances = null):
 	var plan = _gml_draw_frame_plan(instances)
 	var phase_lists = plan["phases"]
 	var dispatched = 0
+	# Draw Begin, Draw and Draw End run for the room's views; with views
+	# enabled and none visible they do not run (yyRoom.js DrawViews).
+	var room_drawn = _gml_view_room_drawn(_gml_view_active_state())
 	for index in range(GML_DRAW_EVENT_PHASES.size()):
-		dispatched += _gml_draw_dispatch_phase(GML_DRAW_EVENT_PHASES[index], phase_lists[index], plan)
+		var phase = GML_DRAW_EVENT_PHASES[index]
+		if not room_drawn and GML_DRAW_ROOM_PHASES.has(phase["phase"]):
+			continue
+		dispatched += _gml_draw_dispatch_phase(phase, phase_lists[index], plan)
 	_gml_draw_frame_finish(plan["drawers"], creation_mark)
 	_gml_draw_dispatch_active = false
 	_gml_draw_apply_pending_depths()

@@ -1099,6 +1099,37 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "return [_gml_method_self, _gml_method_other])",
         )
 
+    def test_method_locals_get_their_own_names_beside_enclosing_locals(self):
+        # A method's locals are its own (manual: Local Variables); GDScript
+        # rejects a lambda local that reuses an enclosing local or parameter.
+        code = transpile_gml_code(
+            "function outer(_name) {\n"
+            "    var n = 1;\n"
+            "    var f = function() {\n"
+            "        var n = 2;\n"
+            "        var _name = \"n\";\n"
+            "        var g = function() { var n = 4; return n; };\n"
+            "        for (var _i = 0; _i < 2; _i += 1) { n += _i; }\n"
+            "        return n + other.n + _name;\n"
+            "    };\n"
+            "    return f() + n;\n"
+            "}\n"
+        )
+
+        self.assertIn("\t\tvar n = 1\n", code)
+        self.assertIn("\t\t\tvar _gml_local_n_2 = 2\n", code)
+        self.assertIn('\t\t\tvar _gml_local__name = "n"\n', code)
+        self.assertIn("\t\t\t\tvar _gml_local_n = 4\n\t\t\t\treturn _gml_local_n\n", code)
+        self.assertIn("_gml_local_n_2 = GMRuntime.gml_add(_gml_local_n_2, _i)", code)
+        self.assertIn(
+            'return GMRuntime.gml_add(GMRuntime.gml_add(_gml_local_n_2, '
+            'GMRuntime.gml_selector_get(_gml_method_other, "n")), _gml_local__name)',
+            code,
+        )
+        self.assertIn('GMRuntime.gml_call_value(f, [], _gml_method_self, _gml_method_other, "f"), n)', code)
+        # A local that reuses no enclosing name keeps its own name.
+        self.assertIn("\t\t\tvar _i = 0\n", code)
+
     def test_method_rebinding_resolves_script_asset_callable_metadata(self):
         self.assertEqual(
             transpile_gml_expression(

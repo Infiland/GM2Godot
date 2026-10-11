@@ -256,7 +256,7 @@ Instances destroyed earlier, even in the same step, receive no Game Start, Room 
 
 In object events, instance creation code and timeline moments, `other` is the instance itself, as in GameMaker, except inside collision events and `with` blocks. Room creation code runs with the room root as both `self` and `other`.
 
-For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, restores those instances, and runs the entry sequence for the new scene.
+For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, and runs the entry sequence for the new scene. As in GameMaker, the persistent instances join the new room once its own instances are created: each joins the layer of the same name as the one it left (a new layer of that name at its depth when the room has none) and takes that layer's depth, while one with its own depth (from `instance_create_depth()` or a `depth` assignment) keeps it.
 
 `game_restart()` dispatches Game End, then ends the game as GameMaker's runner does: every instance is removed, persistent ones included, without further events, the time sources made by `call_later()` are destroyed and all sounds stop. The first room then starts as it did at launch, Game Start included.
 

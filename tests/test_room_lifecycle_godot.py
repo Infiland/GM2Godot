@@ -318,6 +318,61 @@ _CONSTRUCT_TRACE = [
 ]
 
 
+# A persistent instance on a room layer moves to the layer of the same name
+# in each room it goes to, taking that layer's depth; when the room has no
+# such layer, one is made at the instance's depth. An instance that has its
+# own depth (instance_create_depth) keeps it. (Runner StartRoom: the layer
+# names it records, GetLayerFromName / AddLayer.)
+_LAYER_REPORT = (
+    'trace("keeper:" + room_get_name(room) + ":depth=" + string(depth) + ":actors="\n'
+    '    + (layer_exists("Actors") ? string(layer_get_depth("Actors")) + "/"\n'
+    '    + string(array_length(layer_get_all_elements(layer_get_id("Actors")))) : "none")\n'
+    '    + ":floater=" + string(global.floater.depth));\n'
+)
+_LAYERS_PROJECT = GameMakerProject(
+    name="PersistentLayers",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_keeper",
+            {
+                EVENT_CREATE: "steps = 0;\nglobal.floater = instance_create_depth(0, 0, -7, o_floater);\n",
+                EVENT_ROOM_START: _LAYER_REPORT,
+                EVENT_STEP: "steps += 1;\nif (steps == 2 && room != r_three) { steps = 0; room_goto_next(); }\n",
+            },
+            persistent=True,
+        ),
+        GameMakerObject("o_floater", {}, persistent=True),
+        GameMakerObject("o_plain", {}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(InstanceLayer("Actors", 100, (RoomInstance("inst_keeper", "o_keeper", 0, 0),)),),
+            creation_order=("inst_keeper",),
+        ),
+        GameMakerRoom(
+            "r_two",
+            layers=(
+                InstanceLayer("Back", 200, (RoomInstance("inst_back", "o_plain", 0, 0),)),
+                InstanceLayer("Actors", -50, (RoomInstance("inst_actor", "o_plain", 0, 0),)),
+            ),
+            creation_order=("inst_back", "inst_actor"),
+        ),
+        GameMakerRoom(
+            "r_three",
+            layers=(InstanceLayer("Ground", 300, (RoomInstance("inst_ground", "o_plain", 0, 0),)),),
+            creation_order=("inst_ground",),
+        ),
+    ),
+)
+_LAYERS_TRACE = [
+    "keeper:r_one:depth=100:actors=100/1:floater=-7",
+    "keeper:r_two:depth=-50:actors=-50/2:floater=-7",
+    "keeper:r_three:depth=-50:actors=-50/1:floater=-7",
+]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
@@ -330,6 +385,9 @@ class TestRoomLifecycleGodot(unittest.TestCase):
 
     def test_instances_are_built_once_before_their_create_events(self) -> None:
         self.assertEqual(self._run_trace(_CONSTRUCT_PROJECT), _CONSTRUCT_TRACE)
+
+    def test_persistent_instances_move_to_the_layer_of_the_same_name(self) -> None:
+        self.assertEqual(self._run_trace(_LAYERS_PROJECT), _LAYERS_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

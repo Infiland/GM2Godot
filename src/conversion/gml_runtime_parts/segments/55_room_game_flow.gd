@@ -2,6 +2,7 @@ const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"
 const GML_ROOM_UNSUPPORTED_EXIT_MESSAGE = "GM2Godot maps game_end to SceneTree.quit(); platform-specific close prompts and window behavior are not emulated."
 const GML_ROOM_PREPARED_META = "_gm2godot_room_prepared"
 const GML_ROOM_HELD_INSTANCES_META = "_gm2godot_room_held_instances"
+const GML_ROOM_PERSISTENT_LAYER_META = "_gm2godot_room_persistent_layer"
 const GML_ROOM_UNORDERED_INSTANCE = 1073741824
 
 static var _gml_room_current_id = -1
@@ -76,6 +77,7 @@ static func gml_room_enter_scene(scene, force = false):
 	_gml_room_update_current(entry, scene)
 	_gml_room_warn_persistent_room(scene)
 	_gml_room_create_instances(scene)
+	_gml_room_restore_persistent_instances(scene)
 	if not _gml_room_game_started:
 		_gml_room_game_started = true
 		_gml_room_dispatch_lifecycle(scene, "_on_game_start")
@@ -254,7 +256,6 @@ static func _gml_room_change_to_entry(entry, restarting):
 	_gml_room_suppress_auto_enter = true
 	root.add_child(new_scene)
 	tree.current_scene = new_scene
-	_gml_room_restore_persistent_instances(new_scene)
 	_gml_room_suppress_auto_enter = false
 	gml_room_enter_scene(new_scene, true)
 	_gml_room_transition_log.append({
@@ -573,18 +574,63 @@ static func _gml_room_capture_persistent_instances(scene):
 			continue
 		if node.get_parent() == null:
 			continue
+		node.set_meta(GML_ROOM_PERSISTENT_LAYER_META, _gml_room_persistent_layer_record(node))
 		node.set_meta("_gm2godot_room_preserving_persistent", true)
 		node.reparent(persistent_root, true)
 
 
+# The layer a persistent instance leaves its room on: the room or runtime
+# layer's name, or "" when it is on no named layer (it has its own depth, as
+# after instance_create_depth or a depth assignment, which GameMaker keeps on
+# a managed depth layer), plus its depth.
+static func _gml_room_persistent_layer_record(node):
+	var current_depth = node.get("depth") if _object_has_property(node, "depth") else 0.0
+	var record = {"name": "", "depth": gml_instance_depth_get(node, current_depth)}
+	if node.has_meta(GML_EXPLICIT_DEPTH_META):
+		return record
+	var layer_node = node.get_parent()
+	while layer_node != null and not layer_node.has_meta("gm2godot_room_root_policy"):
+		if layer_node.has_meta("gamemaker_layer_name"):
+			record["name"] = str(layer_node.get_meta("gamemaker_layer_name"))
+			break
+		layer_node = layer_node.get_parent()
+	return record
+
+
+# Like the runner's StartRoom, the persistent instances brought along join
+# the room once its own instances are created: each joins the layer of the
+# same name as the one it left (a new layer of that name at its depth when
+# the room has none) and takes that layer's depth; one with its own depth
+# keeps it.
 static func _gml_room_restore_persistent_instances(scene):
-	var persistent_root = _gml_room_persistent_root()
-	if persistent_root == null or scene == null:
+	var tree = _gml_room_tree()
+	if tree == null or tree.root == null or scene == null:
+		return
+	var persistent_root = tree.root.get_node_or_null(GML_ROOM_PERSISTENT_ROOT_NAME)
+	if persistent_root == null:
 		return
 	for node in persistent_root.get_children():
-		node.reparent(scene, true)
+		if node.is_queued_for_deletion():
+			continue
+		var record = node.get_meta(GML_ROOM_PERSISTENT_LAYER_META) if node.has_meta(GML_ROOM_PERSISTENT_LAYER_META) else {"name": "", "depth": 0.0}
+		node.remove_meta(GML_ROOM_PERSISTENT_LAYER_META)
+		var layer = _gml_room_persistent_instance_layer(record)
+		node.reparent(layer.reference if gml_handle_is_valid(layer) else scene, true)
 		node.set_meta("_gm2godot_room_preserving_persistent", false)
 		node.set_meta("_gm2godot_room_restored_persistent", true)
+		# Its depth is the layer's (assigning depth would move it off the layer).
+		if gml_handle_is_valid(layer) and _object_has_property(node, "_gm_depth"):
+			node.set("_gm_depth", gml_layer_get_depth(layer))
+
+
+static func _gml_room_persistent_instance_layer(record):
+	var layer_name = str(record["name"])
+	if layer_name == "":
+		return null
+	var layer = _gml_layer_handles_by_name.get(layer_name)
+	if not gml_handle_is_valid(layer):
+		layer = gml_layer_create(record["depth"], layer_name)
+	return layer if gml_handle_is_valid(layer) and layer.reference is Node else null
 
 
 static func _gml_room_node_is_persistent(node):

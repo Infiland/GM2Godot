@@ -2089,8 +2089,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn(
             "if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:\n"
-            "\t\t# Most often an instance (or noone) from a query.\n"
-            "\t\treturn gml_handle_is_valid(value)",
+            "\t\t# Most often an instance (or noone) from a query. A destroyed\n"
+            "\t\t# instance's id is still a positive number, so true.\n"
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)",
             GML_RUNTIME_SCRIPT,
         )
 
@@ -2387,7 +2388,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n",
             GML_RUNTIME_SCRIPT,
         )
-        self.assertIn("\t\treturn gml_handle_is_valid(value)\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)\n"
+            "\tif is_undefined(value):\n\t\treturn false",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_variant_backed_parameters(self):

@@ -238,7 +238,10 @@ static func gml_with_targets(target, current_self = null, current_other = null):
 			# An instance whose node was freed no longer exists.
 			return []
 		if target is Node:
-			# The instance itself (self, other, a stored instance).
+			# The instance itself (self, other, a stored instance), unless it
+			# was destroyed: it was registered once and no longer is.
+			if target.has_meta("_gm2godot_instance_id") and not _gml_instance_handles_by_node_id.has(target.get_instance_id()):
+				return []
 			return [target]
 	if is_undefined(target):
 		return []
@@ -326,10 +329,16 @@ static func gml_handle_invalidate(handle):
 	if handle is GMLHandle:
 		var old_key = _gml_handle_key(handle.kind, handle.index)
 		handle.valid = false
+		_gml_handle_registry.erase(old_key)
+		if handle.kind == GML_INSTANCE_HANDLE_KIND:
+			# A destroyed instance keeps its id: stored references never turn
+			# into noone, and they still reach the instance's variables until
+			# its node is freed at the end of the step (GameMaker only marks
+			# the instance; instance lookups skip it).
+			return handle
 		handle.reference = null
 		handle.index = _gml_invalid_handle_index(handle.kind)
 		handle.value = _gml_encode_handle_value(handle.type_id, handle.index)
-		_gml_handle_registry.erase(old_key)
 	return handle
 
 

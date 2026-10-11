@@ -168,6 +168,78 @@ _GAME_EXIT_PROJECT = GameMakerProject(
 )
 _GAME_EXIT_TRACE = ["create_res", "clean_up_res:restart", "create_res", "clean_up_res:close"]
 
+# instance_destroy only marks an instance: it stops existing for instance
+# lookups at once (instance_exists, instance_number, with, also through self,
+# other or a stored self), but its id stays a number (never noone, true, and
+# different from every other id), and its variables can still be read and
+# written until it is removed at the end of the step (HTML5 runner:
+# Command_Destroy marks it, GetWithArray and instance_exists skip marked
+# instances, yyInst finds it by id until RemoveMarked; manual,
+# instance_destroy: "it will continue to perform the code contained in the
+# current event").
+_DESTROYED_REFERENCE_PROJECT = GameMakerProject(
+    name="DestroyedReferences",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject("o_target", {EVENT_CREATE: "hp = 1;\n"}),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("kept")) {\n'
+                    '    trace("later:noone=" + (global.kept == noone ? "yes" : "no")\n'
+                    '        + ":exists=" + (instance_exists(global.kept) ? "yes" : "no"));\n'
+                    "    exit;\n"
+                    "}\n"
+                    "var b = instance_create_depth(5, 6, 0, o_target);\n"
+                    "var c = instance_create_depth(7, 8, 0, o_target);\n"
+                    "b.hp = 42;\n"
+                    "instance_destroy(b);\n"
+                    "instance_destroy(c);\n"
+                    'trace("id:noone=" + (b == noone ? "yes" : "no") + ":same=" + (b == c ? "yes" : "no")\n'
+                    '    + ":true=" + (b ? "yes" : "no"));\n'
+                    'trace("lookup:exists=" + (instance_exists(b) ? "yes" : "no")\n'
+                    '    + ":number=" + string(instance_number(o_target)));\n'
+                    'trace("vars:hp=" + string(b.hp) + ":x=" + string(b.x));\n'
+                    "b.hp = 50;\n"
+                    'trace("vars:set_hp=" + string(b.hp));\n'
+                    "var n = 0;\n"
+                    "with (b) n += 1;\n"
+                    'trace("with:" + string(n));\n'
+                    "global.kept = b;\n"
+                    "var d = instance_create_depth(0, 0, 0, o_target);\n"
+                    "with (d) {\n"
+                    "    global.node = self;\n"
+                    "    instance_destroy();\n"
+                    '    trace("self:noone=" + (id == noone ? "yes" : "no")\n'
+                    '        + ":exists=" + (instance_exists(self) ? "yes" : "no") + ":hp=" + string(hp));\n'
+                    "}\n"
+                    "n = 0;\n"
+                    "with (global.node) n += 1;\n"
+                    'trace("stored_self:exists=" + (instance_exists(global.node) ? "yes" : "no") + ":with=" + string(n));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(InstanceLayer("Instances", 0, (RoomInstance("inst_runner", "o_runner", 0, 0),)),),
+            creation_order=("inst_runner",),
+        ),
+    ),
+)
+_DESTROYED_REFERENCE_TRACE = [
+    "id:noone=no:same=no:true=yes",
+    "lookup:exists=no:number=0",
+    "vars:hp=42:x=5",
+    "vars:set_hp=50",
+    "with:0",
+    "self:noone=no:exists=no:hp=1",
+    "stored_self:exists=no:with=0",
+    "later:noone=no:exists=no",
+]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -188,6 +260,11 @@ class TestInstanceDestroyGodot(unittest.TestCase):
 
     def test_game_restart_and_closing_the_window_run_clean_up(self) -> None:
         self.assertEqual(self._run_trace(_GAME_EXIT_PROJECT), _GAME_EXIT_TRACE)
+
+    def test_a_destroyed_instance_keeps_its_id_and_variables_but_stops_existing(self) -> None:
+        trace = self._run_trace(_DESTROYED_REFERENCE_PROJECT)
+        # The runner keeps stepping; every later step traces the same line.
+        self.assertEqual(trace[: len(_DESTROYED_REFERENCE_TRACE)], _DESTROYED_REFERENCE_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

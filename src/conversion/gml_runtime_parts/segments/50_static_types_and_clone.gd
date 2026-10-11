@@ -310,8 +310,9 @@ static func gml_bool(value):
 	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
 		return float(value) > 0.5
 	if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:
-		# Most often an instance (or noone) from a query.
-		return gml_handle_is_valid(value)
+		# Most often an instance (or noone) from a query. A destroyed
+		# instance's id is still a positive number, so true.
+		return gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)
 	if is_undefined(value):
 		return false
 	if is_ptr(value):

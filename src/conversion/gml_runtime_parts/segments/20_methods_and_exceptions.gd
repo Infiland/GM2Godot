@@ -32,6 +32,13 @@ static func _gml_shutdown_detach_method(method, pending, seen_objects):
 	method.callable_owner = null
 
 
+# Whether a value met at shutdown is a method. GML data can hold freed nodes
+# (a destroyed instance's id keeps its node, a stored self), which "is" must
+# not test.
+static func _gml_shutdown_is_method(value):
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLMethod
+
+
 static func _gml_shutdown_detach_methods(roots):
 	# Use an explicit worklist to remain stack-safe for deeply nested GML data.
 	# The identity list keeps cyclic Array/Dictionary graphs finite without
@@ -43,6 +50,8 @@ static func _gml_shutdown_detach_methods(roots):
 	var seen_objects = {}
 	while not pending.is_empty():
 		var value = pending.pop_back()
+		if typeof(value) == TYPE_OBJECT and not is_instance_valid(value):
+			continue
 		if value is GMLMethod:
 			_gml_shutdown_detach_method(value, pending, seen_objects)
 			continue
@@ -51,7 +60,7 @@ static func _gml_shutdown_detach_methods(roots):
 			if seen_objects.has(exception_id):
 				continue
 			seen_objects[exception_id] = true
-			if value.value is GMLMethod:
+			if _gml_shutdown_is_method(value.value):
 				_gml_shutdown_detach_method(value.value, pending, seen_objects)
 				value.value = null
 			else:
@@ -62,7 +71,7 @@ static func _gml_shutdown_detach_methods(roots):
 			if seen_objects.has(handle_id):
 				continue
 			seen_objects[handle_id] = true
-			if value.reference is GMLMethod:
+			if _gml_shutdown_is_method(value.reference):
 				_gml_shutdown_detach_method(value.reference, pending, seen_objects)
 				value.reference = null
 			else:
@@ -76,7 +85,7 @@ static func _gml_shutdown_detach_methods(roots):
 		if value_type == TYPE_ARRAY:
 			for index in range(value.size()):
 				var element = value[index]
-				if element is GMLMethod:
+				if _gml_shutdown_is_method(element):
 					_gml_shutdown_detach_method(element, pending, seen_objects)
 					value[index] = null
 				else:
@@ -84,12 +93,12 @@ static func _gml_shutdown_detach_methods(roots):
 			continue
 		for key in value.keys():
 			var element = value[key]
-			if element is GMLMethod:
+			if _gml_shutdown_is_method(element):
 				_gml_shutdown_detach_method(element, pending, seen_objects)
 				value[key] = null
 			else:
 				pending.append(element)
-			if key is GMLMethod:
+			if _gml_shutdown_is_method(key):
 				_gml_shutdown_detach_method(key, pending, seen_objects)
 				value.erase(key)
 			else:

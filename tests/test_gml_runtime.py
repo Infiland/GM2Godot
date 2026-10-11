@@ -2024,7 +2024,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_handle_invalid(kind = \"\", invalid_index = GML_HANDLE_INVALID_INDEX):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_make_handle(str(kind), int(invalid_index), null, \"\", false)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_noone():", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "_gml_instance_noone_handle = gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("static func gml_instance_all():", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)", GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_REFERENCE_HANDLE_KIND = "dbgref"', GML_RUNTIME_SCRIPT)
@@ -2084,7 +2087,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_handle_eq(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.kind == right.kind and left.index == right.index", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_handle(value):\n\t\treturn gml_handle_is_valid(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:\n"
+            "\t\t# Most often an instance (or noone) from a query.\n"
+            "\t\treturn gml_handle_is_valid(value)",
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_tracks_instance_registry_and_object_selectors(self):
         self.assertIn("static var _gml_instance_entries = {}", GML_RUNTIME_SCRIPT)
@@ -2373,13 +2381,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
             GML_RUNTIME_SCRIPT,
         )
-        # Plain numbers and bools come first; undefined is false.
+        # Plain numbers and bools come first, then handles; undefined is false.
         self.assertIn(
             "static func gml_bool(value):\n\tvar value_type = typeof(value)\n\tif value_type == TYPE_BOOL:\n\t\treturn value\n"
-            "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n"
-            "\tif is_undefined(value):\n\t\treturn false",
+            "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n",
             GML_RUNTIME_SCRIPT,
         )
+        self.assertIn("\t\treturn gml_handle_is_valid(value)\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_variant_backed_parameters(self):

@@ -36,8 +36,15 @@ static func gml_handle_invalid(kind = "", invalid_index = GML_HANDLE_INVALID_IND
 	return _gml_make_handle(str(kind), int(invalid_index), null, "", false)
 
 
+# noone is one shared handle, made once: nothing changes it (invalidating it
+# leaves it as it is).
+static var _gml_instance_noone_handle = null
+
+
 static func gml_instance_noone():
-	return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)
+	if _gml_instance_noone_handle == null:
+		_gml_instance_noone_handle = gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)
+	return _gml_instance_noone_handle
 
 
 static func gml_instance_all():

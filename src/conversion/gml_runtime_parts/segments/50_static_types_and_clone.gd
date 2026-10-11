@@ -309,12 +309,13 @@ static func gml_bool(value):
 		return value
 	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
 		return float(value) > 0.5
+	if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:
+		# Most often an instance (or noone) from a query.
+		return gml_handle_is_valid(value)
 	if is_undefined(value):
 		return false
 	if is_ptr(value):
 		return not value.invalid and value.value != 0
-	if is_handle(value):
-		return gml_handle_is_valid(value)
 	if is_int64(value):
 		return float(value.value) > 0.5
 	if is_number(value):

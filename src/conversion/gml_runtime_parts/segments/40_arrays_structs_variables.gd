@@ -437,6 +437,25 @@ static func gml_struct_get(struct_value, member_name):
 			return struct_value[key]
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
+		if (key == "x" or key == "y") and struct_value is Node2D and not (key in struct_value):
+			# The node's position (see _gml_object_builtin_field_get).
+			var position = (
+				struct_value.global_position
+				if _gml_sequence_instances_exist and bool(struct_value.get_meta("gamemaker_in_sequence", false))
+				else struct_value.position
+			)
+			return position.x if key == "x" else position.y
+		match _gml_object_member_kind(struct_value, key):
+			GML_OBJECT_MEMBER_PROPERTY:
+				return struct_value.get(key)
+			GML_OBJECT_MEMBER_FIELD:
+				if struct_value.has_meta(GML_OBJECT_DYNAMIC_FIELDS_META):
+					var fields = struct_value.get_meta(GML_OBJECT_DYNAMIC_FIELDS_META)
+					if typeof(fields) == TYPE_DICTIONARY and fields.has(key):
+						return fields[key]
+				return gml_undefined()
+			GML_OBJECT_MEMBER_BUILTIN:
+				return _gml_object_builtin_field_get(struct_value, key)
 		if _gml_object_uses_builtin_field(struct_value, key):
 			return _gml_object_builtin_field_get(struct_value, key)
 		if _object_has_property(struct_value, key):
@@ -533,11 +552,12 @@ static func _gml_selector_direct_target(target):
 
 
 static func gml_selector_get(target, member_name, current_self = null, current_other = null):
-	var direct: Variant = _gml_selector_direct_target(target)
-	if direct != null:
-		return gml_struct_get(direct, member_name)
-	if typeof(target) == TYPE_OBJECT and not is_instance_valid(target):
-		return gml_undefined()
+	if typeof(target) != TYPE_INT:
+		var direct: Variant = _gml_selector_direct_target(target)
+		if direct != null:
+			return gml_struct_get(direct, member_name)
+		if typeof(target) == TYPE_OBJECT and not is_instance_valid(target):
+			return gml_undefined()
 	# An object's first instance, as with o_player.x.
 	var first: Variant = _gml_instance_object_first(target)
 	if first != null:
@@ -655,13 +675,20 @@ static func gml_struct_set(struct_value, member_name, value):
 		struct_value[key] = value
 		return value
 	if typeof(struct_value) == TYPE_OBJECT:
-		if _gml_object_uses_builtin_field(struct_value, key):
+		var kind = _gml_object_member_kind(struct_value, key)
+		if kind == -1:
+			kind = (
+				GML_OBJECT_MEMBER_BUILTIN if _gml_object_uses_builtin_field(struct_value, key)
+				else GML_OBJECT_MEMBER_PROPERTY if _object_has_property(struct_value, key)
+				else GML_OBJECT_MEMBER_FIELD
+			)
+		if kind == GML_OBJECT_MEMBER_BUILTIN:
 			_gml_object_builtin_field_set(struct_value, key, value)
 		elif struct_value is Node and _gml_motion_is_synced_field(key) and key in struct_value:
 			# speed/direction and hspeed/vspeed stay in step, as when the
 			# instance assigns them itself.
 			_gml_motion_assign_field(struct_value, key, value)
-		elif _object_has_property(struct_value, key):
+		elif kind == GML_OBJECT_MEMBER_PROPERTY:
 			struct_value.set(key, value)
 		else:
 			_gml_object_dynamic_fields(struct_value, true)[key] = value
@@ -710,7 +737,7 @@ static func gml_struct_names_count(struct_value):
 static func _gml_object_dynamic_fields(object_value, create = false):
 	if typeof(object_value) != TYPE_OBJECT:
 		return {}
-	var meta_name = "_gm2godot_dynamic_fields"
+	var meta_name = GML_OBJECT_DYNAMIC_FIELDS_META
 	if object_value.has_meta(meta_name):
 		var fields = object_value.get_meta(meta_name)
 		if typeof(fields) == TYPE_DICTIONARY:
@@ -733,6 +760,44 @@ static func _gml_object_has_builtin_field(object_value, member_name):
 
 
 const GML_OBJECT_BBOX_FIELDS = ["bbox_left", "bbox_top", "bbox_right", "bbox_bottom"]
+const GML_OBJECT_DYNAMIC_FIELDS_META = "_gm2godot_dynamic_fields"
+# How an instance holds a member (see _gml_object_member_kind): as one of the
+# node's builtin fields, one of its properties (script variables included), or
+# a field kept with the instance.
+const GML_OBJECT_MEMBER_BUILTIN = 0
+const GML_OBJECT_MEMBER_PROPERTY = 1
+const GML_OBJECT_MEMBER_FIELD = 2
+
+static var _gml_object_member_kinds = {}
+
+
+# How the instance holds a member (a GML_OBJECT_MEMBER_* kind), as
+# gml_struct_get and gml_struct_set work it out. That only depends on the
+# instance's script and class, so the kinds are kept per script and class;
+# objects without a script get -1 and are worked out every time.
+static func _gml_object_member_kind(object_value, key):
+	var script = object_value.get_script()
+	if script == null:
+		return -1
+	var by_class = _gml_object_member_kinds.get(script)
+	if by_class == null:
+		by_class = {}
+		_gml_object_member_kinds[script] = by_class
+	var class_name_value = object_value.get_class()
+	var kinds = by_class.get(class_name_value)
+	if kinds == null:
+		kinds = {}
+		by_class[class_name_value] = kinds
+	var kind = kinds.get(key)
+	if kind == null:
+		if _gml_object_uses_builtin_field(object_value, key):
+			kind = GML_OBJECT_MEMBER_BUILTIN
+		elif _object_has_property(object_value, key):
+			kind = GML_OBJECT_MEMBER_PROPERTY
+		else:
+			kind = GML_OBJECT_MEMBER_FIELD
+		kinds[key] = kind
+	return kind
 
 
 # Whether a member of a Node2D instance maps to the node itself rather than to

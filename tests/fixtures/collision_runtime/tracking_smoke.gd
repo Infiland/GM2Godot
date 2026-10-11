@@ -57,13 +57,12 @@ func _expect(label, actual, expected):
 
 
 # The query worked out from scratch: a new state for every listed instance,
-# tested in list order.
+# each one tested in list order.
 func _reference(kind, query, target, current_self, notme, prec, every):
 	var hits = []
 	var entries = GMRuntime._gml_instance_target_entries(target)
 	if entries == null:
 		return hits if every else null
-	var bounds = GMRuntime._gml_collision_query_bounds(kind, query)
 	for entry in entries:
 		var inst = entry["instance"]
 		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
@@ -71,10 +70,6 @@ func _reference(kind, query, target, current_self, notme, prec, every):
 		if notme and is_same(inst, current_self):
 			continue
 		var fresh = GMRuntime._gml_collision_current_state(inst, null)
-		if bounds != null and (
-			fresh["left"] > bounds[2] or fresh["right"] < bounds[0] or fresh["top"] > bounds[3] or fresh["bottom"] < bounds[1]
-		):
-			continue
 		if not GMRuntime._gml_collision_query_hits(kind, query, fresh, prec):
 			continue
 		if not every:
@@ -111,6 +106,20 @@ func _add_box_queries(box, lines, rects, points, places):
 	lines.append([left - 20, middle_y, right + 20, middle_y])
 	lines.append([middle_x, top - 20, middle_x, bottom + 20])
 	lines.append([left - 1, top - 1, left - 30, top - 30])
+	# Lines along the edges and past the corners, on and just outside the
+	# box (the runner reaches up to a pixel past the right and bottom edges
+	# in compatibility mode), at a slant too.
+	for gap in [0.0, 0.5, 1.0, 1.5, 2.5]:
+		lines.append([left - 20, top - gap, right + 20, top - gap])
+		lines.append([left - 20, bottom + gap, right + 20, bottom + gap])
+		lines.append([left - gap, top - 20, left - gap, bottom + 20])
+		lines.append([right + gap, top - 20, right + gap, bottom + 20])
+		lines.append([left - gap - 20, top - gap + 20, left - gap + 20, top - gap - 20])
+		lines.append([right + gap - 20, top - gap - 20, right + gap + 20, top - gap + 20])
+		lines.append([left - gap - 20, bottom + gap - 20, left - gap + 20, bottom + gap + 20])
+		lines.append([right + gap - 20, bottom + gap + 20, right + gap + 20, bottom + gap - 20])
+		lines.append([right + gap - 5, bottom + gap + 15, right + gap + 5, bottom + gap - 15])
+		lines.append([left - gap - 15, top - gap + 5, left - gap + 15, top - gap - 5])
 	rects.append([left + 1, top + 1, right - 1, bottom - 1])
 	rects.append([right + 1, top, right + 10, bottom])
 	places.append([middle_x, middle_y])

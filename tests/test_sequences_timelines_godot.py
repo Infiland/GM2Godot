@@ -320,7 +320,13 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \ttimeline_position = 0
         \ttimeline_speed = 1
         \ttimeline_running = true
+        \t# Each step runs the moments from the old position up to, not
+        \t# including, the new one: moment 1 on the second step, moment 2 on
+        \t# the third.
         \tGMRuntime.gml_timeline_step(self)
+        \tGMRuntime.gml_timeline_step(self)
+        \tif not _check(GMRuntime.gml_global_scope().get("timeline_seed_hits", 0) == 1 and GMRuntime.gml_global_scope().get("timeline_hits", 0) == 0, "timeline moments ran on the wrong step"):
+        \t\treturn
         \tGMRuntime.gml_timeline_step(self)
         \tif not _check(GMRuntime.gml_global_scope().get("timeline_seed_hits", 0) == 1, "authored timeline callback did not fire"):
         \t\treturn
@@ -339,8 +345,13 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \ttimeline_position = 1
         \ttimeline_speed = 2
         \ttimeline_loop = true
+        \t# Past the last moment a looping timeline restarts at 0; the moments
+        \t# from 0 run on the next step.
         \tGMRuntime.gml_timeline_step(self)
-        \tif not _check(GMRuntime.gml_global_scope().get("timeline_loop_order", "") == "01" and timeline_position == 1, "wrapped timeline moments were skipped or reordered"):
+        \tif not _check(GMRuntime.gml_global_scope().get("timeline_loop_order", "") == "1" and timeline_position == 0, "looping timeline did not restart at 0"):
+        \t\treturn
+        \tGMRuntime.gml_timeline_step(self)
+        \tif not _check(GMRuntime.gml_global_scope().get("timeline_loop_order", "") == "101" and timeline_position == 0, "restarted timeline moments were skipped or reordered"):
         \t\treturn
 
         \tGMRuntime.gml_layer_sequence_destroy(element)
@@ -685,6 +696,13 @@ class TestSequencesTimelinesGodotSmoke(unittest.TestCase):
                     \t\tpush_error("timeline step failed")
                     \t\tget_tree().quit(1)
                     \t\treturn
+                    \t# Moment 3 is at the new position, so it runs on the next step.
+                    \tvar first_step_order = GMRuntime.gml_global_scope().get("timeline_order", "")
+                    \tif first_step_order != "AB":
+                    \t\tpush_error("timeline GML first step mismatch: " + str(first_step_order))
+                    \t\tget_tree().quit(1)
+                    \t\treturn
+                    \tGMRuntime.gml_timeline_step(self)
                     \tvar order = GMRuntime.gml_global_scope().get("timeline_order", "")
                     \tif order != "ABC":
                     \t\tpush_error("timeline GML order mismatch: " + str(order))

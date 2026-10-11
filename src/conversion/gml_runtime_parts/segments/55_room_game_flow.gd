@@ -408,6 +408,11 @@ static func _gml_room_preserved_persistent_names():
 # as it joins the scene, then its instance creation code, before the next
 # instance is created. Instances the scene did not hold back (restored
 # persistent instances, hand-made scenes) only run their creation code.
+# Like the runner's StartRoom, whether an instance's Create event and
+# creation code run is decided once, before its Create event: once an
+# earlier instance requested a room change, neither runs (unless the
+# instance or the room is persistent), while the instance whose own Create
+# event requested the change still runs its creation code.
 static func _gml_room_create_instances(scene):
 	var held = {"instances": [], "parents": []}
 	if scene.has_meta(GML_ROOM_HELD_INSTANCES_META):
@@ -421,9 +426,11 @@ static func _gml_room_create_instances(scene):
 		var node = step["node"]
 		if not is_instance_valid(node):
 			continue
+		var blocked = _gml_event_scheduler_event_blocked(node, true)
 		if step.has("parent") and not _gml_room_add_held_instance(scene, node, step["parent"]):
 			continue
-		_gml_room_run_instance_creation_code(scene, node)
+		if not blocked:
+			_gml_room_run_instance_creation_code(scene, node)
 	_gml_room_restore_child_order(held["parents"])
 
 

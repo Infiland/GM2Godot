@@ -247,7 +247,7 @@ Generated object `_ready()` methods register the instance, initialize motion sta
 1. Register layer and view metadata.
 2. Instantiate authored room particle-layer systems.
 3. Update the current room and room globals.
-4. Add the held instances back one at a time in the declared GameMaker creation order: each runs its Create event, then its instance creation code, before the next one is added. An instance destroyed before its turn is never added.
+4. Add the held instances back one at a time in the declared GameMaker creation order: each runs its Create event, then its instance creation code, before the next one is added. An instance destroyed before its turn is never added. Once an earlier instance has requested a room change, later instances run neither their Create event nor their creation code, unless the instance or the room is persistent.
 5. Dispatch Game Start once for the running game.
 6. Run room creation code.
 7. Dispatch Room Start.

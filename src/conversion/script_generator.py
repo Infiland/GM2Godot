@@ -548,7 +548,8 @@ def _emit_object_runtime_prelude(
     lines.append(
         member_lines
         + "\n\nfunc _gm_register_instance():"
-        "\n\tif GMRuntime.gml_handle_is_valid(id):"
+        # Registered already, or destroyed (never registered again).
+        "\n\tif GMRuntime.gml_handle_is_valid(id) or has_meta(\"_gm2godot_instance_destroyed\"):"
         "\n\t\treturn"
         f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"

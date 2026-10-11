@@ -285,6 +285,11 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	parent.add_child(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
+		if instance.has_meta("_gm2godot_instance_destroyed"):
+			# Its Create event destroyed it: like GameMaker, return the id it
+			# had there, which no longer refers to an existing instance.
+			var own_id = instance.get("id")
+			return own_id if own_id is GMLHandle else gml_instance_noone()
 		handle = gml_instance_register(instance, int(entry["id"]), [])
 	return handle
 

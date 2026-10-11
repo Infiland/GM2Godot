@@ -240,6 +240,87 @@ _DESTROYED_REFERENCE_TRACE = [
     "later:noone=no:exists=no",
 ]
 
+# An instance that destroys itself in its own Create event (a singleton guard,
+# say) stays destroyed: instance_create_* returns the id it had in Create, and
+# it neither exists nor counts once the call returns, also when the Create
+# event is inherited or calls event_inherited() afterwards (HTML5 runner:
+# instance_create_depth in Function_Layers.js returns the instance's id after
+# its Create event; Command_Destroy marks it; GetWithArray skips it).
+_SELF_DESTROY_PROJECT = GameMakerProject(
+    name="SelfDestroyInCreate",
+    scripts={
+        "scr_trace": _TRACE_SCRIPT,
+        "scr_yes_no": "function yes_no(_value) {\n    return _value ? \"yes\" : \"no\";\n}\n",
+    },
+    objects=(
+        GameMakerObject(
+            "o_single",
+            {
+                EVENT_CREATE: (
+                    "global.create_id = id;\n"
+                    "if (instance_number(o_single) > 1) instance_destroy();\n"
+                ),
+                EVENT_DESTROY: 'trace("destroy");\n',
+            },
+        ),
+        GameMakerObject("o_single_child", {}, parent="o_single"),
+        GameMakerObject(
+            "o_single_inherit",
+            {
+                EVENT_CREATE: (
+                    "instance_destroy();\n"
+                    "event_inherited();\n"
+                    'trace("inherited:exists=" + yes_no(instance_exists(id))\n'
+                    '    + ":same=" + yes_no(global.create_id == id));\n'
+                ),
+            },
+            parent="o_single",
+        ),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("done")) exit;\n'
+                    "global.done = true;\n"
+                    "var a = instance_create_depth(0, 0, 0, o_single);\n"
+                    "var n = 0;\n"
+                    "with (o_single) n += 1;\n"
+                    'trace("single:exists=" + yes_no(instance_exists(a)) + ":number=" + string(instance_number(o_single))\n'
+                    '    + ":with=" + string(n) + ":noone=" + yes_no(a == noone) + ":same=" + yes_no(a == global.create_id));\n'
+                    "var b = instance_create_depth(0, 0, 0, o_single_child);\n"
+                    'trace("child:exists=" + yes_no(instance_exists(b)) + ":number=" + string(instance_number(o_single_child))\n'
+                    '    + ":same=" + yes_no(b == global.create_id));\n'
+                    "var c = instance_create_depth(0, 0, 0, o_single_inherit);\n"
+                    'trace("inherit:exists=" + yes_no(instance_exists(c)) + ":number=" + string(instance_number(o_single_inherit))\n'
+                    '    + ":same=" + yes_no(c == global.create_id) + ":all=" + string(instance_number(o_single)));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (RoomInstance("inst_first", "o_single", 0, 0), RoomInstance("inst_runner", "o_runner", 10, 0)),
+                ),
+            ),
+            creation_order=("inst_first", "inst_runner"),
+        ),
+    ),
+)
+_SELF_DESTROY_TRACE = [
+    "destroy",
+    "single:exists=no:number=1:with=1:noone=no:same=yes",
+    "destroy",
+    "child:exists=no:number=0:same=yes",
+    "destroy",
+    "inherited:exists=no:same=yes",
+    "inherit:exists=no:number=0:same=yes:all=1",
+]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -265,6 +346,9 @@ class TestInstanceDestroyGodot(unittest.TestCase):
         trace = self._run_trace(_DESTROYED_REFERENCE_PROJECT)
         # The runner keeps stepping; every later step traces the same line.
         self.assertEqual(trace[: len(_DESTROYED_REFERENCE_TRACE)], _DESTROYED_REFERENCE_TRACE)
+
+    def test_an_instance_destroyed_in_its_create_event_stays_destroyed(self) -> None:
+        self.assertEqual(self._run_trace(_SELF_DESTROY_PROJECT), _SELF_DESTROY_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

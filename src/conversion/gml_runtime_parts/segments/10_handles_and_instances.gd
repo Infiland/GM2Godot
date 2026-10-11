@@ -129,6 +129,9 @@ static func gml_instance_destroy(target = null):
 		if entry == null or entry["destroyed"]:
 			continue
 		entry["destroyed"] = true
+		# A destroyed instance is never registered again, not even by the rest
+		# of its Create event (event_inherited) or by instance_create_*.
+		_gml_instance_set_meta(instance, "_gm2godot_instance_destroyed", true)
 		# After a room change request GameMaker skips the Destroy event,
 		# unless the instance or the current room is persistent.
 		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):

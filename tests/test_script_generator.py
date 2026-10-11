@@ -145,7 +145,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -161,7 +160,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
             content,
         )
-        self.assertIn("func _exit_tree():\n\tsuper._exit_tree()\n\t_gm_unregister_instance()", content)
+        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()\n", content)
 
     def test_inherited_sprite_runtime_reuses_parent_members(self):
         content = generate_script_content(
@@ -177,7 +176,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -283,7 +281,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
     def test_cleanup_event(self):
         content = generate_script_content([{"eventType": 12, "eventNum": 0}])
-        self.assertIn("func _exit_tree():", content)
+        self.assertIn("func _on_clean_up():", content)
 
     def test_destroy_event(self):
         content = generate_script_content([{"eventType": 1, "eventNum": 0}])

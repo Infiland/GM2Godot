@@ -75,7 +75,6 @@ def _write_objects(project_dir: Path) -> None:
                 parent_object_names=(parent,) if parent else (),
                 solid=solid,
                 inherit_ready=parent is not None,
-                inherit_exit_tree=parent is not None,
             ),
             base_script_path=f"res://objects/{parent}/{parent}.gd" if parent else None,
         )

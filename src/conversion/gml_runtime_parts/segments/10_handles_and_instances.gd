@@ -72,6 +72,7 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		"selector_ids": selector_ids,
 		"selector_names": selector_names,
 		"destroyed": false,
+		"cleaned_up": false,
 		"creation_order": _gml_instance_creation_counter,
 		# Whether the instance keeps its own collision state (see
 		# _gml_collision_tracked_state).
@@ -132,10 +133,36 @@ static func gml_instance_destroy(target = null):
 		# unless the instance or the current room is persistent.
 		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
 			instance.call("_on_destroy")
+		_gml_instance_clean_up(instance, entry)
 		gml_instance_unregister(entry["handle"])
 		if instance is Node and instance.is_inside_tree():
 			instance.queue_free()
 	return null
+
+
+# GameMaker runs an instance's Clean Up event once, as the instance leaves the
+# game: right after its Destroy event (before instance_destroy returns), when
+# a room that is not persistent ends, and when the game ends or restarts;
+# never when a persistent instance moves on to the next room. A pending room
+# change does not hold it back.
+static func _gml_instance_clean_up(instance, entry):
+	if entry["cleaned_up"]:
+		return
+	entry["cleaned_up"] = true
+	if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance) and instance.has_method("_on_clean_up"):
+		instance.call("_on_clean_up")
+
+
+# Runs the Clean Up event of the instances under root_node (every instance
+# when root_node is null), in instance order.
+static func _gml_instances_clean_up(root_node):
+	for entry in _gml_instance_live_order.slice(0):
+		var instance = entry["instance"]
+		if entry["destroyed"] or typeof(instance) != TYPE_OBJECT or not is_instance_valid(instance):
+			continue
+		if root_node != null and not (instance is Node and root_node.is_ancestor_of(instance)):
+			continue
+		_gml_instance_clean_up(instance, entry)
 
 
 static func gml_instance_exists(target):

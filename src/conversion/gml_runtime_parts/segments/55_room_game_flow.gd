@@ -138,6 +138,8 @@ static func _gml_game_restart_now():
 	var tree = _gml_room_tree()
 	if tree != null and tree.current_scene != null:
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
+	# Every instance leaves the game, persistent ones too.
+	_gml_instances_clean_up(null)
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
 	return _gml_room_change_to_entry(entries[0], true)
@@ -160,10 +162,18 @@ static func _gml_game_end_now():
 	if tree != null and tree.current_scene != null:
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_room_end")
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
+		_gml_instances_clean_up(null)
 		push_warning(GML_ROOM_UNSUPPORTED_EXIT_MESSAGE)
 		tree.quit(0)
 	else:
 		push_warning(GML_ROOM_UNSUPPORTED_EXIT_MESSAGE)
+	return null
+
+
+# Closing the game window ends the game: every instance runs its Clean Up
+# event before Godot quits.
+static func gml_game_window_close():
+	_gml_instances_clean_up(null)
 	return null
 
 
@@ -226,6 +236,10 @@ static func _gml_room_change_to_entry(entry, restarting):
 	if old_scene != null:
 		_gml_room_dispatch_lifecycle(old_scene, "_on_room_end")
 		_gml_room_capture_persistent_instances(old_scene)
+		# The instances left in a room that is not persistent leave the game
+		# (the persistent ones have just moved out).
+		if not _gml_room_current_is_persistent():
+			_gml_instances_clean_up(old_scene)
 		root.remove_child(old_scene)
 		old_scene.queue_free()
 	var new_scene = packed_scene.instantiate()

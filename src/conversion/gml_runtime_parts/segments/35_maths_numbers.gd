@@ -5,10 +5,12 @@ const GML_RANDOM_UNIT_DENOMINATOR = 4294967296.0
 const GML_MATH_DEFAULT_EPSILON = 0.00001
 const GML_MATH_MINIMUM_EPSILON = 0.00000000001
 const GML_COMPARE_UNORDERED = -2
-# The value of pi, and of pi / 180, that GameMaker's runner uses in
-# point_direction and degtorad.
+# The value of pi, of pi / 180 and of 180 / pi that GameMaker's runner uses
+# in point_direction and lengthdir_*, in degtorad and dsin, dcos and dtan, and
+# in radtodeg and darcsin, darccos, darctan and darctan2.
 const GML_RUNNER_PI = 3.14159265
 const GML_RUNNER_DEGREES_TO_RADIANS = 0.0174532925
+const GML_RUNNER_RADIANS_TO_DEGREES = 57.2957795
 
 static var _gml_random_seed = GML_RANDOM_DEFAULT_SEED
 static var _gml_random_state = GML_RANDOM_DEFAULT_SEED
@@ -197,11 +199,29 @@ static func gml_tan(value):
 
 
 static func gml_arcsin(value):
-	return asin(_gml_math_real("GML arcsin", value))
+	var real_value = _gml_unit_range_real("arcsin", value)
+	return asin(real_value) if typeof(real_value) == TYPE_FLOAT else real_value
 
 
 static func gml_arccos(value):
-	return acos(_gml_math_real("GML arccos", value))
+	var real_value = _gml_unit_range_real("arccos", value)
+	return acos(real_value) if typeof(real_value) == TYPE_FLOAT else real_value
+
+
+# The runner's arcsin and arccos take a value within the comparison epsilon
+# (math_set_epsilon) of -1 or 1 as exactly that and raise an error for any
+# other value outside [-1, 1] (Function_Maths.js).
+static func _gml_unit_range_real(api_name, value):
+	var real_value = _gml_math_real("GML " + api_name, value)
+	if typeof(real_value) != TYPE_FLOAT:
+		return real_value
+	if absf(real_value + 1.0) <= _gml_math_epsilon:
+		return -1.0
+	if absf(real_value - 1.0) <= _gml_math_epsilon:
+		return 1.0
+	if real_value < -1.0 or real_value > 1.0:
+		return gml_error("Value " + gml_string(real_value) + " is not within valid range [-1.0, 1.0]: " + api_name + "()")
+	return real_value
 
 
 static func gml_arctan(value):
@@ -215,33 +235,35 @@ static func gml_arctan2(y, x):
 
 
 static func gml_dsin(value):
-	return sin(deg_to_rad(_gml_math_real("GML dsin", value)))
+	return sin(_gml_math_real("GML dsin", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_dcos(value):
-	return cos(deg_to_rad(_gml_math_real("GML dcos", value)))
+	return cos(_gml_math_real("GML dcos", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_dtan(value):
-	return tan(deg_to_rad(_gml_math_real("GML dtan", value)))
+	return tan(_gml_math_real("GML dtan", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_darcsin(value):
-	return rad_to_deg(asin(_gml_math_real("GML darcsin", value)))
+	var radians = gml_arcsin(value)
+	return radians * GML_RUNNER_RADIANS_TO_DEGREES if typeof(radians) == TYPE_FLOAT else radians
 
 
 static func gml_darccos(value):
-	return rad_to_deg(acos(_gml_math_real("GML darccos", value)))
+	var radians = gml_arccos(value)
+	return radians * GML_RUNNER_RADIANS_TO_DEGREES if typeof(radians) == TYPE_FLOAT else radians
 
 
 static func gml_darctan(value):
-	return rad_to_deg(atan(_gml_math_real("GML darctan", value)))
+	return atan(_gml_math_real("GML darctan", value)) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_darctan2(y, x):
 	if not _is_real_convertible(y) or not _is_real_convertible(x):
 		return gml_error("GML darctan2 requires real-convertible arguments")
-	return rad_to_deg(atan2(_to_real(y), _to_real(x)))
+	return atan2(_to_real(y), _to_real(x)) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_degtorad(value):
@@ -252,7 +274,7 @@ static func gml_degtorad(value):
 
 
 static func gml_radtodeg(value):
-	return rad_to_deg(_gml_math_real("GML radtodeg", value))
+	return _gml_math_real("GML radtodeg", value) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_point_distance(x1, y1, x2, y2):

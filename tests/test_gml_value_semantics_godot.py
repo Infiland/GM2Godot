@@ -251,6 +251,39 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_LENGTHDIR_OK",
         )
 
+    def test_arcsin_arccos_and_degree_trig_follow_the_runner(self) -> None:
+        # The runner's arcsin and arccos take values within the comparison
+        # epsilon of -1 or 1 as exactly that and raise an error for other
+        # values outside [-1, 1]; its degree functions multiply by
+        # 0.0174532925 and 57.2957795.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("arcsin(0.999995) is arcsin(1)", GMRuntime.gml_arcsin(0.999995) == PI / 2.0, true)
+            _expect("arcsin(-1.000004) is arcsin(-1)", GMRuntime.gml_arcsin(-1.000004) == -PI / 2.0, true)
+            _expect("arccos(1.000004) is arccos(1)", GMRuntime.gml_arccos(1.000004) == 0.0, true)
+            _expect("arccos(-0.999995) is arccos(-1)", GMRuntime.gml_arccos(-0.999995) == PI, true)
+            _expect("arcsin(0.5)", GMRuntime.gml_arcsin(0.5) == asin(0.5), true)
+            _expect("arcsin(nan)", GMRuntime.gml_arcsin(NAN), NAN)
+            _expect("arcsin(2) is an error", GMRuntime.is_undefined(GMRuntime.gml_arcsin(2)), true)
+            _expect("arccos(-1.5) is an error", GMRuntime.is_undefined(GMRuntime.gml_arccos(-1.5)), true)
+            _expect("darcsin(2) is an error", GMRuntime.is_undefined(GMRuntime.gml_darcsin(2)), true)
+            _expect("darccos(1.1) is an error", GMRuntime.is_undefined(GMRuntime.gml_darccos(1.1)), true)
+            GMRuntime.gml_math_set_epsilon(0.01)
+            _expect("arcsin(0.995) with epsilon 0.01", GMRuntime.gml_arcsin(0.995) == PI / 2.0, true)
+            GMRuntime.gml_math_set_epsilon(0.00001)
+            _expect("dsin(180)", GMRuntime.gml_dsin(180) == sin(180.0 * 0.0174532925), true)
+            _expect("dcos(90)", GMRuntime.gml_dcos(90) == cos(90.0 * 0.0174532925), true)
+            _expect("dtan(45)", GMRuntime.gml_dtan(45) == tan(45.0 * 0.0174532925), true)
+            _expect("darcsin(1)", GMRuntime.gml_darcsin(1) == asin(1.0) * 57.2957795, true)
+            _expect("darccos(0)", GMRuntime.gml_darccos(0) == acos(0.0) * 57.2957795, true)
+            _expect("darctan(1)", GMRuntime.gml_darctan(1) == atan(1.0) * 57.2957795, true)
+            _expect("darctan2(1, 0)", GMRuntime.gml_darctan2(1, 0) == atan2(1.0, 0.0) * 57.2957795, true)
+            _expect("radtodeg(pi)", GMRuntime.gml_radtodeg(PI) == PI * 57.2957795, true)
+            """,
+            "GML_TRIG_OK",
+        )
+
     def test_round_uses_bankers_rounding(self) -> None:
         _run_runtime_checks(
             self,

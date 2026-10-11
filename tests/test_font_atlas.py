@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import shutil
@@ -382,8 +381,8 @@ class TestRenderBMFont(FontAtlasTestCase):
             reference.line_origins(sample, halign=FA_CENTER, valign=FA_MIDDLE),
             strict=True,
         ):
-            pen_x = math.ceil(17.5 + line_x - 0.5)
-            baseline = math.ceil(40.25 + line_y - 0.5) + base
+            pen_x = 17.5 + line_x
+            baseline = 40.25 + line_y + base
             previous: int | None = None
             for char in line:
                 code = ord(char)

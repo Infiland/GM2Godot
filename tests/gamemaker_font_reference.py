@@ -39,11 +39,15 @@ class ReferenceGlyph:
 
 @dataclass(frozen=True)
 class ReferenceQuad:
-    """A drawn glyph cell: the atlas cell and the pixel its top-left lights."""
+    """A drawn glyph cell: the atlas cell and where its top-left lands.
+
+    ``left`` and ``top`` are exact draw-space coordinates, often fractional:
+    the runner rounds nothing (see :func:`draw_reference_quads`).
+    """
 
     code: int
-    left: int
-    top: int
+    left: float
+    top: float
     w: int
     h: int
     atlas_x: int
@@ -222,7 +226,7 @@ class GameMakerTextReference:
         halign: int = FA_LEFT,
         valign: int = FA_TOP,
     ) -> list[ReferenceQuad]:
-        """Glyph cells ``draw_text_ext`` draws, snapped like nearest sampling."""
+        """Glyph cells ``draw_text_ext`` draws, at their exact positions."""
         quads: list[ReferenceQuad] = []
         lines = self.split(text, line_width)
         origins = self.line_origins(
@@ -244,8 +248,8 @@ class GameMakerTextReference:
                     quads.append(
                         ReferenceQuad(
                             code=glyph.code,
-                            left=math.ceil(left - 0.5),
-                            top=math.ceil(top - 0.5),
+                            left=left,
+                            top=top,
                             w=glyph.w,
                             h=glyph.h,
                             atlas_x=glyph.x,
@@ -273,9 +277,9 @@ class GameMakerTextReference:
         """The quads ``draw_text_ext_transformed_colour`` hands the GPU.
 
         Follows ``GR_Text_Draw`` (line steps, alignment) and ``Draw_String_GL``
-        (glyph quads, rotation about each line origin, corner colours). Text
-        without scale or rotation has its line origins snapped the way nearest
-        sampling lights the fractional quads.
+        (glyph quads, rotation about each line origin, corner colours). Like
+        the runner, nothing is rounded: the GPU picks the lit pixels after the
+        view or GUI transform (see :func:`rasterize_vertex_quads`).
         """
         if abs(angle) <= 0.001:
             angle = 0.0
@@ -291,7 +295,6 @@ class GameMakerTextReference:
         elif valign == FA_BOTTOM:
             x -= len(lines) * xsep
             y -= len(lines) * ysep
-        snap = xscale == 1.0 and yscale == 1.0 and angle == 0.0
         quads: list[ReferenceVertexQuad] = []
         for line in lines:
             xoff = 0.0
@@ -302,8 +305,6 @@ class GameMakerTextReference:
                 xoff = -(xscale * self.text_width(line))
             line_x = x + cosine * xoff + sine * yoff
             line_y = y - sine * xoff + cosine * yoff
-            if snap:
-                line_x, line_y = math.ceil(line_x - 0.5), math.ceil(line_y - 0.5)
             quads.extend(
                 self._line_vertex_quads(line, (line_x, line_y), (xscale, yscale), (sine, cosine), colours)
             )
@@ -397,19 +398,21 @@ def rasterize_vertex_quads(
     A pixel is drawn when its centre lies in the quad (left and top edges
     included), takes the atlas texel under that centre, and multiplies it by
     the corner colours interpolated over the triangles split along the
-    top-left to bottom-right diagonal. Results blend source-over.
+    top-left to bottom-right diagonal. Results blend source-over, and pixels
+    outside the canvas are clipped.
     """
     pixels = canvas.load()
     texels = atlas.load()
     assert pixels is not None and texels is not None
+    canvas_width, canvas_height = canvas.size
     for quad in quads:
         (left, top), (right, _), (_, bottom), _ = quad.points
         source_x, source_y, source_w, source_h = quad.source
         width, height = right - left, bottom - top
-        for row in range(math.ceil(top - 0.5), math.ceil(bottom - 0.5)):
+        for row in range(max(math.ceil(top - 0.5), 0), min(math.ceil(bottom - 0.5), canvas_height)):
             v = (row + 0.5 - top) / height
             texel_y = source_y + min(int(v * source_h), source_h - 1)
-            for column in range(math.ceil(left - 0.5), math.ceil(right - 0.5)):
+            for column in range(max(math.ceil(left - 0.5), 0), min(math.ceil(right - 0.5), canvas_width)):
                 u = (column + 0.5 - left) / width
                 texel = texels[source_x + min(int(u * source_w), source_w - 1), texel_y]
                 assert isinstance(texel, tuple)
@@ -469,10 +472,14 @@ def draw_reference_quads(
     atlas: Image.Image,
     quads: Iterable[ReferenceQuad],
 ) -> None:
-    """Blend each quad's atlas cell over ``canvas`` at its snapped pixel."""
+    """Blend each quad's atlas cell over ``canvas`` without any transform.
+
+    Nearest sampling at pixel centres lights pixel ``ceil(edge - 0.5)`` for a
+    cell edge, so each cell lands whole at that pixel.
+    """
     for quad in quads:
         cell = atlas.crop((quad.atlas_x, quad.atlas_y, quad.atlas_x + quad.w, quad.atlas_y + quad.h))
-        canvas.alpha_composite(cell, dest=(quad.left, quad.top))
+        canvas.alpha_composite(cell, dest=(math.ceil(quad.left - 0.5), math.ceil(quad.top - 0.5)))
 
 
 def synthetic_glyph_cells(

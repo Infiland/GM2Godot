@@ -86,9 +86,13 @@ class _TextCase:
         }
 
 
+# GameMaker rounds no glyph position, so a glyph edge exactly on a pixel
+# centre (a coordinate ending in .5 here) leaves the lit pixels to the GPU's
+# tie rules. The origins keep every edge clear of pixel centres, including the
+# half-pixel offsets of centred lines.
 _CASES = (
-    _TextCase("fnt_plain", 10.5, 12.25, "Hello, World!\nSecond line"),
-    _TextCase("fnt_plain", 300.0, 60.0, "Centered text\r\nwith CRLF", halign=FA_CENTER, valign=FA_MIDDLE),
+    _TextCase("fnt_plain", 10.75, 12.25, "Hello, World!\nSecond line"),
+    _TextCase("fnt_plain", 300.25, 60.0, "Centered text\r\nwith CRLF", halign=FA_CENTER, valign=FA_MIDDLE),
     _TextCase("fnt_plain", 780.49, 20.51, "Right \u00e9 and missing \u2603 glyphs", halign=FA_RIGHT),
     _TextCase(
         "fnt_plain",
@@ -100,7 +104,7 @@ _CASES = (
         valign=FA_BOTTOM,
     ),
     _TextCase("fnt_kerned", 30.0, 230.0, "AVATAR To Vo AV VA V A"),
-    _TextCase("fnt_kerned", 420.0, 230.0, "A\u0416A soft\u00adhyphen \u0436", halign=FA_CENTER),
+    _TextCase("fnt_kerned", 420.25, 230.0, "A\u0416A soft\u00adhyphen \u0436", halign=FA_CENTER),
     _TextCase(
         "fnt_kerned",
         780.0,
@@ -111,7 +115,7 @@ _CASES = (
         halign=FA_RIGHT,
         valign=FA_MIDDLE,
     ),
-    _TextCase("fnt_sdf", 40.5, 330.0, "SDF text\nline two"),
+    _TextCase("fnt_sdf", 40.75, 330.0, "SDF text\nline two"),
     _TextCase("fnt_plain", 560.0, 420.0, "CR LF\r\nends\r\nLF CR\n\rlines\r\n", halign=FA_RIGHT, valign=FA_BOTTOM),
 )
 
@@ -414,8 +418,13 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\tvar quads = []
         \t\tfor line in layout["lines"]:
         \t\t\tlines.append([line["x"], line["y"], line["width"]])
-        \t\t\tvar baseline = GMRuntime._gml_draw_text_line_baseline(origin, line, layout)
-        \t\t\tquads.append_array(_line_quads(layout, line, baseline))
+        \t\t\tvar transform = GMRuntime._gml_draw_text_line_transform(origin, line, Vector2.ONE, 0.0)
+        \t\t\tfor quad in _line_quads(layout, line, Vector2(0.0, float(layout["ascent"]))):
+        \t\t\t\tif typeof(quad[0]) != TYPE_STRING:
+        \t\t\t\t\tvar corner = transform * Vector2(quad[1], quad[2])
+        \t\t\t\t\tquad[1] = corner.x
+        \t\t\t\t\tquad[2] = corner.y
+        \t\t\t\tquads.append(quad)
         \t\tresult["cases"].append({{"line_step": layout["line_step"], "lines": lines, "quads": quads}})
         \tfor case in data["transforms"]:
         \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
@@ -457,7 +466,7 @@ def _write_renderer(project_dir: Path, data_path: Path) -> None:
         \t\tGMRuntime.gml_draw_set_halign(case["halign"])
         \t\tGMRuntime.gml_draw_set_valign(case["valign"])
         \t\tvar layout = GMRuntime._gml_draw_text_layout(case["text"], case["sep"], case["width"])
-        \t\tGMRuntime._gml_draw_text_emit(get_canvas_item(), Vector2(case["x"], case["y"]), layout, Color.WHITE)
+        \t\tGMRuntime._gml_draw_text_on(self, Vector2(case["x"], case["y"]), layout, Vector2.ONE, 0.0, Color.WHITE, Transform2D.IDENTITY)
         \tfor case in data["transforms"]:
         \t\tif not case["render"]:
         \t\t\tcontinue
@@ -496,7 +505,7 @@ def _project_settings() -> str:
     )
 
 
-def _quad_tuple(quad: ReferenceQuad) -> tuple[int, ...]:
+def _quad_tuple(quad: ReferenceQuad) -> tuple[float, ...]:
     return (quad.code, quad.left, quad.top, quad.w, quad.h, quad.atlas_x, quad.atlas_y)
 
 
@@ -847,10 +856,14 @@ class TestFontTextGodot(unittest.TestCase):
             )
             with self.subTest(text=case.text):
                 self.assertTrue(expected)
-                self.assertEqual(
-                    [tuple(cast(list[int], quad)) for quad in cast(list[object], quads)],
-                    [_quad_tuple(quad) for quad in expected],
-                )
+                actual_quads = [tuple(cast(list[float], quad)) for quad in cast(list[object], quads)]
+                self.assertEqual(len(actual_quads), len(expected), actual_quads)
+                for actual_quad, expected_quad in zip(actual_quads, expected, strict=True):
+                    wanted = _quad_tuple(expected_quad)
+                    # Godot keeps positions in single precision.
+                    self.assertEqual(actual_quad[:1] + actual_quad[3:], wanted[:1] + wanted[3:], actual_quad)
+                    self.assertAlmostEqual(actual_quad[1], wanted[1], places=3, msg=actual_quad)
+                    self.assertAlmostEqual(actual_quad[2], wanted[2], places=3, msg=actual_quad)
 
     def test_transformed_and_coloured_text_matches_gamemaker_quads(self) -> None:
         transforms = self._result_list("transforms")

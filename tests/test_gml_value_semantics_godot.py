@@ -98,6 +98,17 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("counter /= 2", counter, 3.5)
             _expect("deaths / 30", GMRuntime.gml_div(45, 30), 1.5)
             _expect("int64 / int64", GMRuntime.gml_div(GMRuntime.gml_int64(5), GMRuntime.gml_int64(2)).value, 2)
+            # Only int64 / int64 is integer division: an int64 with any
+            # other number divides as reals, whether that number is held as
+            # a whole number or not.
+            var col = 0x8040C0
+            _expect("(col & 255) / 255", GMRuntime.gml_div(GMRuntime.gml_bit_and(col, 255), 255), 192.0 / 255.0)
+            _expect("(col & 255) / (510 / 2)", GMRuntime.gml_div(GMRuntime.gml_bit_and(col, 255), GMRuntime.gml_div(510, 2)), 192.0 / 255.0)
+            _expect("int64(5) / 2", GMRuntime.gml_div(GMRuntime.gml_int64(5), 2), 2.5)
+            _expect("int64(5) / 2.0", GMRuntime.gml_div(GMRuntime.gml_int64(5), 2.0), 2.5)
+            _expect("5 / int64(2)", GMRuntime.gml_div(5, GMRuntime.gml_int64(2)), 2.5)
+            _expect("int64(5) / floor(2.5)", GMRuntime.gml_div(GMRuntime.gml_int64(5), GMRuntime.gml_floor(2.5)), 2.5)
+            _expect("int64(1) / 0", GMRuntime.gml_div(GMRuntime.gml_int64(1), 0), INF)
             _expect("5 div 2", GMRuntime.gml_int_div(5, 2), 2)
             _expect("-5 div 2", GMRuntime.gml_int_div(-5, 2), -2)
             _expect("5.5 mod 2", GMRuntime.gml_mod(5.5, 2), 1.5)

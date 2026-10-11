@@ -9,13 +9,15 @@ static func gml_div(left, right):
 		return _gml_real_divide(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
-	if _returns_int64_arithmetic_result(left, right):
+	if is_int64(left) and is_int64(right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
 	# GML `/` is always real division, even when both operands hold whole
-	# numbers (5 / 2 == 2.5); only int64 / int64 keeps integer semantics.
+	# numbers (5 / 2 == 2.5); only int64 / int64 keeps integer semantics
+	# (the runner's yyfdivide turns an int64 divided by, or dividing, any
+	# other number into a real).
 	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML divide", left, right)
 	return _gml_real_divide(_to_real(left), _to_real(right))

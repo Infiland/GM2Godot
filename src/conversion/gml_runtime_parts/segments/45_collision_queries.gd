@@ -28,6 +28,10 @@ const GML_COLLISION_QUERY_ELLIPSE = 3
 const GML_COLLISION_QUERY_LINE = 4
 const GML_COLLISION_QUERY_INSTANCE = 5
 const GML_COLLISION_QUERY_SOLID = 6
+# Coordinates and box sizes up to which the side of a line a box lies on is
+# worked out (see _gml_collision_find_in_boxes); rounding stays far below a
+# pixel there.
+const GML_COLLISION_LINE_BOX_TEST_LIMIT = 1.0e12
 
 static var _gml_collision_event_trace = []
 static var _gml_collision_compatibility_mode = null
@@ -235,12 +239,6 @@ static func gml_collision_event_dispatch_frame(instances = null, frame = -1):
 # The instances of every object in the collision table as its instance list
 # stands when the collision events start, one record per instance.
 static func _gml_collision_dispatch_context(instances, table, frame):
-	var allowed = null
-	if instances is Array:
-		allowed = {}
-		for inst in instances:
-			if _gml_collision_instance_valid(inst):
-				allowed[inst.get_instance_id()] = true
 	var context = {
 		"pools": {},
 		"records": {},
@@ -248,28 +246,42 @@ static func _gml_collision_dispatch_context(instances, table, frame):
 		"frame": frame,
 		"generation": 0,
 	}
+	var records = context["records"]
+	var allowed = null
 	for object_name in table["objects"]:
 		var entries = _gml_instance_live_by_object_name.get(object_name, null)
-		if entries == null:
+		if entries == null or entries.is_empty():
 			continue
+		if allowed == null and instances is Array:
+			# Only needed once some object of the table has instances.
+			allowed = {}
+			for inst in instances:
+				if typeof(inst) == TYPE_OBJECT and is_instance_valid(inst):
+					allowed[inst.get_instance_id()] = true
 		var pool = []
 		for entry in entries:
 			var inst = entry["instance"]
-			if not _gml_collision_instance_valid(inst):
+			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
 				continue
 			var key = inst.get_instance_id()
 			if allowed != null and not allowed.has(key):
 				continue
-			var record = context["records"].get(key, null)
+			var record = records.get(key, null)
 			if record == null:
+				# An instance's object chain does not change while it is
+				# registered: it is worked out once and kept in its entry.
+				var chain = entry.get("collision_chain")
+				if chain == null:
+					chain = _gml_collision_entry_object_chain(entry)
+					entry["collision_chain"] = chain
 				record = {
 					"inst": inst,
 					"entry": entry,
-					"chain": _gml_collision_entry_object_chain(entry),
+					"chain": chain,
 					"state": null,
 					"generation": -1,
 				}
-				context["records"][key] = record
+				records[key] = record
 			pool.append(record)
 		if not pool.is_empty():
 			context["pools"][object_name] = pool
@@ -284,16 +296,26 @@ static func _gml_collision_dispatch_instance(context, first_pool, first_index, t
 		if second_pool == null:
 			continue
 		for second_index in range(second_pool.size()):
-			if not _gml_collision_record_live(first):
+			# Instances destroyed by an earlier event are passed over, and an
+			# instance's state is worked out again after events ran (they may
+			# move or change any instance).
+			if first["entry"]["destroyed"] or not is_instance_valid(first["inst"]):
 				return dispatched
 			var second = second_pool[second_index]
-			if is_same(second, first) or not _gml_collision_record_live(second):
+			if is_same(second, first) or second["entry"]["destroyed"] or not is_instance_valid(second["inst"]):
 				continue
 			# Two instances of the same object are tested once, in list order.
 			if second_index < first_index and second["chain"][0] == first["chain"][0]:
 				continue
-			var first_state = _gml_collision_record_state(context, first)
-			var second_state = _gml_collision_record_state(context, second)
+			var generation = context["generation"]
+			if first["generation"] != generation:
+				first["state"] = _gml_collision_state(first["inst"])
+				first["generation"] = generation
+			if second["generation"] != generation:
+				second["state"] = _gml_collision_state(second["inst"])
+				second["generation"] = generation
+			var first_state = first["state"]
+			var second_state = second["state"]
 			if first_state == null or second_state == null or _gml_collision_boxes_apart(first_state, second_state):
 				continue
 			var pair_key = _gml_collision_pair_key(first, second)
@@ -323,17 +345,6 @@ static func _gml_collision_boxes_apart(first_state, second_state):
 		or second_state["top"] >= first_state["bottom"] + 1.0
 		or second_state["bottom"] + 1.0 <= first_state["top"]
 	)
-
-
-static func _gml_collision_record_live(record):
-	return not record["entry"]["destroyed"] and is_instance_valid(record["inst"])
-
-
-static func _gml_collision_record_state(context, record):
-	if record["generation"] != context["generation"]:
-		record["state"] = _gml_collision_state(record["inst"])
-		record["generation"] = context["generation"]
-	return record["state"]
 
 
 static func _gml_collision_pair_key(first, second):
@@ -689,22 +700,52 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 
 # _gml_collision_find over a list of instances whose bounding boxes are kept
 # (see _gml_collision_box_list): the instances whose boxes lie outside the
-# query's region are passed over without looking at them.
+# query's region are passed over without looking at them, and so, for a
+# line, are the boxes the line passes by.
 static func _gml_collision_find_in_boxes(
-	kind, query, entries, boxes, skipped, prec, every, bounds_left, bounds_top, bounds_right, bounds_bottom
+	kind, query, entries, boxes_value, skipped, prec, every, bounds_left, bounds_top, bounds_right, bounds_bottom
 ):
 	var hits = []
-	var offset = -4
-	for candidate in entries:
-		offset += 4
-		if (
-			boxes[offset] > bounds_right
-			or boxes[offset + 2] < bounds_left
-			or boxes[offset + 1] > bounds_bottom
-			or boxes[offset + 3] < bounds_top
-		):
+	var boxes: PackedFloat64Array = boxes_value
+	var left: float = bounds_left
+	var top: float = bounds_top
+	var right: float = bounds_right
+	var bottom: float = bounds_bottom
+	var line_test: bool = kind == GML_COLLISION_QUERY_LINE and _gml_collision_line_box_test_usable(query)
+	var line_x: float = query[0] if line_test else 0.0
+	var line_y: float = query[1] if line_test else 0.0
+	var line_dx: float = query[2] - query[0] if line_test else 0.0
+	var line_dy: float = query[3] - query[1] if line_test else 0.0
+	var count: int = entries.size()
+	for index in count:
+		var offset: int = index * 4
+		if boxes[offset] > right or boxes[offset + 2] < left or boxes[offset + 1] > bottom or boxes[offset + 3] < top:
 			continue
-		var inst = candidate["instance"]
+		var box_left: float = boxes[offset]
+		var box_top: float = boxes[offset + 1]
+		var box_right: float = boxes[offset + 2]
+		var box_bottom: float = boxes[offset + 3]
+		if (
+			line_test
+			and box_right - box_left < GML_COLLISION_LINE_BOX_TEST_LIMIT
+			and box_bottom - box_top < GML_COLLISION_LINE_BOX_TEST_LIMIT
+		):
+			# Which side of the line each corner of the box widened by two
+			# pixels lies on (the cross product of the line's direction and
+			# the corner seen from the line's start): when all four lie on
+			# one side, the line passes the box by. No line test reaches a
+			# pixel past a box.
+			var low_x: float = box_left - 2.0 - line_x
+			var high_x: float = box_right + 2.0 - line_x
+			var low_y: float = box_top - 2.0 - line_y
+			var high_y: float = box_bottom + 2.0 - line_y
+			var side_min: float = line_dx * (low_y if line_dx >= 0.0 else high_y)
+			var side_max: float = line_dx * (high_y if line_dx >= 0.0 else low_y)
+			side_min -= line_dy * (high_x if line_dy >= 0.0 else low_x)
+			side_max -= line_dy * (low_x if line_dy >= 0.0 else high_x)
+			if side_min > 0.0 or side_max < 0.0:
+				continue
+		var inst = entries[index]["instance"]
 		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
 			continue
 		if skipped != null and is_same(inst, skipped):
@@ -716,6 +757,15 @@ static func _gml_collision_find_in_boxes(
 			return state
 		hits.append(state)
 	return hits if every else null
+
+
+# Whether the sides of a line can be told apart reliably: its coordinates are
+# finite and small enough that rounding stays far below a pixel.
+static func _gml_collision_line_box_test_usable(query):
+	for coordinate in query:
+		if not (absf(coordinate) <= GML_COLLISION_LINE_BOX_TEST_LIMIT):
+			return false
+	return true
 
 
 # The region (left, top, right, bottom) of a query widened by a pixel: an

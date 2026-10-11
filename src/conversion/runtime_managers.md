@@ -70,9 +70,10 @@ A step keeps one list of live instances in creation order, carried over from
 the previous step: instances created during a phase join it before the next
 phase, destroyed instances are skipped. Which events, alarms, input bindings
 and Other events an object has is looked up once per object script. The
-scheduler records the events it runs (`gml_event_scheduler_trace()`) and the
-input runtime its input events (`gml_input_dispatch_trace()`) only while
-`gml_event_scheduler_set_tracing(true)` is in effect; both keep only their
+scheduler records the events it runs (`gml_event_scheduler_trace()`), the
+input runtime its input events (`gml_input_dispatch_trace()`) and the collision
+runtime its collision events (`gml_collision_event_trace()`) only while
+`gml_event_scheduler_set_tracing(true)` is in effect; each keeps only its
 latest records.
 
 Draw phases run once per frame from `GMRuntime.gml_draw_event_dispatch_frame()`:

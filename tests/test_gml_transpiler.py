@@ -5253,10 +5253,49 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "flexpanel_calculate_layout.*expects 4.*got 3"):
             transpile_gml_code("flexpanel_calculate_layout(root, 320, 180);", indent="")
 
+    def test_os_type_and_browser_constants_are_gamemaker_numbers(self):
+        # os_type and os_browser hold numbers in GameMaker. The HTML5 runner's
+        # Globals.js gives the desktop, mobile, unknown and browser values.
+        cases = {
+            "os_unknown": -1,
+            "os_windows": 0,
+            "os_macosx": 1,
+            "os_ios": 3,
+            "os_android": 4,
+            "os_linux": 6,
+            "os_winphone": 7,
+            "os_win8native": 9,
+            "os_ps4": 14,
+            "os_xboxone": 15,
+            "os_uwp": 18,
+            "os_tvos": 20,
+            "os_switch": 21,
+            "os_ps5": 22,
+            "os_gxgames": 23,
+            "os_operagx": 23,
+            "os_gdk": 24,
+            "os_xboxseriesxs": 24,
+            "browser_not_a_browser": -1,
+            "browser_unknown": 0,
+            "browser_ie": 1,
+            "browser_firefox": 2,
+            "browser_chrome": 3,
+            "browser_safari": 4,
+            "browser_safari_mobile": 5,
+            "browser_opera": 6,
+            "browser_windows_store": 8,
+            "browser_tizen": 9,
+            "browser_ie_mobile": 10,
+            "browser_edge": 11,
+        }
+        for name, value in cases.items():
+            with self.subTest(constant=name):
+                self.assertEqual(transpile_gml_expression(name), str(value))
+
     def test_os_debug_gc_helpers_lower_to_runtime_and_builtins(self):
         self.assertEqual(
             transpile_gml_expression("os_type == os_macosx"),
-            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), "macosx")',
+            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), 1)',
         )
         self.assertEqual(
             transpile_gml_expression("fps_real"),

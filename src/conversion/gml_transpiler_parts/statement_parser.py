@@ -24,6 +24,12 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
+from .statement_boundaries import (
+    matching_close_index,
+    scan_expression_end,
+    scan_statement_end,
+    skip_newline_tokens,
+)
 from .statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
@@ -278,6 +284,10 @@ class _StatementParser:
         condition_tokens = self._read_condition_tokens()
         if not condition_tokens:
             raise GMLTranspileError("Expected if condition")
+        # if <condition> then <statement> (manual: If Else and Conditional
+        # Operators).
+        self._skip_newlines()
+        self._match_identifier("then")
 
         condition = transpile_gml_condition(
             tokens_to_source(condition_tokens),
@@ -853,6 +863,16 @@ class _StatementParser:
         return self._parse_statement()
 
     def _read_condition_tokens(self) -> list[_Token]:
+        # The condition is one expression, with or without parentheses; the
+        # body may follow on the same line.
+        start = skip_newline_tokens(self.tokens, self.position)
+        end = scan_expression_end(self.tokens, start)
+        if end is not None:
+            self.position = end
+            tokens = [token for token in self.tokens[start:end] if token.kind != "NEWLINE"]
+            if tokens[0].value == "(" and matching_close_index(tokens, 0) == len(tokens) - 1:
+                return tokens[1:-1]
+            return tokens
         if self._check("("):
             condition_start = self.position
             self._advance()
@@ -953,6 +973,14 @@ class _StatementParser:
         raise self._error(f"Expected '{closer}'")
 
     def _read_simple_statement(self) -> list[_Token]:
+        # A statement ends where its expression ends: it may share a line
+        # with the next statement, and line breaks inside it are white space.
+        end = scan_statement_end(self.tokens, self.position)
+        if end is not None:
+            statement_tokens = [token for token in self.tokens[self.position:end] if token.kind != "NEWLINE"]
+            self.position = end
+            self._match(";")
+            return statement_tokens
         tokens: list[_Token] = []
         depth = 0
         while not self._at_end():

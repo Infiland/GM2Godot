@@ -4214,6 +4214,63 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = _gm2gd_mutation_value_0",
         )
 
+    def test_statements_end_where_their_expression_ends(self):
+        # GameMaker needs no semicolons and treats line breaks as white space:
+        # a statement ends before the first token that cannot continue it
+        # (manual: If Else and Conditional Operators).
+        cases = {
+            "a = 2 trace(a);": 'a = 2\nGMRuntime.gml_call_named("trace", [a], self, other)',
+            "instance_destroy(o) exit": "GMRuntime.gml_instance_destroy(o)\nreturn",
+            "{onice = false onGround = true}": "onice = false\nonGround = true",
+            "var s = 1, t = 2 u = 3": "var s = 1\nvar t = 2\nu = 3",
+            "total = a +\n    b;": "total = GMRuntime.gml_add(a, b)",
+            "total = a\n    + b;": "total = GMRuntime.gml_add(a, b)",
+            "total = ready\n    ? a\n    : b;": "total = a if GMRuntime.gml_bool(ready) else b",
+            "count++ total = 1": "count = GMRuntime.gml_add(count, 1)\ntotal = 1",
+            'lang = "english" set_language(0);': 'lang = "english"\nGMRuntime.gml_call_named("set_language", [0], self, other)',
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
+    def test_conditions_without_parentheses_end_before_their_body(self):
+        cases = {
+            "if f(v) g()": (
+                'if GMRuntime.gml_bool(GMRuntime.gml_call_named("f", [v], self, other)):\n'
+                '\tGMRuntime.gml_call_named("g", [], self, other)'
+            ),
+            "if a == 1\n    b = 1;": "if GMRuntime.gml_eq(a, 1):\n\tb = 1",
+            "if test == true variable = false else variable = true;": (
+                "if GMRuntime.gml_eq(test, true):\n\tvariable = false\nelse:\n\tvariable = true"
+            ),
+            "if ready then go = 1 else { go = 2 }": (
+                "if GMRuntime.gml_bool(ready):\n\tgo = 1\nelse:\n\tgo = 2"
+            ),
+            "if (a) ++b;": "if GMRuntime.gml_bool(a):\n\tb = GMRuntime.gml_add(b, 1)",
+            "while i < 3 i += 1": "while GMRuntime.gml_lt(i, 3):\n\ti = GMRuntime.gml_add(i, 1)",
+            "with o_thing instance_destroy()": (
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(o_thing, self, other):\n"
+                "\tGMRuntime.gml_instance_destroy(_gml_with_target_0)"
+            ),
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+        self.assertEqual(
+            transpile_gml_code("function loc(p) {\n    if !file_exists(p) return false;\n    return true;\n}", indent=""),
+            transpile_gml_code("function loc(p) {\n    if (!file_exists(p)) { return false; }\n    return true;\n}", indent=""),
+        )
+
+    def test_case_bodies_and_methods_split_statements_without_semicolons(self):
+        self.assertEqual(
+            transpile_gml_code('switch (k) { case("40"): r = 1 break; default: v = 5 break }', indent=""),
+            transpile_gml_code('switch (k) { case("40"): r = 1; break; default: v = 5; break; }', indent=""),
+        )
+        self.assertEqual(
+            transpile_gml_code("fn = function() {\n    a = 1\n    b = 2\n}", indent=""),
+            transpile_gml_code("fn = function() {\n    a = 1;\n    b = 2;\n}", indent=""),
+        )
+
     def test_transpiles_increment_decrement_statements(self):
         self.assertEqual(
             transpile_gml_code("count++;", indent=""),

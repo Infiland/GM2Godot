@@ -12,6 +12,10 @@ const GML_DRAW_INSTANCE_GROUP = &"_gm2godot_draw_instances"
 # Set on an instance once its depth has been assigned; until then it has its
 # layer's depth.
 const GML_EXPLICIT_DEPTH_META = &"_gm2godot_explicit_depth"
+# Set while an instance moves to another layer node. It stays the same live
+# instance, so the generated _exit_tree (CleanUp, unregistering) and the draw
+# sink release do not run for the move.
+const GML_LAYER_MOVE_META = &"_gm2godot_moving_layers"
 const GML_DRAW_GUI_LAYER_NAME = "GMGUI"
 const GML_DRAW_GUI_LAYER_INDEX = 1000
 const GML_DRAW_PHASE_SPACES = {
@@ -690,15 +694,15 @@ static func _gml_depth_room_reset():
 	_gml_depth_dirty = true
 
 
-# Assigning depth moves a GameMaker instance to (a layer at) that depth. Godot
-# renders by z_index, so the instance gets an absolute z_index from the same
-# monotonic depth mapping generated layers use. GameMaker applies a depth set
-# while drawing after the draw events, so the instance keeps its place for the
-# rest of that frame. Returns the stored depth value.
+# Assigning depth moves a GameMaker instance to (a layer at) that depth.
+# GameMaker only does this when the value differs from what depth reads
+# (yyInstance.js depth setter). GameMaker applies a depth set while drawing
+# after the draw events, so the instance keeps its place for the rest of that
+# frame. Returns the stored depth value.
 static func gml_instance_depth_assign(instance, value, current = null):
 	var resolved = _to_real(value)
-	if current != null and is_numeric(current) and _to_real(current) == resolved and instance is Object and instance.has_meta(GML_EXPLICIT_DEPTH_META):
-		return resolved
+	if current != null and is_numeric(current) and gml_instance_depth_get(instance, _to_real(current)) == resolved:
+		return current
 	if instance is Object:
 		instance.set_meta(GML_EXPLICIT_DEPTH_META, true)
 	if instance is CanvasItem:
@@ -709,8 +713,58 @@ static func gml_instance_depth_assign(instance, value, current = null):
 	return resolved
 
 
+# GameMaker moves an instance whose depth no longer truncates to its layer's
+# depth off that layer onto a managed layer at the new depth (yyRoom.js
+# ProcessDepthList2, LayerManager.AddInstance): the room layer's visibility,
+# position and layer_destroy no longer affect it. Here it moves to the room
+# root, keeping x and y, and draws at its depth's own z_index.
+# An instance a sequence plays stays in the sequence.
 static func _gml_instance_apply_depth_z(instance, depth):
-	_gml_depth_track(instance, gml_depth_truncate(depth))
+	var truncated = gml_depth_truncate(depth)
+	var layer_depth = _gml_instance_layer_depth(instance)
+	if layer_depth != null and not bool(instance.get_meta("gamemaker_in_sequence", false)):
+		if gml_depth_truncate(layer_depth) == truncated:
+			return
+		var room_root = _gml_instance_layer_room_root(instance)
+		if room_root != null:
+			_gml_instance_move_to_parent(instance, room_root)
+	_gml_depth_track(instance, truncated)
+
+
+# The node holding the outermost layer node an instance is on.
+static func _gml_instance_layer_room_root(instance):
+	var room_root = null
+	var node = instance.get_parent()
+	while node != null:
+		if node.has_meta(&"gm2godot_room_root_policy"):
+			return node
+		if node.has_meta(&"gamemaker_layer_depth"):
+			room_root = node.get_parent()
+		node = node.get_parent()
+	return room_root
+
+
+# Moves an instance node between layer nodes without ending it. A parent that
+# is still adding its children cannot lose or gain one, so the move then waits
+# until the end of the frame.
+static func _gml_instance_move_to_parent(instance, parent, keep_global_transform = false):
+	var current_parent = instance.get_parent()
+	if current_parent == parent:
+		return
+	instance.set_meta(GML_LAYER_MOVE_META, true)
+	var busy = (current_parent != null and not current_parent.is_node_ready()) or not parent.is_node_ready()
+	if busy:
+		if current_parent != null:
+			instance.reparent.call_deferred(parent, keep_global_transform)
+		else:
+			parent.add_child.call_deferred(instance)
+		instance.remove_meta.call_deferred(GML_LAYER_MOVE_META)
+		return
+	if current_parent != null:
+		instance.reparent(parent, keep_global_transform)
+	else:
+		parent.add_child(instance)
+	instance.remove_meta(GML_LAYER_MOVE_META)
 
 
 static func _gml_draw_apply_pending_depths():
@@ -927,9 +981,20 @@ static func _gml_draw_watch_sink_host(sink, host):
 		return
 	sink.host_id = host.get_instance_id()
 	var key = sink.registry_key
-	var callable = func(): _gml_draw_release_sink(key)
-	host.tree_exiting.connect(callable, CONNECT_ONE_SHOT)
+	var callable = func(): _gml_draw_sink_host_exiting(key)
+	host.tree_exiting.connect(callable)
 	sink.host_exit_callable = callable
+
+
+# An instance moving to another layer keeps drawing into its sink: the sink
+# hangs off the instance's own canvas item, which the move keeps.
+static func _gml_draw_sink_host_exiting(key):
+	var sink = _gml_draw_sinks.get(key, null)
+	if sink is GMLDrawSink and sink.host_id != 0:
+		var host = instance_from_id(sink.host_id)
+		if host is Node and host.has_meta(GML_LAYER_MOVE_META):
+			return
+	_gml_draw_release_sink(key)
 
 
 static func _gml_draw_release_sink(key):
@@ -1024,15 +1089,16 @@ static func _gml_draw_registered_instances():
 
 
 # Orders nodes from the highest depth to the lowest; nodes at the same
-# (truncated) depth keep their given (tree) order. Instances whose depth was
-# never assigned have their layer's depth, looked up once per parent node.
+# (truncated) depth keep their given (tree) order. Instances that draw with
+# their layer (relative z_index) have its depth, looked up once per parent
+# node; the others draw at their own depth's z_index.
 static func _gml_draw_sort_by_depth(nodes):
 	var buckets = {}
 	var depths = []
 	var layer_depths = {}
 	for inst in nodes:
 		var depth = null
-		if not inst.has_meta(GML_EXPLICIT_DEPTH_META):
+		if not (inst is CanvasItem) or inst.z_as_relative:
 			var parent = inst.get_parent()
 			if layer_depths.has(parent):
 				depth = layer_depths[parent]

@@ -320,7 +320,40 @@ static func gml_bool(value):
 		return float(value.value) > 0.5
 	if is_number(value):
 		return float(value) > 0.5
-	return bool(value)
+	return _gml_bool_other(value, value_type)
+
+
+# The rest of the runner's yyGetBool: an instance (a node here, even a freed
+# one, as a destroyed instance's id stays a number), a struct and a function
+# are true; "true", "false" and text that starts with a number read as such;
+# anything else (an array, other text) is an error, and false.
+static func _gml_bool_other(value, value_type):
+	if value_type == TYPE_NIL:
+		return false
+	if value_type == TYPE_OBJECT or value_type == TYPE_DICTIONARY or value_type == TYPE_CALLABLE:
+		return true
+	if value_type == TYPE_STRING or value_type == TYPE_STRING_NAME:
+		var text = str(value)
+		if text == "true":
+			return true
+		if text == "false":
+			return false
+		var matched = _gml_bool_number_pattern().search(text)
+		if matched != null:
+			return matched.get_string().to_float() > 0.5
+	gml_error("unable to convert " + gml_string(value) + " to a boolean")
+	return false
+
+
+static var _gml_bool_number_regex = null
+
+
+# The runner's g_NumberRE: a sign, digits with an optional fraction and an
+# exponent up to 29, at the start of the text.
+static func _gml_bool_number_pattern():
+	if _gml_bool_number_regex == null:
+		_gml_bool_number_regex = RegEx.create_from_string("^[-+]?(?:[0-9]{0,30}\\.)?[0-9]{1,30}(?:[Ee][-+]?[1-2]?[0-9])?")
+	return _gml_bool_number_regex
 
 
 static func gml_is_nullish(value):

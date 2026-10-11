@@ -258,6 +258,38 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_STRUCT_MEMBERS_OK",
         )
 
+    def test_truthiness_follows_the_runner(self) -> None:
+        # The runner's yyGetBool: numbers above 0.5 are true; an instance (a
+        # destroyed one too: its id stays a number), a struct and a function
+        # are true; "true", "false" and text that starts with a number read
+        # as such.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("0.5", GMRuntime.gml_bool(0.5), false)
+            _expect("0.6", GMRuntime.gml_bool(0.6), true)
+            _expect("-1", GMRuntime.gml_bool(-1), false)
+            _expect("undefined", GMRuntime.gml_bool(GMRuntime.gml_undefined()), false)
+            _expect("noone", GMRuntime.gml_bool(GMRuntime.gml_instance_noone()), false)
+            _expect("an instance", GMRuntime.gml_bool(self), true)
+            var gone = Node.new()
+            gone.free()
+            _expect("a freed instance", GMRuntime.gml_bool(gone), true)
+            _expect("a struct", GMRuntime.gml_bool({}), true)
+            _expect("a function", GMRuntime.gml_bool(func(): return 0), true)
+            _expect("a method", GMRuntime.gml_bool(GMRuntime.GMLMethod.new()), true)
+            _expect("text true", GMRuntime.gml_bool("true"), true)
+            _expect("text false", GMRuntime.gml_bool("false"), false)
+            _expect("text 1", GMRuntime.gml_bool("1"), true)
+            _expect("text 0.4", GMRuntime.gml_bool("0.4"), false)
+            _expect("text 2abc", GMRuntime.gml_bool("2abc"), true)
+            _expect("text .6", GMRuntime.gml_bool(".6"), true)
+            _expect("text 1e1", GMRuntime.gml_bool("1e1"), true)
+            _expect("text -3", GMRuntime.gml_bool("-3"), false)
+            """,
+            "GML_TRUTHINESS_OK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

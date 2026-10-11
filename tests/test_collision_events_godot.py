@@ -36,7 +36,9 @@ _OBJECTS: tuple[tuple[str, str | None, bool, dict[str, str]], ...] = (
                 '\tif label == "killer":\n'
                 "\t\tGMRuntime.gml_instance_destroy(self)\n"
                 '\tif label == "spawner":\n'
-                '\t\tget_parent().spawn("o_b", "spawned", position.x, position.y)'
+                '\t\tget_parent().spawn("o_b", "spawned", position.x, position.y)\n'
+                '\tif label == "leaver":\n'
+                "\t\tGMRuntime.gml_game_end()"
             ),
         },
     ),

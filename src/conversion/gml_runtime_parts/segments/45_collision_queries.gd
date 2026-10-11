@@ -406,19 +406,16 @@ static func _gml_collision_dispatch_pair(first, first_chain, second, second_chai
 	return dispatched
 
 
-# The step loop stops running events once a room change is pending; it hooks
-# that check in here. Until then every collision event runs.
-static func _gml_collision_events_blocked():
-	return false
-
-
 static func _gml_collision_perform_event(inst, other_inst, other_chain, frame):
 	# The event for the other instance's object wins over an event for one of
 	# its parents; GDScript inheritance already resolves this instance's own
 	# parents.
 	if not _gml_collision_instance_valid(inst) or not _gml_collision_instance_valid(other_inst):
 		return 0
-	if _gml_collision_events_blocked():
+	# Once a room change (or game_restart, game_end) is pending, no collision
+	# event runs, a persistent instance's neither; solid instances have still
+	# moved back.
+	if _gml_event_scheduler_event_blocked(inst):
 		return 0
 	for object_name in other_chain:
 		var method_name = GML_COLLISION_EVENT_PREFIX + str(object_name)

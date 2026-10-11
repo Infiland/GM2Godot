@@ -15,6 +15,8 @@ draws:
   (WebGL_TextureDrawWH_RELEASE);
 - draw_sprite_stretched truncates x and y toward zero (yyGraphics.js
   Graphics_DrawStretchedExt);
+- draw_tilemap draws in opaque white whatever the draw colour and alpha
+  (yyRoom.js DrawLayerTilemapElement).
 """
 from __future__ import annotations
 
@@ -93,6 +95,15 @@ _STRETCHED_CASES = (
 )
 _STRETCHED_REGION = (0, 102, 40, 124)
 
+# Each group draws the two-cell tilemap of 4x4 white tiles at (x, y) under a
+# different draw colour and alpha.
+_TILEMAP_CALLS = (
+    ("gml_draw_set_alpha(0.5)", "gml_draw_set_color(0x0000ff)", "gml_draw_tilemap(tm, 64, 104)"),
+    ("gml_draw_set_alpha(1)", "gml_draw_set_color(0x00ff00)", "gml_draw_tilemap(tm, 64, 112)"),
+)
+_TILEMAP_ORIGINS = ((64, 104), (64, 112))
+_TILEMAP_REGION = (60, 102, 128, 124)
+
 
 def _texel(column: int, row: int) -> Pixel:
     return (40 * column + 40, 70 * row + 60, 250 - 30 * column)
@@ -113,6 +124,8 @@ def _draw_script() -> str:
     calls += [case[0] for case in _PART_CASES]
     calls += [case[0] for case in _GENERAL_CASES]
     calls += [case[0] for case in _STRETCHED_CASES]
+    for group in _TILEMAP_CALLS:
+        calls += list(group)
     body = "".join(f"\tGMRuntime.{call}\n" for call in calls)
     return (
         "extends Node2D\n\n"
@@ -341,6 +354,15 @@ class TestDrawGameMakerPixelsGodot(unittest.TestCase):
         for _call, x, y in _STRETCHED_CASES:
             _paint_part(painted, (x, y, _FRAME[0], _FRAME[1]), (0, 0, _FRAME[0], _FRAME[1]))
         self._assert_region(_STRETCHED_REGION, lambda x, y: painted.get((x, y), _BLACK))
+
+    def test_tilemaps_draw_in_opaque_white_whatever_the_draw_colour_and_alpha(self) -> None:
+        def expected(x: int, y: int) -> Pixel:
+            for origin_x, origin_y in _TILEMAP_ORIGINS:
+                if origin_x <= x < origin_x + 8 and origin_y <= y < origin_y + 4:
+                    return _WHITE
+            return _BLACK
+
+        self._assert_region(_TILEMAP_REGION, expected)
 
 
 if __name__ == "__main__":

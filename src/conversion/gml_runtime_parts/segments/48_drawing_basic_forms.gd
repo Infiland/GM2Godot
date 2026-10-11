@@ -247,7 +247,9 @@ static func gml_draw_tile(tileset, tiledata, frame, x, y):
 
 
 # Draws every cell of a tilemap layer element with its top-left corner at
-# (x, y), as well as the layer's own rendering.
+# (x, y), as well as the layer's own rendering. Unlike draw_tile, GameMaker
+# draws the cells in opaque white (DrawLayerTilemapElement), whatever the draw
+# colour and alpha.
 static func gml_draw_tilemap(tilemap_element_id, x, y):
 	var target = _gml_draw_target()
 	if target == null:
@@ -258,7 +260,7 @@ static func gml_draw_tilemap(tilemap_element_id, x, y):
 	var tile_set = node.tile_set
 	var tile_size = Vector2(tile_set.tile_size)
 	var origin = Vector2(_to_real(x), _to_real(y))
-	var colour = _gml_draw_colour_value(0xffffff, 1, true) * node.self_modulate
+	var colour = _gml_draw_colour_value(0xffffff, 1)
 	for coords in node.get_used_cells():
 		var source = tile_set.get_source(node.get_cell_source_id(coords))
 		if not (source is TileSetAtlasSource) or source.texture == null:

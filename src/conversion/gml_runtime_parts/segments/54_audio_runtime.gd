@@ -308,18 +308,23 @@ static func gml_audio_channel_num(num_channels):
 
 
 static func gml_audio_master_gain(gain):
-	return gml_audio_set_master_gain(gain)
-
-
-static func gml_audio_set_master_gain(gain):
 	_gml_audio_master_gain = max(_to_real(gain), 0.0)
 	for entry in _gml_audio_instances.values():
 		_gml_audio_apply_entry_volume(entry)
 	return null
 
 
-static func gml_audio_get_master_gain():
-	return _gml_audio_master_gain
+static func gml_audio_set_master_gain(listener_index, gain):
+	# GameMaker only has the main listener 0; other listeners are ignored.
+	if int(_to_real(listener_index)) == 0:
+		gml_audio_master_gain(gain)
+	return null
+
+
+static func gml_audio_get_master_gain(listener_index):
+	if int(_to_real(listener_index)) == 0:
+		return _gml_audio_master_gain
+	return 0.0
 
 
 static func gml_audio_throw_on_error(enable):
@@ -349,6 +354,7 @@ static func gml_audio_emitter_free(emitter):
 		return false
 	var handle = entry["handle"]
 	_gml_audio_emitters.erase(handle.index)
+	_gml_audio_gain_ramps.erase("emitter:" + str(handle.index))
 	gml_handle_invalidate(handle)
 	return true
 
@@ -385,13 +391,14 @@ static func gml_audio_emitter_falloff(emitter, falloff_ref, falloff_max, falloff
 	return null
 
 
-static func gml_audio_emitter_gain(emitter, gain):
+static func gml_audio_emitter_gain(emitter, gain, time = 0):
+	# The emitter fades linearly over `time` milliseconds, like sound gains.
 	var entry = _gml_audio_emitter_entry(emitter)
 	if entry == null:
 		return null
-	entry["gain"] = max(_to_real(gain), 0.0)
-	for sound_entry in _gml_audio_entries_for_emitter(entry["handle"].index):
-		sound_entry["emitter_gain"] = entry["gain"]
+	var emitter_index = entry["handle"].index
+	_gml_audio_gain_ramp_to(entry, "gain", "emitter:" + str(emitter_index), _gml_audio_gain_argument(gain), _gml_audio_fade_time_argument(time))
+	for sound_entry in _gml_audio_entries_for_emitter(emitter_index):
 		_gml_audio_apply_entry_volume(sound_entry)
 	return null
 
@@ -1117,6 +1124,9 @@ static func _gml_audio_apply_entry_volume(entry):
 	var group_state = _gml_audio_group_state.get(str(entry.get("audio_group", "audiogroup_default")), null)
 	if typeof(group_state) == TYPE_DICTIONARY:
 		entry["group_gain"] = group_state["gain"]
+	var emitter_state = _gml_audio_emitters.get(int(entry.get("emitter_index", -1)), null)
+	if typeof(emitter_state) == TYPE_DICTIONARY:
+		entry["emitter_gain"] = emitter_state["gain"]
 	var player = entry["player"]
 	if _gml_audio_player_is_valid(player):
 		player.volume_linear = _gml_audio_final_gain(

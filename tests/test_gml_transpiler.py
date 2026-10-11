@@ -4449,6 +4449,30 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_audio_destroy_sync_group(group)",
         )
 
+    def test_master_and_emitter_gain_take_gamemaker_arguments(self):
+        # Manual: audio_set_master_gain(listenerIndex, gain),
+        # audio_get_master_gain(listenerIndex) and
+        # audio_emitter_gain(emitter, gain, [time]).
+        self.assertEqual(
+            transpile_gml_code(
+                "audio_set_master_gain(0, 0.5);"
+                "g = audio_get_master_gain(0);"
+                "audio_emitter_gain(e, 0.5);"
+                "audio_emitter_gain(e, 0, 1000);"
+                "audio_master_gain(0.25);",
+                indent="",
+            ),
+            "GMRuntime.gml_audio_set_master_gain(0, 0.5)\n"
+            "g = GMRuntime.gml_audio_get_master_gain(0)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0.5)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0, 1000)\n"
+            "GMRuntime.gml_audio_master_gain(0.25)",
+        )
+        for source in ("audio_set_master_gain(0.5);", "g = audio_get_master_gain();"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "argument"):
+                    transpile_gml_code(source, indent="")
+
     def test_audio_group_helpers_lower_to_runtime_and_group_constants(self):
         self.assertEqual(
             transpile_gml_code(

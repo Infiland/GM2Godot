@@ -112,6 +112,27 @@ _SMOKE_SCRIPT = textwrap.dedent(
 
     \tGMRuntime.gml_audio_sound_loop(voice, false)
     \t_expect("audio_sound_loop(false) swaps to the plain stream", player.stream.loop_mode == AudioStreamWAV.LOOP_DISABLED)
+
+    \t# audio_sound_loop only changes the voice's loop flag: a paused voice
+    \t# stays paused where it was, and a sound asset index does nothing.
+    \tvar paused_voice = GMRuntime.gml_audio_play_sound(sound_id, 0, true)
+    \tvar paused_player = GMRuntime.gml_handle_resolve(paused_voice)
+    \tawait _wait_ms(300)
+    \tGMRuntime.gml_audio_pause_sound(paused_voice)
+    \tvar paused_at = paused_player.get_playback_position()
+    \t_expect("the voice played before the pause (%s)" % str(paused_at), paused_at > 0.1)
+    \tGMRuntime.gml_audio_sound_loop(paused_voice, false)
+    \t_expect("audio_sound_loop leaves a paused voice paused", GMRuntime.gml_audio_is_paused(paused_voice))
+    \t_expect("audio_sound_loop sets the paused voice's loop flag", not GMRuntime.gml_audio_sound_get_loop(paused_voice))
+    \t_expect("the paused voice's player stays paused", paused_player.stream_paused)
+    \t_expect_near("the paused voice keeps its position", paused_player.get_playback_position(), paused_at, 0.05)
+    \tGMRuntime.gml_audio_resume_sound(paused_voice)
+    \t_expect("the voice resumes after audio_sound_loop", paused_player.playing and not paused_player.stream_paused)
+    \t_expect_near("the voice resumes where it was paused", paused_player.get_playback_position(), paused_at, 0.05)
+    \tGMRuntime.gml_audio_sound_loop(paused_voice, true)
+    \tGMRuntime.gml_audio_sound_loop(sound_id, false)
+    \t_expect("audio_sound_loop on a sound asset leaves its voices alone", GMRuntime.gml_audio_sound_get_loop(paused_voice))
+    \t_expect("audio_sound_get_loop of a sound asset is false", not GMRuntime.gml_audio_sound_get_loop(sound_id))
     \tGMRuntime.gml_audio_stop_all()
     \t_expect("stop_all stops every voice", not GMRuntime.gml_audio_is_playing(sound_id))
 

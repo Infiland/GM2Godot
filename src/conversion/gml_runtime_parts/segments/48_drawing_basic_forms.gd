@@ -2299,26 +2299,34 @@ static func _gml_font_split_text(info, text, width):
 	return lines
 
 
-# Split_TextBlock without wrapping: LF and CR both end a line (a CR LF or LF CR
-# pair counts once), a trailing line break adds no empty line, and an empty
-# string has no lines at all.
+# Split_TextBlock without wrapping (yyFont.js), step for step: LF and CR both
+# end a line, a single trailing line break adds no empty line, and an empty
+# string has no lines at all. On the second character of a CR LF or LF CR pair
+# the runner moves on without starting a new line, so that character opens the
+# next line: "AB\r\nCD" gives "AB" and "\nCD", "x\r\n" gives "x" and "\n".
+# Measuring counts it as the first glyph's shift and drawing skips it, like
+# any character the font has no glyph for.
 static func _gml_font_split_lines(text):
 	var lines = []
 	var length = text.length()
+	var last = text.unicode_at(0) if length > 0 else 0
 	var start = 0
-	var index = 0
-	while index < length:
-		var code = text.unicode_at(index)
-		if code == 10 or code == 13:
-			lines.append(text.substr(start, index - start))
-			if index + 1 < length:
-				var next_code = text.unicode_at(index + 1)
-				if (next_code == 10 or next_code == 13) and next_code != code:
-					index += 1
-			start = index + 1
-		index += 1
-	if start < length:
-		lines.append(text.substr(start))
+	var end = 0
+	while start < length:
+		while end < length:
+			var code = text.unicode_at(end)
+			if code == 10 or code == 13:
+				break
+			end += 1
+			last = text.unicode_at(end) if end < length else 0
+		var current = text.unicode_at(end) if end < length else 0
+		if (last == 10 and current == 13) or (last == 13 and current == 10):
+			end += 1
+			continue
+		last = current
+		lines.append(text.substr(start, end - start))
+		end += 1
+		start = end
 	return lines
 
 

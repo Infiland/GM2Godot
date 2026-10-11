@@ -158,6 +158,16 @@ static func _gml_instance_clean_up(instance, entry):
 		_gml_instance_perform_own_event(instance, "_on_clean_up")
 
 
+# Moves a node to another parent, such as an instance to another layer. The
+# node leaves the tree and comes back, which must not count as the instance
+# leaving the game (its _exit_tree unregisters it otherwise).
+static func _gml_instance_reparent(node, new_parent):
+	var preserving = node.get_meta("_gm2godot_room_preserving_persistent", false)
+	node.set_meta("_gm2godot_room_preserving_persistent", true)
+	node.reparent(new_parent, true)
+	node.set_meta("_gm2godot_room_preserving_persistent", preserving)
+
+
 # Runs an event that GameMaker performs on an instance by itself (Destroy,
 # Clean Up) with other being the instance, also when a collision event (where
 # other is the instance collided with) set it off; the caller's other comes

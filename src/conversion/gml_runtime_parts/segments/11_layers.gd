@@ -222,7 +222,7 @@ static func gml_layer_add_instance(layer, instance):
 	if instance_node.get_parent() == layer_node:
 		return true
 	if instance_node.get_parent() != null:
-		instance_node.reparent(layer_node, true)
+		_gml_instance_reparent(instance_node, layer_node)
 	else:
 		layer_node.add_child(instance_node)
 	# The instance now has the layer's depth instead of one assigned earlier.
@@ -373,7 +373,7 @@ static func gml_layer_element_move(element, layer):
 	if element_node.get_parent() == layer_node:
 		return true
 	if element_node.get_parent() != null:
-		element_node.reparent(layer_node, true)
+		_gml_instance_reparent(element_node, layer_node)
 	else:
 		layer_node.add_child(element_node)
 	_gml_layer_element_register(element_node)

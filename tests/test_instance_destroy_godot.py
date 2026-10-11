@@ -321,6 +321,45 @@ _SELF_DESTROY_TRACE = [
     "inherit:exists=no:number=0:same=yes:all=1",
 ]
 
+# Moving an instance to another layer moves it, nothing more: it still exists
+# and runs its Clean Up event only when it is destroyed (manual,
+# layer_add_instance).
+_LAYER_MOVE_PROJECT = GameMakerProject(
+    name="LayerMove",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject("o_moved", {EVENT_CLEAN_UP: 'trace("clean_up_moved");\n'}),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("done")) exit;\n'
+                    "global.done = true;\n"
+                    'var a = instance_create_layer(0, 0, "Instances", o_moved);\n'
+                    'layer_add_instance("Other", a);\n'
+                    "var n = 0;\n"
+                    "with (o_moved) n += 1;\n"
+                    'trace("moved:exists=" + (instance_exists(a) ? "yes" : "no")\n'
+                    '    + ":number=" + string(instance_number(o_moved)) + ":with=" + string(n));\n'
+                    "instance_destroy(a);\n"
+                    'trace("destroyed:number=" + string(instance_number(o_moved)));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer("Instances", 0, (RoomInstance("inst_runner", "o_runner", 0, 0),)),
+                InstanceLayer("Other", 100, ()),
+            ),
+            creation_order=("inst_runner",),
+        ),
+    ),
+)
+_LAYER_MOVE_TRACE = ["moved:exists=yes:number=1:with=1", "clean_up_moved", "destroyed:number=0"]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -349,6 +388,9 @@ class TestInstanceDestroyGodot(unittest.TestCase):
 
     def test_an_instance_destroyed_in_its_create_event_stays_destroyed(self) -> None:
         self.assertEqual(self._run_trace(_SELF_DESTROY_PROJECT), _SELF_DESTROY_TRACE)
+
+    def test_moving_an_instance_to_another_layer_keeps_it(self) -> None:
+        self.assertEqual(self._run_trace(_LAYER_MOVE_PROJECT), _LAYER_MOVE_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

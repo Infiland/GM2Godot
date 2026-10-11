@@ -9,9 +9,15 @@ choices used for a project.
 - Rooms use `Node2D` roots with `res://gm2godot/gml_room_node.gd`.
 - The first GameMaker `RoomOrderNodes` entry becomes `run/main_scene`.
 - GameMaker layers become `Node2D` children with an absolute
-  (`z_as_relative = false`) `z_index = -depth`. Depths beyond ±3072 are
-  compressed logarithmically into Godot's ±4096 `z_index` range so their
-  order is kept; instance `depth` assignments use the same mapping.
+  (`z_as_relative = false`) `z_index = -depth`. Depth is an integer:
+  fractional depths are truncated toward zero. GameMaker gives every distinct
+  depth its own layer, so no two depths may share a `z_index`: when a depth in
+  use is beyond Godot's ±4096 `z_index` range, the distinct depths in use are
+  ranked into that range in depth order (depths with room around them keep
+  `-depth`). The converter ranks a room's layer depths; the runtime ranks
+  every depth in use (layers, `layer_create`/`layer_depth`, instance `depth`
+  assignments and `part_system_depth`) again whenever a new one appears. The
+  order is exact for up to 8193 distinct depths in use at once.
 - Every generated room has a `GMGUI` `CanvasLayer` reserved for Draw GUI phases.
 - Tile layers use Godot 4 `TileMapLayer` when the source tile data can be decoded.
 - Native Godot callbacks and signals do not define GameMaker event order; runtime

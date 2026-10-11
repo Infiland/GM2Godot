@@ -410,7 +410,8 @@ class _ExpressionParser:
                 instance_target="_gml_constructor_self",
                 global_names=self.scope_context.global_names,
                 asset_names=self.scope_context.asset_names,
-                direct_instance_names=self.scope_context.direct_instance_names,
+                # The new struct's variables, not the declaring script's.
+                direct_instance_names=frozenset(),
                 dynamic_instance_names=self.scope_context.dynamic_instance_names,
                 static_scope=static_scope_name,
                 static_names=static_names,
@@ -430,7 +431,7 @@ class _ExpressionParser:
                 global_scope=scope_context.global_scope,
                 global_names=scope_context.global_names,
                 asset_names=scope_context.asset_names,
-                direct_instance_names=scope_context.direct_instance_names,
+                direct_instance_names=frozenset(),
                 dynamic_instance_names=scope_context.dynamic_instance_names,
                 static_scope=static_scope_name,
                 static_names=static_names,

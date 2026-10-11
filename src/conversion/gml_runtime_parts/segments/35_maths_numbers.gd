@@ -266,7 +266,8 @@ static func gml_point_direction(x1, y1, x2, y2):
 		return gml_error("GML point_direction requires real-convertible arguments")
 	# GameMaker's point_direction: a vertical vector points exactly up (90)
 	# or down (270), no vector gives 0, and other angles are rounded to six
-	# decimals (computed with the runner's value of pi).
+	# decimals (computed with the runner's value of pi) through a 32-bit
+	# integer, as the runner's ~~round(dd * 1000000) does.
 	var dx = _to_real(x2) - _to_real(x1)
 	var dy = _to_real(y2) - _to_real(y1)
 	if dx == 0.0:
@@ -275,22 +276,31 @@ static func gml_point_direction(x1, y1, x2, y2):
 		if dy < 0.0:
 			return 90.0
 		return 0.0
-	var degrees = _gml_collision_round(180.0 * atan2(dy, dx) / GML_RUNNER_PI * 1000000.0) / 1000000.0
-	# (0.0 - degrees rather than -degrees: a vector straight right gives 0,
-	# not -0.)
-	return 0.0 - degrees if degrees <= 0.0 else 360.0 - degrees
+	var degrees = float(_gml_runner_int32(_gml_collision_round(180.0 * atan2(dy, dx) / GML_RUNNER_PI * 1000000.0))) / 1000000.0
+	# (The runner returns -dd, so a vector straight right gives -0.)
+	return -degrees if degrees <= 0.0 else 360.0 - degrees
 
 
 static func gml_lengthdir_x(length, direction):
 	if not _is_real_convertible(length) or not _is_real_convertible(direction):
 		return gml_error("GML lengthdir_x requires real-convertible arguments")
-	return _to_real(length) * cos(deg_to_rad(_to_real(direction)))
+	return _gml_lengthdir_snap(_to_real(length) * cos(_to_real(direction) * GML_RUNNER_PI / 180.0))
 
 
 static func gml_lengthdir_y(length, direction):
 	if not _is_real_convertible(length) or not _is_real_convertible(direction):
 		return gml_error("GML lengthdir_y requires real-convertible arguments")
-	return -_to_real(length) * sin(deg_to_rad(_to_real(direction)))
+	return _gml_lengthdir_snap(-(_to_real(length) * sin(_to_real(direction) * GML_RUNNER_PI / 180.0)))
+
+
+# The runner's lengthdir_x and lengthdir_y (computed with its value of pi)
+# return Math.round(value) when the value is within 0.0001 of it. Math.round
+# rounds halves up and gives -0 for values from -0.5 to -0.
+static func _gml_lengthdir_snap(value):
+	var nearest = floor(value + 0.5)
+	if absf(value - nearest) < 0.0001:
+		return nearest if nearest != 0.0 else value * 0.0
+	return value
 
 
 static func gml_make_color_rgb(red, green, blue):

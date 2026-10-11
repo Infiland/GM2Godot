@@ -218,7 +218,8 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("straight down", GMRuntime.gml_point_direction(10, 10, 10, 15), 270.0)
             _expect("no vector", GMRuntime.gml_point_direction(10, 10, 10, 10), 0.0)
             _expect("straight right", GMRuntime.gml_point_direction(0, 0, 5, 0), 0.0)
-            _expect("straight right is not -0", 1.0 / GMRuntime.gml_point_direction(0, 0, 5, 0), INF)
+            _expect("straight right is -0, as the runner's -dd", 1.0 / GMRuntime.gml_point_direction(0, 0, 5, 0), -INF)
+            _expect("NaN truncates to -0", 1.0 / GMRuntime.gml_point_direction(NAN, 0, 5, 0), -INF)
             _expect("straight left", GMRuntime.gml_point_direction(0, 0, -5, 0), 180.0)
             _expect("up right", GMRuntime.gml_point_direction(0, 0, 1, -1), 45.0)
             _expect("down left", GMRuntime.gml_point_direction(0, 0, -1, 1), 225.0)
@@ -227,6 +228,27 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("degtorad uses the runner's pi / 180", GMRuntime.gml_degtorad(180), 180.0 * 0.0174532925)
             """,
             "GML_POINT_DIRECTION_OK",
+        )
+
+    def test_lengthdir_snaps_to_whole_numbers_like_the_runner(self) -> None:
+        # The runner's lengthdir_x and lengthdir_y use its value of pi and
+        # return the nearest whole number when the result is within 0.0001 of
+        # it, so lengthdir_x(10, 90) is exactly 0.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("lengthdir_x(10, 90) is 0", GMRuntime.gml_lengthdir_x(10, 90) == 0.0, true)
+            _expect("lengthdir_x(100, 60) is 50", GMRuntime.gml_lengthdir_x(100, 60) == 50.0, true)
+            _expect("lengthdir_x(10, 180) is -10", GMRuntime.gml_lengthdir_x(10, 180) == -10.0, true)
+            _expect("lengthdir_y(8, 90) is -8", GMRuntime.gml_lengthdir_y(8, 90) == -8.0, true)
+            _expect("lengthdir_y(10, 180) is 0", GMRuntime.gml_lengthdir_y(10, 180) == 0.0, true)
+            _expect("lengthdir_x(10, 30)", GMRuntime.gml_lengthdir_x(10, 30) == 10.0 * cos(30.0 * 3.14159265 / 180.0), true)
+            _expect("lengthdir_y(10, 45)", GMRuntime.gml_lengthdir_y(10, 45) == -(10.0 * sin(45.0 * 3.14159265 / 180.0)), true)
+            _expect("lengthdir_x(0.00005, 0) is 0", GMRuntime.gml_lengthdir_x(0.00005, 0) == 0.0, true)
+            _expect("lengthdir_x(1.5, 0) is 1.5", GMRuntime.gml_lengthdir_x(1.5, 0), 1.5)
+            _expect("lengthdir_x(inf, 0)", GMRuntime.gml_lengthdir_x(INF, 0), INF)
+            """,
+            "GML_LENGTHDIR_OK",
         )
 
     def test_round_uses_bankers_rounding(self) -> None:

@@ -39,20 +39,51 @@ static func gml_int_div(left, right):
 			return gml_error("GML int32 division by zero")
 		return int(left / right)
 	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
-		return int(float(left) / float(right))
-	if _returns_int64_arithmetic_result(left, right):
+		return _gml_real_int_div(float(left), float(right))
+	if is_ptr(left) or is_ptr(right):
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
+		return gml_unsupported_binary_type_error("GML integer divide", left, right)
+	# The runner's yyfdiv: an int64 dividend keeps int64 integer division
+	# (the divisor truncated to an integer); otherwise both operands are
+	# reals.
+	if is_int64(left):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
 		return GMLInt64.new(int(_to_int64_value(left) / right_int))
-	if _returns_int32_arithmetic_result(left, right):
-		var right_int = _to_int32_value(right)
-		if right_int == 0:
-			return gml_error("GML int32 division by zero")
-		return int(_to_int32_value(left) / right_int)
-	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
-		return gml_unsupported_binary_type_error("GML integer divide", left, right)
-	return int(_to_real(left) / _to_real(right))
+	return _gml_real_int_div(_to_real(left), _to_real(right))
+
+
+# `div` on reals, as the runner's yyfdiv: a zero divisor is an error, NaN
+# and equal operands have fixed results, and otherwise both operands are
+# truncated to integers before the integer division (so 7 div 2.5 == 3; a
+# divisor that truncates to 0 gives 0).
+static func _gml_real_int_div(left_value, right_value):
+	if right_value == 0.0:
+		return gml_error("GML div by zero")
+	var left_nan = is_nan(left_value)
+	var right_nan = is_nan(right_value)
+	if left_nan or right_nan:
+		if left_nan and right_nan:
+			return 1
+		if left_nan:
+			return left_value if is_finite(right_value) else 1
+		return right_value if is_finite(left_value) else 1
+	if left_value == right_value:
+		return 1
+	var right_int = _gml_truncate_real(right_value)
+	if right_int == 0:
+		return 0
+	return _gml_truncate_real(left_value) / right_int
+
+
+# A real truncated toward zero to an integer; infinities give 0, as the
+# runner's ~~ does.
+static func _gml_truncate_real(value):
+	if is_inf(value):
+		return 0
+	return int(value)
 
 
 static func gml_real(value):

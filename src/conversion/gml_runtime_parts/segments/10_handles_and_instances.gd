@@ -122,8 +122,10 @@ static func gml_instance_unregister(instance_or_handle):
 	return true
 
 
-static func gml_instance_destroy(target = null):
+# With execute_event false the Destroy event is skipped; Clean Up still runs.
+static func gml_instance_destroy(target = null, execute_event = true):
 	var destroy_target = target if target != null else gml_instance_noone()
+	var run_destroy_event = gml_bool(execute_event)
 	for instance in gml_with_targets(destroy_target):
 		var entry = _gml_instance_entry(instance)
 		if entry == null or entry["destroyed"]:
@@ -134,7 +136,7 @@ static func gml_instance_destroy(target = null):
 		_gml_instance_set_meta(instance, "_gm2godot_instance_destroyed", true)
 		# After a room change request GameMaker skips the Destroy event,
 		# unless the instance or the current room is persistent.
-		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
+		if run_destroy_event and instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
 			_gml_instance_perform_own_event(instance, "_on_destroy")
 		_gml_instance_clean_up(instance, entry)
 		gml_instance_unregister(entry["handle"])
@@ -238,12 +240,12 @@ static func gml_instance_furthest(x, y, target):
 	return _gml_instance_distance_extreme(x, y, target, false)
 
 
-static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):
-	return _gml_instance_create_at(x, y, layer, null, object_selector, current_self)
+static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null, var_struct = null):
+	return _gml_instance_create_at(x, y, layer, null, object_selector, current_self, var_struct)
 
 
-static func gml_instance_create_depth(x, y, depth_value, object_selector, current_self = null):
-	return _gml_instance_create_at(x, y, null, depth_value, object_selector, current_self)
+static func gml_instance_create_depth(x, y, depth_value, object_selector, current_self = null, var_struct = null):
+	return _gml_instance_create_at(x, y, null, depth_value, object_selector, current_self, var_struct)
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):

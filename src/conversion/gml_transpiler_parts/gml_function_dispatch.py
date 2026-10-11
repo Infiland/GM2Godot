@@ -448,9 +448,9 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
-    "instance_create_layer": (4, 4),
-    "instance_create_depth": (4, 4),
-    "instance_destroy": (0, 1),
+    "instance_create_layer": (4, 5),
+    "instance_create_depth": (4, 5),
+    "instance_destroy": (0, 2),
     "instance_exists": (1, 1),
     "instance_find": (2, 2),
     "instance_number": (1, 1),

@@ -139,7 +139,8 @@ static func gml_event_create_blocked(inst):
 	# Generated Create events ask this first. Like GameMaker, an instance
 	# created after a room change was requested gets no Create event unless
 	# it or the current room is persistent; it still exists until the room
-	# ends.
+	# ends. The variables passed to instance_create_* are set first.
+	_gml_instance_apply_create_variables(inst)
 	return _gml_event_scheduler_event_blocked(inst, true)
 
 

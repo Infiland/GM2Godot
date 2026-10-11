@@ -937,7 +937,8 @@ def _emit_descriptor_call(
         if descriptor.lowering_kind == "runtime_path_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_append_self":
-            emitted_args.append(scope_context.self_expression)
+            # After the required arguments, before any optional ones.
+            emitted_args.insert(descriptor.min_args, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_self_default" and not emitted_args:
             emitted_args.append(scope_context.self_expression)
         return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"

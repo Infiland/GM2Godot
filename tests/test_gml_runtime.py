@@ -2106,8 +2106,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_instance_selector_targets(selector):", GML_RUNTIME_SCRIPT)
         self.assertIn("var object_entries: Variant = _gml_instance_object_entries(selector)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_instance_entry_targets(object_entries)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null, var_struct = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("static func gml_instance_destroy(target = null, execute_event = true):", GML_RUNTIME_SCRIPT)
         self.assertIn('_gml_instance_perform_own_event(instance, "_on_destroy")', GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 

@@ -262,7 +262,7 @@ static func _gml_instance_position(instance):
 	return Vector2.ZERO
 
 
-static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null):
+static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null, var_struct = null):
 	var entry: Variant = _gml_object_asset_entry(object_selector)
 	if entry == null:
 		return gml_instance_noone()
@@ -282,7 +282,12 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	var parent = _gml_instance_creation_parent(current_self, layer)
 	if parent == null:
 		return gml_instance_noone()
+	if var_struct != null and not is_undefined(var_struct):
+		# Set just before the Create event runs (gml_event_create_blocked).
+		instance.set_meta(GML_INSTANCE_CREATE_VARIABLES_META, var_struct)
 	parent.add_child(instance)
+	# An object without a Create event takes them now.
+	_gml_instance_apply_create_variables(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
 		if instance.has_meta("_gm2godot_instance_destroyed"):
@@ -292,6 +297,25 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 			return own_id if own_id is GMLHandle else gml_instance_noone()
 		handle = gml_instance_register(instance, int(entry["id"]), [])
 	return handle
+
+
+const GML_INSTANCE_CREATE_VARIABLES_META = "_gm2godot_create_variables"
+
+
+# instance_create_*'s var_struct: GameMaker copies its variables onto the new
+# instance after the Pre-Create event and before the Create event, binding the
+# struct's own methods to the instance (ShallowCopyVars in the HTML5 runner).
+# Applied once, also when a child object's Create event calls event_inherited.
+static func _gml_instance_apply_create_variables(instance):
+	if not is_instance_valid(instance) or not instance.has_meta(GML_INSTANCE_CREATE_VARIABLES_META):
+		return
+	var var_struct = instance.get_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	instance.remove_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	for name in gml_struct_get_names(var_struct):
+		var value = gml_struct_get(var_struct, name)
+		if value is GMLMethod and is_same(value.bound_self, var_struct):
+			value = gml_method(instance, value)
+		gml_struct_set(instance, name, value)
 
 
 static func _gml_instance_creation_parent(current_self, layer):

@@ -11,7 +11,9 @@ from pathlib import Path
 
 from tests.gamemaker_project_support import (
     EVENT_CLEAN_UP,
+    EVENT_CREATE,
     EVENT_DESTROY,
+    EVENT_STEP,
     GameMakerObject,
     GameMakerProject,
     GameMakerRoom,
@@ -127,6 +129,73 @@ _COLLISION_ROOM_CHANGE_PROJECT = GameMakerProject(
 )
 _COLLISION_ROOM_CHANGE_TRACE = ["collision_a:0"]
 
+# instance_create_layer/depth copy the variables of an optional struct onto
+# the new instance before its Create event (only once, also when a child
+# object's Create event calls event_inherited), binding the struct's methods
+# to the instance; instance_destroy(id, false) skips the Destroy event but
+# still runs Clean Up (HTML5 runner: instance_create_depth and
+# instance_create_layer call ShallowCopyVars between the Pre-Create and Create
+# events in Function_Layers.js; DoDestroy in Function_Instance.js; manual,
+# instance_create_layer and instance_destroy).
+_CREATE_DESTROY_ARGUMENTS_PROJECT = GameMakerProject(
+    name="CreateDestroyArguments",
+    scripts=_SCRIPTS,
+    objects=(
+        GameMakerObject(
+            "o_t",
+            {
+                EVENT_CREATE: 'trace("create:hp=" + string(hp) + ":speed=" + string(speed));\nhp += 1;\n',
+                EVENT_DESTROY: 'trace("destroy");\n',
+                EVENT_CLEAN_UP: 'trace("clean_up");\n',
+            },
+        ),
+        GameMakerObject("o_t_child", {EVENT_CREATE: "hp *= 10;\nevent_inherited();\n"}, parent="o_t"),
+        GameMakerObject("o_plain", {EVENT_STEP: "x += 1;\n"}),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("done")) exit;\n'
+                    "global.done = true;\n"
+                    # Held globally: a struct whose method is bound to it is a
+                    # reference cycle that only the global scope breaks at exit.
+                    "global.basis = {hp: 5, speed: 2, get_hp: function() { return hp; }};\n"
+                    "var t = instance_create_depth(0, 0, 0, o_t, global.basis);\n"
+                    'trace("after_create:hp=" + string(t.hp) + ":hspeed=" + string(t.hspeed));\n'
+                    "t.hp = 9;\n"
+                    'trace("method:" + string(t.get_hp()));\n'
+                    'var c = instance_create_layer(0, 0, "Instances", o_t_child, {hp: 5});\n'
+                    'trace("child:hp=" + string(c.hp));\n'
+                    'var n = instance_create_layer(0, 0, "Instances", o_plain, {tag: "late"});\n'
+                    'trace("no_create:" + n.tag);\n'
+                    "instance_destroy(t, false);\n"
+                    'trace("destroyed:exists=" + yes_no(instance_exists(t)));\n'
+                    "instance_destroy(c, true);\n"
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(InstanceLayer("Instances", 0, (RoomInstance("inst_runner", "o_runner", 0, 0),)),),
+            creation_order=("inst_runner",),
+        ),
+    ),
+)
+_CREATE_DESTROY_ARGUMENTS_TRACE = [
+    "create:hp=5:speed=2",
+    "after_create:hp=6:hspeed=2",
+    "method:9",
+    "create:hp=50:speed=0",
+    "child:hp=51",
+    "no_create:late",
+    "clean_up",
+    "destroyed:exists=no",
+    "destroy",
+    "clean_up",
+]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -145,6 +214,9 @@ class TestInstanceEventsGodot(unittest.TestCase):
 
     def test_no_collision_event_runs_once_a_room_change_is_pending(self) -> None:
         self.assertEqual(self._run_trace(_COLLISION_ROOM_CHANGE_PROJECT), _COLLISION_ROOM_CHANGE_TRACE)
+
+    def test_create_variables_and_destroy_without_the_destroy_event(self) -> None:
+        self.assertEqual(self._run_trace(_CREATE_DESTROY_ARGUMENTS_PROJECT), _CREATE_DESTROY_ARGUMENTS_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

@@ -1292,7 +1292,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Instantiates generated object scenes and registers live instances through GMRuntime.",
+        "Instantiates generated object scenes and registers live instances through GMRuntime; "
+        "the optional var_struct's variables are set before the Create event.",
     ),
     _entry(
         "instance_create_depth",
@@ -1304,7 +1305,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Instantiates generated object scenes with depth metadata and registry handles.",
+        "Instantiates generated object scenes with depth metadata and registry handles; "
+        "the optional var_struct's variables are set before the Create event.",
     ),
     _entry(
         "instance_destroy",
@@ -1316,7 +1318,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Runs destroy callbacks, unregisters instances, and queues Godot nodes for deletion.",
+        "Runs the Destroy event (unless execute_event_flag is false) and the Clean Up event, "
+        "unregisters instances, and queues Godot nodes for deletion.",
     ),
     _entry(
         "instance_exists",

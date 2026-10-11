@@ -71,8 +71,10 @@ the previous step: instances created during a phase join it before the next
 phase, destroyed instances are skipped. Which events, alarms, input bindings
 and Other events an object has is looked up once per object script. The
 scheduler records the events it runs (`gml_event_scheduler_trace()`), the
-input runtime its input events (`gml_input_dispatch_trace()`) and the collision
-runtime its collision events (`gml_collision_event_trace()`) only while
+input runtime its input events (`gml_input_dispatch_trace()`), the collision
+runtime its collision events (`gml_collision_event_trace()`), `GMAsync` the
+async events it delivers (`gml_async_event_log()`) and the room runtime its
+room changes (`gml_room_transition_log()`) only while
 `gml_event_scheduler_set_tracing(true)` is in effect; each keeps only its
 latest records.
 

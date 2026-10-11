@@ -51,6 +51,8 @@ class TestNetworkingGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Delivered async events are logged only while tracing is on.
+            \tGMRuntime.gml_event_scheduler_set_tracing(true)
             \tserver = GMRuntime.gml_network_create_server(0, __PORT__, 4)
             \tif not _check(GMRuntime.gml_handle_is_valid(server), "server handle is invalid"):
             \t\treturn

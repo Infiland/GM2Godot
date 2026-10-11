@@ -3,6 +3,10 @@ const GML_ROOM_UNSUPPORTED_EXIT_MESSAGE = "GM2Godot maps game_end to SceneTree.q
 const GML_ROOM_PREPARED_META = "_gm2godot_room_prepared"
 const GML_ROOM_HELD_INSTANCES_META = "_gm2godot_room_held_instances"
 const GML_ROOM_UNORDERED_INSTANCE = 1073741824
+# While tracing is on (gml_event_scheduler_set_tracing), every room change is
+# recorded; gml_room_transition_log() returns at most this many of the latest
+# records.
+const GML_ROOM_TRANSITION_LOG_LIMIT = 64
 
 static var _gml_room_current_id = -1
 static var _gml_room_previous_id = -1
@@ -198,7 +202,11 @@ static func gml_room_get_info(room_asset):
 
 
 static func gml_room_transition_log():
-	return _gml_room_transition_log
+	# The latest records, oldest first.
+	var records = _gml_room_transition_log
+	if records.size() > GML_ROOM_TRANSITION_LOG_LIMIT:
+		records = records.slice(records.size() - GML_ROOM_TRANSITION_LOG_LIMIT)
+	return _gml_clone_value(records, 4)
 
 
 static func _gml_room_process_scene(scene, delta):
@@ -236,11 +244,15 @@ static func _gml_room_change_to_entry(entry, restarting):
 	_gml_room_restore_persistent_instances(new_scene)
 	_gml_room_suppress_auto_enter = false
 	gml_room_enter_scene(new_scene, true)
-	_gml_room_transition_log.append({
-		"room": str(entry["name"]),
-		"room_id": int(entry["id"]),
-		"restart": bool(restarting),
-	})
+	if _gml_event_scheduler_tracing:
+		_gml_room_transition_log.append({
+			"room": str(entry["name"]),
+			"room_id": int(entry["id"]),
+			"restart": bool(restarting),
+		})
+		# Trimmed in batches, so recording stays cheap.
+		if _gml_room_transition_log.size() >= GML_ROOM_TRANSITION_LOG_LIMIT * 2:
+			_gml_room_transition_log = _gml_room_transition_log.slice(-GML_ROOM_TRANSITION_LOG_LIMIT)
 	return true
 
 

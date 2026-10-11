@@ -26,6 +26,7 @@ _EVENT_FILE_PREFIXES = {0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 7: "Ot
 EVENT_CREATE = (0, 0)
 EVENT_DESTROY = (1, 0)
 EVENT_STEP = (3, 0)
+EVENT_BEGIN_STEP = (3, 1)
 EVENT_GAME_START = (7, 2)
 EVENT_ROOM_START = (7, 4)
 

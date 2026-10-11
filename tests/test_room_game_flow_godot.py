@@ -214,6 +214,8 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     """\
                     extends Node
 
+                    const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
                     func _ready():
                     \tcall_deferred("_run")
 
@@ -229,10 +231,15 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     \tawait get_tree().process_frame
                     \tvar room = get_parent()
                     \tvar camera = room.get_node("ViewCamera")
-                    \tvar background = room.get_node("Backgrounds/BackgroundVisual")
+                    \tvar layer = room.get_node("Backgrounds")
                     \tif not _check(abs(camera.position.x - 260.0) < 0.01, "Camera2D did not follow target on x"):
                     \t\treturn
-                    \tif not _check(background.position.x > 0.0, "Background did not scroll"):
+                    \t# Each step scrolls the layer by its speed.
+                    \tvar before = layer.position
+                    \tGMRuntime.gml_event_scheduler_frame(0.0, 1)
+                    \tif not _check(layer.position - before == Vector2(2, 0), "Background layer did not scroll: " + str(layer.position)):
+                    \t\treturn
+                    \tif not _check(GMRuntime.gml_layer_get_x("Backgrounds") == layer.position.x, "layer_get_x does not follow the scroll"):
                     \t\treturn
                     \tprint("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK")
                     \tget_tree().quit(0)
@@ -266,6 +273,7 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     [node name="Backgrounds" type="Node2D" parent="."]
                     metadata/gamemaker_layer_name = "Backgrounds"
                     metadata/gamemaker_layer_type = "GMRBackgroundLayer"
+                    metadata/gamemaker_layer_hspeed = 2
 
                     [node name="BackgroundVisual" type="Node2D" parent="Backgrounds"]
                     metadata/gamemaker_layer_element_type = "background"

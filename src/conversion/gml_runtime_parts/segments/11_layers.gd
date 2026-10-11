@@ -566,13 +566,64 @@ static func _gml_layer_node_axis(node, axis):
 
 
 static func _gml_layer_set_node_axis(node, axis, value):
-	var key = "gamemaker_layer_" + str(axis)
-	if node is Node2D:
-		if str(axis) == "x":
-			node.position.x = value
-		else:
-			node.position.y = value
-	node.set_meta(key, value)
+	var offset = _gml_layer_node_offset(node)
+	if str(axis) == "x":
+		offset.x = value
+	else:
+		offset.y = value
+	_gml_layer_set_node_offset(node, offset)
+
+
+static func _gml_layer_node_offset(node):
+	return Vector2(_gml_layer_node_axis(node, "x"), _gml_layer_node_axis(node, "y"))
+
+
+static func _gml_layer_set_node_offset(node, offset):
+	var delta = offset - _gml_layer_node_offset(node)
+	node.set_meta("gamemaker_layer_x", offset.x)
+	node.set_meta("gamemaker_layer_y", offset.y)
+	if not (node is Node2D) or delta == Vector2.ZERO:
+		return
+	# GameMaker draws a layer's backgrounds, tilemaps, sprites and sequences
+	# at the layer offset (yyRoom.js DrawLayer*Element add m_xoffset), but an
+	# instance stays at its own x/y. A layer node that holds no instances
+	# carries the offset itself; on one that does, the offset moves the
+	# layer's other elements instead.
+	if _gml_layer_offset_moves_node(node):
+		node.position += delta
+		return
+	for child in node.get_children():
+		if child is Node2D and not _gml_layer_offset_keeps_child(child):
+			child.position += delta
+
+
+static func _gml_layer_offset_moves_node(node):
+	if str(node.get_meta("gamemaker_layer_type", "")) == "GMRInstanceLayer":
+		return false
+	for child in node.get_children():
+		if _gml_layer_offset_keeps_child(child):
+			return false
+	return true
+
+
+static func _gml_layer_offset_keeps_child(child):
+	# Instances, and nested layers with offsets of their own.
+	return _gml_layer_node_has_metadata(child) or gml_handle_is_valid(_gml_instance_handle_for_node(child))
+
+
+static func _gml_layer_step_scroll():
+	# GameMaker's LayerManager.UpdateLayers (Function_Layers.js), run each
+	# step after the instances' images update and before Begin Step: every
+	# layer's offset moves by its speed (layer_hspeed/layer_vspeed, which
+	# start at the Room Editor's speed of a background layer).
+	for handle in _gml_layer_handles_by_index.values():
+		if not gml_handle_is_valid(handle) or not (handle.reference is Node):
+			continue
+		var node = handle.reference
+		var speed = Vector2(_gml_layer_node_speed(node, "h"), _gml_layer_node_speed(node, "v"))
+		if speed != Vector2.ZERO:
+			_gml_layer_set_node_offset(node, _gml_layer_node_offset(node) + speed)
+	return null
 
 
 static func _gml_layer_node_speed(node, axis):

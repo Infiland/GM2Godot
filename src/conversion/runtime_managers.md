@@ -44,7 +44,8 @@ methods rather than relying on individual Godot node callback order. The runtime
 dispatches Create/room-enter behavior during room scene setup, then every frame
 runs one GameMaker step in the order of the GameMaker runner
 (`GML_EVENT_PHASE_ORDER`): input latch, `xprevious`/`yprevious` and image
-animation with Animation End, Begin Step, Async events, timelines, time sources,
+animation with Animation End, layer scrolling (each layer's offset moves by its
+`layer_hspeed`/`layer_vspeed`), Begin Step, Async events, timelines, time sources,
 alarms, keyboard events, mouse events, sequences, Step, motion/paths, Outside
 Room/Intersect Boundary/view events, collisions and End Step, followed by the
 draw phases. Keyboard and mouse pressed/released states are latched at the start

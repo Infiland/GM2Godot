@@ -112,7 +112,8 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_x(layer_id, 8) and GMRuntime.gml_layer_y(layer_id, 16), "layer position setters failed"):
         \t\treturn
-        \tif not _check(instances.position == Vector2(8, 16) and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
+        \t# An instance layer's offset does not move its instances.
+        \tif not _check(instances.position == Vector2.ZERO and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_hspeed(layer_id, 2) and GMRuntime.gml_layer_vspeed(layer_id, -1), "layer speed setters failed"):
         \t\treturn

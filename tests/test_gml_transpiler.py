@@ -156,6 +156,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 with self.assertRaises(GMLTranspileError):
                     transpile_gml_expression(source)
 
+    def test_grey_and_gray_colour_constants_share_gamemaker_values(self):
+        # GameMaker defines both spellings: c_grey = c_gray = 8421504,
+        # c_dkgrey = c_dkgray = 4210752, c_ltgrey = c_ltgray = 12632256.
+        cases = (
+            ("c_grey", "c_gray", 8421504),
+            ("c_dkgrey", "c_dkgray", 4210752),
+            ("c_ltgrey", "c_ltgray", 12632256),
+        )
+        for british, american, value in cases:
+            with self.subTest(constant=british):
+                emitted = transpile_gml_expression(british)
+                self.assertEqual(emitted, transpile_gml_expression(american))
+                self.assertEqual(int(emitted, 16), value)
+
     def test_preserves_hex_literals_as_numeric_values(self):
         self.assertEqual(
             transpile_gml_expression("$2c8e + 10"),

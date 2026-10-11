@@ -539,12 +539,11 @@ static func gml_call_named(function_name, args = [], caller_self = null, caller_
 
 # A struct (the global scope too) or a live instance node, which selector
 # reads and writes use as is; null for everything that needs resolving
-# (objects, ids, handles, keywords, methods and script functions).
+# (objects, ids, handles, keywords, methods and script functions). A struct
+# is itself whatever members it has, id and handle included.
 static func _gml_selector_direct_target(target):
 	var target_type = typeof(target)
 	if target_type == TYPE_DICTIONARY:
-		if target.has("id") or target.has("handle"):
-			return null
 		return target
 	if target_type == TYPE_OBJECT and is_instance_valid(target) and target is Node:
 		return target

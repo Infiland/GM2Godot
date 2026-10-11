@@ -227,6 +227,37 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_ROUND_OK",
         )
 
+    def test_structs_keep_id_handle_and_type_members_as_members(self) -> None:
+        # A struct has whatever members it is given: an id, a handle or a
+        # type member does not make it an instance, an object or an asset.
+        _run_runtime_checks(
+            self,
+            """\
+            var level = {"id": 3, "type": "object", "name": "o_level", "title": "Workshop"}
+            _expect("read", GMRuntime.gml_selector_get(level, "title"), "Workshop")
+            _expect("read id", GMRuntime.gml_selector_get(level, "id"), 3)
+            GMRuntime.gml_selector_set(level, "title", "Renamed")
+            _expect("write", level.get("title"), "Renamed")
+            GMRuntime.gml_selector_update(level, "id", func(value): return value + 1)
+            _expect("update", level.get("id"), 4)
+            var with_targets = GMRuntime.gml_with_targets(level)
+            _expect("with", with_targets.size() == 1 and is_same(with_targets[0], level), true)
+            _expect("variable_instance_get", GMRuntime.gml_variable_instance_get(level, "name"), "o_level")
+            var holder = {"handle": 7, "file": "save.ini"}
+            _expect("handle member", GMRuntime.gml_selector_get(holder, "file"), "save.ini")
+            _expect("variable_instance_exists", GMRuntime.gml_variable_instance_exists(holder, "file"), true)
+            GMRuntime.gml_variable_instance_set(holder, "file", "other.ini")
+            _expect("variable_instance_set", holder.get("file"), "other.ini")
+            var globals = GMRuntime.gml_global_scope()
+            globals["handle"] = 1
+            globals["score_seen"] = 12
+            _expect("global with a handle member", GMRuntime.gml_selector_get(globals, "score_seen"), 12)
+            globals.erase("handle")
+            globals.erase("score_seen")
+            """,
+            "GML_STRUCT_MEMBERS_OK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

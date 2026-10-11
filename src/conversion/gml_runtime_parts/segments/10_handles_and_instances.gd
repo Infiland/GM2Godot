@@ -196,6 +196,9 @@ static func gml_instance_create_depth(x, y, depth_value, object_selector, curren
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):
+	if typeof(target) == TYPE_DICTIONARY:
+		# A struct, whatever members it has (an id or a handle too).
+		return [target]
 	if typeof(target) == TYPE_OBJECT:
 		if not is_instance_valid(target):
 			# An instance whose node was freed no longer exists.

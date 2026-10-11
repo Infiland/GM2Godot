@@ -348,6 +348,16 @@ func _run():
     GMRuntime.gml_camera_destroy(created)
     if not _check(not GMRuntime.gml_handle_is_valid(created), "camera_destroy did not free the camera"):
         return
+    # camera_copy_transforms copies the view, speeds, borders, angle and
+    # matrices, but the destination keeps following its own target.
+    var copy_source = GMRuntime.gml_camera_create_view(5, 6, 70, 80, 15, 7, 3, 4, 20, 30)
+    var copy_dest = GMRuntime.gml_camera_create_view(0, 0, 10, 10, 0, 3)
+    GMRuntime.gml_camera_copy_transforms(copy_dest, copy_source)
+    var copied = [GMRuntime.gml_camera_get_view_x(copy_dest), GMRuntime.gml_camera_get_view_y(copy_dest), GMRuntime.gml_camera_get_view_width(copy_dest), GMRuntime.gml_camera_get_view_height(copy_dest), GMRuntime.gml_camera_get_view_angle(copy_dest), GMRuntime.gml_camera_get_view_speed_x(copy_dest), GMRuntime.gml_camera_get_view_speed_y(copy_dest), GMRuntime.gml_camera_get_view_border_x(copy_dest), GMRuntime.gml_camera_get_view_border_y(copy_dest), GMRuntime.gml_camera_get_view_target(copy_dest)]
+    if not _check(copied == [5.0, 6.0, 70.0, 80.0, 15.0, 3.0, 4.0, 20.0, 30.0, 3], "camera_copy_transforms mismatch: " + str(copied)):
+        return
+    GMRuntime.gml_camera_destroy(copy_source)
+    GMRuntime.gml_camera_destroy(copy_dest)
     var empty = GMRuntime.gml_camera_create()
     if not _check(GMRuntime.gml_handle_is_valid(empty) and GMRuntime.gml_camera_get_view_width(empty) == 0, "camera_create mismatch"):
         return

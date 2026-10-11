@@ -145,7 +145,9 @@ static func gml_camera_copy_transforms(dest, source):
 	var source_camera = _gml_camera_resolve(source)
 	if destination_camera == null or source_camera == null or is_same(destination_camera, source_camera):
 		return null
-	for key in ["x", "y", "width", "height", "angle", "object", "hborder", "vborder", "hspeed", "vspeed", "matrices_custom"]:
+	# CameraManager.js camera_copy_transforms: the view, speeds, borders,
+	# angle and matrices; the destination keeps its own target.
+	for key in ["x", "y", "width", "height", "angle", "hborder", "vborder", "hspeed", "vspeed", "matrices_custom"]:
 		destination_camera[key] = source_camera[key]
 	destination_camera["view_matrix"] = _gml_clone_value(source_camera["view_matrix"], 0)
 	destination_camera["projection_matrix"] = _gml_clone_value(source_camera["projection_matrix"], 0)

@@ -438,20 +438,29 @@ def _corner_colour(colours: tuple[Colour, Colour, Colour, Colour], u: float, v: 
 
 
 def _split_lines(text: str) -> list[str]:
-    """``Split_TextBlock`` without wrapping: LF and CR end lines."""
+    """``Split_TextBlock`` without wrapping, step for step.
+
+    LF and CR end lines. On the second character of a CR LF or LF CR pair the
+    runner moves ``end`` on without moving ``start``, so that character opens
+    the next line: ``"AB\\r\\nCD"`` splits into ``["AB", "\\nCD"]`` and
+    ``"x\\r\\n"`` into ``["x", "\\n"]``.
+    """
     lines: list[str] = []
-    start = 0
-    index = 0
-    while index < len(text):
-        if text[index] in "\n\r":
-            lines.append(text[start:index])
-            following = text[index + 1:index + 2]
-            if following in ("\n", "\r") and following != text[index]:
-                index += 1
-            start = index + 1
-        index += 1
-    if start < len(text):
-        lines.append(text[start:])
+    length = len(text)
+    last = text[:1]
+    start = end = 0
+    while start < length:
+        while end < length and text[end] not in "\n\r":
+            end += 1
+            last = text[end:end + 1]
+        current = text[end:end + 1]
+        if (last, current) in (("\n", "\r"), ("\r", "\n")):
+            end += 1
+            continue
+        last = current
+        lines.append(text[start:end])
+        end += 1
+        start = end
     return lines
 
 

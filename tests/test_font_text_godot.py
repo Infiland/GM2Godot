@@ -42,6 +42,7 @@ from tests.gamemaker_font_reference import (
     WHITE,
     Colour,
     GameMakerTextReference,
+    ReferenceGlyph,
     ReferenceQuad,
     ReferenceVertexQuad,
     SyntheticFont,
@@ -111,6 +112,7 @@ _CASES = (
         valign=FA_MIDDLE,
     ),
     _TextCase("fnt_sdf", 40.5, 330.0, "SDF text\nline two"),
+    _TextCase("fnt_plain", 560.0, 420.0, "CR LF\r\nends\r\nLF CR\n\rlines\r\n", halign=FA_RIGHT, valign=FA_BOTTOM),
 )
 
 
@@ -238,6 +240,10 @@ _MEASURED_TEXTS: tuple[tuple[str, int, int], ...] = (
     ("\n", -1, -1),
     ("A\n", -1, -1),
     ("x\r\ny\n\rz", -1, -1),
+    ("AB\r\nCD", -1, -1),
+    ("x\r\n", -1, -1),
+    ("a\r\n\nb\n\r\r", -1, -1),
+    ("\r\n", -1, -1),
     ("\u2603 missing", -1, -1),
     ("tab\there", -1, -1),
     ("the quick brown fox jumps over", -1, 40),
@@ -385,7 +391,7 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
 
         func _ready():
         \tvar data = JSON.parse_string(FileAccess.get_file_as_string(DATA_PATH))
-        \tvar result = {{"fonts": {{}}, "measures": [], "cases": [], "transforms": []}}
+        \tvar result = {{"fonts": {{}}, "measures": [], "splits": [], "cases": [], "transforms": []}}
         \tfor name in data["fonts"]:
         \t\tresult["fonts"][name] = _font_record(name)
         \tfor measure in data["measures"]:
@@ -397,6 +403,7 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\t\tGMRuntime.gml_string_width_ext(text, measure["sep"], measure["width"]),
         \t\t\tGMRuntime.gml_string_height_ext(text, measure["sep"], measure["width"]),
         \t\t])
+        \t\tresult["splits"].append(GMRuntime._gml_font_split_text(GMRuntime._gml_draw_font_info(), text, measure["width"]))
         \tfor case in data["cases"]:
         \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
         \t\tGMRuntime.gml_draw_set_halign(case["halign"])
@@ -500,6 +507,53 @@ def _max_channel_difference(actual: Image.Image, expected: Image.Image) -> int:
         if isinstance(high, (int, float)):
             worst = max(worst, int(high))
     return worst
+
+
+class TestGameMakerTextReference(unittest.TestCase):
+    """Pins the reference model to results of the runner's own functions."""
+
+    @staticmethod
+    def _reference() -> GameMakerTextReference:
+        # Shifts of a pixel font whose first glyph is a 2 px space.
+        shifts = {32: 2, 65: 5, 66: 5, 67: 6, 68: 6, 120: 4}
+        return GameMakerTextReference(
+            glyphs={code: ReferenceGlyph(code, 0, 0, 0, 0, shift, 0) for code, shift in shifts.items()},
+            line_height=14,
+            ascender_offset=0,
+            kerning={},
+            sdf_spread=0,
+        )
+
+    def test_no_wrap_split_follows_split_text_block(self) -> None:
+        # yyFont.js Split_TextBlock: the second character of a CR LF or
+        # LF CR pair starts the next line instead of being dropped.
+        expected = {
+            "": [],
+            "\n": [""],
+            "x\n": ["x"],
+            "x\n\n": ["x", ""],
+            "AB\r\nCD": ["AB", "\nCD"],
+            "A\n\rBCD": ["A", "\rBCD"],
+            "x\r\n": ["x", "\n"],
+            "\r\n": ["", "\n"],
+            "a\r\n\r\nb": ["a", "\n", "\nb"],
+            "a\r\n\nb": ["a", "\n\nb"],
+            "a\n\r\r": ["a", "\r\r"],
+        }
+        reference = self._reference()
+        for text, lines in expected.items():
+            with self.subTest(text=text):
+                self.assertEqual(reference.split(text), lines)
+
+    def test_crlf_text_measures_the_carried_character(self) -> None:
+        # TextWidth counts the carried LF or CR as the first glyph's shift and
+        # string_height counts the extra line.
+        reference = self._reference()
+        self.assertEqual(reference.string_width("AB\r\nCD"), 14)
+        self.assertEqual(reference.string_width("AB\nCD"), 12)
+        self.assertEqual(reference.string_width("A\r\nBCD"), 19)
+        self.assertEqual(reference.string_height("x\r\n"), 28)
+        self.assertEqual(reference.string_height("x\n"), 14)
 
 
 class TestFontTextGodot(unittest.TestCase):
@@ -742,6 +796,18 @@ class TestFontTextGodot(unittest.TestCase):
                         reference.string_height(text, sep, width),
                     ],
                 )
+
+    def test_lines_split_like_gamemaker(self) -> None:
+        splits = self._result_list("splits")
+        expected_rows = [
+            (font, text, width)
+            for font in self.references
+            for text, _sep, width in _MEASURED_TEXTS
+        ]
+        self.assertEqual(len(splits), len(expected_rows))
+        for (font, text, width), actual in zip(expected_rows, splits, strict=True):
+            with self.subTest(font=font, text=text, width=width):
+                self.assertEqual(actual, self.references[font].split(text, width))
 
     def test_text_layout_matches_gamemaker(self) -> None:
         cases = self._result_list("cases")

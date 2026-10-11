@@ -455,22 +455,31 @@ static func _gml_room_create_instances(scene):
 		if not is_instance_valid(node):
 			continue
 		var blocked = _gml_event_scheduler_event_blocked(node, true)
+		var destroyed = step.has("parent") and _gml_room_held_instance_destroyed(node)
 		if step.has("parent") and not _gml_room_add_held_instance(scene, node, step["parent"]):
 			continue
 		if not blocked:
 			_gml_room_run_instance_creation_code(scene, node)
+		if destroyed and is_instance_valid(node) and not node.is_queued_for_deletion():
+			node.queue_free()
 	_gml_room_restore_child_order(held["parents"])
 
 
-static func _gml_room_add_held_instance(scene, node, parent):
-	# An instance destroyed before its turn (by an earlier Create event or
-	# creation code) never joins the room and runs no Create event; neither
-	# does one whose room was left meanwhile. (GameMaker's HTML5 runner still
-	# runs the Create event and creation code of such an instance, which it
-	# only removes at the end of the step; a destroyed instance cannot run
-	# events here without being registered again.)
+# An instance destroyed before its turn, by an earlier Create event or
+# creation code, still runs its Create event and creation code when its turn
+# comes: the runner's StartRoom finds it by id (marked, not yet removed) and
+# runs both; it is removed at the end of the step. Being built already, it is
+# not registered again, so it stays destroyed.
+static func _gml_room_held_instance_destroyed(node):
 	var entry: Variant = _gml_instance_entry(node)
-	if entry == null or entry["destroyed"] or not scene.is_inside_tree():
+	return entry == null or bool(entry["destroyed"])
+
+
+static func _gml_room_add_held_instance(scene, node, parent):
+	# An instance whose room was left meanwhile never joins it and runs no
+	# Create event.
+	var entry: Variant = _gml_instance_entry(node)
+	if not scene.is_inside_tree() or (_gml_room_held_instance_destroyed(node) and not node.has_method("_gm_construct_instance")):
 		if entry != null:
 			gml_instance_unregister(node)
 		node.queue_free()

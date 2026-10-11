@@ -1518,6 +1518,8 @@ static func _gml_draw_texture_uv(texture, source):
 	return [base.get_rid(), Rect2(region.position / size, region.size / size)]
 
 
+# GameMaker's Graphics_DrawStretchedExt truncates x and y toward zero (~~)
+# before drawing; the size stays as given.
 static func _gml_draw_sprite_stretched(sprite, subimg, x, y, w, h, colour):
 	var frame = _gml_draw_sprite_frame(sprite, subimg)
 	if frame == null:
@@ -1526,8 +1528,14 @@ static func _gml_draw_sprite_stretched(sprite, subimg, x, y, w, h, colour):
 	if size.x <= 0.0 or size.y <= 0.0:
 		return null
 	var scale = Vector2(_gml_draw_real(w), _gml_draw_real(h)) / size
-	_gml_draw_texture_rect(frame["texture"], Rect2(Vector2.ZERO, size), Vector2(_gml_draw_real(x), _gml_draw_real(y)), scale, 0.0, Vector2.ZERO, colour)
+	var position = Vector2(_gml_draw_truncate(x), _gml_draw_truncate(y))
+	_gml_draw_texture_rect(frame["texture"], Rect2(Vector2.ZERO, size), position, scale, 0.0, Vector2.ZERO, colour)
 	return null
+
+
+static func _gml_draw_truncate(value):
+	var real_value = _gml_draw_real(value)
+	return real_value - fmod(real_value, 1.0)
 
 
 # Tiles the frame over the visible part of the current draw space so that one

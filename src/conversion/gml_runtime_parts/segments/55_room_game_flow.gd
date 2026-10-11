@@ -305,7 +305,12 @@ static func gml_room_prepare_scene(scene):
 	var parents = {}
 	var traversal_order = 0
 	for node in _gml_room_tree_nodes(scene):
-		if node == scene or not _gml_room_node_is_placed_instance(node):
+		if node == scene:
+			continue
+		if _gml_layer_is_sprite_element(node):
+			_gml_layer_sprite_element_start(node)
+			continue
+		if not _gml_room_node_is_placed_instance(node):
 			continue
 		var parent = node.get_parent()
 		if not parents.has(parent.get_instance_id()):

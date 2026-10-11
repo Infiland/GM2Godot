@@ -1108,3 +1108,27 @@ static func _gml_layer_background_axis(tiled, size, scale, low, high):
 	var start = floor(low / step) * step
 	var copies = maxi(int(ceil((high - start) / step)), 1)
 	return [start + copies * step if scale < 0.0 else start, copies]
+
+
+# --- Sprite elements on asset layers -------------------------------------
+
+static func _gml_layer_is_sprite_element(node):
+	return node.has_meta("gamemaker_layer_element_type") and str(node.get_meta("gamemaker_layer_element_type")) == "sprite"
+
+
+static func _gml_layer_sprite_element_start(node):
+	# A sprite placed in the Room Editor starts at its initial frame
+	# (headPosition) and plays at its animation speed times the sprite's
+	# (Function_Layers.js: NewSprite.m_imageIndex = sImageIndex,
+	# m_imageSpeed = sImageSpeed). The head wraps into the sprite's frames
+	# like a looping sprite sequence (yySequence.js HandleSequenceWrapping),
+	# so -1 is the last frame.
+	var visual = node.get_node_or_null("AnimatedSprite2D")
+	if not (visual is AnimatedSprite2D) or visual.sprite_frames == null:
+		return
+	var count = visual.sprite_frames.get_frame_count(visual.animation)
+	if count <= 0:
+		return
+	var head = _to_real(node.get_meta("gamemaker_asset_head_position", 0))
+	visual.frame = posmod(int(floor(head)), count)
+	visual.speed_scale = _to_real(node.get_meta("gamemaker_asset_animation_speed", 1))

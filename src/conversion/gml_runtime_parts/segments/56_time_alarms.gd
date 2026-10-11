@@ -419,8 +419,20 @@ static func gml_time_source_get_time_remaining(handle):
 static func gml_call_later(period, units, callback, repeat = false):
 	var reps = -1 if bool(repeat) else 1
 	var handle = gml_time_source_create(null, period, units, callback, [], reps, GML_TIME_SOURCE_EXPIRY_AFTER)
+	# Marked so game_restart can destroy it (_gml_time_source_destroy_call_later).
+	_gml_time_sources[handle.reference]["call_later"] = true
 	gml_time_source_start(handle)
 	return handle
+
+
+static func _gml_time_source_destroy_call_later():
+	# game_restart destroys every time source call_later made (the runner's
+	# Run_EndGame destroys their parent, g_SDTimeSourceParent); those made
+	# by time_source_create stay.
+	for ts_id in _gml_time_sources.keys():
+		var ts = _gml_time_sources.get(ts_id)
+		if typeof(ts) == TYPE_DICTIONARY and bool(ts.get("call_later", false)):
+			gml_time_source_destroy(ts["handle"])
 
 
 static func gml_call_cancel(handle):

@@ -258,6 +258,8 @@ In object events, instance creation code and timeline moments, `other` is the in
 
 For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, restores those instances, and runs the entry sequence for the new scene.
 
+`game_restart()` dispatches Game End, then ends the game as GameMaker's runner does: every instance is removed, persistent ones included, without further events, the time sources made by `call_later()` are destroyed and all sounds stop. The first room then starts as it did at launch, Game Start included.
+
 ### Per-frame scheduler
 
 `GMInput._input(event)` captures native input as it arrives. Every Godot frame, the generated `GMEvents` frame pump runs one GameMaker step in the order of the GameMaker runner:

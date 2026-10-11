@@ -138,9 +138,30 @@ static func _gml_game_restart_now():
 	var tree = _gml_room_tree()
 	if tree != null and tree.current_scene != null:
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
+	_gml_game_restart_end_game(tree)
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
 	return _gml_room_change_to_entry(entries[0], true)
+
+
+# Like the runner's Run_EndGame(true) before a restart: every instance goes,
+# persistent ones included, with no further events, the time sources made
+# by call_later are destroyed and every sound stops. The first room then
+# starts as it did at launch, with nothing carried over.
+static func _gml_game_restart_end_game(tree):
+	if tree != null and tree.current_scene != null:
+		var old_scene = tree.current_scene
+		if old_scene.get_parent() != null:
+			old_scene.get_parent().remove_child(old_scene)
+		old_scene.queue_free()
+		tree.current_scene = null
+	for entry in _gml_instance_live_order.slice(0):
+		var node = entry["instance"]
+		gml_instance_unregister(entry["handle"])
+		if node is Node and is_instance_valid(node) and not node.is_queued_for_deletion():
+			node.queue_free()
+	_gml_time_source_destroy_call_later()
+	gml_audio_stop_all()
 
 
 static func gml_game_end():

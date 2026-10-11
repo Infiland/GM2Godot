@@ -22,6 +22,7 @@ from tests.gamemaker_project_support import (
 )
 from tests.godot_test_support import find_smoke_godot_binary
 
+EVENT_GAME_END = (7, 3)
 EVENT_ROOM_END = (7, 5)
 
 _TRACE_SCRIPT = (
@@ -41,7 +42,13 @@ var _frames = 0
 func _process(_delta):
 	_frames += 1
 	if _frames == 12:
-		print("ROOM_LIFECYCLE_TRACE " + JSON.stringify(GMRuntime.gml_global_scope().get("trace", [])))
+		var scope = GMRuntime.gml_global_scope()
+		var trace = scope.get("trace", [])
+		# Time sources the game kept in globals: whether each still exists.
+		for key in ["later", "kept"]:
+			if scope.has(key):
+				trace.append(key + "_exists:" + str(GMRuntime.gml_handle_is_valid(scope[key])))
+		print("ROOM_LIFECYCLE_TRACE " + JSON.stringify(trace))
 		get_tree().quit(0)
 """
 
@@ -149,12 +156,85 @@ _DESTROYED_PROJECT = GameMakerProject(
 _DESTROYED_TRACE = ["room_start_killer", "leave"]
 
 
+# game_restart ends the game like the runner's Run_EndGame(true): every
+# instance goes, persistent ones included (placed or created by code), and
+# the time sources made by call_later are destroyed; those made by
+# time_source_create stay. The first room then starts as at launch: the
+# persistent controller runs its Create event and creation code again and
+# Game Start runs again. Game End runs before the restart.
+_RESTART_PROJECT = GameMakerProject(
+    name="GameRestart",
+    scripts={"scr_trace": _TRACE_SCRIPT, "scr_later": "function later_callback() {}\n"},
+    objects=(
+        GameMakerObject(
+            "o_ctrl",
+            {
+                EVENT_CREATE: (
+                    "counter = 0;\n"
+                    'trace("create_ctrl:" + string(instance_number(o_ctrl)));\n'
+                    'if (!variable_global_exists("runs")) {\n'
+                    "    global.runs = 0;\n"
+                    "    global.later = call_later(100000, 1, later_callback, true);\n"
+                    "    global.kept = time_source_create(time_source_global, 100000, 1, later_callback, [], -1);\n"
+                    "    time_source_start(global.kept);\n"
+                    "}\n"
+                    "global.runs += 1;\n"
+                ),
+                EVENT_GAME_START: 'trace("game_start_ctrl");\n',
+                EVENT_ROOM_START: (
+                    'trace("room_start_ctrl:counter=" + string(counter) + ":managers=" + string(instance_number(o_manager)));\n'
+                ),
+                EVENT_STEP: 'counter += 1;\nif (counter == 3 && global.runs == 1) {\n    trace("restart");\n    game_restart();\n}\n',
+                EVENT_GAME_END: 'trace("game_end_ctrl");\n',
+            },
+            persistent=True,
+        ),
+        GameMakerObject("o_spawner", {EVENT_CREATE: "instance_create_depth(0, 0, 0, o_manager);\n"}),
+        GameMakerObject("o_manager", {EVENT_CREATE: 'trace("create_manager:" + string(instance_number(o_manager)));\n'}, persistent=True),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_first",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0, creation_code='trace("code_ctrl");\n'),
+                        RoomInstance("inst_spawner", "o_spawner", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_ctrl", "inst_spawner"),
+        ),
+    ),
+)
+_RESTART_RUN = [
+    "create_ctrl:1",
+    "code_ctrl",
+    "create_manager:1",
+    "game_start_ctrl",
+    "room_start_ctrl:counter=0:managers=1",
+]
+_RESTART_TRACE = [
+    *_RESTART_RUN,
+    "restart",
+    "game_end_ctrl",
+    *_RESTART_RUN,
+    "later_exists:false",
+    "kept_exists:true",
+]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
 
     def test_destroyed_instances_get_no_room_or_game_events(self) -> None:
         self.assertEqual(self._run_trace(_DESTROYED_PROJECT), _DESTROYED_TRACE)
+
+    def test_game_restart_removes_persistent_instances_and_call_later_sources(self) -> None:
+        self.assertEqual(self._run_trace(_RESTART_PROJECT), _RESTART_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

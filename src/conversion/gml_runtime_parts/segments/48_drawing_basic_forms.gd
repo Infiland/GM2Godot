@@ -1220,7 +1220,9 @@ static func _gml_draw_fill_target(color):
 
 
 # Lines are quads `width` wide through the pixel centres of the end points and
-# reach half a pixel past the end point, so both end pixels are covered.
+# reach half a pixel past both end points, so both end pixels are covered. Like
+# GameMaker's line quad (WebGL_draw_line_width_color_RELEASE) the quad is the
+# same whichever end the line starts from.
 static func _gml_draw_line_quad(x1, y1, x2, y2, width, col1, col2):
 	var target = _gml_draw_target()
 	if target == null:
@@ -1232,6 +1234,7 @@ static func _gml_draw_line_quad(x1, y1, x2, y2, width, col1, col2):
 	if length < 0.0001:
 		return
 	var direction = delta / length
+	start -= direction * 0.5
 	finish += direction * 0.5
 	var normal = Vector2(-direction.y, direction.x) * (abs(_gml_draw_real(width)) * 0.5)
 	var points = PackedVector2Array([start - normal, finish - normal, finish + normal, start + normal])

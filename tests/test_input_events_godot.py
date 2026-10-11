@@ -607,6 +607,187 @@ class TestInputEventsGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "main.tscn", _MAIN_SCENE)
             self._run_project(project_dir, "INPUT_MOUSE_MASK_SMOKE_OK")
 
+    def test_mouse_events_test_one_room_mouse_position_per_step(self) -> None:
+        # GameMaker's HandleMouse (Events.js) works out the room mouse
+        # position once and tests every instance against it, so a view that
+        # an earlier mouse event moves does not change where later instances
+        # are hit tested until the next step.
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        sprite_scene_paths = {"s_button": "res://sprites/s_button/s_button.tscn"}
+        object_events: tuple[tuple[str, str], ...] = (
+            ("o_panner", "camera_set_view_pos(view_camera[0], 1000, 0); presses += 1;"),
+            ("o_button", "presses += 1;"),
+        )
+        object_scripts = {
+            object_name: generate_script_content(
+                [{"eventType": 0, "eventNum": 0}, {"eventType": 6, "eventNum": 4}],
+                code_bodies={
+                    "_ready": transpile_gml_code("presses = 0;"),
+                    "_gm_input_mouse_4": transpile_gml_code(pressed_code),
+                },
+                instance_variables={"presses"},
+                sprite_runtime=SpriteRuntimeConfig(
+                    initial_sprite_name="s_button",
+                    sprite_scene_paths=sprite_scene_paths,
+                ),
+                object_runtime=ObjectRuntimeConfig(object_name=object_name),
+            )
+            for object_name, pressed_code in object_events
+        }
+        main_script = textwrap.dedent(
+            """\
+            extends Node2D
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var panner = null
+            var button = null
+            var mouse_positions = []
+            var tick = 0
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _ready():
+            \t# View 0 shows the room 1:1 on the whole application surface.
+            \tvar app = GMRuntime._gml_display_application_surface_size()
+            \tGMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "view_enabled", true)
+            \tGMRuntime.gml_view_set_visible(0, true)
+            \tGMRuntime.gml_view_set_xport(0, 0)
+            \tGMRuntime.gml_view_set_yport(0, 0)
+            \tGMRuntime.gml_view_set_wport(0, app.x)
+            \tGMRuntime.gml_view_set_hport(0, app.y)
+            \tvar camera = GMRuntime.gml_view_get_camera(0)
+            \tGMRuntime.gml_camera_set_view_pos(camera, 0, 0)
+            \tGMRuntime.gml_camera_set_view_size(camera, app.x, app.y)
+            \tvar layer = Node2D.new()
+            \tlayer.name = "Instances"
+            \tadd_child(layer)
+            \t# Both 40x8 masks span x 100..139 and y 100..107; o_panner has the
+            \t# lower object index, so its mouse events run first.
+            \tpanner = GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(100, 100, "Instances", GMRuntime.gml_asset_get_index("o_panner"), self))
+            \tbutton = GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(100, 100, "Instances", GMRuntime.gml_asset_get_index("o_button"), self))
+
+            func _mouse(position, button_index = MOUSE_BUTTON_NONE, pressed = false):
+            \tvar event = null
+            \tif button_index == MOUSE_BUTTON_NONE:
+            \t\tevent = InputEventMouseMotion.new()
+            \telse:
+            \t\tevent = InputEventMouseButton.new()
+            \t\tevent.button_index = button_index
+            \t\tevent.pressed = pressed
+            \tevent.position = position
+            \tget_viewport().push_input(event)
+
+            func _process(_delta):
+            \ttick += 1
+            \tmouse_positions.append([GMRuntime.gml_builtin_global("mouse_x"), GMRuntime.gml_builtin_global("mouse_y")])
+            \tmatch tick:
+            \t\t1:
+            \t\t\t_mouse(Vector2(130, 104))
+            \t\t2:
+            \t\t\t_mouse(Vector2(130, 104), MOUSE_BUTTON_LEFT, true)
+            \t\t4:
+            \t\t\t_verify()
+
+            func _verify():
+            \tif not _check(mouse_positions[1] == [130.0, 104.0], "mouse before the press: " + str(mouse_positions)):
+            \t\treturn
+            \t# o_panner's Left Pressed event moved the view; o_button is still
+            \t# tested at the position the step started with.
+            \tif not _check(int(panner.presses) == 1 and int(button.presses) == 1, "presses: panner " + str(panner.presses) + ", button " + str(button.presses)):
+            \t\treturn
+            \tif not _check(mouse_positions[3] == [1130.0, 104.0], "mouse after the view moved: " + str(mouse_positions)):
+            \t\treturn
+            \tprint("INPUT_MOUSE_ONE_POSITION_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        sprite_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=3 format=3]
+
+            [sub_resource type="PlaceholderTexture2D" id="texture"]
+            size = Vector2(40, 8)
+
+            [sub_resource type="RectangleShape2D" id="RectangleShape2D_1"]
+            size = Vector2(40, 8)
+
+            [node name="s_button" type="Area2D"]
+            metadata/gamemaker_width = 40
+            metadata/gamemaker_height = 8
+            metadata/gamemaker_origin_x = 0
+            metadata/gamemaker_origin_y = 0
+            metadata/gamemaker_collision_kind = 1
+            metadata/gamemaker_collision_tolerance = 0
+            metadata/gamemaker_bbox_left = 0
+            metadata/gamemaker_bbox_right = 39
+            metadata/gamemaker_bbox_top = 0
+            metadata/gamemaker_bbox_bottom = 7
+
+            [node name="Sprite2D" type="Sprite2D" parent="."]
+            texture = SubResource("texture")
+            position = Vector2(20.0, 4.0)
+
+            [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+            shape = SubResource("RectangleShape2D_1")
+            position = Vector2(20.0, 4.0)
+            """
+        )
+        object_scene_template = textwrap.dedent(
+            """\
+            [gd_scene load_steps=3 format=3]
+
+            [ext_resource type="PackedScene" path="res://sprites/s_button/s_button.tscn" id="1"]
+            [ext_resource type="Script" path="res://objects/{name}/{name}.gd" id="2"]
+
+            [node name="{name}" type="Node2D"]
+            script = ExtResource("2")
+
+            [node name="s_button" parent="." instance=ExtResource("1")]
+            """
+        )
+        entries = (
+            AssetRegistryEntry(
+                id=400,
+                name="s_button",
+                kind="sprites",
+                asset_type="sprite",
+                type_name="Sprite",
+                source_path="sprites/s_button/s_button.yy",
+                godot_path=sprite_scene_paths["s_button"],
+                legacy_id="sprites/s_button/s_button.yy",
+                metadata={"frame_count": 1, "playback_speed": 15.0, "playback_speed_type": 0},
+            ),
+        ) + tuple(
+            AssetRegistryEntry(
+                id=asset_id,
+                name=object_name,
+                kind="objects",
+                asset_type="object",
+                type_name="Object",
+                source_path=f"objects/{object_name}/{object_name}.yy",
+                godot_path=f"res://objects/{object_name}/{object_name}.tscn",
+                legacy_id=f"objects/{object_name}/{object_name}.yy",
+            )
+            for asset_id, (object_name, _code) in enumerate(object_events, start=401)
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(project_dir / "project.godot", _project_file("InputMouseOnePositionSmoke"))
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+            _write_text(project_dir / "sprites" / "s_button" / "s_button.tscn", sprite_scene)
+            for object_name, object_script in object_scripts.items():
+                object_dir = project_dir / "objects" / object_name
+                _write_text(object_dir / f"{object_name}.gd", object_script)
+                _write_text(object_dir / f"{object_name}.tscn", object_scene_template.format(name=object_name))
+            _write_text(project_dir / "main.gd", main_script)
+            _write_text(project_dir / "main.tscn", _MAIN_SCENE)
+            self._run_project(project_dir, "INPUT_MOUSE_ONE_POSITION_SMOKE_OK")
+
 
 if __name__ == "__main__":
     unittest.main()

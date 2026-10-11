@@ -752,9 +752,10 @@ static func _gml_input_dispatch_event(instances, event_type, event_num):
 	return dispatched
 
 
-static func _gml_input_perform(row, binding):
+static func _gml_input_perform(row, binding, payload = null):
 	# Once a room change is pending no further events run, and destroyed
-	# instances get no more events.
+	# instances get no more events. payload becomes event_data for the event
+	# (a gesture's data; empty for keyboard and mouse events).
 	if gml_room_change_pending():
 		return 0
 	var entry = row["entry"]
@@ -763,18 +764,17 @@ static func _gml_input_perform(row, binding):
 	var inst = row["instance"]
 	if not _gml_event_scheduler_instance_valid(inst):
 		return 0
-	return _gml_input_dispatch_binding(inst, binding)
+	return _gml_input_dispatch_binding(inst, binding, payload)
 
 
-static func _gml_input_dispatch_binding(inst, binding):
+static func _gml_input_dispatch_binding(inst, binding, payload):
 	var method_name = str(binding.get("method", ""))
 	if method_name == "" or not inst.has_method(method_name):
 		return 0
 	var event_type = int(_to_real(binding.get("event_type", -1)))
 	var event_num = int(_to_real(binding.get("event_num", 0)))
 	var previous_event_data = _gml_builtin_globals["event_data"] if _gml_builtin_globals.has("event_data") else {}
-	var payload = _gml_input_binding_payload(inst, binding)
-	_gml_builtin_globals["event_data"] = payload
+	_gml_builtin_globals["event_data"] = payload if payload is Dictionary else {}
 	if _gml_event_scheduler_tracing:
 		_gml_input_dispatch_trace.append({
 			"instance": str(inst.name) if inst is Node else "",
@@ -785,22 +785,6 @@ static func _gml_input_dispatch_binding(inst, binding):
 	inst.call(method_name)
 	_gml_builtin_globals["event_data"] = previous_event_data
 	return 1
-
-
-static func _gml_input_binding_payload(inst, binding):
-	var event_type = int(_to_real(binding.get("event_type", -1)))
-	if event_type != 13:
-		return {}
-	var event_num = int(_to_real(binding.get("event_num", 0)))
-	for gesture in _gml_input_gesture_events:
-		if not (gesture is Dictionary):
-			continue
-		if int(_to_real(gesture.get("event_num", -1))) != event_num:
-			continue
-		if gml_bool(gesture.get("global", false)) or _gml_input_instance_contains_mouse(inst):
-			var payload = gesture.get("payload", {})
-			return payload if payload is Dictionary else {}
-	return {}
 
 
 static func _gml_input_dispatch_keyboard(instances, event_type):
@@ -850,8 +834,14 @@ static func _gml_input_dispatch_mouse(instances):
 			rows.append(row)
 	rows.sort_custom(_gml_input_mouse_order_less)
 	var dispatched = 0
-	for row in rows:
-		dispatched += _gml_input_dispatch_instance_mouse(row)
+	if not rows.is_empty():
+		# Like GameMaker's HandleMouse, the room position under the mouse
+		# (window_views_mouse_get_x/y) is worked out once, and every instance
+		# is tested against it: a view moved by an earlier mouse event takes
+		# effect for the next step.
+		var mouse_room_position = _gml_mouse_room_position()
+		for row in rows:
+			dispatched += _gml_input_dispatch_instance_mouse(row, mouse_room_position)
 	for button in [1, 2, 3]:
 		if gml_mouse_check_button(button):
 			dispatched += _gml_input_dispatch_event(instances, 6, 49 + button)
@@ -884,7 +874,7 @@ static func _gml_input_mouse_order_less(left, right):
 	return int(left["order"]) > int(right["order"])
 
 
-static func _gml_input_dispatch_instance_mouse(row):
+static func _gml_input_dispatch_instance_mouse(row, mouse_room_position):
 	var inst = row["instance"]
 	var mouse_events = row["events"][6]
 	var entry = row["entry"]
@@ -894,7 +884,7 @@ static func _gml_input_dispatch_instance_mouse(row):
 		return 0
 	var was_over = inst.has_meta("_gml_mouse_over") and bool(inst.get_meta("_gml_mouse_over"))
 	var dispatched = 0
-	if not _gml_input_mouse_over_instance(inst):
+	if not _gml_input_mouse_over_instance(inst, mouse_room_position):
 		if was_over:
 			inst.set_meta("_gml_mouse_over", false)
 			dispatched += _gml_input_perform_mouse_event(row, mouse_events, 11)
@@ -936,17 +926,17 @@ static func _gml_input_mouse_test_needed(mouse_events):
 	return false
 
 
-static func _gml_input_mouse_over_instance(inst):
+static func _gml_input_mouse_over_instance(inst, mouse_room_position):
 	# Like GameMaker, the mouse position in the room (through the views, as
 	# window_views_mouse_get_x/y report it) is tested against the
 	# instance's collision mask. Instances with their own hit test keep it.
 	var entry = _gml_instance_entry(inst)
 	if entry == null or inst.has_method("_gm_input_contains_point") or inst is Control or inst.has_meta("gamemaker_collision_radius"):
-		return _gml_input_instance_contains_mouse(inst)
+		return _gml_input_instance_contains_mouse(inst, mouse_room_position)
 	var hit = gml_collision_point(
 		inst,
-		gml_window_views_mouse_get_x(),
-		gml_window_views_mouse_get_y(),
+		mouse_room_position.x,
+		mouse_room_position.y,
 		entry["handle"],
 		true,
 		false
@@ -961,40 +951,49 @@ static func _gml_input_perform_mouse_event(row, mouse_events, event_num):
 
 
 static func _gml_input_dispatch_gestures(table):
+	if _gml_input_gesture_events.is_empty():
+		return 0
+	# As for mouse events, the room position under the mouse is worked out
+	# once for all instances.
+	var mouse_room_position = _gml_mouse_room_position()
 	var dispatched = 0
 	for row in table:
 		var gesture_events = row["events"].get(13, {})
 		for event_num in gesture_events.keys():
-			var binding = gesture_events[event_num]
-			if _gml_input_gesture_event_matches(row["instance"], event_num, binding):
-				dispatched += _gml_input_perform(row, binding)
+			var payload = _gml_input_gesture_payload(row["instance"], event_num, mouse_room_position)
+			if payload != null:
+				dispatched += _gml_input_perform(row, gesture_events[event_num], payload)
 	return dispatched
 
 
-static func _gml_input_instance_contains_mouse(inst):
+static func _gml_input_instance_contains_mouse(inst, mouse_room_position = null):
 	# GameMaker runs an instance's mouse events while the mouse (mouse_x and
 	# mouse_y, in room coordinates) is over the instance's collision mask,
 	# tested precisely when the mask is precise. Instances without a sprite or
-	# mask never get them.
+	# mask never get them. mouse_room_position is the room position the
+	# input step tests every instance against (the current one by default).
 	if inst == null:
 		return false
-	var mouse_room_position = _gml_mouse_room_position()
+	var point = _gml_mouse_room_position() if mouse_room_position == null else mouse_room_position
 	if inst.has_method("_gm_input_contains_point"):
-		return bool(inst.call("_gm_input_contains_point", mouse_room_position.x, mouse_room_position.y))
+		return bool(inst.call("_gm_input_contains_point", point.x, point.y))
 	if inst is Control:
-		return inst.get_global_rect().has_point(mouse_room_position)
-	return _gml_collision_instance_contains_point(inst, mouse_room_position.x, mouse_room_position.y)
+		return inst.get_global_rect().has_point(point)
+	return _gml_collision_instance_contains_point(inst, point.x, point.y)
 
 
-static func _gml_input_gesture_event_matches(inst, event_num, binding):
+static func _gml_input_gesture_payload(inst, event_num, mouse_room_position):
+	# The data of the first queued gesture of this event that is global or
+	# over the instance, or null when there is none.
 	for gesture in _gml_input_gesture_events:
 		if not (gesture is Dictionary):
 			continue
 		if int(_to_real(gesture.get("event_num", -1))) != int(_to_real(event_num)):
 			continue
-		if gml_bool(gesture.get("global", false)) or _gml_input_instance_contains_mouse(inst):
-			return true
-	return false
+		if gml_bool(gesture.get("global", false)) or _gml_input_instance_contains_mouse(inst, mouse_room_position):
+			var payload = gesture.get("payload", {})
+			return payload if payload is Dictionary else {}
+	return null
 
 
 static func _gml_input_normalize_gesture_payload(payload):

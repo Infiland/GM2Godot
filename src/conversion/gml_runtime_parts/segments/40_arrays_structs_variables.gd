@@ -237,10 +237,51 @@ static func gml_array_concat(array1, array2):
 	return result
 
 
-static func gml_array_contains(array_value, value):
+# The range an array search covers, as the runner's computeIterationValues
+# works it out: [first index, number of elements, step]. The offset is
+# clamped into the array (a negative offset counts from the end) and a
+# negative length walks backwards from it.
+static func _gml_array_search_range(size, offset, length):
+	var raw_offset = _to_real(offset)
+	if is_nan(raw_offset):
+		raw_offset = 0.0
+	var first = int(clamp(raw_offset, -size, size - 1))
+	if first < 0:
+		first += size
+	var raw_length = float(size) if length == null else _to_real(length)
+	if is_nan(raw_length):
+		return [first, 0, 1]
+	if raw_length < 0.0:
+		return [first, min(first + 1, -raw_length), -1]
+	return [first, min(first + raw_length, size) - first, 1]
+
+
+# The index of the first element in the range that is equal (as with ==) to
+# value, or -1.
+static func _gml_array_search_value(array_value, value, offset, length):
+	if array_value.is_empty():
+		return -1
+	var search = _gml_array_search_range(array_value.size(), offset, length)
+	var index = search[0]
+	var remaining = search[1]
+	while remaining > 0:
+		if gml_eq(array_value[index], value):
+			return index
+		index += search[2]
+		remaining -= 1
+	return -1
+
+
+static func gml_array_contains(array_value, value, offset = 0, length = null):
 	if typeof(array_value) != TYPE_ARRAY:
 		return false
-	return array_value.has(value)
+	return _gml_array_search_value(array_value, value, offset, length) != -1
+
+
+static func gml_array_get_index(array_value, value, offset = 0, length = null):
+	if typeof(array_value) != TYPE_ARRAY:
+		return -1
+	return _gml_array_search_value(array_value, value, offset, length)
 
 
 static func gml_array_find_index(array_value, value):
@@ -430,8 +471,19 @@ static func gml_enum(fields = {}):
 	return enum_fields
 
 
+# A struct member or variable name as GameMaker spells it: names that are not
+# strings go through string(), so s[$ 4 / 2] is the member "2", not "2.0".
+static func _gml_member_key(member_name):
+	var name_type = typeof(member_name)
+	if name_type == TYPE_STRING:
+		return member_name
+	if name_type == TYPE_STRING_NAME:
+		return str(member_name)
+	return gml_string(member_name)
+
+
 static func gml_struct_get(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		if struct_value.has(key):
 			return struct_value[key]
@@ -656,7 +708,7 @@ static func gml_variable_global_set(member_name, value):
 
 
 static func gml_struct_exists(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.has(key)
 	if typeof(struct_value) == TYPE_OBJECT:
@@ -669,7 +721,7 @@ static func gml_struct_exists(struct_value, member_name):
 
 
 static func gml_struct_set(struct_value, member_name, value):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value[key] = value
 		return value
@@ -696,7 +748,7 @@ static func gml_struct_set(struct_value, member_name, value):
 
 
 static func gml_struct_remove(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value.erase(key)
 		return gml_undefined()

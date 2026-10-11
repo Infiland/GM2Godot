@@ -4021,6 +4021,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("found = array_contains(arr, 42);", indent=""),
             "found = GMRuntime.gml_array_contains(arr, 42)",
         )
+        self.assertEqual(
+            transpile_gml_code("found = array_contains(arr, 42, -1, -3);", indent=""),
+            "found = GMRuntime.gml_array_contains(arr, 42, -1, -3)",
+        )
+
+    def test_transpiles_array_get_index(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42)",
+        )
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42, 2, 3);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42, 2, 3)",
+        )
 
     def test_transpiles_array_find_index(self):
         self.assertEqual(

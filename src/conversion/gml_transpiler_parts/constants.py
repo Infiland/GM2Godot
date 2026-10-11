@@ -1244,6 +1244,7 @@ ARRAY_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "array_copy": "gml_array_copy",
     "array_concat": "gml_array_concat",
     "array_contains": "gml_array_contains",
+    "array_get_index": "gml_array_get_index",
     "array_find_index": "gml_array_find_index",
     "array_foreach": "gml_array_foreach",
     "array_filter": "gml_array_filter",

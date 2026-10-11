@@ -3043,7 +3043,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_names_count(instance_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn []", GML_RUNTIME_SCRIPT)
-        self.assertIn("if targets.is_empty():\n\t\treturn -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_variable_helpers_use_shared_global_scope(self):
         self.assertIn("static func gml_variable_global_exists(member_name):", GML_RUNTIME_SCRIPT)
@@ -3058,7 +3058,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_struct_names_count(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
-        self.assertIn("return -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_variable_names(struct_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_get_names(struct_value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_foreach_invokes_callback_for_visible_members(self):
         self.assertIn("static func gml_struct_foreach(", GML_RUNTIME_SCRIPT)

@@ -713,10 +713,12 @@ static func gml_selector_get_names(target, current_self = null, current_other = 
 	return gml_struct_get_names(targets[0])
 
 
+# 0 when nothing is selected, as in the runner's
+# variable_instance_names_count (yyVariable.js; the manual says -1).
 static func gml_selector_names_count(target, current_self = null, current_other = null):
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
-		return -1
+		return 0
 	return gml_struct_names_count(targets[0])
 
 
@@ -737,12 +739,12 @@ static func gml_struct_exists(struct_value, member_name):
 	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.has(key)
-	if typeof(struct_value) == TYPE_OBJECT:
-		return (
-			_gml_object_has_builtin_field(struct_value, key)
-			or _object_has_property(struct_value, key)
-			or _gml_object_dynamic_fields(struct_value).has(key)
-		)
+	if _gml_is_instance_node(struct_value):
+		return _gml_instance_variable_exists(struct_value, key)
+	if _gml_selects_instances(struct_value):
+		return gml_selector_exists(struct_value, key)
+	if typeof(struct_value) == TYPE_OBJECT and is_instance_valid(struct_value):
+		return _object_has_property(struct_value, key) or _gml_object_dynamic_fields(struct_value).has(key)
 	return false
 
 
@@ -789,13 +791,14 @@ static func gml_struct_remove(struct_value, member_name):
 static func gml_struct_get_names(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.keys()
-	if typeof(struct_value) == TYPE_OBJECT:
+	if _gml_is_instance_node(struct_value):
+		return _gml_instance_variable_names(struct_value)
+	if _gml_selects_instances(struct_value):
+		return gml_selector_get_names(struct_value)
+	if typeof(struct_value) == TYPE_OBJECT and is_instance_valid(struct_value):
 		var names = []
 		for property in struct_value.get_property_list():
 			names.append(property.get("name"))
-		for builtin_name in _gml_object_builtin_field_names(struct_value):
-			if not names.has(builtin_name):
-				names.append(builtin_name)
 		for dynamic_name in _gml_object_dynamic_fields(struct_value).keys():
 			if not names.has(dynamic_name):
 				names.append(dynamic_name)
@@ -806,9 +809,104 @@ static func gml_struct_get_names(struct_value):
 static func gml_struct_names_count(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.size()
-	if typeof(struct_value) == TYPE_OBJECT:
+	if typeof(struct_value) == TYPE_OBJECT or _gml_selects_instances(struct_value):
 		return gml_struct_get_names(struct_value).size()
-	return -1
+	return 0
+
+
+# An instance itself (self, other or a stored instance). The struct_*
+# functions treat it, and an instance id or object (anything else
+# _gml_selects_instances accepts), as the variable_instance_* ones do: the
+# runner's struct_exists, struct_get_names and struct_names_count call them
+# (yyVariable.js).
+static func _gml_is_instance_node(value):
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is Node
+
+
+static func _gml_selects_instances(value):
+	return is_handle(value) or is_numeric(value)
+
+
+# GameMaker's built-in instance variables (the manual's instance, sprite and
+# physics variables; the runner lists them in g_instance_names). Every
+# instance has them, so variable_instance_exists is true for them, and the
+# variable name functions leave them out (the runner's
+# __internal__get_variable_names lists the variables code assigned).
+const GML_INSTANCE_BUILTIN_VARIABLES = {
+	"id": true, "visible": true, "solid": true, "persistent": true, "depth": true,
+	"layer": true, "on_ui_layer": true, "collision_space": true, "alarm": true,
+	"direction": true, "friction": true, "gravity": true, "gravity_direction": true,
+	"hspeed": true, "vspeed": true, "speed": true, "xstart": true, "ystart": true,
+	"x": true, "y": true, "xprevious": true, "yprevious": true, "object_index": true,
+	"path_index": true, "path_position": true, "path_positionprevious": true,
+	"path_speed": true, "path_scale": true, "path_orientation": true, "path_endaction": true,
+	"timeline_index": true, "timeline_running": true, "timeline_speed": true,
+	"timeline_position": true, "timeline_loop": true,
+	"in_sequence": true, "sequence_instance": true, "drawn_by_sequence": true,
+	"in_collision_tree": true,
+	"bbox_left": true, "bbox_right": true, "bbox_top": true, "bbox_bottom": true,
+	"sprite_index": true, "sprite_width": true, "sprite_height": true,
+	"sprite_xoffset": true, "sprite_yoffset": true, "image_alpha": true,
+	"image_angle": true, "image_blend": true, "image_index": true, "image_number": true,
+	"image_single": true, "image_speed": true, "image_xscale": true, "image_yscale": true,
+	"mask_index": true,
+	"phy_rotation": true, "phy_position_x": true, "phy_position_y": true,
+	"phy_angular_velocity": true, "phy_linear_velocity_x": true, "phy_linear_velocity_y": true,
+	"phy_speed_x": true, "phy_speed_y": true, "phy_speed": true,
+	"phy_angular_damping": true, "phy_linear_damping": true, "phy_bullet": true,
+	"phy_fixed_rotation": true, "phy_active": true, "phy_mass": true, "phy_inertia": true,
+	"phy_com_x": true, "phy_com_y": true, "phy_dynamic": true, "phy_kinematic": true,
+	"phy_sleeping": true, "phy_position_xprevious": true, "phy_position_yprevious": true,
+	"phy_collision_points": true, "phy_collision_x": true, "phy_collision_y": true,
+	"phy_col_normal_x": true, "phy_col_normal_y": true,
+}
+
+static var _gml_instance_declared_variables = {}
+
+
+# The variables a converted object's script declares for its code (its
+# ancestors' too), in order: not the built-in ones, other or the converter's
+# own _gm_ members. They only depend on the script, so they are kept per
+# script.
+static func _gml_instance_script_variables(instance):
+	var script = instance.get_script()
+	if script == null:
+		return []
+	var names = _gml_instance_declared_variables.get(script)
+	if names == null:
+		names = []
+		for property in instance.get_property_list():
+			if (int(property.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
+				continue
+			var name = str(property.get("name"))
+			if GML_INSTANCE_BUILTIN_VARIABLES.has(name) or name == "other" or name.begins_with("_gm_"):
+				continue
+			names.append(name)
+		_gml_instance_declared_variables[script] = names
+	return names
+
+
+# Whether an instance has a variable: GameMaker creates one when code first
+# assigns it. A converted object declares its variables up front holding
+# null, which a GML assignment does not store (undefined is its own value),
+# so a declared variable exists once it holds something else. (A function
+# that returns nothing gives null as well, so a variable set to such a result
+# reads as not set.)
+static func _gml_instance_variable_exists(instance, key):
+	if GML_INSTANCE_BUILTIN_VARIABLES.has(key) or _gml_object_dynamic_fields(instance).has(key):
+		return true
+	return _gml_instance_script_variables(instance).has(key) and typeof(instance.get(key)) != TYPE_NIL
+
+
+static func _gml_instance_variable_names(instance):
+	var names = []
+	for name in _gml_instance_script_variables(instance):
+		if typeof(instance.get(name)) != TYPE_NIL:
+			names.append(name)
+	for dynamic_name in _gml_object_dynamic_fields(instance).keys():
+		if not names.has(dynamic_name):
+			names.append(dynamic_name)
+	return names
 
 
 static func _gml_object_dynamic_fields(object_value, create = false):
@@ -824,16 +922,6 @@ static func _gml_object_dynamic_fields(object_value, create = false):
 	var new_fields = {}
 	object_value.set_meta(meta_name, new_fields)
 	return new_fields
-
-
-static func _gml_object_builtin_field_names(object_value):
-	if object_value is Node2D:
-		return ["x", "y", "image_angle", "image_xscale", "image_yscale"]
-	return []
-
-
-static func _gml_object_has_builtin_field(object_value, member_name):
-	return _gml_object_builtin_field_names(object_value).has(str(member_name))
 
 
 const GML_OBJECT_BBOX_FIELDS = ["bbox_left", "bbox_top", "bbox_right", "bbox_bottom"]
@@ -890,7 +978,6 @@ static func _gml_object_uses_builtin_field(object_value, member_name):
 	var key = str(member_name)
 	match key:
 		"x", "y", "image_angle", "image_xscale", "image_yscale":
-			# The names _gml_object_builtin_field_names lists for a Node2D.
 			return not (key in object_value)
 		"bbox_left", "bbox_top", "bbox_right", "bbox_bottom":
 			return true

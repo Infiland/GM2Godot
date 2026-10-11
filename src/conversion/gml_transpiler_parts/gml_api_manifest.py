@@ -1424,7 +1424,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/Variable_Functions.htm",
-        "Checks dynamic instance/global-scope members through selector helpers.",
+        "True for built-in instance variables and for variables code has assigned; a declared variable that was never assigned does not exist yet.",
     ),
     _entry(
         "variable_instance_set",
@@ -1448,7 +1448,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/Variable_Functions.htm",
-        "Enumerates visible dynamic member names on the resolved instance/global target.",
+        "Lists the variables code has assigned on the first selected instance (not the built-in ones), or the global variables.",
     ),
     _entry(
         "variable_instance_names_count",
@@ -1460,7 +1460,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/Variable_Functions.htm",
-        "Counts visible dynamic member names on the resolved instance/global target.",
+        "Counts the variables code has assigned on the first selected instance, or the global variables; 0 when nothing is selected.",
     ),
     _entry(
         "variable_global_exists",
@@ -1556,7 +1556,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/Variable_Functions.htm",
-        "Enumerates dictionary-backed struct and Godot object member names.",
+        "Lists a struct's members; for an instance, the variables its code has assigned.",
     ),
     _entry(
         "struct_names_count",
@@ -1568,7 +1568,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/Variable_Functions.htm",
-        "Counts dictionary-backed struct and Godot object member names.",
+        "Counts a struct's members; for an instance, the variables its code has assigned (0 when nothing is selected).",
     ),
     _entry(
         "variable_struct_exists",

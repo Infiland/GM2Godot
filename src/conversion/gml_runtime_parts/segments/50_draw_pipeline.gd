@@ -820,6 +820,8 @@ static func _gml_draw_phase_layer(scene, spec, space):
 	layer.name = str(spec["name"])
 	layer.layer = int(spec["layer"])
 	layer.follow_viewport_enabled = bool(spec["follow_viewport"])
+	if not bool(spec["room_space"]):
+		layer.transform = _gml_display_window_to_viewport_transform()
 	layer.set_meta("gm2godot_draw_space", space)
 	scene.add_child(layer, false, Node.INTERNAL_MODE_BACK)
 	return layer

@@ -902,12 +902,29 @@ static func _gml_display_gui_effective_scale():
 
 
 static func _gml_display_apply_gui_layer(scene):
+	_gml_display_apply_window_layers(scene)
 	var layer = _gml_display_gui_layer(scene)
 	if layer == null:
 		return
 	var transform = _gml_display_gui_to_viewport_transform()
 	if layer.transform != transform:
 		layer.transform = transform
+
+
+# Pre Draw and Post Draw draw on the window in window pixels (yyRoom.js
+# PostDraw sets the viewport and view area to the window size), so their
+# layers map window pixels onto the stretched root viewport. They are still
+# rasterised at the application surface's resolution.
+static func _gml_display_apply_window_layers(scene):
+	if not (scene is Node) or not is_instance_valid(scene):
+		return
+	var transform = _gml_display_window_to_viewport_transform()
+	for spec in GML_DRAW_SPACE_LAYER_SPECS.values():
+		if bool(spec["room_space"]):
+			continue
+		var layer = scene.get_node_or_null(NodePath(str(spec["name"])))
+		if layer is CanvasLayer and layer.transform != transform:
+			layer.transform = transform
 
 
 # The room's Draw GUI CanvasLayer: the converter's GMGUI node, or a layer the

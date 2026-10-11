@@ -88,8 +88,11 @@ add commands to runtime-owned `RenderingServer` canvas items that are cleared
 and refilled every frame and freed with their instance or room: Draw output is
 parented under the instance's canvas item so it sorts at the instance's depth;
 Draw Begin and Draw End use room-space `CanvasLayer`s at -1 and 1 (behind and in
-front of the room's layers); Pre Draw and Post Draw use window-space layers at
--2 and 999; GUI phases draw into the room's `GMGUI` layer (1000). A blend mode,
+front of the room's layers); Pre Draw and Post Draw use layers at -2 and 999
+whose coordinates are window pixels, as in GameMaker, mapped onto the stretched
+root viewport (they are rasterised at the application surface's resolution, so
+detail finer than one application surface pixel is lost when the window is
+larger); GUI phases draw into the room's `GMGUI` layer (1000). A blend mode,
 shader, shader uniform, texture filter or texture repeat change starts a new
 canvas item so earlier commands keep the state they were drawn with. Draw state
 set with `draw_set_*`, `gpu_set_*` and `shader_set` persists across instances,

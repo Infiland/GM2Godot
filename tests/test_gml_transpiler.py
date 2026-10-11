@@ -4036,11 +4036,26 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "idx = GMRuntime.gml_array_get_index(arr, 42, 2, 3)",
         )
 
-    def test_transpiles_array_find_index(self):
+    def test_transpiles_array_find_index_with_a_predicate(self):
         self.assertEqual(
-            transpile_gml_code("idx = array_find_index(arr, 42);", indent=""),
-            "idx = GMRuntime.gml_array_find_index(arr, 42)",
+            transpile_gml_code("idx = array_find_index(arr, is_big);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, 0, null, self, other)",
         )
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, is_big, -1, -4);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, -1, -4, self, other)",
+        )
+        inline = transpile_gml_code(
+            "idx = array_find_index(arr, function(_e, _i) { return _e > 1; });",
+            indent="",
+        )
+        self.assertTrue(
+            inline.startswith(
+                "idx = GMRuntime.gml_array_find_index("
+                "arr, GMRuntime.gml_receiver_method(self, "
+            )
+        )
+        self.assertTrue(inline.endswith("), 0, null, self, other)"))
 
     def test_transpiles_array_foreach(self):
         self.assertEqual(

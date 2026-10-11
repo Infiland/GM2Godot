@@ -1,8 +1,8 @@
 """Godot checks for array searches and computed struct member names.
 
 GameMaker compares array elements with == (numbers by value within the
-math epsilon) and turns struct member names that are not strings into text
-with string().
+math epsilon), takes a predicate in array_find_index and turns struct member
+names that are not strings into text with string().
 """
 from __future__ import annotations
 
@@ -124,6 +124,37 @@ class TestArraySearchGodot(unittest.TestCase):
             ];
             """,
             "[2, 4, 2, -1, -1, -1, 0, false, true, false, -1]",
+        )
+
+    def test_array_find_index_calls_a_predicate(self) -> None:
+        _run_gml_probe(
+            self,
+            """\
+            var _a = [3, 8, 1, 9, 4];
+            var _seen = [];
+            var _first_big = array_find_index(_a, function(_element, _index) {
+                return _element > 5;
+            });
+            var _last_big = array_find_index(_a, function(_element) {
+                return _element > 5;
+            }, -1, -infinity);
+            var _none = array_find_index(_a, function(_element) {
+                return _element > 50;
+            });
+            var _from_two = array_find_index(_a, function(_element) {
+                return _element > 5;
+            }, 2);
+            var _limit = 4;
+            var _bound = array_find_index(_a, method({_limit}, function(_element) {
+                return _element == _limit;
+            }));
+            array_find_index(_a, method({_seen}, function(_element, _index) {
+                array_push(_seen, _index);
+                return _index == 2;
+            }));
+            return [_first_big, _last_big, _none, _from_two, _bound, _seen];
+            """,
+            "[1, 3, -1, 3, 4, [0, 1, 2]]",
         )
 
     def test_struct_member_names_use_gamemaker_string_conversion(self) -> None:

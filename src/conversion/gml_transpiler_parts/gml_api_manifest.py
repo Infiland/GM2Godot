@@ -6921,7 +6921,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Variable_Functions/array_find_index.htm",
-        "Returns index of value or -1 via GDScript .find().",
+        "Returns the index of the first element in the range the predicate is true for, or -1.",
     ),
     _entry(
         "array_foreach",

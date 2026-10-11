@@ -284,10 +284,36 @@ static func gml_array_get_index(array_value, value, offset = 0, length = null):
 	return _gml_array_search_value(array_value, value, offset, length)
 
 
-static func gml_array_find_index(array_value, value):
+# array_find_index calls the predicate with (element, index) and returns the
+# index of the first element it is true for, or -1.
+static func gml_array_find_index(
+	array_value,
+	callback,
+	offset = 0,
+	length = null,
+	caller_self = null,
+	caller_other = null
+):
 	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_find_index", array_value)
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
+		return gml_unsupported_type_error("GML array_find_index callback", callback)
+	if array_value.is_empty():
 		return -1
-	return array_value.find(value)
+	var search = _gml_array_search_range(array_value.size(), offset, length)
+	var index = search[0]
+	var remaining = search[1]
+	while remaining > 0:
+		if gml_bool(gml_call_value(resolved_callback, [array_value[index], index], caller_self, caller_other)):
+			return index
+		index += search[2]
+		remaining -= 1
+	return -1
 
 
 static func gml_array_foreach(

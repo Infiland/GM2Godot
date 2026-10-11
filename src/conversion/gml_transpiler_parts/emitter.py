@@ -604,6 +604,8 @@ def _emit_function_literal(
         function_self_expression = "_gml_method_self"
         function_other_expression = "_gml_method_other"
     parameters = ", ".join(emitted_parameters)
+    # A function's instance variables are its receiver's (see
+    # _ScopeContext): the members of the script it is declared in are not.
     function_scope_context = _ScopeContext(
         self_expression=function_self_expression,
         other_expression=function_other_expression,
@@ -611,7 +613,7 @@ def _emit_function_literal(
         global_scope=scope_context.global_scope,
         global_names=scope_context.global_names,
         asset_names=scope_context.asset_names,
-        direct_instance_names=scope_context.direct_instance_names,
+        direct_instance_names=frozenset(),
         dynamic_instance_names=scope_context.dynamic_instance_names,
         static_scope=scope_context.static_scope,
         static_names=scope_context.static_names,

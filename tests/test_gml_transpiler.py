@@ -2295,6 +2295,45 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "score = GMRuntime.gml_variable_instance_get(self, \"draw\")",
         )
 
+    def test_with_bodies_use_the_with_instance_for_the_scripts_own_members(self):
+        # The calling object's script declares hp, yet inside with GameMaker
+        # reads and writes the with instance's hp; locals stay locals.
+        output = transpile_gml_code(
+            "var bonus = 2; hp = 1; with (all) { hp += bonus; other.seen = hp; with (other) hp = 7; } hp += 1;",
+            indent="",
+            instance_target="self",
+            direct_instance_names={"hp"},
+        )
+
+        self.assertEqual(
+            output,
+            "var bonus = 2\n"
+            "hp = 1\n"
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"), bonus))\n'
+            '\tGMRuntime.gml_selector_set(self, "seen", GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"))\n'
+            "\tfor _gml_with_target_1 in GMRuntime.gml_with_targets(self, _gml_with_target_0, self):\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_with_target_1, "hp", 7)\n'
+            "hp = GMRuntime.gml_add(hp, 1)",
+        )
+
+    def test_functions_use_their_receiver_for_the_scripts_own_members(self):
+        # A method reads its receiver's variables and a constructor sets the
+        # new struct's, even where the declaring object's script declares a
+        # member of the same name.
+        output = transpile_gml_code(
+            "get_hp = function() { return hp; }; Point = function(px) constructor { hp = px; };",
+            indent="",
+            instance_target="self",
+            direct_instance_names={"hp", "get_hp", "Point"},
+        )
+
+        self.assertIn('return GMRuntime.gml_variable_instance_get(_gml_method_self, "hp")', output)
+        self.assertIn('\tGMRuntime.gml_variable_instance_set(_gml_constructor_self, "hp", px)', output)
+        self.assertTrue(output.startswith("get_hp = GMRuntime.gml_receiver_method(self, "), output)
+        self.assertNotIn("\thp = px", output)
+
     def test_transpiles_multidimensional_array_access(self):
         self.assertEqual(
             transpile_gml_expression("grid[x][y]"),

@@ -324,13 +324,15 @@ class _StatementParser:
         )
         with_target = self._next_generated_name("_gml_with_target")
         outer_scope_context = self.scope_context
+        # Inside with, instance variables are the with instance's: the
+        # members the calling object's script declares are not.
         self.scope_context = _ScopeContext(
             self_expression=with_target,
             other_expression=outer_scope_context.self_expression,
             instance_target=with_target,
             global_names=outer_scope_context.global_names,
             asset_names=outer_scope_context.asset_names,
-            direct_instance_names=outer_scope_context.direct_instance_names,
+            direct_instance_names=frozenset(),
             dynamic_instance_names=outer_scope_context.dynamic_instance_names,
             static_scope=outer_scope_context.static_scope,
             static_names=outer_scope_context.static_names,

@@ -248,8 +248,32 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("round(-2.6)", GMRuntime.gml_round(-2.6), -3)
             _expect("round(7)", GMRuntime.gml_round(7), 7)
             _expect("round(inf)", GMRuntime.gml_round(INF), INF)
+            _expect("round(1e20)", GMRuntime.gml_round(1e20), 1e20)
+            _expect("round(-1e20)", GMRuntime.gml_round(-1e20), -1e20)
             """,
             "GML_ROUND_OK",
+        )
+
+    def test_floor_and_ceil_keep_infinities_nan_and_huge_values(self) -> None:
+        # The runner's floor and ceil are Math.floor and Math.ceil: an
+        # infinity, NaN or a value too big for a 64-bit integer comes back as
+        # the real it is.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("floor(1.75)", GMRuntime.gml_floor(1.75), 1)
+            _expect("ceil(-1.25)", GMRuntime.gml_ceil(-1.25), -1)
+            _expect("floor(inf)", GMRuntime.gml_floor(INF), INF)
+            _expect("floor(-inf)", GMRuntime.gml_floor(-INF), -INF)
+            _expect("ceil(inf)", GMRuntime.gml_ceil(INF), INF)
+            _expect("ceil(-inf)", GMRuntime.gml_ceil(-INF), -INF)
+            _expect("floor(nan)", GMRuntime.gml_floor(NAN), NAN)
+            _expect("ceil(nan)", GMRuntime.gml_ceil(NAN), NAN)
+            _expect("floor(1e20)", GMRuntime.gml_floor(1e20), 1e20)
+            _expect("ceil(-1e20)", GMRuntime.gml_ceil(-1e20), -1e20)
+            _expect("floor(2^62)", GMRuntime.gml_floor(4611686018427387904.0), 4611686018427387904)
+            """,
+            "GML_FLOOR_CEIL_OK",
         )
 
     def test_structs_keep_id_handle_and_type_members_as_members(self) -> None:

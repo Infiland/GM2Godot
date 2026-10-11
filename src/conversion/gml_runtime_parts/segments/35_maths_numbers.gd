@@ -40,13 +40,13 @@ static func gml_sign(value):
 static func gml_floor(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML floor", value)
-	return int(floor(_to_real(value)))
+	return _gml_whole_real(floor(_to_real(value)))
 
 
 static func gml_ceil(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML ceil", value)
-	return int(ceil(_to_real(value)))
+	return _gml_whole_real(ceil(_to_real(value)))
 
 
 static func gml_round(value):
@@ -61,7 +61,16 @@ static func gml_round(value):
 	var fraction = real_value - floor_value
 	if fraction > 0.5 or (fraction == 0.5 and fmod(floor_value, 2.0) != 0.0):
 		floor_value += 1.0
-	return int(floor_value)
+	return _gml_whole_real(floor_value)
+
+
+# A whole real (from floor, ceil or round) as an int when a 64-bit integer
+# holds it, else as the real it is: the runner's Math.floor, Math.ceil and
+# round return an infinity, NaN or a value of 2^63 or more unchanged.
+static func _gml_whole_real(value):
+	if absf(value) < 9223372036854775808.0:
+		return int(value)
+	return value
 
 
 static func gml_math_set_epsilon(value):

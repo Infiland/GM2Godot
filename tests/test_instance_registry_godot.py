@@ -132,12 +132,21 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tGMRuntime.gml_selector_set(parent_selector, "hp", 9, self, null)
         \tif not _check(first.hp == 9 and second.hp == 9, "parent selector write did not update inherited child instances"):
         \t\treturn
+        \t# The variable_instance_* functions use the first instance an object
+        \t# selects (children included), where the dot syntax sets them all.
         \tGMRuntime.gml_variable_instance_set(parent_selector, "hp", 13)
-        \tif not _check(first.hp == 13 and second.hp == 13, "variable_instance_set did not update parent selector matches"):
+        \tif not _check(first.hp == 13 and second.hp == 9, "variable_instance_set did not set the first parent selector match only"):
         \t\treturn
         \tif not _check(GMRuntime.gml_variable_instance_get(parent_selector, "hp") == 13, "variable_instance_get did not read parent selector match"):
         \t\treturn
         \tif not _check(GMRuntime.gml_variable_instance_exists(parent_selector, "hp"), "variable_instance_exists did not inspect parent selector matches"):
+        \t\treturn
+        \tGMRuntime.gml_variable_instance_set(handle_b, "second_only", 1)
+        \tif not _check(GMRuntime.gml_variable_instance_exists(handle_b, "second_only"), "variable_instance_exists missed an instance variable"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_variable_instance_exists(parent_selector, "second_only"), "variable_instance_exists looked past the first parent selector match"):
+        \t\treturn
+        \tif not _check(not GMRuntime.gml_variable_instance_exists(GMRuntime.gml_instance_noone(), "hp"), "variable_instance_exists found a variable on noone"):
         \t\treturn
         \tif not _check(GMRuntime.gml_variable_instance_get_names(parent_selector).has("hp"), "variable_instance_get_names did not inspect parent selector matches"):
         \t\treturn

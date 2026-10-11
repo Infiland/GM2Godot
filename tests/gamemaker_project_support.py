@@ -23,7 +23,17 @@ from src.gui.setting_value import SettingValue
 from tests.godot_test_support import write_fixture_text
 
 # GameMaker event file names by event type.
-_EVENT_FILE_PREFIXES = {0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 7: "Other", 8: "Draw", 12: "CleanUp"}
+_EVENT_FILE_PREFIXES = {
+    0: "Create",
+    1: "Destroy",
+    2: "Alarm",
+    3: "Step",
+    6: "Mouse",
+    7: "Other",
+    8: "Draw",
+    9: "KeyPress",
+    12: "CleanUp",
+}
 EVENT_CREATE = (0, 0)
 EVENT_DESTROY = (1, 0)
 EVENT_STEP = (3, 0)

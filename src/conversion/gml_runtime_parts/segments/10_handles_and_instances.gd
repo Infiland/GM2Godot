@@ -163,13 +163,121 @@ static func _gml_instance_clean_up(instance, entry):
 # other is the instance collided with) set it off; the caller's other comes
 # back afterwards.
 static func _gml_instance_perform_own_event(instance, method_name):
+	_gml_instance_call_event(instance, method_name, instance)
+
+
+# Calls an event method of an instance with other_value as its other, then
+# gives the instance its own other back.
+static func _gml_instance_call_event(instance, method_name, other_value):
 	var has_other = "other" in instance
 	var previous_other = instance.get("other") if has_other else null
 	if has_other:
-		instance.set("other", instance)
+		instance.set("other", other_value)
 	instance.call(method_name)
 	if has_other and is_instance_valid(instance):
 		instance.set("other", previous_other)
+
+
+# The generated methods of the events event_perform can name, by event type
+# and number (src/conversion/events/mappings names them).
+const GML_EVENT_STEP_METHODS = {0: "_on_step", 1: "_on_begin_step", 2: "_on_end_step"}
+const GML_EVENT_OTHER_METHODS = {
+	0: "_on_outside_room",
+	1: "_on_intersect_boundary",
+	2: "_on_game_start",
+	3: "_on_game_end",
+	4: "_on_room_start",
+	5: "_on_room_end",
+	6: "_on_no_more_lives",
+	7: "_on_animation_end",
+	8: "_on_path_ended",
+	9: "_on_no_more_health",
+	58: "_on_animation_update",
+	59: "_on_animation_event",
+	76: "_on_broadcast_message",
+}
+const GML_EVENT_DRAW_METHODS = {
+	0: "_on_draw",
+	64: "_on_draw_gui",
+	65: "_on_resize",
+	72: "_on_draw_begin",
+	73: "_on_draw_end",
+	74: "_on_draw_gui_begin",
+	75: "_on_draw_gui_end",
+	76: "_on_pre_draw",
+	77: "_on_post_draw",
+}
+const GML_EVENT_INPUT_METHOD_PREFIXES = {
+	5: "_gm_input_keyboard_",
+	6: "_gm_input_mouse_",
+	9: "_gm_input_key_press_",
+	10: "_gm_input_key_release_",
+	13: "_gm_input_gesture_",
+}
+
+
+# event_user(number) runs the instance's User Event number (0 to 15), as
+# event_perform(ev_other, ev_user0 + number) does.
+static func gml_event_user(number, current_self = null, current_other = null):
+	var user_number = int(_to_real(number))
+	if user_number < 0 or user_number > 15:
+		return null
+	return gml_event_perform(7, 10 + user_number, current_self, current_other)
+
+
+# event_perform(type, number) runs the code of one of the instance's events
+# (an inherited one too) at once, with the caller's self and other, and does
+# nothing else: performing the Destroy event destroys nothing. Nothing runs
+# for an event the object does not have, nor for one GameMaker holds back
+# once a room change is pending (HTML5 runner: event_perform in
+# Function_Game.js calls PerformEvent(event, index, self, other)).
+static func gml_event_perform(event_type, event_number, current_self = null, current_other = null):
+	var type_value = int(_to_real(event_type))
+	var method_name = _gml_event_method_name(type_value, event_number)
+	if method_name == "" or not (current_self is Node) or not is_instance_valid(current_self):
+		return null
+	if not current_self.has_method(method_name):
+		return null
+	# Clean Up always runs; Create, Pre-Create, Destroy, Alarm and Other events
+	# still run for persistent instances.
+	if type_value != 12 and _gml_event_scheduler_event_blocked(current_self, type_value in [0, 1, 2, 7, 14]):
+		return null
+	_gml_instance_call_event(current_self, method_name, current_other if current_other != null else current_self)
+	return null
+
+
+static func _gml_event_method_name(type_value, event_number):
+	if type_value == 4:
+		# The number is the object collided with.
+		var object_name = _gml_object_selector_name(event_number)
+		return GML_COLLISION_EVENT_PREFIX + object_name if object_name != "" else ""
+	var number = int(_to_real(event_number))
+	if GML_EVENT_INPUT_METHOD_PREFIXES.has(type_value):
+		return GML_EVENT_INPUT_METHOD_PREFIXES[type_value] + str(number)
+	match type_value:
+		0:
+			# The Create event; the generated _ready also sets xstart, ystart,
+			# xprevious and yprevious to the current position again.
+			return "_ready"
+		1:
+			return "_on_destroy"
+		2:
+			return "_on_alarm_" + str(number)
+		3:
+			return GML_EVENT_STEP_METHODS.get(number, "")
+		7:
+			if number >= 10 and number <= 25:
+				return "_user_event_" + str(number - 10)
+			if number >= 40 and number <= 47:
+				return "_on_outside_view_" + str(number - 40)
+			if number >= 50 and number <= 57:
+				return "_on_intersect_view_" + str(number - 50) + "_boundary"
+			return GML_EVENT_OTHER_METHODS.get(number, "_on_other_" + str(number))
+		8:
+			return GML_EVENT_DRAW_METHODS.get(number, "_on_draw_" + str(number))
+		12:
+			return "_on_clean_up"
+	return ""
 
 
 # Runs the Clean Up event of the instances under root_node (every instance

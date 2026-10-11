@@ -13,6 +13,7 @@ from tests.gamemaker_project_support import (
     EVENT_CLEAN_UP,
     EVENT_CREATE,
     EVENT_DESTROY,
+    EVENT_ROOM_START,
     EVENT_STEP,
     GameMakerObject,
     GameMakerProject,
@@ -196,6 +197,103 @@ _CREATE_DESTROY_ARGUMENTS_TRACE = [
     "clean_up",
 ]
 
+# event_user(n) and event_perform(type, number) run the instance's event at
+# once, with the caller's self and other: inherited events too, any event
+# type, and nothing for an event the object does not have. Performing the
+# Destroy event does not destroy the instance (HTML5 runner: event_user and
+# event_perform in Function_Game.js call PerformEvent(event, index, self,
+# other); manual, event_perform and event_user).
+_EVENT_USER_PROJECT = GameMakerProject(
+    name="EventUser",
+    scripts=_SCRIPTS,
+    objects=(
+        GameMakerObject(
+            "o_ev",
+            {
+                EVENT_CREATE: (
+                    "if (object_index == o_ev) global.ev = id;\n"
+                    "count = 0;\n"
+                    "event_user(0);\n"
+                    'trace("create:count=" + string(count));\n'
+                ),
+                (7, 10): 'count += 1;\ntrace("user0:other_is_self=" + yes_no(other.id == id));\n',
+                (7, 11): (
+                    'trace("user1:other_is_runner=" + yes_no(other.object_index == o_runner)\n'
+                    '    + ":self_is_ev=" + yes_no(object_index == o_ev));\n'
+                ),
+                (2, 3): 'trace("alarm3");\n',
+                EVENT_ROOM_START: 'trace("room_start");\n',
+                EVENT_DESTROY: 'trace("destroy_event");\n',
+                (6, 4): 'trace("left_press");\n',
+                (9, 27): 'trace("escape_press");\n',
+            },
+        ),
+        GameMakerObject("o_ev_child", {}, parent="o_ev"),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("done")) exit;\n'
+                    "global.done = true;\n"
+                    "with (o_ev) event_user(1);\n"
+                    "with (global.ev) {\n"
+                    "    event_perform(ev_alarm, 3);\n"
+                    "    event_perform(ev_other, ev_room_start);\n"
+                    "    event_perform(ev_destroy, 0);\n"
+                    "    event_perform(ev_other, ev_user0);\n"
+                    "    event_perform(ev_mouse, ev_left_press);\n"
+                    "    event_perform(ev_keypress, vk_escape);\n"
+                    "}\n"
+                    'trace("exists:" + yes_no(instance_exists(global.ev)) + ":count=" + string(global.ev.count));\n'
+                    "with (o_ev_child) event_user(0);\n"
+                    "var n = 5;\n"
+                    "with (global.ev) event_user(n - 5);\n"
+                    "with (global.ev) event_user(7);\n"
+                    "with (global.ev) event_perform(ev_step, ev_step_end);\n"
+                    'trace("done:count=" + string(global.ev.count));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_ev", "o_ev", 0, 0),
+                        RoomInstance("inst_ev_child", "o_ev_child", 10, 0),
+                        RoomInstance("inst_runner", "o_runner", 20, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_ev", "inst_ev_child", "inst_runner"),
+        ),
+    ),
+)
+_EVENT_USER_TRACE = [
+    "user0:other_is_self=yes",
+    "create:count=1",
+    "user0:other_is_self=yes",
+    "create:count=1",
+    "room_start",
+    "room_start",
+    "user1:other_is_runner=yes:self_is_ev=yes",
+    "user1:other_is_runner=yes:self_is_ev=no",
+    "alarm3",
+    "room_start",
+    "destroy_event",
+    "user0:other_is_self=no",
+    "left_press",
+    "escape_press",
+    "exists:yes:count=2",
+    "user0:other_is_self=no",
+    "user0:other_is_self=no",
+    "done:count=3",
+]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -217,6 +315,9 @@ class TestInstanceEventsGodot(unittest.TestCase):
 
     def test_create_variables_and_destroy_without_the_destroy_event(self) -> None:
         self.assertEqual(self._run_trace(_CREATE_DESTROY_ARGUMENTS_PROJECT), _CREATE_DESTROY_ARGUMENTS_TRACE)
+
+    def test_event_user_and_event_perform_run_events_at_once(self) -> None:
+        self.assertEqual(self._run_trace(_EVENT_USER_PROJECT), _EVENT_USER_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

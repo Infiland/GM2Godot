@@ -444,16 +444,7 @@ def _emit_expression(
             POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _StructLiteral):
-        fields = ", ".join(
-            _emit_struct_field(
-                field_name,
-                field_value,
-                local_names,
-                scope_context=scope_context,
-            )
-            for field_name, field_value in expr.fields
-        )
-        return f"GMRuntime.gml_struct({{{fields}}})", POSTFIX_PRECEDENCE
+        return _emit_struct_literal(expr, local_names, scope_context), POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
         if _is_alarm_array_access(expr, local_names):
             index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
@@ -685,6 +676,29 @@ def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
         return False
     stripped = line.lstrip("\t")
     return stripped == "pass" or stripped == "return" or stripped.startswith("return ")
+
+
+def _emit_struct_literal(
+    expr: _StructLiteral,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    # A struct literal may repeat a variable name: every value is evaluated
+    # in order and the last one wins. A GDScript dictionary literal cannot
+    # repeat a key, so each repeat starts another dictionary, and the
+    # runtime merges them in order (the key keeps its first place).
+    groups: list[list[str]] = [[]]
+    group_names: set[str] = set()
+    for field_name, field_value in expr.fields:
+        if field_name in group_names:
+            groups.append([])
+            group_names = set()
+        group_names.add(field_name)
+        groups[-1].append(_emit_struct_field(field_name, field_value, local_names, scope_context=scope_context))
+    dictionaries = [f"{{{', '.join(group)}}}" for group in groups]
+    if len(dictionaries) == 1:
+        return f"GMRuntime.gml_struct({dictionaries[0]})"
+    return f"GMRuntime.gml_struct_repeated_fields([{', '.join(dictionaries)}])"
 
 
 def _emit_struct_field(

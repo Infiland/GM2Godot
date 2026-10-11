@@ -1165,6 +1165,19 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "\t), _gm2gd_mutation_value_0]",
         )
 
+    def test_struct_literals_may_repeat_a_variable_name(self):
+        # Every value is evaluated in order and the last one wins; a GDScript
+        # dictionary literal cannot repeat a key.
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: f(), a: 3, c: 4, b: 5, a: 6}"),
+            'GMRuntime.gml_struct_repeated_fields([{"a": 1, "b": GMRuntime.gml_call_named("f", [], self, other)}, '
+            '{"a": 3, "c": 4, "b": 5}, {"a": 6}])',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: 2}"),
+            'GMRuntime.gml_struct({"a": 1, "b": 2})',
+        )
+
     def test_method_rebinding_resolves_script_asset_callable_metadata(self):
         self.assertEqual(
             transpile_gml_expression(

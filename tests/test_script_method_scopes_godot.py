@@ -138,6 +138,36 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["count:2:2/3:3"])
 
+    def test_struct_literals_may_repeat_a_variable_name(self) -> None:
+        scripts = {
+            "scr_colours": (
+                "function colours() {\n"
+                "    global.order = \"\";\n"
+                "    return {\n"
+                "        c_red: mark(\"r\", 1),\n"
+                "        c_gray: mark(\"g\", 2),\n"
+                "        c_blue: mark(\"b\", 3),\n"
+                "        c_gray: mark(\"G\", 4),\n"
+                "    };\n"
+                "}\n"
+                "\n"
+                "function mark(_label, _value) {\n"
+                "    global.order += _label;\n"
+                "    return _value;\n"
+                "}\n"
+            ),
+        }
+        create_code = (
+            "var _colours = colours();\n"
+            'trace("gray:" + string(_colours.c_gray) + ":" + global.order + ":"'
+            " + string(variable_struct_names_count(_colours)));\n"
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["gray:4:rgbG:3"])
+
 
 if __name__ == "__main__":
     unittest.main()

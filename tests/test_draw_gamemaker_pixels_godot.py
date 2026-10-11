@@ -9,6 +9,10 @@ draws:
 - draw_roundrect's corner ellipses are xrad by yrad, capped at the rectangle,
   so a corner's radius is half of them (yyWebGL.js
   WebGL_draw_roundrect_color_EXT_RELEASE, ported below);
+- draw_sprite_part clips the part to the frame and leaves the visible pixels
+  where they would have been (yyWebGL.js WebGL_DrawPart_RELEASE), while
+  draw_sprite_general does not clip, so texels outside the frame stay empty
+  (WebGL_TextureDrawWH_RELEASE);
 """
 from __future__ import annotations
 
@@ -58,6 +62,30 @@ _ROUNDRECTS = (
 )
 _ROUNDRECT_REGION = (0, 34, 128, 76)
 
+# (call, GameMaker's destination x, y, width, height, source left, top,
+# width, height); integer scales so every pixel centre samples one texel.
+_PART_CASES = (
+    ("gml_draw_sprite_part(tex, 0, -2, 0, 4, 3, 2, 80)", (4, 80, 2, 3), (0, 0, 2, 3)),
+    ("gml_draw_sprite_part(tex, 0, 1, -2, 3, 4, 10, 80)", (10, 82, 3, 2), (1, 0, 3, 2)),
+    ("gml_draw_sprite_part(tex, 0, 3, 1, 6, 6, 18, 80)", (18, 80, 2, 2), (3, 1, 2, 2)),
+    ("gml_draw_sprite_part_ext(tex, 0, -2, -1, 4, 3, 26, 80, 2, 2, 0xffffff, 1)", (30, 82, 4, 4), (0, 0, 2, 2)),
+    ("gml_draw_sprite_part_ext(tex, 0, -1, 0, 3, 2, 38, 80, 3, 1, 0xffffff, 1)", (41, 80, 6, 2), (0, 0, 2, 2)),
+)
+# draw_sprite_general: (call, x, y, xscale, yscale, left, top, width, height).
+_GENERAL_CASES = (
+    ("gml_draw_sprite_general(tex, 0, -2, 0, 4, 3, 56, 80, 1, 1, 0, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 1)",
+     (56, 80, 1, 1), (-2, 0, 4, 3)),
+    ("gml_draw_sprite_general(tex, 0, 3, -1, 4, 3, 64, 80, 2, 2, 0, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 1)",
+     (64, 80, 2, 2), (3, -1, 4, 3)),
+    ("gml_draw_sprite_general(tex, 0, 1, 1, 3, 2, 76, 80, 2, 1, 0, 0xffffff, 0xffffff, 0xffffff, 0xffffff, 1)",
+     (76, 80, 2, 1), (1, 1, 3, 2)),
+)
+_PART_REGION = (0, 78, 128, 100)
+
+
+def _texel(column: int, row: int) -> Pixel:
+    return (40 * column + 40, 70 * row + 60, 250 - 30 * column)
+
 
 # The scene draws every case in _ready; `tex` is a 5x3 texture whose texels
 # all differ and `tm` a hidden tilemap layer of two white 4x4 cells.
@@ -71,6 +99,8 @@ def _draw_script() -> str:
             calls.append(f"gml_draw_roundrect({x1}, {y1}, {x2}, {y2}, false)")
         else:
             calls.append(f"gml_draw_roundrect_ext({x1}, {y1}, {x2}, {y2}, {xrad}, {yrad}, false)")
+    calls += [case[0] for case in _PART_CASES]
+    calls += [case[0] for case in _GENERAL_CASES]
     body = "".join(f"\tGMRuntime.{call}\n" for call in calls)
     return (
         "extends Node2D\n\n"
@@ -157,6 +187,25 @@ def _convex_coverage(rim: list[tuple[float, float]], px: float, py: float) -> bo
         if distance <= 1e-3:
             inside = False
     return True if inside else None
+
+
+def _paint_part(
+    expected: dict[tuple[int, int], Pixel],
+    destination: tuple[float, float, float, float],
+    source: tuple[float, float, float, float],
+) -> None:
+    """Paint source texels stretched over the destination rect, nearest sampling.
+
+    Texels outside the frame are left empty like GameMaker's texture page.
+    """
+    dx, dy, dw, dh = destination
+    sx, sy, sw, sh = source
+    for py in range(math.ceil(dy - 0.5), math.ceil(dy + dh - 0.5)):
+        for px in range(math.ceil(dx - 0.5), math.ceil(dx + dw - 0.5)):
+            column = math.floor(sx + (px + 0.5 - dx) / dw * sw)
+            row = math.floor(sy + (py + 0.5 - dy) / dh * sh)
+            if 0 <= column < _FRAME[0] and 0 <= row < _FRAME[1]:
+                expected[(px, py)] = _texel(column, row)
 
 
 def _region_pixels(image: Image.Image, region: Region) -> Iterable[tuple[int, int, Pixel]]:
@@ -266,6 +315,14 @@ class TestDrawGameMakerPixelsGodot(unittest.TestCase):
             return _BLACK
 
         self._assert_region(_ROUNDRECT_REGION, expected)
+
+    def test_sprite_parts_clip_to_the_frame_like_gamemaker(self) -> None:
+        painted: dict[tuple[int, int], Pixel] = {}
+        for _call, destination, source in _PART_CASES:
+            _paint_part(painted, destination, source)
+        for _call, (x, y, xscale, yscale), (left, top, width, height) in _GENERAL_CASES:
+            _paint_part(painted, (x, y, width * xscale, height * yscale), (left, top, width, height))
+        self._assert_region(_PART_REGION, lambda x, y: painted.get((x, y), _BLACK))
 
 
 if __name__ == "__main__":

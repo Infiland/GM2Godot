@@ -135,8 +135,9 @@ static func gml_draw_sprite_part(sprite, subimg, left, top, width, height, x, y)
 	var frame = _gml_draw_sprite_frame(sprite, subimg)
 	if frame == null:
 		return null
-	var source = _gml_draw_source_rect(left, top, width, height, frame["size"])
-	_gml_draw_texture_part(frame["texture"], source, x, y, 1, 1, 0, 0xffffff, 1, Vector2.ZERO, true)
+	var part = _gml_draw_part_clip(left, top, width, height, frame["size"])
+	var clip = part[1]
+	_gml_draw_texture_part(frame["texture"], part[0], _gml_draw_real(x) + clip.x, _gml_draw_real(y) + clip.y, 1, 1, 0, 0xffffff, 1, Vector2.ZERO, true)
 	return null
 
 
@@ -144,20 +145,22 @@ static func gml_draw_sprite_part_ext(sprite, subimg, left, top, width, height, x
 	var frame = _gml_draw_sprite_frame(sprite, subimg)
 	if frame == null:
 		return null
-	var source = _gml_draw_source_rect(left, top, width, height, frame["size"])
-	_gml_draw_texture_part(frame["texture"], source, x, y, xscale, yscale, 0, colour, alpha, Vector2.ZERO)
+	var part = _gml_draw_part_clip(left, top, width, height, frame["size"])
+	var scale = Vector2(_gml_draw_real(xscale), _gml_draw_real(yscale))
+	var offset = part[1] * scale
+	_gml_draw_texture_part(frame["texture"], part[0], _gml_draw_real(x) + offset.x, _gml_draw_real(y) + offset.y, scale.x, scale.y, 0, colour, alpha, Vector2.ZERO)
 	return null
 
 
 # The part's top-left corner lands on (x, y) and rotation turns around it; the
 # four colours apply to the top-left, top-right, bottom-right and bottom-left
-# corners.
+# corners. GameMaker does not clip the part to the frame here.
 static func gml_draw_sprite_general(sprite, subimg, left, top, width, height, x, y, xscale, yscale, rot, c1, c2, c3, c4, alpha):
 	var frame = _gml_draw_sprite_frame(sprite, subimg)
 	if frame == null:
 		return null
-	var source = _gml_draw_source_rect(left, top, width, height, frame["size"])
-	if source.size.x <= 0.0 or source.size.y <= 0.0:
+	var source = Rect2(_gml_draw_real(left), _gml_draw_real(top), _gml_draw_real(width), _gml_draw_real(height))
+	if source.size.x == 0.0 or source.size.y == 0.0:
 		return null
 	var origin = Vector2(_gml_draw_real(x), _gml_draw_real(y))
 	var angle = deg_to_rad(-_gml_draw_real(rot))
@@ -170,7 +173,10 @@ static func gml_draw_sprite_general(sprite, subimg, left, top, width, height, x,
 		_gml_draw_colour_value(c3, alpha),
 		_gml_draw_colour_value(c4, alpha),
 	])
-	_gml_draw_textured_quad(frame["texture"], source, points, colours)
+	if Rect2(Vector2.ZERO, frame["size"]).encloses(source.abs()):
+		_gml_draw_textured_quad(frame["texture"], source, points, colours)
+	else:
+		_gml_draw_textured_quad_in_frame(frame["texture"], frame["size"], source, points, colours)
 	return null
 
 
@@ -1444,6 +1450,60 @@ static func _gml_draw_textured_quad(texture, source, points, colours):
 	target.draw_triangles(points, colours, uvs, mapping[0], PackedInt32Array([0, 1, 2, 2, 3, 0]))
 
 
+# Draws the quad like _gml_draw_textured_quad where `source` reaches outside
+# the frame. GameMaker samples the empty texture page around the sprite there,
+# so each of the quad's two triangles is clipped to the frame's texels: the
+# rest stays empty and colours keep the whole quad's interpolation.
+static func _gml_draw_textured_quad_in_frame(texture, frame_size, source, points, colours):
+	var target = _gml_draw_target()
+	if target == null or not (texture is Texture2D):
+		return
+	if not _gml_draw_alpha_test_passes(colours[0].a):
+		return
+	var mapping = _gml_draw_texture_uv(texture, Rect2(Vector2.ZERO, frame_size))
+	if mapping.is_empty():
+		return
+	var uv = mapping[1]
+	var texels = [source.position, Vector2(source.end.x, source.position.y), source.end, Vector2(source.position.x, source.end.y)]
+	var clipped_points = PackedVector2Array()
+	var clipped_colours = PackedColorArray()
+	var clipped_uvs = PackedVector2Array()
+	var indices = PackedInt32Array()
+	for triangle in [[0, 1, 2], [2, 3, 0]]:
+		var polygon = []
+		for corner in triangle:
+			polygon.append([points[corner], texels[corner], colours[corner]])
+		for plane in [[0, 0.0, 1.0], [0, frame_size.x, -1.0], [1, 0.0, 1.0], [1, frame_size.y, -1.0]]:
+			polygon = _gml_draw_clip_polygon(polygon, plane[0], plane[1], plane[2])
+		var base = clipped_points.size()
+		for vertex in polygon:
+			clipped_points.append(vertex[0])
+			clipped_uvs.append(uv.position + vertex[1] / frame_size * uv.size)
+			clipped_colours.append(vertex[2])
+		for index in range(1, polygon.size() - 1):
+			indices.append_array([base, base + index, base + index + 1])
+	if not indices.is_empty():
+		target.draw_triangles(clipped_points, clipped_colours, clipped_uvs, mapping[0], indices)
+
+
+# Keeps the part of a convex polygon of [position, texel, colour] vertices
+# whose texel coordinate on `axis` is on the `side` (1 or -1) of `bound`.
+static func _gml_draw_clip_polygon(polygon, axis, bound, side):
+	var kept = []
+	var count = polygon.size()
+	for index in range(count):
+		var current = polygon[index]
+		var following = polygon[(index + 1) % count]
+		var current_distance = (current[1][axis] - bound) * side
+		var following_distance = (following[1][axis] - bound) * side
+		if current_distance >= 0.0:
+			kept.append(current)
+		if (current_distance >= 0.0) != (following_distance >= 0.0):
+			var weight = current_distance / (current_distance - following_distance)
+			kept.append([current[0].lerp(following[0], weight), current[1].lerp(following[1], weight), current[2].lerp(following[2], weight)])
+	return kept
+
+
 # Texture RID and normalized UV rect for raw vertex drawing; atlas textures map
 # into their atlas.
 static func _gml_draw_texture_uv(texture, source):
@@ -1860,12 +1920,20 @@ static func _gml_draw_alpha_test_allows(alpha):
 	return resolved_alpha >= _gml_draw_real(_gml_draw_state["alpha_test_ref"])
 
 
-static func _gml_draw_source_rect(left, top, width, height, frame_size):
-	var source_left = clamp(_gml_draw_real(left), 0.0, frame_size.x)
-	var source_top = clamp(_gml_draw_real(top), 0.0, frame_size.y)
-	var source_width = clamp(_gml_draw_real(width), 0.0, frame_size.x - source_left)
-	var source_height = clamp(_gml_draw_real(height), 0.0, frame_size.y - source_top)
-	return Rect2(Vector2(source_left, source_top), Vector2(source_width, source_height))
+# GameMaker's Graphics_DrawPart (yyWebGL.js WebGL_DrawPart_RELEASE) clips a
+# part to the frame: columns left of it and rows above it are dropped and the
+# rest stays where it would have been drawn, so the destination moves by the
+# clipped amount (the second value, in frame pixels). A part with no size left
+# draws nothing.
+static func _gml_draw_part_clip(left, top, width, height, frame_size):
+	var start = Vector2(_gml_draw_real(left), _gml_draw_real(top))
+	var clip = Vector2(max(-start.x, 0.0), max(-start.y, 0.0))
+	start += clip
+	var size = Vector2(
+		min(_gml_draw_real(width) - clip.x, frame_size.x - start.x),
+		min(_gml_draw_real(height) - clip.y, frame_size.y - start.y)
+	)
+	return [Rect2(start, size), clip]
 
 
 static func _gml_draw_sprite_frame(sprite, subimg):

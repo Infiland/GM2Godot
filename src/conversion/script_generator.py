@@ -254,6 +254,7 @@ def _collision_dirty_line(track_collision: bool) -> str:
     return "\n\t\t_gm_collision_changed()" if track_collision else ""
 
 
+_LAYER_MOVE_EXIT_GUARD = '\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn'
 _COLLISION_NOTIFICATION_BODY = (
     "\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
     " or what == NOTIFICATION_EXIT_TREE:"
@@ -628,7 +629,9 @@ def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConf
 
 
 def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    cleanup_lines: list[str] = []
+    # An instance moving to another layer node stays the same live instance:
+    # no CleanUp event, and it stays registered.
+    cleanup_lines: list[str] = [_LAYER_MOVE_EXIT_GUARD]
     if object_runtime.inherit_exit_tree and body.strip() == "pass":
         cleanup_lines.append("\tsuper._exit_tree()")
     elif body.strip() != "pass":

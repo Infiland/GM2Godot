@@ -18,6 +18,10 @@ choices used for a project.
   every depth in use (layers, `layer_create`/`layer_depth`, instance `depth`
   assignments and `part_system_depth`) again whenever a new one appears. The
   order is exact for up to 8193 distinct depths in use at once.
+- Assigning an instance a `depth` that does not truncate to its room layer's
+  depth moves the instance node off the layer to the room root (GameMaker's
+  managed layer at that depth), keeping `x`/`y`; it stays the same live
+  instance, so no CleanUp event runs for the move.
 - Every generated room has a `GMGUI` `CanvasLayer` reserved for Draw GUI phases.
 - Tile layers use Godot 4 `TileMapLayer` when the source tile data can be decoded.
 - Native Godot callbacks and signals do not define GameMaker event order; runtime

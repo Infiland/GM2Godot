@@ -222,10 +222,7 @@ static func gml_layer_add_instance(layer, instance):
 		return false
 	if instance_node.get_parent() == layer_node:
 		return true
-	if instance_node.get_parent() != null:
-		instance_node.reparent(layer_node, true)
-	else:
-		layer_node.add_child(instance_node)
+	_gml_instance_move_to_parent(instance_node, layer_node, true)
 	# The instance now has the layer's depth instead of one assigned earlier.
 	if instance_node.has_meta(GML_EXPLICIT_DEPTH_META):
 		instance_node.remove_meta(GML_EXPLICIT_DEPTH_META)

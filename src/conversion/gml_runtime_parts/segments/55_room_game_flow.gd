@@ -305,6 +305,10 @@ static func _gml_room_dispatch_lifecycle(root_node, method_name):
 	for node in _gml_room_tree_nodes(root_node):
 		if node == null or not node.has_method(method_name):
 			continue
+		# Like the runner's PerformEvent, instances destroyed earlier (even
+		# in the same step) receive no further events.
+		if not _gml_event_scheduler_instance_valid(node):
+			continue
 		# Game/room start and end are Other events: after a room change
 		# request only persistent instances still receive them.
 		if _gml_event_scheduler_event_blocked(node, true):

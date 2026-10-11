@@ -9,6 +9,7 @@ from tests.gamemaker_project_support import (
     EVENT_CREATE,
     EVENT_GAME_START,
     EVENT_ROOM_START,
+    EVENT_STEP,
     GameMakerObject,
     GameMakerProject,
     GameMakerRoom,
@@ -20,6 +21,8 @@ from tests.gamemaker_project_support import (
     write_gamemaker_project,
 )
 from tests.godot_test_support import find_smoke_godot_binary
+
+EVENT_ROOM_END = (7, 5)
 
 _TRACE_SCRIPT = (
     "function trace(_text) {\n"
@@ -94,9 +97,64 @@ _REDIRECT_PROJECT = GameMakerProject(
 )
 _REDIRECT_TRACE = ["create_go", "code_go", "room_code_init", "create_next"]
 
+# Destroyed instances receive no further events: one that destroys itself in
+# its Create event gets no Game Start or Room Start, one destroyed by an
+# earlier Room Start event gets no Room Start, and one destroyed in the step
+# that changes the room gets no Room End.
+_DESTROYED_PROJECT = GameMakerProject(
+    name="DestroyedLifecycle",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_gone",
+            {
+                EVENT_CREATE: "instance_destroy();\n",
+                EVENT_GAME_START: 'trace("game_start_gone");\n',
+                EVENT_ROOM_START: 'trace("room_start_gone");\n',
+            },
+        ),
+        GameMakerObject("o_killer", {EVENT_ROOM_START: 'trace("room_start_killer");\ninstance_destroy(o_victim);\n'}),
+        GameMakerObject("o_victim", {EVENT_ROOM_START: 'trace("room_start_victim");\n'}),
+        GameMakerObject(
+            "o_leaver",
+            {
+                EVENT_STEP: (
+                    'if (room == r_one) {\n    trace("leave");\n    instance_destroy(o_ender);\n    room_goto(r_two);\n}\n'
+                ),
+            },
+        ),
+        GameMakerObject("o_ender", {EVENT_ROOM_END: 'trace("room_end_ender");\n'}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_gone", "o_gone", 0, 0),
+                        RoomInstance("inst_killer", "o_killer", 0, 0),
+                        RoomInstance("inst_victim", "o_victim", 0, 0),
+                        RoomInstance("inst_leaver", "o_leaver", 0, 0),
+                        RoomInstance("inst_ender", "o_ender", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_gone", "inst_killer", "inst_victim", "inst_leaver", "inst_ender"),
+        ),
+        GameMakerRoom("r_two", layers=(), creation_order=()),
+    ),
+)
+_DESTROYED_TRACE = ["room_start_killer", "leave"]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
+
+    def test_destroyed_instances_get_no_room_or_game_events(self) -> None:
+        self.assertEqual(self._run_trace(_DESTROYED_PROJECT), _DESTROYED_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

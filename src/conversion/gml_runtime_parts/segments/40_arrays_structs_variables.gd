@@ -837,6 +837,7 @@ static func _gml_object_has_builtin_field(object_value, member_name):
 
 
 const GML_OBJECT_BBOX_FIELDS = ["bbox_left", "bbox_top", "bbox_right", "bbox_bottom"]
+const GML_OBJECT_SPRITE_METRIC_FIELDS = ["sprite_width", "sprite_height", "sprite_xoffset", "sprite_yoffset"]
 const GML_OBJECT_DYNAMIC_FIELDS_META = "_gm2godot_dynamic_fields"
 # How an instance holds a member (see _gml_object_member_kind): as one of the
 # node's builtin fields, one of its properties (script variables included), or
@@ -878,10 +879,11 @@ static func _gml_object_member_kind(object_value, key):
 
 
 # Whether a member of a Node2D instance maps to the node itself rather than to
-# a script variable: x and y are its position and the bbox_* variables are
-# computed from its collision mask. A converted object declares image_angle,
-# image_xscale and image_yscale with setters that update the node, so those
-# script variables hold the GML values when they exist.
+# a script variable: x and y are its position, the bbox_* variables are
+# computed from its collision mask and sprite_width, sprite_height,
+# sprite_xoffset and sprite_yoffset from its sprite. A converted object
+# declares image_angle, image_xscale and image_yscale with setters that update
+# the node, so those script variables hold the GML values when they exist.
 static func _gml_object_uses_builtin_field(object_value, member_name):
 	if not (object_value is Node2D):
 		return false
@@ -892,6 +894,8 @@ static func _gml_object_uses_builtin_field(object_value, member_name):
 			return not (key in object_value)
 		"bbox_left", "bbox_top", "bbox_right", "bbox_bottom":
 			return true
+		"sprite_width", "sprite_height", "sprite_xoffset", "sprite_yoffset":
+			return true
 	return false
 
 
@@ -899,6 +903,8 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 	var key = str(member_name)
 	if object_value is Node2D and GML_OBJECT_BBOX_FIELDS.has(key):
 		return _gml_collision_instance_bbox_value(object_value, key)
+	if object_value is Node2D and GML_OBJECT_SPRITE_METRIC_FIELDS.has(key):
+		return _gml_object_sprite_metric(object_value, key)
 	if object_value is Node2D:
 		var in_sequence = _gml_sequence_instances_exist and bool(
 			object_value.get_meta("gamemaker_in_sequence", false)
@@ -936,9 +942,29 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 	return gml_undefined()
 
 
+# sprite_width and sprite_height are the size of the instance's sprite, and
+# sprite_xoffset and sprite_yoffset its origin, times image_xscale or
+# image_yscale; all are 0 when the instance has no sprite (the runner's
+# yyInstance getters).
+static func _gml_object_sprite_metric(object_value, key):
+	var sprite = gml_struct_get(object_value, "sprite_index")
+	var data = _gml_draw_sprite_data(sprite)
+	if data == null:
+		return 0
+	if key == "sprite_width" or key == "sprite_xoffset":
+		var xscale = _to_real(gml_struct_get(object_value, "image_xscale"))
+		if key == "sprite_width":
+			return gml_sprite_get_width(sprite) * xscale
+		return _to_real(data["origin"].x) * xscale
+	var yscale = _to_real(gml_struct_get(object_value, "image_yscale"))
+	if key == "sprite_height":
+		return gml_sprite_get_height(sprite) * yscale
+	return _to_real(data["origin"].y) * yscale
+
+
 static func _gml_object_builtin_field_set(object_value, member_name, value):
 	var key = str(member_name)
-	if GML_OBJECT_BBOX_FIELDS.has(key):
+	if GML_OBJECT_BBOX_FIELDS.has(key) or GML_OBJECT_SPRITE_METRIC_FIELDS.has(key):
 		# Read-only in GameMaker.
 		return value
 	if object_value is Node2D:

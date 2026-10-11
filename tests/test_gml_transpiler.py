@@ -2256,6 +2256,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_rejects_writes_to_read_only_builtin_variables(self):
         for source in (
             "bbox_left = 0",
+            "sprite_width = 16",
+            "sprite_yoffset += 1",
             "image_number += 1",
             "room++",
             "view_current[0] = 1",
@@ -3388,6 +3390,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("bbox_bottom <= platform.bbox_top"),
             'GMRuntime.gml_lte(GMRuntime.gml_struct_get(self, "bbox_bottom"), '
             'GMRuntime.gml_selector_get(platform, "bbox_top"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("x + sprite_width - other.sprite_xoffset"),
+            'GMRuntime.gml_sub(GMRuntime.gml_add(position.x, GMRuntime.gml_struct_get(self, "sprite_width")), '
+            'GMRuntime.gml_selector_get(other, "sprite_xoffset"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) h = sprite_height + sprite_yoffset;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "h", GMRuntime.gml_add('
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_height"), '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_yoffset")))',
         )
         self.assertEqual(
             transpile_gml_code("with (all) left = bbox_left;", indent=""),

@@ -83,9 +83,12 @@ from .utils import (
 )
 
 # Read-only instance variables the runtime computes on demand (the bounding
-# box from the collision mask); they have no script variable.
+# box from the collision mask, the scaled sprite size and origin); they have
+# no script variable.
 _COMPUTED_INSTANCE_VARIABLES = frozenset(
-    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items() if metadata.subsystem == "collision_bounds"
+    name
+    for name, metadata in BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.subsystem in {"collision_bounds", "sprite_metrics"}
 )
 
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -198,7 +201,7 @@ def _emit_builtin_instance_name(value: str, scope_context: _ScopeContext) -> tup
     if value in INSTANCE_NAME_REPLACEMENTS:
         return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
     if value in _COMPUTED_INSTANCE_VARIABLES:
-        # The bounding box has no script variable; the runtime computes it.
+        # These have no script variable; the runtime computes them.
         return (
             f"GMRuntime.gml_struct_get({scope_context.self_expression}, {json.dumps(value)})",
             POSTFIX_PRECEDENCE,

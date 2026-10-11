@@ -1094,7 +1094,8 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('position = Vector2(100, 200)', content)
-        self.assertIn('rotation_degrees = 90', content)
+        # GameMaker turns counter-clockwise on screen, Godot clockwise.
+        self.assertIn('rotation_degrees = -90\n', content)
         self.assertIn('scale = Vector2(2, 0.5)', content)
         self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "instance"', content)
@@ -1191,7 +1192,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[ext_resource type="PackedScene" path="res://sprites/s_decor/s_decor.tscn" id="1"]', content)
         self.assertIn('[node name="spr_decor_1" parent="Assets" instance=ExtResource("1")]', content)
         self.assertIn('position = Vector2(24, 48)', content)
-        self.assertIn('rotation_degrees = 15', content)
+        self.assertIn('rotation_degrees = -15\n', content)
         self.assertIn('scale = Vector2(2, 3)', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "sprite"', content)

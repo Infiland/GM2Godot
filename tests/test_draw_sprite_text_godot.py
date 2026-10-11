@@ -233,6 +233,8 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
         """\
         extends Node2D
 
+        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
         func _check(condition, message):
         \tif not condition:
         \t\tpush_error(str(message))
@@ -245,7 +247,23 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
         \tawait get_tree().process_frame
         \tif not _check(abs(instance.image_angle - 90.0) < 0.01, "room rotation did not hydrate image_angle"):
         \t\treturn
-        \tif not _check(abs(instance.rotation_degrees - 90.0) < 0.01, "image_angle did not apply to node rotation"):
+        \t# GameMaker angles turn counter-clockwise on screen: at 90 degrees the
+        \t# sprite's +x axis points up the screen (towards -y).
+        \tif not _check(instance.transform.basis_xform(Vector2(1, 0)).distance_to(Vector2(0, -2)) < 0.01, "image_angle 90 did not turn the sprite counter-clockwise: " + str(instance.transform)):
+        \t\treturn
+        \tinstance.image_angle = 30.0
+        \tvar expected_axis = Vector2(cos(deg_to_rad(30.0)), -sin(deg_to_rad(30.0))) * 2.0
+        \tif not _check(instance.transform.basis_xform(Vector2(1, 0)).distance_to(expected_axis) < 0.01, "image_angle 30 did not turn the sprite counter-clockwise: " + str(instance.transform)):
+        \t\treturn
+        \tif not _check(abs(GMRuntime.gml_struct_get(instance, "image_angle") - 30.0) < 0.01, "image_angle did not read back"):
+        \t\treturn
+        \tinstance.image_angle = 90.0
+        \tvar plain = Node2D.new()
+        \tadd_child(plain)
+        \tGMRuntime.gml_struct_set(plain, "image_angle", 90)
+        \tif not _check(plain.transform.basis_xform(Vector2(1, 0)).distance_to(Vector2(0, -1)) < 0.01, "image_angle on a plain node did not turn it counter-clockwise: " + str(plain.transform)):
+        \t\treturn
+        \tif not _check(abs(GMRuntime.gml_struct_get(plain, "image_angle") - 90.0) < 0.01, "image_angle on a plain node did not read back"):
         \t\treturn
         \tif not _check(abs(instance.image_xscale - 2.0) < 0.01 and abs(instance.image_yscale - 0.5) < 0.01, "room scale did not hydrate image scale"):
         \t\treturn
@@ -276,7 +294,7 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
 
         [node name="inst_rotated" parent="." instance=ExtResource("2")]
         position = Vector2(100, 200)
-        rotation_degrees = 90
+        rotation_degrees = -90
         scale = Vector2(2, 0.5)
         metadata/gamemaker_image_angle = 90
         metadata/gamemaker_image_xscale = 2

@@ -286,7 +286,7 @@ def _write_probe(project_dir: Path, room_path: str) -> None:
         \t\treturn
         \tif not _check(host.scale == Vector2(1.5, 0.75), "element scale mismatch"):
         \t\treturn
-        \tif not _check(abs(host.rotation_degrees - 15.0) < 0.001, "element rotation mismatch"):
+        \tif not _check(abs(host.rotation_degrees + 15.0) < 0.001, "element rotation mismatch (GameMaker turns counter-clockwise)"):
         \t\treturn
         \tvar system = host.get_meta("gamemaker_particle_system_handle", null)
         \tif not _check(GMRuntime.gml_part_system_exists(system), "authored system was not instantiated"):

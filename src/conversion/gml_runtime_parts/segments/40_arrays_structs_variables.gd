@@ -838,8 +838,10 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 				else object_value.position.y
 			)
 		if key == "image_angle":
-			return (
-				-rad_to_deg(object_value.global_rotation)
+			# GameMaker angles turn counter-clockwise on screen, Godot
+			# rotations clockwise (y points down).
+			return 0.0 - (
+				rad_to_deg(object_value.global_rotation)
 				if in_sequence
 				else object_value.rotation_degrees
 			)
@@ -877,7 +879,7 @@ static func _gml_object_builtin_field_set(object_value, member_name, value):
 				object_value.position.y = _to_real(value)
 			return value
 		if key == "image_angle":
-			object_value.rotation_degrees = _to_real(value)
+			object_value.rotation_degrees = -_to_real(value)
 			return value
 		if key == "image_xscale":
 			object_value.scale.x = _to_real(value)

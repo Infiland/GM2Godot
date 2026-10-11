@@ -831,9 +831,7 @@ def _asset_transform_lines(asset: JsonObject) -> list[str]:
             x=_format_number(asset_fields.x),
             y=_format_number(asset_fields.y),
         ),
-        "rotation_degrees = {rotation}".format(
-            rotation=_format_number(asset_fields.rotation)
-        ),
+        f"rotation_degrees = {_godot_rotation_degrees(asset_fields.rotation)}",
         "scale = Vector2({scale_x}, {scale_y})".format(
             scale_x=_format_number(asset_fields.scale_x),
             scale_y=_format_number(asset_fields.scale_y),
@@ -1231,9 +1229,7 @@ def _instance_scene_lines(
             x=_format_number(instance_fields.x),
             y=_format_number(instance_fields.y),
         ),
-        "rotation_degrees = {rotation}".format(
-            rotation=_format_number(instance_fields.rotation)
-        ),
+        f"rotation_degrees = {_godot_rotation_degrees(instance_fields.rotation)}",
         "scale = Vector2({scale_x}, {scale_y})".format(
             scale_x=_format_number(instance_fields.scale_x),
             scale_y=_format_number(instance_fields.scale_y),
@@ -1376,6 +1372,20 @@ def _format_number(value: JsonValue) -> str:
     if number.is_integer():
         return str(int(number))
     return str(number)
+
+
+def _godot_rotation_degrees(value: JsonValue) -> str:
+    """Godot rotation_degrees for a GameMaker room rotation.
+
+    GameMaker angles turn counter-clockwise on screen (the manual's
+    image_angle page: 90 is up), while a positive Godot rotation turns
+    clockwise because y points down, so the angle changes sign.
+    """
+    try:
+        number = float(value) if isinstance(value, (str, int, float)) else 0.0
+    except (TypeError, ValueError):
+        number = 0.0
+    return _format_number(-number)
 
 
 def _truthy(value: JsonValue) -> bool:

@@ -629,7 +629,8 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('image_yscale = get_meta("gamemaker_image_yscale")', content)
         self.assertIn('image_blend = get_meta("gamemaker_image_blend")', content)
         self.assertIn('image_alpha = get_meta("gamemaker_image_alpha")', content)
-        self.assertIn('rotation_degrees = float(image_angle)', content)
+        self.assertIn('rotation_degrees = -float(image_angle)', content)
+        self.assertIn('image_angle = 0.0 - rotation_degrees', content)
         self.assertIn('scale = Vector2(float(image_xscale), float(image_yscale))', content)
         self.assertIn('sprite_node.modulate = _gm_image_modulate()', content)
 

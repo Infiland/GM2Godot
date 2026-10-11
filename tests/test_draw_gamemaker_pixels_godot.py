@@ -13,6 +13,8 @@ draws:
   where they would have been (yyWebGL.js WebGL_DrawPart_RELEASE), while
   draw_sprite_general does not clip, so texels outside the frame stay empty
   (WebGL_TextureDrawWH_RELEASE);
+- draw_sprite_stretched truncates x and y toward zero (yyGraphics.js
+  Graphics_DrawStretchedExt);
 """
 from __future__ import annotations
 
@@ -82,6 +84,15 @@ _GENERAL_CASES = (
 )
 _PART_REGION = (0, 78, 128, 100)
 
+# (call, GameMaker's x, y): x and y truncated toward zero, 1:1 size.
+_STRETCHED_CASES = (
+    ("gml_draw_sprite_stretched(tex, 0, 2.6, 104.7, 5, 3)", 2, 104),
+    ("gml_draw_sprite_stretched(tex, 0, 10.4, 104.2, 5, 3)", 10, 104),
+    ("gml_draw_sprite_stretched_ext(tex, 0, 18.7, 110.6, 5, 3, 0xffffff, 1)", 18, 110),
+    ("gml_draw_sprite_stretched(tex, 0, -0.6, 116.9, 5, 3)", 0, 116),
+)
+_STRETCHED_REGION = (0, 102, 40, 124)
+
 
 def _texel(column: int, row: int) -> Pixel:
     return (40 * column + 40, 70 * row + 60, 250 - 30 * column)
@@ -101,6 +112,7 @@ def _draw_script() -> str:
             calls.append(f"gml_draw_roundrect_ext({x1}, {y1}, {x2}, {y2}, {xrad}, {yrad}, false)")
     calls += [case[0] for case in _PART_CASES]
     calls += [case[0] for case in _GENERAL_CASES]
+    calls += [case[0] for case in _STRETCHED_CASES]
     body = "".join(f"\tGMRuntime.{call}\n" for call in calls)
     return (
         "extends Node2D\n\n"
@@ -323,6 +335,12 @@ class TestDrawGameMakerPixelsGodot(unittest.TestCase):
         for _call, (x, y, xscale, yscale), (left, top, width, height) in _GENERAL_CASES:
             _paint_part(painted, (x, y, width * xscale, height * yscale), (left, top, width, height))
         self._assert_region(_PART_REGION, lambda x, y: painted.get((x, y), _BLACK))
+
+    def test_stretched_sprites_truncate_their_position(self) -> None:
+        painted: dict[tuple[int, int], Pixel] = {}
+        for _call, x, y in _STRETCHED_CASES:
+            _paint_part(painted, (x, y, _FRAME[0], _FRAME[1]), (0, 0, _FRAME[0], _FRAME[1]))
+        self._assert_region(_STRETCHED_REGION, lambda x, y: painted.get((x, y), _BLACK))
 
 
 if __name__ == "__main__":

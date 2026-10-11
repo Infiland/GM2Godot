@@ -78,6 +78,24 @@ func _reference(kind, query, target, current_self, notme, prec, every):
 	return hits if every else null
 
 
+# distance_to_object worked out from scratch: the gap to the nearest listed
+# instance's new state (the instance itself included).
+func _reference_distance(current_self, target):
+	var self_state = GMRuntime._gml_collision_current_state(current_self, null)
+	var best = 10000000000.0
+	var entries = GMRuntime._gml_instance_target_entries(target)
+	if entries == null:
+		return best
+	for entry in entries:
+		var inst = entry["instance"]
+		if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			continue
+		var distance = GMRuntime._gml_collision_bbox_gap(self_state, GMRuntime._gml_collision_current_state(inst, null))
+		if distance < best:
+			best = distance
+	return best
+
+
 func _list_names(list_id):
 	var names = []
 	for index in range(GMRuntime.gml_ds_list_size(list_id)):
@@ -148,8 +166,14 @@ func _check_queries(stage, probe, boxes = []):
 	for box in boxes:
 		_add_box_queries(box, lines, rects, points, places)
 	var list_id = GMRuntime.gml_ds_list_create()
+	var selves = [probe]
+	for entry in GMRuntime._gml_instance_target_entries(_index("o_post")):
+		selves.append(entry["instance"])
 	for target_name in targets.keys():
 		var target = targets[target_name]
+		for current_self in selves:
+			var label = "%s distance_to_object from %s at %s" % [stage, _name(current_self), target_name]
+			_expect(label, GMRuntime.gml_distance_to_object(current_self, target), _reference_distance(current_self, target))
 		for line in lines:
 			var label = "%s line %s at %s" % [stage, str(line), target_name]
 			var actual = GMRuntime.gml_collision_line(probe, line[0], line[1], line[2], line[3], target, false, false)

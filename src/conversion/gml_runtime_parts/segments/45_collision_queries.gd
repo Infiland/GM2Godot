@@ -58,7 +58,11 @@ static func gml_distance_to_object(current_self, target):
 	var entries: Variant = null if target == null or is_undefined(target) else _gml_instance_target_entries(target)
 	if entries != null:
 		# An object's (or every) listed instance, as _gml_collision_find
-		# goes through them below.
+		# goes through them below: by their kept boxes when there are.
+		if not _gml_sequence_instances_exist:
+			var boxes: Variant = _gml_collision_box_list(_gml_collision_box_list_key(target), entries)
+			if boxes != null:
+				return _gml_collision_box_list_distance(self_state, boxes, best_distance)
 		for entry in entries:
 			var inst = entry["instance"]
 			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
@@ -72,6 +76,36 @@ static func gml_distance_to_object(current_self, target):
 		if distance < best_distance:
 			best_distance = distance
 	return best_distance
+
+
+# The smallest _gml_collision_bbox_gap between the state and the boxes of a
+# kept list (see _gml_collision_box_list), or `best_value` when none is
+# smaller. A freed node's box (infinitely far) never is.
+static func _gml_collision_box_list_distance(self_state, boxes_value, best_value):
+	var boxes: PackedFloat64Array = boxes_value
+	var best: float = best_value
+	var left: float = self_state["left"]
+	var top: float = self_state["top"]
+	var right: float = self_state["right"]
+	var bottom: float = self_state["bottom"]
+	var count: int = boxes.size()
+	var offset: int = 0
+	while offset < count:
+		var xd: float = 0.0
+		var yd: float = 0.0
+		if boxes[offset] > right:
+			xd = boxes[offset] - right
+		if boxes[offset + 2] < left:
+			xd = boxes[offset + 2] - left
+		if boxes[offset + 1] > bottom:
+			yd = boxes[offset + 1] - bottom
+		if boxes[offset + 3] < top:
+			yd = boxes[offset + 3] - top
+		var distance: float = sqrt(xd * xd + yd * yd)
+		if distance < best:
+			best = distance
+		offset += 4
+	return best
 
 
 static func gml_distance_to_point(current_self, x, y):

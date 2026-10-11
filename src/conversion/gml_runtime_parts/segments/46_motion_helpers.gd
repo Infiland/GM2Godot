@@ -483,9 +483,29 @@ static func _gml_motion_compute_components(instance):
 		var member_direction = instance.direction
 		if typeof(member_direction) != TYPE_FLOAT:
 			member_direction = _gml_motion_real(instance, "direction", 0.0)
-		var member_radians = member_direction * GML_MOTION_DEGREES_TO_RADIANS
-		instance.hspeed = _gml_motion_snap_whole(member_speed * _gml_motion_clamp_float(cos(member_radians)))
-		instance.vspeed = _gml_motion_snap_whole(-member_speed * _gml_motion_clamp_float(sin(member_radians)))
+		var member_radians: float = member_direction * GML_MOTION_DEGREES_TO_RADIANS
+		# _gml_motion_snap_whole(speed * _gml_motion_clamp_float(cos)) and the
+		# same with -sin, written out.
+		var cosine: float = cos(member_radians)
+		cosine = float(int(cosine * 1000000.0)) / 1000000.0 if is_finite(cosine) else 0.0
+		var sine: float = sin(member_radians)
+		sine = float(int(sine * 1000000.0)) / 1000000.0 if is_finite(sine) else 0.0
+		var horizontal: float = member_speed * cosine
+		var vertical: float = -member_speed * sine
+		var whole: float = floor(horizontal)
+		var fraction: float = horizontal - whole
+		if fraction > 0.5 or (fraction == 0.5 and fmod(whole, 2.0) != 0.0):
+			whole += 1.0
+		if absf(horizontal - whole) < GML_MOTION_WHOLE_SNAP:
+			horizontal = whole
+		whole = floor(vertical)
+		fraction = vertical - whole
+		if fraction > 0.5 or (fraction == 0.5 and fmod(whole, 2.0) != 0.0):
+			whole += 1.0
+		if absf(vertical - whole) < GML_MOTION_WHOLE_SNAP:
+			vertical = whole
+		instance.hspeed = horizontal
+		instance.vspeed = vertical
 		return
 	var speed_value = _gml_motion_real(instance, "speed", 0.0)
 	var radians = _gml_motion_real(instance, "direction", 0.0) * GML_MOTION_DEGREES_TO_RADIANS

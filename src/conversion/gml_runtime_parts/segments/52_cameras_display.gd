@@ -41,6 +41,9 @@ const GML_VIEW_LEGACY_RECT_FIELDS = {"x": true, "y": true, "width": true, "heigh
 
 # The active room's view state: {"scene", "enabled", "room_size", "persistent", "arrays", "room_cameras"}.
 static var _gml_view_state = null
+# The view state of each persistent room visited, by room scene: its views
+# and cameras live on while the room is away.
+static var _gml_view_persistent_states = {}
 static var _gml_view_follow_frame = -1
 static var _gml_view_legacy_active = false
 static var _gml_view_legacy_shadow = {}
@@ -1048,9 +1051,42 @@ static func _gml_view_activate_scene(scene):
 		return
 	var state = scene.get_meta(GML_VIEW_STATE_META) if scene.has_meta(GML_VIEW_STATE_META) else null
 	if not (state is Dictionary):
-		state = _gml_view_state_create(scene)
+		state = _gml_view_persistent_state(scene)
 		scene.set_meta(GML_VIEW_STATE_META, state)
 	_gml_view_activate_state(state)
+
+
+# A persistent room comes back with the views and cameras it had when it was
+# left (_GameMaker.js StartRoom keeps the cameras of a persistent room's
+# views); the converted room scene is new, so the kept state moves to it.
+static func _gml_view_persistent_state(scene):
+	var key = _gml_view_room_key(scene)
+	var kept = _gml_view_persistent_states.get(key, null)
+	if kept is Dictionary:
+		kept["scene"] = scene
+		return kept
+	var state = _gml_view_state_create(scene)
+	if bool(state["persistent"]) and key != "":
+		_gml_view_persistent_states[key] = state
+	return state
+
+
+static func _gml_view_room_key(scene):
+	if not (scene is Node):
+		return ""
+	return scene.scene_file_path if scene.scene_file_path != "" else str(scene.name)
+
+
+# game_restart starts every room afresh, persistent ones included.
+static func _gml_view_forget_persistent_rooms():
+	for state in _gml_view_persistent_states.values():
+		if is_same(state, _gml_view_state):
+			state["persistent"] = false
+			continue
+		for handle in state["room_cameras"]:
+			if gml_handle_is_valid(handle) and not _gml_camera_handles_match(handle, _gml_default_camera_handle):
+				gml_handle_invalidate(handle)
+	_gml_view_persistent_states.clear()
 
 
 static func _gml_view_activate_state(state):

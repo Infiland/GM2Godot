@@ -140,6 +140,7 @@ static func _gml_game_restart_now():
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
+	_gml_view_forget_persistent_rooms()
 	return _gml_room_change_to_entry(entries[0], true)
 
 

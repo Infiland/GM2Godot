@@ -48,7 +48,13 @@ func _process(_delta):
 """
 
 
-def _run_project(test: unittest.TestCase, scripts: dict[str, str], create_code: str) -> tuple[list[object], str]:
+def _run_project(
+    test: unittest.TestCase,
+    scripts: dict[str, str],
+    create_code: str,
+    *,
+    unloadable_script: str | None = None,
+) -> tuple[list[object], str]:
     godot_binary = find_smoke_godot_binary()
     if godot_binary is None:
         test.skipTest("Godot binary not available")
@@ -68,6 +74,9 @@ def _run_project(test: unittest.TestCase, scripts: dict[str, str], create_code: 
         root = Path(temporary_directory)
         write_gamemaker_project(root / "gamemaker", project)
         convert_gamemaker_project(root / "gamemaker", root / "godot")
+        if unloadable_script is not None:
+            script_path = root / "godot" / "scripts" / f"{unloadable_script}.gd"
+            script_path.write_text(script_path.read_text(encoding="utf-8") + "\nfunc (:\n", encoding="utf-8")
         add_probe_autoload(root / "godot", _PROBE)
         result = run_converted_project(godot_binary, root / "godot")
     output = result.stdout + result.stderr
@@ -167,6 +176,28 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
 
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["gray:4:rgbG:3"])
+
+    def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
+        scripts = {
+            "scr_ok": "function ok_value() { return 7; }\n",
+            "scr_broken": "function broken_value() { return 1; }\n",
+            "scr_thing": (
+                "function Thing(_size) constructor {\n"
+                "    size = _size * 2;\n"
+                "}\n"
+                "global.Counted = function() constructor {};\n"
+            ),
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("thing:" + string(new Thing(3).size) + ":" + string(is_method(global.Counted)));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code, unloadable_script="scr_broken")
+
+        self.assertIn('Failed to load script "res://scripts/scr_broken.gd"', output)
+        self.assertNotIn('Failed to load script "res://gm2godot/gml_script_registry.gd"', output)
+        self.assertEqual(trace, ["ok:7", "thing:6:true"])
 
 
 if __name__ == "__main__":

@@ -68,6 +68,7 @@ func _run():
 	_case_other_restored()
 	_case_trace()
 	_case_registry_replaced()
+	_case_room_change()
 	if _failures.is_empty():
 		print("COLLISION_EVENTS_OK")
 		get_tree().quit(0)
@@ -193,3 +194,20 @@ func _case_registry_replaced():
 	_expect("replaced registry reorders the collision table", _dispatch(), ["b:a:b<-a@900", "a:b:a<-b@908"])
 	_clear()
 	GMRuntime.gml_asset_registry_set(original)
+
+
+# Once an event asks for a room change (game_end here), the other collision
+# events of the step do not run; solid instances still move back.
+func _case_room_change():
+	GMRuntime.gml_room_set_deferred_changes(true)
+	spawn("o_a", "leaver", 1000, 0)
+	spawn("o_b", "b1", 1005, 0)
+	var wall = spawn("o_wall", "wall", 1100, 0)
+	var mover = spawn("o_a", "mover", 1110, 0)
+	mover.xprevious = 1130.0
+	_expect("a pending room change ends the collision events", _dispatch(), ["a:b:leaver<-b1@1005"])
+	_expect("the room change is still pending", GMRuntime.gml_room_change_pending(), true)
+	_expect("a solid collision still moves back", mover.position.x, 1130.0)
+	_expect("the solid instance stays", wall.position.x, 1100.0)
+	GMRuntime.gml_room_set_deferred_changes(false)
+	_clear()

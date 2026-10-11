@@ -515,6 +515,7 @@ static func gml_draw_event_dispatch_frame(instances = null):
 	_gml_draw_frame_serial += 1
 	_gml_draw_used_materials.clear()
 	if gml_application_surface_is_enabled():
+		_gml_application_surface_apply_pending_resize()
 		_gml_application_surface_ensure()
 	_gml_camera_update_visible_views()
 	_gml_draw_sinks_begin_frame()

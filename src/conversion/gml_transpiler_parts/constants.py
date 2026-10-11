@@ -1855,6 +1855,7 @@ DRAW_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "surface_reset_target": "gml_surface_reset_target",
     "surface_get_width": "gml_surface_get_width",
     "surface_get_height": "gml_surface_get_height",
+    "surface_resize": "gml_surface_resize",
     "draw_surface": "gml_draw_surface",
     "draw_surface_ext": "gml_draw_surface_ext",
     "surface_copy": "gml_surface_copy",

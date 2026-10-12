@@ -1854,7 +1854,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_time_source_get_time_remaining",
             "gml_call_later",
             "gml_call_cancel",
-            "gml_time_source_tick_all",
+            "gml_time_source_frame_tick",
+            "gml_time_source_step",
         )
         for helper_name in helper_names:
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
@@ -2968,8 +2969,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_time_alarm_scheduler_helpers(self):
         self.assertIn("const GML_ALARM_COUNT = 12", GML_RUNTIME_SCRIPT)
-        self.assertIn("const GML_TIME_SOURCE_UNITS_FRAMES = 0", GML_RUNTIME_SCRIPT)
-        self.assertIn("const GML_TIME_SOURCE_UNITS_SECONDS = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_GLOBAL = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_GAME = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_SECONDS = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_FRAMES = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_EXPIRY_NEAREST = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_EXPIRY_AFTER = 1", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_INITIAL = 0", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_ACTIVE = 1", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_PAUSED = 2", GML_RUNTIME_SCRIPT)
@@ -2982,14 +2987,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_event_scheduler_tick_alarms(instances = null, delta_frames = 1, frame = -1):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_event_scheduler_phase_order():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_event_scheduler_trace():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = GML_TIME_SOURCE_EXPIRY_AFTER):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_start(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_stop(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_pause(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_resume(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_destroy(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_destroy(handle, destroy_tree = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_frame_tick(real_usec):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_step(game_usec):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_game_step_loop_helpers(self):
         self.assertIn("static func gml_event_scheduler_pump_attach():", GML_RUNTIME_SCRIPT)

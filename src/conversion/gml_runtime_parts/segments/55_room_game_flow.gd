@@ -169,6 +169,8 @@ static func _gml_game_restart_now():
 	var tree = _gml_room_tree()
 	if tree != null and tree.current_scene != null:
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
+	# Run_EndGame(true): pending call_later callbacks do not survive.
+	gml_time_source_clear_call_later()
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
 	return _gml_room_change_to_entry(entries[0], true)

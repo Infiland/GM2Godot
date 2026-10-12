@@ -91,7 +91,13 @@ static func gml_event_scheduler_game_frame(delta_seconds = 0.0):
 	# up to GML_STEP_MAX_STEPS_PER_TICK steps. Returns the last change
 	# performed ("", "room", "game_restart" or "game_end").
 	_gml_step_frame_drawable = false
-	_gml_step_tick_usec = Time.get_ticks_usec()
+	var now = Time.get_ticks_usec()
+	# GameMaker_Tick: the global time source and the call_later sources take
+	# the real time since the last tick.
+	gml_time_source_frame_tick(
+		now - _gml_step_tick_usec if _gml_step_tick_usec >= 0 else _to_real(delta_seconds) * 1000000.0
+	)
+	_gml_step_tick_usec = now
 	var outcome = _gml_step_run_tick(max(_to_real(delta_seconds), 0.0))
 	# Without the pump's step latching, input edges last one frame.
 	gml_input_end_frame()

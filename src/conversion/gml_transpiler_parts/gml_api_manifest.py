@@ -2533,14 +2533,14 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "mp_grid_path",
         "Paths and Motion Planning",
-        "partial",
+        "implemented",
         "src.conversion.gml_runtime_parts.segments.47_paths_motion_planning",
         "yes",
         "yes",
-        "partial",
         "yes",
-        "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Finds deterministic 4/8-way routes and writes points into generated runtime path data.",
+        "yes",
+        "GameMaker_Language/GML_Reference/Movement_And_Collisions/Motion_Planning/mp_grid_path.htm",
+        "The runner's breadth-first search; writes start, cell centres and goal (whole numbers) as an open path.",
     ),
     _entry(
         "draw_set_color",

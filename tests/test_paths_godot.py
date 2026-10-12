@@ -114,6 +114,26 @@ trace("delete:" + str_bool(path_exists(p)) + "," + str_bool(path_exists(q)));
 """
 
 
+# Plans paths through an mp_grid with a wall at column 2 (open in the bottom
+# row) and a blocked cell at (4, 1) (Create of o_planner).
+_GRID_GML = """\
+var g = mp_grid_create(10, 20, 6, 5, 16, 16);
+for (var v = 0; v < 4; v++) mp_grid_add_cell(g, 2, v);
+mp_grid_add_cell(g, 4, 1);
+var p = path_add();
+path_add_point(p, 999, 999, 50);
+var ok = mp_grid_path(g, p, 13.7, 25.2, 90.9, 30.5, false);
+trace("straight:" + str_bool(ok) + "," + (path_get_closed(p) ? "closed" : "open") + "," + pts(p) + f3(path_get_length(p)));
+ok = mp_grid_path(g, p, 13.7, 25.2, 90.9, 30.5, true);
+trace("diagonal:" + str_bool(ok) + "," + pts(p) + f3(path_get_length(p)));
+ok = mp_grid_path(g, p, 13, 25, 42, 30, true);
+trace("blocked:" + str_bool(ok) + "," + string(path_get_number(p)));
+ok = mp_grid_path(g, p, 9, 25, 90, 30, true);
+trace("outside:" + str_bool(ok) + "," + string(path_get_number(p)));
+ok = mp_grid_path(g, p, 13, 25, 13, 25, true);
+trace("same:" + str_bool(ok) + "," + pts(p));
+"""
+
 @dataclass(frozen=True)
 class GameMakerPath:
     name: str
@@ -598,6 +618,36 @@ class TestPathsGodot(unittest.TestCase):
             [line for line in trace if line.startswith("dropper")],
             ["dropper:100000,50000,0,yes,yes", "dropper:100000,60000,125,yes,yes"]
             + ["dropper:100000,70000,250,yes,no"] * 8,
+        )
+
+    def test_mp_grid_path_writes_the_path_gamemaker_plans(self) -> None:
+        # mp_grid_path searches the grid breadth first (left, right, up,
+        # down, then the diagonals whose two neighbouring cells are free) and
+        # replaces the path's points with an open path from the start
+        # position through the centres of the cells in between to the goal
+        # position, all as whole numbers (Function_MotionPlanning.js). It
+        # leaves the path alone when the goal is blocked or the start is off
+        # the grid.
+        trace = self._run_trace(
+            {"o_planner": {EVENT_CREATE: _GRID_GML}},
+            (("o_planner", 0, 0),),
+            (),
+            frames=2,
+        )
+        self.assertEqual(
+            trace,
+            [
+                "straight:yes,open,13000 25000 100000;18000 44000 100000;18000 60000 100000;18000 76000 100000;"
+                "18000 92000 100000;34000 92000 100000;50000 92000 100000;66000 92000 100000;66000 76000 100000;"
+                "66000 60000 100000;66000 44000 100000;66000 28000 100000;82000 28000 100000;90000 30000 100000;"
+                "203893",
+                "diagonal:yes,13000 25000 100000;34000 44000 100000;34000 60000 100000;34000 76000 100000;"
+                "34000 92000 100000;50000 92000 100000;66000 92000 100000;82000 76000 100000;98000 60000 100000;"
+                "98000 44000 100000;90000 30000 100000;185699",
+                "blocked:no,11",
+                "outside:no,11",
+                "same:yes,13000 25000 100000;13000 25000 100000;",
+            ],
         )
 
 

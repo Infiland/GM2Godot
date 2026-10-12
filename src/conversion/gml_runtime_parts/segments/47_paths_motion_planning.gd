@@ -14,6 +14,19 @@ const GML_MP_GRID_HANDLE_KIND = "mp_grid"
 # A smooth path's pieces stop dividing once a control leg is no longer than
 # 4 pixels (HandlePiece compares squared lengths with 16).
 const GML_PATH_SMOOTH_MIN_SQUARED = 16.0
+# mp_grid_path's search looks left, right, up, down, then down-left,
+# up-left, down-right and up-right; a diagonal needs the two straight
+# neighbours (indices into the same list) free. Its walk back from the goal
+# tries the diagonals in another order.
+const GML_MP_GRID_SEARCH_OFFSETS = [
+	Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1),
+	Vector2i(-1, 1), Vector2i(-1, -1), Vector2i(1, 1), Vector2i(1, -1)
+]
+const GML_MP_GRID_DIAGONAL_SIDES = [[3, 0], [2, 0], [3, 1], [2, 1]]
+const GML_MP_GRID_BACK_OFFSETS = [
+	Vector2i(-1, 0), Vector2i(1, 0), Vector2i(0, -1), Vector2i(0, 1),
+	Vector2i(-1, 1), Vector2i(1, 1), Vector2i(-1, -1), Vector2i(1, -1)
+]
 # Where an instance's path starts in the room (the runner's path_xstart and
 # path_ystart): path_start sets it, path_action_continue moves it on. Kept
 # as node metadata, out of GML's sight.
@@ -411,21 +424,39 @@ static func gml_mp_grid_add_rectangle(grid, left, top, right, bottom):
 
 
 static func gml_mp_grid_path(grid, path, xstart, ystart, xgoal, ygoal, allowdiag):
+	# The runner's mp_grid_path: a breadth-first search from the start cell
+	# to the goal cell. The path it writes (open, kind unchanged) runs from
+	# the start position through the centres of the cells in between to the
+	# goal position; positions are whole numbers. false, leaving the path as
+	# it was, when there is no way, or the start or goal is off the grid or
+	# in a blocked cell.
 	var resolved = _gml_mp_grid_resolve(grid)
-	if resolved == null:
-		return false
-	var start = _gml_mp_grid_cell_for_point(resolved, Vector2(_to_real(xstart), _to_real(ystart)))
-	var goal = _gml_mp_grid_cell_for_point(resolved, Vector2(_to_real(xgoal), _to_real(ygoal)))
-	var route = _gml_mp_grid_find_route(resolved, start, goal, gml_bool(allowdiag))
-	if route.is_empty():
-		return false
 	var entry: Variant = _gml_path_resolve(path)
-	if entry == null:
+	if resolved == null or entry == null:
 		return false
-	var points = []
-	for cell in route:
-		var center = _gml_mp_grid_cell_center(resolved, cell)
-		points.append({"x": center.x, "y": center.y, "speed": 100.0})
+	var start_x = _gml_path_int(xstart)
+	var start_y = _gml_path_int(ystart)
+	var goal_x = _gml_path_int(xgoal)
+	var goal_y = _gml_path_int(ygoal)
+	var start = _gml_mp_grid_path_cell(resolved, start_x, start_y)
+	var goal = _gml_mp_grid_path_cell(resolved, goal_x, goal_y)
+	if start == null or goal == null:
+		return false
+	var diagonal = gml_bool(allowdiag)
+	var steps = _gml_mp_grid_path_search(resolved, start, goal, diagonal)
+	if steps.is_empty():
+		return false
+	var points = [{"x": float(goal_x), "y": float(goal_y), "speed": 100.0}]
+	var cell = goal
+	while cell != start:
+		cell = _gml_mp_grid_path_back(resolved, steps, cell, diagonal)
+		if cell == null:
+			break
+		if cell != start:
+			var center = _gml_mp_grid_path_center(resolved, cell)
+			points.append({"x": center.x, "y": center.y, "speed": 100.0})
+	points.append({"x": float(start_x), "y": float(start_y), "speed": 100.0})
+	points.reverse()
 	entry["closed"] = false
 	entry["points"] = points
 	_gml_path_compute_internal(entry)
@@ -869,54 +900,84 @@ static func _gml_mp_grid_cell_for_point(grid, point):
 	)
 
 
-static func _gml_mp_grid_cell_center(grid, cell):
+static func _gml_mp_grid_path_cell(grid, x, y):
+	# The cell of a start or goal position, or null when the position is off
+	# the grid or its cell is blocked.
+	var left = _to_real(grid["left"])
+	var top = _to_real(grid["top"])
+	var width = _to_real(grid["cellwidth"])
+	var height = _to_real(grid["cellheight"])
+	if x < left or x >= left + int(grid["hcells"]) * width:
+		return null
+	if y < top or y >= top + int(grid["vcells"]) * height:
+		return null
+	var cell = Vector2i(int((x - left) / width), int((y - top) / height))
+	if _gml_mp_grid_cell_blocked(grid, cell):
+		return null
+	return cell
+
+
+static func _gml_mp_grid_path_center(grid, cell):
+	# The centre of a cell on a planned path, truncated to whole numbers.
+	var width = _to_real(grid["cellwidth"])
+	var height = _to_real(grid["cellheight"])
 	return Vector2(
-		_to_real(grid["left"]) + (cell.x + 0.5) * _to_real(grid["cellwidth"]),
-		_to_real(grid["top"]) + (cell.y + 0.5) * _to_real(grid["cellheight"])
+		int(_to_real(grid["left"]) + cell.x * width + width / 2.0),
+		int(_to_real(grid["top"]) + cell.y * height + height / 2.0)
 	)
 
 
-static func _gml_mp_grid_find_route(grid, start, goal, allowdiag):
-	if not _gml_mp_grid_cell_inside(grid, start) or not _gml_mp_grid_cell_inside(grid, goal):
-		return []
-	if _gml_mp_grid_cell_blocked(grid, start) or _gml_mp_grid_cell_blocked(grid, goal):
-		return []
-	var frontier = [start]
-	var came_from = {_gml_mp_grid_cell_key(start): null}
-	while not frontier.is_empty():
-		var current = frontier.pop_front()
-		if current == goal:
-			break
-		for next in _gml_mp_grid_neighbors(grid, current, allowdiag):
-			var key = _gml_mp_grid_cell_key(next)
-			if came_from.has(key):
+static func _gml_mp_grid_path_search(grid, start, goal, diagonal):
+	# The runner's search: every cell reached gets its distance from the
+	# start (1 there, 0 unreached, -1 blocked). A cell looks left, right, up
+	# and down, then, when diagonal, at the diagonals whose two neighbouring
+	# cells it found free. Returns the distances, or [] when the goal is not
+	# reached.
+	var hcells = int(grid["hcells"])
+	var vcells = int(grid["vcells"])
+	var steps = PackedInt32Array()
+	steps.resize(hcells * vcells)
+	for h in range(hcells):
+		for v in range(vcells):
+			steps[h * vcells + v] = -1 if _gml_mp_grid_cell_blocked(grid, Vector2i(h, v)) else 0
+	steps[start.x * vcells + start.y] = 1
+	var queue = [start]
+	var head = 0
+	while head < queue.size():
+		var cell = queue[head]
+		head += 1
+		if cell == goal:
+			return steps
+		var distance = steps[cell.x * vcells + cell.y] + 1
+		var free = []
+		for offset in GML_MP_GRID_SEARCH_OFFSETS:
+			var next = cell + offset
+			free.append(_gml_mp_grid_cell_inside(grid, next) and steps[next.x * vcells + next.y] == 0)
+		for i in range(GML_MP_GRID_SEARCH_OFFSETS.size()):
+			if not free[i]:
 				continue
-			came_from[key] = current
-			frontier.append(next)
-	var goal_key = _gml_mp_grid_cell_key(goal)
-	if not came_from.has(goal_key):
-		return []
-	var route = []
-	var current = goal
-	while current != null:
-		route.push_front(current)
-		current = came_from[_gml_mp_grid_cell_key(current)]
-	return route
+			if i >= 4:
+				var sides = GML_MP_GRID_DIAGONAL_SIDES[i - 4]
+				if not (diagonal and free[sides[0]] and free[sides[1]]):
+					continue
+			var next = cell + GML_MP_GRID_SEARCH_OFFSETS[i]
+			steps[next.x * vcells + next.y] = distance
+			queue.append(next)
+	return PackedInt32Array()
 
 
-static func _gml_mp_grid_neighbors(grid, cell, allowdiag):
-	var offsets = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-	if allowdiag:
-		offsets.append(Vector2i(1, 1))
-		offsets.append(Vector2i(1, -1))
-		offsets.append(Vector2i(-1, 1))
-		offsets.append(Vector2i(-1, -1))
-	var neighbors = []
-	for offset in offsets:
+static func _gml_mp_grid_path_back(grid, steps, cell, diagonal):
+	# One step of the walk back from the goal: the first neighbour one step
+	# nearer the start, straight ones first (the runner's order).
+	var vcells = int(grid["vcells"])
+	var nearer = steps[cell.x * vcells + cell.y] - 1
+	for offset in GML_MP_GRID_BACK_OFFSETS:
+		if not diagonal and offset.x != 0 and offset.y != 0:
+			continue
 		var next = cell + offset
-		if _gml_mp_grid_cell_inside(grid, next) and not _gml_mp_grid_cell_blocked(grid, next):
-			neighbors.append(next)
-	return neighbors
+		if _gml_mp_grid_cell_inside(grid, next) and steps[next.x * vcells + next.y] == nearer:
+			return next
+	return null
 
 
 static func _gml_mp_grid_cell_inside(grid, cell):

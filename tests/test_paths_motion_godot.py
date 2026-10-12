@@ -138,10 +138,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tGMRuntime.gml_mp_grid_add_cell(grid, 1, 0)
         \tif not _check(GMRuntime.gml_mp_grid_path(grid, path_selector, 0, 0, 30, 0, false), "mp_grid_path did not find route"):
         \t\treturn
-        \tif not _check(_near(GMRuntime.gml_path_get_length(path_selector), 50), "mp_grid_path wrote wrong route length"):
+        \tif not _check(_near(GMRuntime.gml_path_get_length(path_selector), 52.882456), "mp_grid_path wrote wrong route length"):
         \t\treturn
         \tGMRuntime.gml_path_start(runner, path_selector, 10, 0, true)
-        \tif not _check(runner.position == Vector2(5, 5), "dynamic mp_grid path did not start at cell center"):
+        \tif not _check(runner.position == Vector2(0, 0), "dynamic mp_grid path did not start at the start position"):
         \t\treturn
 
         \tprint("PATHS_SMOKE_OK")

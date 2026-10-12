@@ -770,6 +770,7 @@ BUILTIN_VARIABLE_REGISTRY: Final[Mapping[str, _BuiltinVariableMetadata]] = Mappi
     "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_year": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "debug_mode": _BuiltinVariableMetadata("global", "false", False, False, "debug"),
+    "delta_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "display_aa": _BuiltinVariableMetadata("global", "0", False, False, "display"),
     "depth": _BuiltinVariableMetadata("instance", "0", True, False, "rendering"),
     "direction": _BuiltinVariableMetadata("instance", "0", True, False, "motion"),
@@ -1450,6 +1451,7 @@ AUDIO_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 TIME_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "alarm_get": "gml_alarm_get",
     "alarm_set": "gml_alarm_set",
+    "get_timer": "gml_get_timer",
     "time_source_create": "gml_time_source_create",
     "time_source_start": "gml_time_source_start",
     "time_source_stop": "gml_time_source_stop",

@@ -816,6 +816,123 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "rooms" / "r_second" / "r_second.tscn", second_room)
             self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_PATH_END_ROOM_CHANGE_SMOKE_OK")
 
+    def test_delta_time_and_get_timer_follow_the_step_clock(self) -> None:
+        # GameMaker_DoAStep sets delta_time to the microseconds since the
+        # previous step on the tick clock, so the new room's first step,
+        # which runs in the tick of the room change, sees 0. get_timer()
+        # counts the microseconds the game has been running.
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        asset_names = {"r_second"}
+        go_script = generate_script_content(
+            [{"eventType": 3, "eventNum": 0}],
+            code_bodies={"_on_step": transpile_gml_code("room_goto(r_second);", asset_names=asset_names)},
+            object_runtime=ObjectRuntimeConfig(object_name="o_go"),
+        )
+        clock_script = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+            code_bodies={
+                "_ready": transpile_gml_code("global.deltas = []; global.timers = [];"),
+                "_on_step": transpile_gml_code(
+                    "array_push(global.deltas, delta_time);\n"
+                    "array_push(global.timers, get_timer());\n"
+                ),
+            },
+            object_runtime=ObjectRuntimeConfig(object_name="o_clock"),
+        )
+        checker_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _process(_delta):
+            \tvar deltas = GMRuntime.gml_global_scope().get("deltas", [])
+            \tif deltas.size() < 6:
+            \t\tif Engine.get_process_frames() > 60:
+            \t\t\t_check(false, "the clock object did not step: " + str(deltas))
+            \t\treturn
+            \tvar timers = GMRuntime.gml_global_scope()["timers"]
+            \tfor value in deltas + timers:
+            \t\tif not _check(typeof(value) == TYPE_INT, "delta_time or get_timer() is not an integer: " + str(deltas) + " " + str(timers)):
+            \t\t\treturn
+            \tif not _check(deltas[0] == 0, "the step after a room change in the same tick did not get delta_time 0: " + str(deltas)):
+            \t\treturn
+            \tvar total = 0
+            \tfor index in range(1, deltas.size()):
+            \t\tif not _check(deltas[index] > 0, "a step in a later frame got delta_time 0: " + str(deltas)):
+            \t\t\treturn
+            \t\tif not _check(timers[index] > timers[index - 1], "get_timer() did not advance: " + str(timers)):
+            \t\t\treturn
+            \t\t# The tick of the room change also loaded the new room, which
+            \t\t# the next delta_time includes, as in GameMaker; the sum
+            \t\t# starts after it.
+            \t\tif index >= 2:
+            \t\t\ttotal += deltas[index]
+            \tvar elapsed = timers[-1] - timers[1]
+            \tif not _check(abs(elapsed - total) < 20000, "delta_time does not add up to the get_timer() time: " + str(total) + " vs " + str(elapsed)):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_get_timer() >= timers[-1], "get_timer() went back"):
+            \t\treturn
+            \tprint("GAME_STEP_DELTA_TIME_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        rooms = {
+            "r_first": ("o_go", "inst_go"),
+            "r_second": ("o_clock", "inst_clock"),
+        }
+        entries = tuple(
+            AssetRegistryEntry(
+                id=100 + order,
+                name=name,
+                kind="rooms",
+                asset_type="room",
+                type_name="Room",
+                source_path=f"rooms/{name}/{name}.yy",
+                godot_path=f"res://rooms/{name}/{name}.tscn",
+                legacy_id=f"rooms/{name}/{name}.yy",
+                metadata={"room_order": order, "width": 320, "height": 180, "persistent": False, "volume": 1.0},
+            )
+            for order, name in enumerate(rooms)
+        ) + tuple(
+            AssetRegistryEntry(
+                id=200 + order,
+                name=name,
+                kind="objects",
+                asset_type="object",
+                type_name="Object",
+                source_path=f"objects/{name}/{name}.yy",
+                godot_path=f"res://objects/{name}/{name}.tscn",
+                legacy_id=f"objects/{name}/{name}.yy",
+            )
+            for order, name in enumerate(("o_go", "o_clock"))
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                _project_file("GameStepDeltaTimeSmoke", "res://rooms/r_first/r_first.tscn")
+                + '\n[autoload]\n\nChecker="*res://checker.gd"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+            _write_text(project_dir / "checker.gd", checker_script)
+            for name, script in (("o_go", go_script), ("o_clock", clock_script)):
+                _write_text(project_dir / "objects" / name / f"{name}.gd", script)
+                _write_text(project_dir / "objects" / name / f"{name}.tscn", _scene(name, f"res://objects/{name}/{name}.gd"))
+            for room_name, (object_name, instance_name) in rooms.items():
+                _write_text(
+                    project_dir / "rooms" / room_name / f"{room_name}.tscn",
+                    _room_scene(room_name, object_name, instance_name),
+                )
+            self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_DELTA_TIME_SMOKE_OK")
+
     def test_image_index_advances_by_sprite_playback_speed(self) -> None:
         if _find_godot_binary() is None:
             self.skipTest("Godot binary not available")
@@ -1020,6 +1137,25 @@ def _animated_sprite_scene(sprite_name: str, frame_count: int) -> str:
         'sprite_frames = SubResource("frames")\n'
         'animation = &"default"\n'
         'autoplay = "default"\n'
+    )
+
+
+def _room_scene(room_name: str, object_name: str, instance_name: str) -> str:
+    return textwrap.dedent(
+        f"""\
+        [gd_scene load_steps=3 format=3]
+
+        [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+        [ext_resource type="PackedScene" path="res://objects/{object_name}/{object_name}.tscn" id="object"]
+
+        [node name="{room_name}" type="Node2D"]
+        script = ExtResource("room")
+        metadata/gamemaker_room_width = 320
+        metadata/gamemaker_room_height = 180
+        metadata/gamemaker_room_persistent = false
+
+        [node name="{instance_name}" parent="." instance=ExtResource("object")]
+        """
     )
 
 

@@ -5215,6 +5215,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "flexpanel_calculate_layout.*expects 4.*got 3"):
             transpile_gml_code("flexpanel_calculate_layout(root, 320, 180);", indent="")
 
+    def test_delta_time_and_get_timer_read_the_runtime_clock(self):
+        self.assertEqual(
+            transpile_gml_expression("delta_time / 1000000"),
+            'GMRuntime.gml_div(GMRuntime.gml_builtin_global("delta_time"), 1000000)',
+        )
+        self.assertEqual(transpile_gml_expression("get_timer()"), "GMRuntime.gml_get_timer()")
+        with self.assertRaisesRegex(GMLTranspileError, "delta_time"):
+            transpile_gml_code("delta_time = 5;", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "get_timer.*expects 0.*got 1"):
+            transpile_gml_code("t = get_timer(1);", indent="")
+
     def test_os_debug_gc_helpers_lower_to_runtime_and_builtins(self):
         self.assertEqual(
             transpile_gml_expression("os_type == os_macosx"),

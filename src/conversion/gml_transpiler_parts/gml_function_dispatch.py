@@ -703,6 +703,7 @@ _DS_COLLECTIONS_ARITY: dict[str, tuple[int, int | None]] = {
 _TIME_ARITY: dict[str, tuple[int, int | None]] = {
     "alarm_get": (1, 1),
     "alarm_set": (2, 2),
+    "get_timer": (0, 0),
     "time_source_create": (4, 7),
     "time_source_start": (1, 1),
     "time_source_stop": (1, 1),

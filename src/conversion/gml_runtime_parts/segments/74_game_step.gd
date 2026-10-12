@@ -169,17 +169,17 @@ static func gml_event_create_blocked(inst):
 
 
 static func gml_game_speed_fps():
-	# The game speed in steps per second: room_speed once the game has set
-	# it, otherwise the configured frame rate (option_game_speed).
-	var room_speed = _to_real(_gml_builtin_globals.get("room_speed", 0))
-	if room_speed > 0.0:
-		return room_speed
-	if Engine.max_fps > 0:
-		return float(Engine.max_fps)
-	var configured_fps = int(ProjectSettings.get_setting("application/run/max_fps", 0))
-	if configured_fps > 0:
-		return float(configured_fps)
-	return 60.0
+	# The game speed in steps per second, which room_speed reads (GameMaker's
+	# g_GameTimer.GetFPS): the project's game speed until game_set_speed or
+	# room_speed changes it. With an unfixed frame rate it is the rate of the
+	# last step, or 30 before the first.
+	var fps = _to_real(_gml_builtin_globals.get("room_speed", 0))
+	if fps > 0.0:
+		return fps
+	var delta = _to_real(_gml_builtin_globals.get("delta_time", 0))
+	if delta > 0.0:
+		return 1000000.0 / delta
+	return 30.0
 
 
 static func gml_image_frame_for_index(image_index, image_number):

@@ -933,6 +933,109 @@ class TestGameStepGodotSmoke(unittest.TestCase):
                 )
             self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_DELTA_TIME_SMOKE_OK")
 
+    def test_room_speed_is_the_game_speed_from_the_project(self) -> None:
+        # room_speed reads and writes GameMaker's game timer (yyBuiltIn.js
+        # get_room_speed/set_room_speed), which starts at the project's game
+        # speed; game_set_speed takes steps per second or microseconds per
+        # step (Function_Game.js).
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        speed_script = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}],
+            code_bodies={
+                "_ready": transpile_gml_code(
+                    "global.speeds = [room_speed, game_get_speed(gamespeed_fps), game_get_speed(gamespeed_microseconds)];\n"
+                    "room_speed = 20;\n"
+                    "array_push(global.speeds, room_speed, game_get_speed(gamespeed_fps));\n"
+                    "room_speed += 4;\n"
+                    "array_push(global.speeds, game_get_speed(gamespeed_fps));\n"
+                    "game_set_speed(40000, gamespeed_microseconds);\n"
+                    "array_push(global.speeds, room_speed, game_get_speed(gamespeed_microseconds));\n"
+                    "game_set_speed(-1, gamespeed_fps);\n"
+                    "array_push(global.speeds, room_speed);\n"
+                    "game_set_speed(50, gamespeed_fps);\n"
+                ),
+            },
+            object_runtime=ObjectRuntimeConfig(object_name="o_speed"),
+        )
+        checker_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var max_fps_seen = []
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _process(_delta):
+            \tvar speeds = GMRuntime.gml_global_scope().get("speeds", [])
+            \tif speeds.is_empty():
+            \t\tif Engine.get_process_frames() > 30:
+            \t\t\t_check(false, "the speed object did not run its Create event")
+            \t\treturn
+            \tvar project_speed = float(ProjectSettings.get_setting("application/run/max_fps"))
+            \tvar expected = [project_speed, project_speed, 1000000.0 / project_speed, 20.0, 20.0, 24.0, 25.0, 40000.0, 25.0]
+            \tif not _check(speeds == expected, "game speeds were " + str(speeds) + ", expected " + str(expected)):
+            \t\treturn
+            \tif not _check(Engine.max_fps == 50 and GMRuntime.gml_builtin_global("room_speed") == 50.0, "game_set_speed did not set the frame rate: " + str(Engine.max_fps)):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_string(GMRuntime.gml_builtin_global("room_speed")) == "50", "room_speed does not print as a whole number"):
+            \t\treturn
+            \tprint("GAME_SPEED_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        entries = (
+            AssetRegistryEntry(
+                id=100,
+                name="r_speed",
+                kind="rooms",
+                asset_type="room",
+                type_name="Room",
+                source_path="rooms/r_speed/r_speed.yy",
+                godot_path="res://rooms/r_speed/r_speed.tscn",
+                legacy_id="rooms/r_speed/r_speed.yy",
+                metadata={"room_order": 0, "width": 320, "height": 180, "persistent": False, "volume": 1.0},
+            ),
+            AssetRegistryEntry(
+                id=200,
+                name="o_speed",
+                kind="objects",
+                asset_type="object",
+                type_name="Object",
+                source_path="objects/o_speed/o_speed.yy",
+                godot_path="res://objects/o_speed/o_speed.tscn",
+                legacy_id="objects/o_speed/o_speed.yy",
+            ),
+        )
+        for project_speed in (30, 45):
+            with self.subTest(project_speed=project_speed), tempfile.TemporaryDirectory() as tmpdir:
+                project_dir = Path(tmpdir)
+                _write_text(
+                    project_dir / "project.godot",
+                    _project_file("GameSpeedSmoke", "res://rooms/r_speed/r_speed.tscn").replace(
+                        "[application]\n", f"[application]\nrun/max_fps={project_speed}\n"
+                    )
+                    + '\n[autoload]\n\nChecker="*res://checker.gd"\n',
+                )
+                write_gml_runtime(str(project_dir))
+                _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+                _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+                _write_text(project_dir / "checker.gd", checker_script)
+                _write_text(project_dir / "objects" / "o_speed" / "o_speed.gd", speed_script)
+                _write_text(
+                    project_dir / "objects" / "o_speed" / "o_speed.tscn",
+                    _scene("o_speed", "res://objects/o_speed/o_speed.gd"),
+                )
+                _write_text(
+                    project_dir / "rooms" / "r_speed" / "r_speed.tscn",
+                    _room_scene("r_speed", "o_speed", "inst_speed"),
+                )
+                self._run_project(project_dir, "res://rooms/r_speed/r_speed.tscn", "GAME_SPEED_SMOKE_OK")
+
     def test_image_index_advances_by_sprite_playback_speed(self) -> None:
         if _find_godot_binary() is None:
             self.skipTest("Godot binary not available")

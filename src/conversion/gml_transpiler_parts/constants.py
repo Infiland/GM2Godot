@@ -1473,6 +1473,7 @@ ROOM_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "room_goto_previous": "gml_room_goto_previous",
     "room_restart": "gml_room_restart",
     "game_set_speed": "gml_game_set_speed",
+    "game_get_speed": "gml_game_get_speed",
     "game_restart": "gml_game_restart",
     "game_end": "gml_game_end",
     "room_exists": "gml_room_exists",

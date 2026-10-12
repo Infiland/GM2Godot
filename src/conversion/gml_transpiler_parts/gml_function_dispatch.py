@@ -725,6 +725,7 @@ _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
     "room_goto_previous": (0, 0),
     "room_restart": (0, 0),
     "game_set_speed": (2, 2),
+    "game_get_speed": (1, 1),
     "game_restart": (0, 0),
     "game_end": (0, 0),
     "room_exists": (1, 1),

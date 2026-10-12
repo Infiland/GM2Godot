@@ -115,11 +115,42 @@ static func gml_room_restart():
 
 
 static func gml_game_set_speed(speed, type):
-	var resolved_speed = max(int(_to_real(speed)), 0)
-	_gml_builtin_globals["room_speed"] = resolved_speed
-	if int(_to_real(type)) == 0:
-		Engine.max_fps = resolved_speed
+	# GameMaker's game_set_speed (Function_Game.js): gamespeed_fps gives the
+	# steps per second, gamespeed_microseconds the length of a step, so the
+	# speed becomes 1000000 / speed. A negative speed changes nothing, and 0
+	# means an unfixed frame rate.
+	var value = _to_real(speed)
+	if value < 0.0:
+		return null
+	if int(_to_real(type)) != 0 and value > 0.0:
+		value = 1000000.0 / value
+	_gml_game_speed_set(value)
 	return null
+
+
+static func gml_game_get_speed(type):
+	# The game speed in steps per second (gamespeed_fps) or in microseconds
+	# per step (gamespeed_microseconds).
+	var fps = _to_real(gml_game_speed_fps())
+	if int(_to_real(type)) == 0:
+		return fps
+	return 1000000.0 / fps
+
+
+static func _gml_game_speed_set(fps):
+	# The game timer's frame rate (GameMaker's g_GameTimer.SetFrameRate),
+	# which room_speed reads and writes. Godot runs one step per frame, so
+	# the frame rate is capped to it.
+	_gml_builtin_globals["room_speed"] = fps
+	Engine.max_fps = max(1, int(round(fps))) if fps > 0.0 else 0
+	return null
+
+
+static func _gml_game_speed_project_fps():
+	# The game speed of the project's Game Options, which the converter
+	# writes as the frame rate cap; GameMaker's default when it is not set.
+	var configured_fps = _to_real(ProjectSettings.get_setting("application/run/max_fps", 0))
+	return configured_fps if configured_fps > 0.0 else 60.0
 
 
 static func gml_game_restart():

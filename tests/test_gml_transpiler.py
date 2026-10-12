@@ -4487,9 +4487,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_room_goto_previous()\n"
             "GMRuntime.gml_room_restart()\n"
             "GMRuntime.gml_game_set_speed(60, 0)\n"
-            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "room_speed", 60)\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", 60)\n'
             "GMRuntime.gml_game_restart()\n"
             "GMRuntime.gml_game_end()",
+        )
+
+    def test_room_speed_reads_and_writes_go_through_the_game_speed(self):
+        # room_speed is the game speed (yyBuiltIn.js get_room_speed and
+        # set_room_speed), so every write reaches the runtime's setter.
+        self.assertEqual(
+            transpile_gml_code(
+                "room_speed += 5; room_speed++; room_speed ??= 30;"
+                "steps = room_speed * 10;"
+                "speed_fps = game_get_speed(gamespeed_fps); mpf = game_get_speed(gamespeed_microseconds);",
+                indent="",
+            ),
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("room_speed"), 5))\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("room_speed"), 1))\n'
+            'if GMRuntime.gml_is_nullish(GMRuntime.gml_builtin_global("room_speed")):\n'
+            '\tGMRuntime.gml_builtin_global_set("room_speed", 30)\n'
+            'steps = GMRuntime.gml_mul(GMRuntime.gml_builtin_global("room_speed"), 10)\n'
+            "speed_fps = GMRuntime.gml_game_get_speed(0)\n"
+            "mpf = GMRuntime.gml_game_get_speed(1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("x = room_speed--;", indent=""),
+            'var _gml_increment_value_0 = GMRuntime.gml_builtin_global("room_speed")\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_sub(GMRuntime.gml_builtin_global("room_speed"), 1))\n'
+            "position.x = _gml_increment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("var room_speed = 3; room_speed = 9;", indent=""),
+            "var room_speed = 3\nroom_speed = 9",
         )
 
     def test_layer_helpers_lower_to_runtime(self):

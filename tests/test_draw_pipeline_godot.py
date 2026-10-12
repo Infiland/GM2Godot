@@ -3,20 +3,18 @@
 Draw events run from ``gml_draw_event_dispatch_frame`` and record their
 commands on runtime-owned RenderingServer canvas items ("draw sinks"). These
 tests cover the phase spaces, GameMaker draw-state persistence, depth to
-z_index mapping and reordering, GPU state segments and the canvas item
+z_index reordering, GPU state segments and the canvas item
 lifecycle across instance destruction, room changes and shutdown.
 """
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 
-from src.conversion.architecture_policy import gamemaker_depth_to_z_index
 from src.conversion.asset_registry import (
     AssetRegistryEntry,
     render_asset_registry_script,
@@ -28,27 +26,6 @@ from src.conversion.script_generator import ObjectRuntimeConfig, generate_script
 from tests.godot_test_support import (
     find_smoke_godot_binary as _find_godot_binary,
     write_fixture_text as _write_text,
-)
-
-_DEPTH_SAMPLES = (
-    "-1e12",
-    "-2147483648",
-    "-100000",
-    "-16000",
-    "-3073",
-    "-3072",
-    "-100",
-    "-0.5",
-    "0",
-    "0.5",
-    "1",
-    "99.9",
-    "3072",
-    "3073",
-    "16000",
-    "1000000",
-    "2147483647",
-    "1e12",
 )
 
 _SHADER_SOURCE = textwrap.dedent(
@@ -266,8 +243,6 @@ func _ready():
 \tcall_deferred("_run")
 
 func _run():
-\tfor depth in [%(depth_samples)s]:
-\t\tprint("DEPTH_Z ", var_to_str(depth), " ", GMRuntime.gml_depth_to_z_index(depth))
 \tvar layer = _make_layer()
 \tvar phases = _create("o_phases", 10, 20)
 \tphases.rotation_degrees = 30.0
@@ -436,7 +411,7 @@ class TestDrawPipelineGodot(unittest.TestCase):
             write_gml_runtime(str(project_dir))
             _write_registry(project_dir)
             _write_objects(project_dir)
-            _write_text(project_dir / "smoke.gd", _SMOKE_SCRIPT % {"depth_samples": ", ".join(_DEPTH_SAMPLES)})
+            _write_text(project_dir / "smoke.gd", _SMOKE_SCRIPT)
             _write_text(project_dir / "smoke.tscn", _scene("smoke.gd"))
             _write_text(project_dir / "smoke_next.gd", _NEXT_SCRIPT)
             _write_text(project_dir / "smoke_next.tscn", _scene("smoke_next.gd"))
@@ -450,18 +425,6 @@ class TestDrawPipelineGodot(unittest.TestCase):
         self.assertNotIn("SCRIPT ERROR", output)
         self.assertNotIn("ERROR:", output)
         self.assertNotIn("leaked", output)
-
-        runtime_mapping = {
-            float(depth): int(z_index)
-            for depth, z_index in re.findall(r"^DEPTH_Z (\S+) (-?\d+)$", output, re.MULTILINE)
-        }
-        self.assertEqual(len(runtime_mapping), len(_DEPTH_SAMPLES))
-        for depth, z_index in runtime_mapping.items():
-            with self.subTest(depth=depth):
-                self.assertEqual(z_index, gamemaker_depth_to_z_index(depth))
-        ordered = [runtime_mapping[float(depth)] for depth in _DEPTH_SAMPLES]
-        self.assertEqual(ordered, sorted(ordered, reverse=True))
-        self.assertTrue(all(-4096 <= z_index <= 4096 for z_index in ordered))
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ from src.conversion.architecture_policy import (
     ARCHITECTURE_POLICY_RELATIVE_PATH,
     build_architecture_policy_report,
     capture_architecture_policy_snapshot,
+    gamemaker_depth_z_indices,
     publish_architecture_policy_report,
     restore_architecture_policy_snapshot,
     write_architecture_policy_report,
@@ -1646,6 +1647,51 @@ class TestArchitecturePolicy(unittest.TestCase):
             "viewSettings": {"enableViews": bool(views)},
             "volume": 1.0,
         }
+
+
+class TestGameMakerDepthZIndices(unittest.TestCase):
+    """GameMaker draws every distinct depth on its own layer, in depth order."""
+
+    def _assert_strictly_ordered(self, z_indices: dict[int, int]) -> None:
+        ordered = [z_indices[depth] for depth in sorted(z_indices)]
+        self.assertEqual(len(set(ordered)), len(ordered), "two depths share a z_index")
+        self.assertEqual(ordered, sorted(ordered, reverse=True), "a lower depth does not draw later")
+        self.assertTrue(all(-4096 <= z_index <= 4096 for z_index in ordered))
+
+    def test_depths_in_godot_range_map_to_negative_depth(self) -> None:
+        depths = [-4096, -3100, -3080, -11, -10, 0, 1, 99, 3072, 3073, 4096]
+        self.assertEqual(gamemaker_depth_z_indices(depths), {depth: -depth for depth in depths})
+
+    def test_distinct_depths_beyond_godot_range_never_share_a_z_index(self) -> None:
+        depths = [
+            -2**40, -2147483648, -20001, -20000, -15001, -15000, -10001, -10000, -9999,
+            -5050, -5000, -4040, -4000, -3100, -3080, -11, -10, 0, 3300, 3320,
+            5000, 5050, 9900, 10000, 1000000, 2147483647, 2**40,
+        ]
+        z_indices = gamemaker_depth_z_indices(depths)
+        self.assertEqual(set(z_indices), set(depths))
+        self._assert_strictly_ordered(z_indices)
+        # Depths with room around them keep -depth.
+        for depth in (-3100, -3080, -11, -10, 0, 3300, 3320):
+            self.assertEqual(z_indices[depth], -depth)
+
+    def test_tall_room_y_sorting_keeps_every_row_ordered(self) -> None:
+        # depth = -y for every row of an 8000 px room, plus a background.
+        depths = [-y for y in range(0, 8001)] + [100]
+        z_indices = gamemaker_depth_z_indices(depths)
+        self._assert_strictly_ordered(z_indices)
+
+    def test_full_godot_range_of_distinct_depths_stays_ordered(self) -> None:
+        depths = list(range(-6000, -6000 + 8193 * 3, 3))
+        self.assertEqual(len(depths), 8193)
+        z_indices = gamemaker_depth_z_indices(depths)
+        self._assert_strictly_ordered(z_indices)
+        self.assertEqual(sorted(z_indices.values()), list(range(-4096, 4097)))
+
+    def test_room_layers_are_ranked_over_the_room(self) -> None:
+        z_indices = gamemaker_depth_z_indices([0, 100, 9900, 10000])
+        self.assertEqual(z_indices, {0: 0, 100: -100, 9900: -4095, 10000: -4096})
+        self.assertEqual(gamemaker_depth_z_indices([]), {})
 
 
 if __name__ == "__main__":

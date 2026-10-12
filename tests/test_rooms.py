@@ -3000,6 +3000,26 @@ class TestTypedRoomConsumerStages(unittest.TestCase):
         self.assertEqual(calls, [("InstanceCreationCode_i.gml", "layers[].instances[].name")])
         self.assertIn("position = Vector2(18, 0)", result.node_lines)
 
+    def test_layer_depths_beyond_godot_range_keep_their_own_ordered_z_index(self) -> None:
+        # GameMaker draws every distinct layer depth separately; nested layers
+        # count too, and a fractional depth is truncated.
+        layers: list[JsonValue] = [
+            {"%Name": "Hud", "resourceType": "GMRInstanceLayer", "depth": -10001},
+            {"%Name": "Menu", "resourceType": "GMRInstanceLayer", "depth": -10000.7},
+            {
+                "%Name": "Scenery",
+                "resourceType": "GMRInstanceLayer",
+                "depth": 3300,
+                "layers": [{"%Name": "Far", "resourceType": "GMRInstanceLayer", "depth": 3320}],
+            },
+            {"%Name": "Parallax", "resourceType": "GMRInstanceLayer", "depth": 9900},
+            {"%Name": "Background", "resourceType": "GMRInstanceLayer", "depth": 10000},
+        ]
+        lines = serialize_room_layers(self.room(layers=layers)).node_lines
+        z_indices = [int(line.split(" = ")[1]) for line in lines if line.startswith("z_index = ")]
+        self.assertEqual(z_indices, [4096, 4095, -3300, -3320, -4095, -4096])
+        self.assertIn("metadata/gamemaker_layer_depth = -10000", lines)
+
     def test_coordinate_nonfinite_and_huge_int_policies_remain_distinct(self) -> None:
         room = self.room(layers=[{"resourceType": "GMRInstanceLayer", "x": float("nan"), "y": -0.0}])
         result = serialize_room_layers(room)

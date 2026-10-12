@@ -215,12 +215,15 @@ static func _gml_game_restart_end_game(tree):
 			old_scene.get_parent().remove_child(old_scene)
 		old_scene.queue_free()
 		tree.current_scene = null
-	for entry in _gml_instance_live_order.slice(0):
+	# Deactivated instances go too (Run_EndGame empties m_Deactive).
+	for entry in _gml_instance_live_order.slice(0) + _gml_instance_deactivated.values():
 		var node = entry["instance"]
 		gml_instance_unregister(entry["handle"])
 		if node is Node and is_instance_valid(node) and not node.is_queued_for_deletion():
 			node.queue_free()
 	_gml_room_drop_parked_rooms()
+	# The first room's instances make a new step list.
+	_gml_room_reset_step_list()
 	gml_time_source_clear_call_later()
 	gml_audio_stop_all()
 

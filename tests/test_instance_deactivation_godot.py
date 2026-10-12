@@ -817,6 +817,91 @@ func _process(_delta):
 """
 
 
+# --- game_restart ---------------------------------------------------------------------
+#
+# game_restart ends the game first (_GameMaker.js Run_EndGame empties the
+# active and the deactivated list, and every persistent room starts afresh):
+# deactivated instances go, those of the current room and of a persistent
+# room that was left alike. The first room then starts with only its own
+# instances, each stepping once per step.
+
+_RESTART_RUN_STEP = """\
+var _t = global.t;
+trace("run" + string(global.runs) + ":" + string(_t));
+if (global.runs == 1 && _t == 1) {
+    instance_deactivate_object(global.b);
+    room_goto(r_away);
+}
+if (global.runs == 1 && _t == 2) {
+    instance_deactivate_object(global.c);
+    game_restart();
+}
+if (global.runs == 2 && _t == 1) {
+    trace("count:" + string(instance_number(all)) + ":" + string(instance_number(o_cnt)));
+    instance_activate_all();
+    trace("activated:" + string(instance_number(all)) + ":" + string(instance_number(o_cnt)));
+}
+"""
+
+_RESTART_PROJECT = GameMakerProject(
+    name="DeactivationRestart",
+    scripts={"scr_trace": _SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_run",
+            {
+                EVENT_CREATE: (
+                    'global.runs = (variable_global_exists("runs") ? global.runs : 0) + 1;\nglobal.t = 0;\n'
+                ),
+                EVENT_BEGIN_STEP: "global.t += 1;\n",
+                EVENT_STEP: _RESTART_RUN_STEP,
+                EVENT_END_STEP: "if (global.runs == 2 && global.t == 2) global.done = true;\n",
+            },
+            persistent=True,
+        ),
+        GameMakerObject("o_cnt", {EVENT_STEP: 'trace(tag + string(global.runs) + ":" + string(global.t));\n'}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_hub",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_run", "o_run", 0, 0, creation_code=_tag("run")),
+                        RoomInstance("inst_a", "o_cnt", 0, 0, creation_code=_tag("a")),
+                        RoomInstance("inst_b", "o_cnt", 0, 0, creation_code=_tag("b")),
+                    ),
+                ),
+            ),
+            creation_order=("inst_run", "inst_a", "inst_b"),
+            persistent=True,
+        ),
+        GameMakerRoom(
+            "r_away",
+            layers=(
+                InstanceLayer("Instances", 0, (RoomInstance("inst_c", "o_cnt", 0, 0, creation_code=_tag("c")),)),
+            ),
+            creation_order=("inst_c",),
+        ),
+    ),
+)
+
+_RESTART_EXPECTED = [
+    "run1:1",
+    "run1:2",
+    "run2:1",
+    "count:3:2",
+    "activated:3:2",
+    "a2:1",
+    "b2:1",
+    "run2:2",
+    "a2:2",
+    "b2:2",
+]
+
+
 # --- Layers and what is drawn ------------------------------------------------------
 
 _LAYERS_RUN_STEP = """\
@@ -984,6 +1069,17 @@ class TestInstanceDeactivationGodot(unittest.TestCase):
         traces = _trace_lines(output, "DEACTIVATION_TRACE ")
         self.assertEqual(len(traces), 1, output)
         self.assertEqual(json.loads(traces[0]), _PARKED_EXPECTED)
+
+    def test_game_restart_drops_deactivated_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            write_gamemaker_project(root / "gamemaker", _RESTART_PROJECT)
+            convert_gamemaker_project(root / "gamemaker", root / "godot")
+            output = self._run(root / "godot", _PARKED_PROBE)
+
+        traces = _trace_lines(output, "DEACTIVATION_TRACE ")
+        self.assertEqual(len(traces), 1, output)
+        self.assertEqual(json.loads(traces[0]), _RESTART_EXPECTED)
 
     def test_step_list_built_afresh_takes_in_every_live_instance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

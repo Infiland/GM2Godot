@@ -1509,6 +1509,8 @@ ROOM_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "room_exists": "gml_room_exists",
     "room_get_name": "gml_room_get_name",
     "room_get_info": "gml_room_get_info",
+    "room_set_width": "gml_room_set_width",
+    "room_set_height": "gml_room_set_height",
 })
 
 LAYER_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

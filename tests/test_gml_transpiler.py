@@ -1032,6 +1032,16 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertEqual(transpile_gml_expression("sprite_exists(spr)"), "GMRuntime.gml_sprite_exists(spr)")
 
+    def test_transpiles_room_set_width_and_height(self):
+        self.assertEqual(
+            transpile_gml_expression("room_set_width(level_room, blocks * 32)"),
+            "GMRuntime.gml_room_set_width(level_room, GMRuntime.gml_mul(blocks, 32))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("room_set_height(level_room, 768)"),
+            "GMRuntime.gml_room_set_height(level_room, 768)",
+        )
+
     def test_transpiles_date_functions_and_time_zone_constants(self):
         self.assertEqual(
             transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),

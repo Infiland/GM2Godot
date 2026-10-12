@@ -393,6 +393,7 @@ static func gml_view_backend_diagnostics():
 static func _gml_view_room_prepare(scene):
 	if not (scene is Node):
 		return false
+	_gml_room_take_stored_size(scene)
 	_gml_view_activate_scene(scene)
 	_gml_view_ensure_presenter(scene, true)
 	_gml_view_present(_gml_view_state)

@@ -2,6 +2,7 @@ const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"
 const GML_ROOM_UNSUPPORTED_EXIT_MESSAGE = "GM2Godot maps game_end to SceneTree.quit(); platform-specific close prompts and window behavior are not emulated."
 const GML_ROOM_PREPARED_META = "_gm2godot_room_prepared"
 const GML_ROOM_HELD_INSTANCES_META = "_gm2godot_room_held_instances"
+const GML_ROOM_STARTED_META = "_gm2godot_room_started"
 const GML_ROOM_UNORDERED_INSTANCE = 1073741824
 # While tracing is on (gml_event_scheduler_set_tracing), every room change is
 # recorded; gml_room_transition_log() returns at most this many of the latest
@@ -22,6 +23,8 @@ static var _gml_room_transition_log = []
 # deferral. Without the pump, requests are performed immediately.
 static var _gml_room_defer_changes = false
 static var _gml_room_requested_change = null
+# The sizes room_set_width and room_set_height stored, by room id.
+static var _gml_room_stored_sizes = {}
 
 
 static func gml_room_set_deferred_changes(enabled):
@@ -74,6 +77,7 @@ static func gml_room_enter_scene(scene, force = false):
 		_gml_room_create_instances(scene)
 		return false
 	_gml_room_pending_entry = null
+	_gml_room_take_stored_size(scene, entry)
 	gml_layer_register_scene(scene)
 	_gml_view_register_scene(scene)
 	_gml_particle_room_enter_scene(scene)
@@ -195,11 +199,57 @@ static func gml_room_get_info(room_asset):
 		"path": str(entry["godot_path"]) if entry.has("godot_path") else "",
 		"source_path": str(entry["source_path"]) if entry.has("source_path") else "",
 		"order": _gml_room_order_index(entry),
-		"width": int(metadata["width"]) if metadata.has("width") else 0,
-		"height": int(metadata["height"]) if metadata.has("height") else 0,
+		"width": _gml_room_stored_size(entry, "width"),
+		"height": _gml_room_stored_size(entry, "height"),
 		"persistent": bool(metadata["persistent"]) if metadata.has("persistent") else false,
 		"volume": _to_real(metadata["volume"]) if metadata.has("volume") else 1.0,
 	}
+
+
+# room_set_width and room_set_height (Function_Room.js) change the size stored
+# for a room. A room takes its stored size each time it starts afresh
+# (CreateRoomFromStorage in yyRoom.js), so the running room keeps its size,
+# and so does a persistent room that is entered again.
+static func gml_room_set_width(room_asset, width):
+	return _gml_room_store_size(room_asset, "width", width)
+
+
+static func gml_room_set_height(room_asset, height):
+	return _gml_room_store_size(room_asset, "height", height)
+
+
+static func _gml_room_store_size(room_asset, key, value):
+	var entry = _gml_room_entry(room_asset)
+	if entry != null:
+		var room_id = int(entry["id"])
+		if not _gml_room_stored_sizes.has(room_id):
+			_gml_room_stored_sizes[room_id] = {}
+		_gml_room_stored_sizes[room_id][key] = int(_to_real(value))
+	return gml_undefined()
+
+
+static func _gml_room_stored_size(entry, key):
+	var stored = _gml_room_stored_sizes.get(int(entry["id"]), {})
+	if stored.has(key):
+		return stored[key]
+	var metadata = _gml_room_metadata(entry)
+	return int(metadata[key]) if metadata.has(key) else 0
+
+
+# A room scene starting for the first time takes the stored size, which the
+# room's views, room_width and room_height then read from its metadata. The
+# room's _enter_tree does this before it sets up the views.
+static func _gml_room_take_stored_size(scene, entry = null):
+	if not (scene is Node) or scene.has_meta(GML_ROOM_STARTED_META):
+		return
+	scene.set_meta(GML_ROOM_STARTED_META, true)
+	if entry == null:
+		entry = _gml_room_pending_entry if _gml_room_pending_entry != null else _gml_room_entry_for_scene(scene)
+	if entry == null:
+		return
+	var stored = _gml_room_stored_sizes.get(int(entry["id"]), {})
+	for key in stored:
+		scene.set_meta("gamemaker_room_" + key, stored[key])
 
 
 static func gml_room_transition_log():

@@ -759,6 +759,8 @@ _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
     "room_exists": (1, 1),
     "room_get_name": (1, 1),
     "room_get_info": (1, 1),
+    "room_set_width": (2, 2),
+    "room_set_height": (2, 2),
 }
 
 _LAYER_ARITY: dict[str, tuple[int, int | None]] = {

@@ -197,7 +197,9 @@ static func gml_mul(left, right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if is_string(right):
 		if is_number(left):
-			return str(right).repeat(max(0, int(_to_real(left))))
+			# The runner's number * string adds the string while the number
+			# counts down to 0.
+			return _gml_repeat_string(str(right), _to_real(left), "GML multiply")
 		return gml_unsupported_binary_type_error("GML multiply", left, right)
 	if is_string(left):
 		return gml_unsupported_binary_type_error("GML multiply", left, right)

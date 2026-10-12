@@ -3280,7 +3280,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("if is_string(right):\n\t\tif is_number(left):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
+        self.assertIn('return _gml_repeat_string(str(right), _to_real(left), "GML multiply")', GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_type_table_errors_are_centralized(self):

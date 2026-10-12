@@ -284,6 +284,31 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_TRIG_OK",
         )
 
+    def test_string_repetition_follows_the_runner(self) -> None:
+        # number * string repeats the string once for each whole time the
+        # number counts down to 0; string_repeat takes its count as a 32-bit
+        # integer (yyGetInt32). A result too long for the runner's strings is
+        # an error there ("Invalid string length"), not an endless loop or a
+        # failed allocation.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("3 * ab", GMRuntime.gml_mul(3, "ab"), "ababab")
+            _expect("2.7 * ab", GMRuntime.gml_mul(2.7, "ab"), "abab")
+            _expect("-1 * ab", GMRuntime.gml_mul(-1, "ab"), "")
+            _expect("nan * ab", GMRuntime.gml_mul(NAN, "ab"), "")
+            _expect("1e12 * empty", GMRuntime.gml_mul(1e12, ""), "")
+            _expect("1e9 * ab is an error", GMRuntime.is_undefined(GMRuntime.gml_mul(1000000000.0, "ab")), true)
+            _expect("inf * ab is an error", GMRuntime.is_undefined(GMRuntime.gml_mul(INF, "ab")), true)
+            _expect("string_repeat(ab, 2.9)", GMRuntime.gml_string_repeat("ab", 2.9), "abab")
+            _expect("string_repeat(ab, -3)", GMRuntime.gml_string_repeat("ab", -3), "")
+            _expect("string_repeat count wraps at 2^32", GMRuntime.gml_string_repeat("ab", 4294967297.0), "ab")
+            _expect("string_repeat(ab, 2e9) is an error", GMRuntime.is_undefined(GMRuntime.gml_string_repeat("ab", 2000000000)), true)
+            _expect("string_repeat of nothing", GMRuntime.gml_string_repeat("", 2000000000), "")
+            """,
+            "GML_STRING_REPEAT_OK",
+        )
+
     def test_round_uses_bankers_rounding(self) -> None:
         _run_runtime_checks(
             self,

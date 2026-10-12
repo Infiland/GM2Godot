@@ -680,6 +680,8 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 	var hits = []
 	if target == null or is_undefined(target):
 		return hits if every else null
+	if (typeof(target) == TYPE_OBJECT or typeof(target) == TYPE_ARRAY) and _gml_collision_has_tilemap(target):
+		return _gml_collision_find_with_tilemaps(kind, query, target, current_self, notme, prec, every)
 	var bounds = _gml_collision_query_bounds(kind, query)
 	var has_bounds = bounds != null
 	var bounds_left = bounds[0] if has_bounds else 0.0
@@ -939,7 +941,8 @@ static func _gml_collision_hit_distance_less(left, right):
 static func _gml_collision_handle_for_instance(instance):
 	var entry: Variant = _gml_instance_entry(instance)
 	if entry == null:
-		return gml_instance_noone()
+		# A tilemap hit stands for its tilemap element.
+		return _gml_collision_tilemap_handle(instance)
 	return entry["handle"]
 
 

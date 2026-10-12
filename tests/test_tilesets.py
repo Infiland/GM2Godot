@@ -158,6 +158,7 @@ class TestTileSetConverterBasic(unittest.TestCase):
         self.assertIn('Vector2i(16, 16)', content)
         self.assertIn('0:0/0 = 0', content)
         self.assertIn('metadata/gamemaker_tileset_tile_count = 4', content)
+        self.assertIn('metadata/gamemaker_tileset_sprite = "s_ground"', content)
         self.assertIn('metadata/gamemaker_tileset_animation_frames = []', content)
 
     def test_resource_outcome_counts_logical_tileset(self):

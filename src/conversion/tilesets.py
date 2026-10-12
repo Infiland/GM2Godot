@@ -711,6 +711,9 @@ class TileSetConverter(BaseConverter):
         lines.append('sources/0 = SubResource("TileSetAtlasSource_1")')
         lines.append(f"metadata/gamemaker_tileset_tile_count = {tileset_data['tile_count']}")
         lines.append(f"metadata/gamemaker_tileset_out_columns = {tileset_data['out_columns']}")
+        if tileset_data["sprite_name"]:
+            # Tilemap collisions test tiles against this sprite's collision mask.
+            lines.append("metadata/gamemaker_tileset_sprite = " + json.dumps(tileset_data["sprite_name"]))
         lines.append(f"metadata/gamemaker_tileset_animation_speed = {_format_number(tileset_data['tileAnimationSpeed'])}")
         lines.append(
             "metadata/gamemaker_tileset_animation_frames = "

@@ -285,13 +285,14 @@ static func _gml_event_scheduler_live_instances():
 
 
 static func _gml_event_scheduler_instance_valid(inst):
-	# Destroyed instances stop receiving events for the rest of the step.
+	# Destroyed and deactivated instances stop receiving events for the rest
+	# of the step.
 	if inst == null or not is_instance_valid(inst):
 		return false
 	if inst is Node and inst.is_queued_for_deletion():
 		return false
 	var entry = _gml_instance_entry(inst)
-	return entry == null or not bool(entry["destroyed"])
+	return entry == null or not (bool(entry["destroyed"]) or entry["deactivated"])
 
 
 static func _gml_event_scheduler_record_phase(phase, method_name = "", inst = null, frame = -1):

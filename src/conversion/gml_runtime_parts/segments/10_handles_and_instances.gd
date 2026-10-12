@@ -73,7 +73,15 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		"selector_names": selector_names,
 		"destroyed": false,
 		"cleaned_up": false,
+		# Deactivated (instance_deactivate_*): out of the live lists until
+		# activated again (see 75_instance_activation.gd).
+		"deactivated": false,
 		"creation_order": _gml_instance_creation_counter,
+		# The creation order the step list took the instance in, or -1 while
+		# it is not in the step list, and the build of the list that took it
+		# (see _gml_step_join_created_instances).
+		"step_order": -1,
+		"step_list": -1,
 		# Whether the instance keeps its own collision state (see
 		# _gml_collision_tracked_state).
 		"collision_tracked": instance is Object and _gml_collision_tracks(instance)
@@ -113,6 +121,7 @@ static func gml_instance_unregister(instance_or_handle):
 	_gml_instance_handles_by_node_id.erase(entry["node_id"])
 	_gml_depth_forget(entry["node_id"])
 	_gml_collision_forget_box_lists(entry)
+	_gml_instance_forget_deactivated(entry)
 	_gml_instance_order_erase(_gml_instance_live_order, entry)
 	for selector_id in entry["selector_ids"]:
 		_gml_instance_index_remove(_gml_instance_live_by_object, selector_id, entry)
@@ -387,6 +396,11 @@ static func gml_instance_create_depth(x, y, depth_value, object_selector, curren
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):
+	# with and the instance functions do not see deactivated instances.
+	return _gml_instance_targets_active(_gml_with_targets_any(target, current_self, current_other))
+
+
+static func _gml_with_targets_any(target, current_self = null, current_other = null):
 	if typeof(target) == TYPE_DICTIONARY:
 		# A struct, whatever members it has (an id or a handle too).
 		return [target]

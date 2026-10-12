@@ -611,6 +611,32 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         'GMRuntime.gml_instance_furthest(position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
     ),
     RuntimeValueParityCase("instance_id_get(0)", "GMRuntime.gml_instance_id_get(0)"),
+    RuntimeValueParityCase("instance_deactivate_all(true)", "GMRuntime.gml_instance_deactivate_all(self, true)"),
+    RuntimeValueParityCase(
+        "instance_deactivate_object(o_enemy)",
+        'GMRuntime.gml_instance_deactivate_object(GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_deactivate_object(self)", "GMRuntime.gml_instance_deactivate_object(self)"
+    ),
+    RuntimeValueParityCase(
+        "instance_deactivate_region(0, 0, 64, 32, false, true)",
+        "GMRuntime.gml_instance_deactivate_region(self, 0, 0, 64, 32, false, true)",
+    ),
+    RuntimeValueParityCase(
+        'instance_deactivate_layer("Enemies")', 'GMRuntime.gml_instance_deactivate_layer("Enemies")'
+    ),
+    RuntimeValueParityCase("instance_activate_all()", "GMRuntime.gml_instance_activate_all()"),
+    RuntimeValueParityCase(
+        "instance_activate_object(all)", "GMRuntime.gml_instance_activate_object(GMRuntime.gml_instance_all())"
+    ),
+    RuntimeValueParityCase(
+        "instance_activate_region(0, 0, 64, 32, true)",
+        "GMRuntime.gml_instance_activate_region(0, 0, 64, 32, true)",
+    ),
+    RuntimeValueParityCase(
+        "instance_activate_layer(layer)", "GMRuntime.gml_instance_activate_layer(layer)"
+    ),
     RuntimeValueParityCase(
         "place_meeting(x, y, o_enemy)",
         'GMRuntime.gml_place_meeting(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
@@ -1219,6 +1245,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_instance_id_get",
             "gml_instance_nearest",
             "gml_instance_furthest",
+            "gml_instance_deactivate_all",
+            "gml_instance_deactivate_object",
+            "gml_instance_deactivate_region",
+            "gml_instance_deactivate_layer",
+            "gml_instance_activate_all",
+            "gml_instance_activate_object",
+            "gml_instance_activate_region",
+            "gml_instance_activate_layer",
             "gml_instance_create_layer",
             "gml_instance_create_depth",
             "gml_with_targets",

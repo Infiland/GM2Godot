@@ -97,6 +97,8 @@ _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_number": frozenset({0}),
     "instance_nearest": frozenset({2}),
     "instance_furthest": frozenset({2}),
+    "instance_deactivate_object": frozenset({0}),
+    "instance_activate_object": frozenset({0}),
 }
 
 _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -884,6 +886,7 @@ def _emit_descriptor_call(
         "runtime_layer_api",
         "runtime_path_api",
         "runtime_path_asset_api",
+        "runtime_prepend_self",
         "runtime_room_api",
         "runtime_sequence_api",
         "runtime_self_default",
@@ -902,7 +905,7 @@ def _emit_descriptor_call(
                 local_names,
                 scope_context=scope_context,
             )
-        if descriptor.lowering_kind == "runtime_collision_api":
+        if descriptor.lowering_kind in ("runtime_collision_api", "runtime_prepend_self"):
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_draw_api":
             emitted_args = _emit_draw_api_args(

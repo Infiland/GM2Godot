@@ -1443,6 +1443,14 @@ INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "instance_nearest": "gml_instance_nearest",
     "instance_furthest": "gml_instance_furthest",
     "instance_id_get": "gml_instance_id_get",
+    "instance_deactivate_all": "gml_instance_deactivate_all",
+    "instance_deactivate_object": "gml_instance_deactivate_object",
+    "instance_deactivate_region": "gml_instance_deactivate_region",
+    "instance_deactivate_layer": "gml_instance_deactivate_layer",
+    "instance_activate_all": "gml_instance_activate_all",
+    "instance_activate_object": "gml_instance_activate_object",
+    "instance_activate_region": "gml_instance_activate_region",
+    "instance_activate_layer": "gml_instance_activate_layer",
 })
 
 COLLISION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

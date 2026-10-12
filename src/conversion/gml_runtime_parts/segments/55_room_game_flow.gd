@@ -320,6 +320,7 @@ static func _gml_room_change_to_entry(entry, restarting):
 	var kept_old_scene = false
 	if old_scene != null:
 		_gml_room_dispatch_lifecycle(old_scene, "_on_room_end")
+		_gml_instance_discard_deactivated(old_scene)
 		_gml_room_capture_persistent_instances(old_scene)
 		kept_old_scene = _gml_room_scene_is_persistent(old_scene) and _gml_room_current_id >= 0
 		# Clean Up comes after Room End. The instances left in a room that is
@@ -391,8 +392,9 @@ static func _gml_room_dispatch_lifecycle(root_node, method_name):
 		if not _gml_event_scheduler_instance_valid(node):
 			continue
 		# Game/room start and end are Other events: after a room change
-		# request only persistent instances still receive them.
-		if _gml_event_scheduler_event_blocked(node, true):
+		# request only persistent instances still receive them, and
+		# deactivated instances never do.
+		if _gml_event_scheduler_event_blocked(node, true) or _gml_instance_node_deactivated(node):
 			continue
 		node.call(method_name)
 

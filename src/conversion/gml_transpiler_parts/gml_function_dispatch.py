@@ -57,6 +57,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_path_api",
     "runtime_path_asset_api",
     "runtime_platform_service_api",
+    "runtime_prepend_self",
     "runtime_room_api",
     "runtime_sequence_api",
     "runtime_self_default",
@@ -474,6 +475,21 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
     "instance_nearest": (3, 3),
     "instance_furthest": (3, 3),
     "instance_id_get": (1, 1),
+    "instance_deactivate_all": (1, 2),
+    "instance_deactivate_object": (1, 2),
+    "instance_deactivate_region": (6, 7),
+    "instance_deactivate_layer": (1, 1),
+    "instance_activate_all": (0, 1),
+    "instance_activate_object": (1, 2),
+    "instance_activate_region": (5, 6),
+    "instance_activate_layer": (1, 1),
+}
+
+# Instance functions whose runtime helper takes the calling instance first
+# (notme refers to it).
+_INSTANCE_LOWERING_KINDS: dict[str, GMLFunctionLoweringKind] = {
+    "instance_deactivate_all": "runtime_prepend_self",
+    "instance_deactivate_region": "runtime_prepend_self",
 }
 
 _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
@@ -1549,7 +1565,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in INSTANCE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INSTANCE_ARITY[name]
-        lowering_kind: GMLFunctionLoweringKind = "runtime_instance_api"
+        lowering_kind: GMLFunctionLoweringKind = _INSTANCE_LOWERING_KINDS.get(name, "runtime_instance_api")
         if name in ("instance_create_layer", "instance_create_depth"):
             lowering_kind = "runtime_append_self"
         elif name == "instance_destroy":

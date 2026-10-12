@@ -272,7 +272,15 @@ def _emit_sprite_runtime_prelude(
     declare_members: bool,
     track_collision: bool = False,
 ) -> None:
+    # Like GameMaker, an instance starts with its own object's sprite (-1 for
+    # none), not an ancestor's: every object script says which sprite that is,
+    # and the script that declares sprite_index starts it from there.
+    own_sprite = "-1"
+    if sprite_runtime.initial_sprite_name is not None:
+        own_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
+    own_sprite_function = f"\n\nfunc _gm_object_sprite_index():\n\treturn {own_sprite}"
     if not declare_members:
+        lines.append(own_sprite_function + "\n")
         return
     collision_dirty = _collision_dirty_line(track_collision)
 
@@ -294,12 +302,8 @@ def _emit_sprite_runtime_prelude(
 
     # Like GameMaker, sprite_index holds the sprite's asset index (-1 for no
     # sprite), so it compares equal to the sprite constants in GML code.
-    initial_sprite = "-1"
-    if sprite_runtime.initial_sprite_name is not None:
-        initial_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
-
     lines.append(
-        f"\nvar sprite_index = {initial_sprite}:"
+        "\nvar sprite_index = _gm_object_sprite_index():"
         "\n\tset(value):"
         "\n\t\tsprite_index = value"
         f"{collision_dirty}"
@@ -311,6 +315,7 @@ def _emit_sprite_runtime_prelude(
         "\n\nvar image_number = 1"
         "\nvar image_speed = 1.0"
         "\nvar _gm_sprite_visual_cache = null"
+        "\nvar _gm_sprite_runtime_started = false"
         "\nvar image_xscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_xscale = value"
@@ -334,7 +339,14 @@ def _emit_sprite_runtime_prelude(
         "\n\tset(value):"
         "\n\t\timage_alpha = value"
         "\n\t\t_gm_apply_image_transform()"
-        "\n\nfunc _gm_initialize_sprite_runtime():"
+        + own_sprite_function
+        # The instance's own _ready starts the sprite before its Create
+        # event; the ancestors' _ready that event_inherited() runs must not
+        # undo what that Create event set, so it starts only once.
+        + "\n\nfunc _gm_initialize_sprite_runtime():"
+        "\n\tif _gm_sprite_runtime_started:"
+        "\n\t\treturn"
+        "\n\t_gm_sprite_runtime_started = true"
         "\n\t_gm_apply_sprite_index()"
         "\n\tif has_meta(\"gamemaker_image_index\"):"
         "\n\t\timage_index = get_meta(\"gamemaker_image_index\")"
@@ -491,23 +503,8 @@ def _emit_sprite_runtime_prelude(
     )
 
 
-def _prepend_sprite_runtime_ready_body(
-    body: str,
-    sprite_runtime: SpriteRuntimeConfig,
-    *,
-    inherited_runtime: bool,
-) -> str:
-    init_lines: list[str] = []
-    if inherited_runtime:
-        # The members come from the parent's script, which starts them with
-        # the parent's sprite; like GameMaker, an instance starts with its own
-        # object's sprite (-1 for none).
-        own_sprite = "-1"
-        if sprite_runtime.initial_sprite_name is not None:
-            own_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
-        init_lines.append(f"\tsprite_index = {own_sprite}")
-    init_lines.append("\t_gm_initialize_sprite_runtime()")
-    init_body = "\n".join(init_lines)
+def _prepend_sprite_runtime_ready_body(body: str) -> str:
+    init_body = "\t_gm_initialize_sprite_runtime()"
     if body.strip() == "pass":
         return init_body
     return f"{init_body}\n{body}"
@@ -873,11 +870,7 @@ def generate_script_content(
             if wrap_body is not None:
                 body = wrap_body(func, body, function_names)
         if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready":
-            body = _prepend_sprite_runtime_ready_body(
-                body,
-                sprite_runtime,
-                inherited_runtime=inherited_sprite_runtime,
-            )
+            body = _prepend_sprite_runtime_ready_body(body)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":

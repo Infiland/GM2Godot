@@ -1677,7 +1677,6 @@ class TestScriptGeneration(unittest.TestCase):
             "func _ready():\n"
             "\t_gm_register_instance()\n"
             "\t_gm_initialize_motion_runtime()\n"
-            "\tsprite_index = -1\n"
             "\t_gm_initialize_sprite_runtime()\n"
             "\tsuper._ready()",
             content,
@@ -1693,7 +1692,8 @@ class TestScriptGeneration(unittest.TestCase):
         with open(os.path.join(self.godot_dir, "objects", "o_empty", "o_empty.gd"), encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn("\nvar sprite_index = -1:", content)
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
         self.assertIn("\nvar image_xscale = 1.0:", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
 
@@ -1707,7 +1707,59 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
 
         self.assertNotIn("\nvar sprite_index =", content)
-        self.assertIn("\tsprite_index = -1\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertNotIn("\n\tsprite_index =", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsuper._ready()", content)
+
+    def test_leaf_object_keeps_its_sprite_under_a_middle_object_without_one(self):
+        # GameMaker starts every instance with its own object's sprite
+        # (yyInstance.js UpdateSpriteIndex(pObject.SpriteIndex)); the
+        # ancestors' Create events that run through event_inherited(), or
+        # because the leaf has no Create event, must not replace it.
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        self._setup_object("o_a", sprite_name="s_a", event_list=[create])
+        self._setup_object("o_b", event_list=[create], parent_object_name="o_a")
+        self._setup_object("o_c", sprite_name="s_c", event_list=[], parent_object_name="o_b")
+        self._setup_object("o_d", sprite_name="s_d", event_list=[create], parent_object_name="o_b")
+        for name, source in (
+            ("o_a", "hp = 1;\n"),
+            ("o_b", "event_inherited();\nmana = 2;\n"),
+            ("o_d", "event_inherited();\nshield = 3;\n"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", name, "Create_0.gml"), "w", encoding="utf-8") as f:
+                f.write(source)
+        converter = self._make_converter()
+        converter.convert_all()
+
+        scripts: dict[str, str] = {}
+        for name in ("o_a", "o_b", "o_c", "o_d"):
+            with open(os.path.join(self.godot_dir, "objects", name, f"{name}.gd"), encoding="utf-8") as f:
+                scripts[name] = f.read()
+
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", scripts["o_a"])
+        for name, own_sprite in (
+            ("o_a", 'GMRuntime.gml_sprite_reference("s_a")'),
+            ("o_b", "-1"),
+            ("o_c", 'GMRuntime.gml_sprite_reference("s_c")'),
+            ("o_d", 'GMRuntime.gml_sprite_reference("s_d")'),
+        ):
+            self.assertIn(f"func _gm_object_sprite_index():\n\treturn {own_sprite}\n", scripts[name])
+            # No _ready assigns it: the instance's own object starts it.
+            self.assertNotIn("\n\tsprite_index =", scripts[name])
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsuper._ready()", scripts["o_c"])
+        self.assertIn(
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\tsuper._ready()",
+            scripts["o_d"],
+        )
+        self.assertIn(
+            "func _gm_initialize_sprite_runtime():\n"
+            "\tif _gm_sprite_runtime_started:\n"
+            "\t\treturn\n",
+            scripts["o_a"],
+        )
 
     def test_child_object_reuses_inherited_sprite_runtime_members(self):
         self._setup_object(
@@ -1734,7 +1786,8 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
-        self.assertIn("\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_child")\n', content)
+        self.assertIn("\t_gm_initialize_sprite_runtime()\n\tsuper._ready()", content)
         self.assertIn("\tsuper._ready()", content)
 
     def test_script_event_sources_use_selected_macro_configuration(self):
@@ -2750,7 +2803,8 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
         self.assertIn('"s_player": preload("res://sprites/s_player/s_player.tscn")', content)
-        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
+        self.assertIn('var sprite_index = _gm_object_sprite_index():', content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_player")\n', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)

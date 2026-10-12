@@ -188,11 +188,13 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
+        # The child says which sprite its instances start with; the parent's
+        # script starts sprite_index from it.
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_child")\n', content)
         self.assertIn(
             "func _ready():\n"
             "\t_gm_register_instance()\n"
             "\t_gm_initialize_motion_runtime()\n"
-            "\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n"
             "\t_gm_initialize_sprite_runtime()\n"
             "\tsuper._ready()",
             content,
@@ -213,7 +215,8 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
 
-        self.assertIn("\nvar sprite_index = -1:", content)
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
         self.assertIn(
             "\t_gm_initialize_sprite_runtime()\n"
@@ -601,7 +604,8 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('const s_enemy = "s_enemy"', content)
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
-        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
+        self.assertIn('var sprite_index = _gm_object_sprite_index():', content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_player")\n', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)

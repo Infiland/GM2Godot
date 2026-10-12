@@ -262,7 +262,9 @@ static func _gml_room_update_current(entry, scene):
 
 static func _gml_room_update_background_layers(scene):
 	# Layer offsets scroll once per step (_gml_layer_step_scroll); every
-	# frame the background elements are laid out for the current view.
+	# frame the background elements are laid out for the current view, by
+	# the draw frame and again by the room scene's _process, which also sees
+	# what changed after the draw.
 	if not (scene is Node):
 		return
 	for node in _gml_layer_background_nodes(scene):

@@ -518,6 +518,11 @@ static func gml_draw_event_dispatch_frame(instances = null):
 		_gml_application_surface_apply_pending_resize()
 		_gml_application_surface_ensure()
 	_gml_camera_update_visible_views()
+	# Backgrounds are drawn over the area of the view in every Draw of the
+	# room (yyRoom.js DrawLayerBackgroundElement), also in the first frame
+	# of a room entered during this frame's step, whose own _process has not
+	# run yet.
+	_gml_room_update_background_layers(_gml_draw_scene_root())
 	_gml_draw_sinks_begin_frame()
 	if _gml_draw_trace_enabled:
 		_gml_draw_trace_trim()

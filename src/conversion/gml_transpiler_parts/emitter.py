@@ -118,6 +118,10 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_place_list": frozenset({2}),
     "instance_position_list": frozenset({2}),
     "place_empty": frozenset({2}),
+    "move_and_collide": frozenset({2}),
+    "mp_linear_step_object": frozenset({3}),
+    "mp_potential_step_object": frozenset({3}),
+    "mp_grid_add_instances": frozenset({1}),
 }
 
 

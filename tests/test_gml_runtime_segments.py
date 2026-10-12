@@ -39,6 +39,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "45_collision_queries.gd",
     "46_motion_helpers.gd",
     "47_paths_motion_planning.gd",
+    "47_motion_planning_steps.gd",
     "48_drawing_basic_forms.gd",
     "49_drawing_surfaces.gd",
     "50_draw_pipeline.gd",

@@ -497,6 +497,12 @@ _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
     "move_snap": (2, 2),
     "move_wrap": (3, 3),
     "place_snapped": (2, 2),
+    "move_and_collide": (3, 8),
+    "mp_linear_step": (4, 4),
+    "mp_linear_step_object": (4, 4),
+    "mp_potential_step": (4, 4),
+    "mp_potential_step_object": (4, 4),
+    "mp_potential_settings": (4, 4),
 }
 
 _PATH_ARITY: dict[str, tuple[int, int | None]] = {
@@ -513,6 +519,7 @@ _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
     "mp_grid_clear_cell": (3, 3),
     "mp_grid_add_rectangle": (5, 5),
     "mp_grid_path": (7, 7),
+    "mp_grid_add_instances": (3, 3),
 }
 
 _INPUT_ARITY: dict[str, tuple[int, int | None]] = {

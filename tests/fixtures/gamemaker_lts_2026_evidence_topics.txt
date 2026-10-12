@@ -237,6 +237,7 @@ GameMaker_Language/GML_Reference/Steam/Steam.htm
 GameMaker_Language/GML_Reference/Strings/Strings.htm
 GameMaker_Language/GML_Reference/Strings/clipboard_set_text.htm
 GameMaker_Language/GML_Reference/Strings/string_byte_length.htm
+GameMaker_Language/GML_Reference/Strings/string_format.htm
 GameMaker_Language/GML_Reference/Strings/string_height.htm
 GameMaker_Language/GML_Reference/Strings/string_height_ext.htm
 GameMaker_Language/GML_Reference/Strings/string_width.htm

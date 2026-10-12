@@ -1240,6 +1240,7 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "string_lettersdigits": "gml_string_lettersdigits",
     "string_split": "gml_string_split",
     "string_join": "gml_string_join_values",
+    "string_format": "gml_string_format",
     "chr": "gml_chr",
     "ord": "gml_ord",
     "ansi_char": "gml_ansi_char",

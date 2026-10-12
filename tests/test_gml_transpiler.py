@@ -997,6 +997,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_string_join_values(",", [a])',
         )
 
+    def test_transpiles_string_format(self):
+        self.assertEqual(
+            transpile_gml_expression("string_format(score, 6, 2)"),
+            "GMRuntime.gml_string_format(score, 6, 2)",
+        )
+
     def test_transpiles_chr(self):
         self.assertEqual(
             transpile_gml_expression('chr(65)'),

@@ -7215,6 +7215,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Joins string() of each value after the delimiter with the delimiter.",
     ),
     _entry(
+        "string_format",
+        "Strings",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.70_handle_string_helpers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Strings/string_format.htm",
+        "Formats the value as the HTML5 runner does: JavaScript toFixed(dec), with the integer part padded with spaces to total.",
+    ),
+    _entry(
         "chr",
         "Strings",
         "implemented",

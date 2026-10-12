@@ -240,6 +240,7 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_lettersdigits": (1, 1),
     "string_split": (2, 2),
     "string_join": (1, None),
+    "string_format": (3, 3),
     "chr": (1, 1),
     "ord": (1, 1),
     "ansi_char": (1, 1),

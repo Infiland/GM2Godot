@@ -83,9 +83,6 @@ from src.conversion.type_defs import (
 )
 from src.localization import get_localized
 
-_SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
-    r"\b(?:sprite_index|image_(?:alpha|angle|blend|index|number|speed|xscale|yscale))\b"
-)
 _GML_IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SCRIPT_ASSIGNMENT_OPERATORS = frozenset(ASSIGNMENT_OPERATORS) | frozenset({"++", "--"})
 _SCRIPT_ASSIGNMENT_SKIP_IDENTIFIERS = (
@@ -1694,56 +1691,13 @@ class ObjectConverter(BaseConverter):
         self,
         object_name: str | None,
         object_source_path: str | None = None,
-        seen: set[str] | None = None,
     ) -> bool:
+        # Every converted object script declares the sprite runtime (every
+        # GameMaker instance has sprite_index and the image_* variables), so
+        # a child inherits it from any parent that converts.
         if object_name is None:
             return False
-        seen = set(seen or set())
-        if object_name in seen:
-            return False
-        seen.add(object_name)
-
-        parsed = self._parse_object_yy(object_name, object_source_path)
-        if parsed is None:
-            return False
-        if parsed["sprite_name"] is not None:
-            return True
-        if self._object_event_code_uses_sprite_runtime(
-            object_name,
-            parsed["source_path"],
-            parsed["event_list"],
-        ):
-            return True
-        return self._object_inherits_sprite_runtime(
-            parsed["parent_object_name"],
-            parsed["parent_object_source_path"],
-            seen,
-        )
-
-    def _object_event_code_uses_sprite_runtime(
-        self,
-        object_name: str,
-        object_source_path: str,
-        event_list: list[JsonObject],
-    ) -> bool:
-        for event in event_list:
-            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
-            if mapping is None or not mapping.gml_filename:
-                continue
-            source_path = self._event_source_path(
-                object_source_path,
-                object_name,
-                mapping,
-            )
-            if source_path is None:
-                continue
-            try:
-                with open(source_path, 'r', encoding='utf-8') as f:
-                    if _SPRITE_RUNTIME_IDENTIFIER_RE.search(f.read()) is not None:
-                        return True
-            except OSError:
-                continue
-        return False
+        return self._parse_object_yy(object_name, object_source_path) is not None
 
     def _process_object(
         self,

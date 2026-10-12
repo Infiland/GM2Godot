@@ -172,7 +172,9 @@ static func _gml_event_scheduler_run_phase(phase, seconds, frames, frame):
 		"other":
 			_gml_step_handle_other(frame)
 		"collision":
-			gml_collision_event_dispatch_frame(_gml_step_instances(), frame)
+			# Every registered instance: the step's list holds the same ones
+			# once the phases before have joined their new instances.
+			gml_collision_event_dispatch_frame(null, frame)
 		"end_step":
 			_gml_step_dispatch_method("end_step", &"_on_end_step", frame)
 	return null

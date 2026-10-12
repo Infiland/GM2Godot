@@ -1483,6 +1483,12 @@ MOTION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "move_snap": "gml_move_snap",
     "move_wrap": "gml_move_wrap",
     "place_snapped": "gml_place_snapped",
+    "move_and_collide": "gml_move_and_collide",
+    "mp_linear_step": "gml_mp_linear_step",
+    "mp_linear_step_object": "gml_mp_linear_step_object",
+    "mp_potential_step": "gml_mp_potential_step",
+    "mp_potential_step_object": "gml_mp_potential_step_object",
+    "mp_potential_settings": "gml_mp_potential_settings",
 })
 
 PATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -1530,6 +1536,7 @@ MP_GRID_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "mp_grid_clear_cell": "gml_mp_grid_clear_cell",
     "mp_grid_add_rectangle": "gml_mp_grid_add_rectangle",
     "mp_grid_path": "gml_mp_grid_path",
+    "mp_grid_add_instances": "gml_mp_grid_add_instances",
 })
 
 INPUT_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

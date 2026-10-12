@@ -157,6 +157,19 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_paths_motion_godot.py",),
     ),
     _segment(
+        "47_motion_planning_steps.gd",
+        "move_and_collide, mp_linear_step, mp_potential_step and mp_grid_add_instances.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "35_maths_numbers.gd",
+            "45_collision_queries.gd",
+            "46_motion_helpers.gd",
+            "47_paths_motion_planning.gd",
+        ),
+        tests=("tests/test_motion_planning_steps_godot.py",),
+    ),
+    _segment(
         "48_drawing_basic_forms.gd",
         "Draw state, primitive drawing, sprite, text, texture, and video helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),

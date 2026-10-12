@@ -217,8 +217,8 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             func _exit_tree():
             \tGMRuntime.gml_instance_unregister(id)
 
-            func _spawn(child_label):
-            \tvar child = load("res://listed_instance.gd").new()
+            func _spawn(child_label, script_path = "res://listed_instance.gd"):
+            \tvar child = load(script_path).new()
             \tchild.configure(child_label, log)
             \tget_parent().add_child(child)
 
@@ -230,6 +230,8 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
 
             func _on_step():
             \tlog.append(label + ":step")
+            \tif label == "A" and steps == 1:
+            \t\t_spawn("L", "res://late_instance.gd")
 
             func _on_end_step():
             \tlog.append(label + ":end")
@@ -243,6 +245,36 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
 
             func _on_no_key():
             \tpass
+            """
+        )
+
+        # An object with Begin Step and End Step but no Step event, first
+        # created during a Step event.
+        late_instance_script = textwrap.dedent(
+            """\
+            extends Node2D
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var label = ""
+            var log = []
+            var id = GMRuntime.gml_instance_noone()
+
+            func configure(label_value, log_ref):
+            \tlabel = str(label_value)
+            \tlog = log_ref
+
+            func _ready():
+            \tid = GMRuntime.gml_instance_register(self, label, [])
+
+            func _exit_tree():
+            \tGMRuntime.gml_instance_unregister(id)
+
+            func _on_begin_step():
+            \tlog.append(label + ":begin")
+
+            func _on_end_step():
+            \tlog.append(label + ":end")
             """
         )
 
@@ -317,15 +349,30 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \t\treturn
             \tvar a = _add(ListedInstance, "A")
             \t# Created in Begin Step: no Begin Step of its own, but Step and End
-            \t# Step in the same step. Created in End Step: first events next step.
+            \t# Step in the same step. Created in Step: End Step in the same step.
+            \t# Created in End Step: first events next step.
             \t_frame()
-            \tif not _check(log == ["A:begin", "A:step", "B:step", "A:end", "B:end"], "first step: " + str(log)):
+            \tif not _check(log == ["A:begin", "A:step", "B:step", "A:end", "B:end", "L:end"], "first step: " + str(log)):
             \t\treturn
             \tlog.clear()
             \t_frame()
-            \tif not _check(log == ["A:begin", "C:begin", "A:step", "C:step", "A:end", "C:end"], "second step: " + str(log)):
+            \tif not _check(log == ["A:begin", "L:begin", "C:begin", "A:step", "C:step", "A:end", "L:end", "C:end"], "second step: " + str(log)):
+            \t\treturn
+            \t# A phase only goes through the instances that have its event.
+            \tif not _check(GMRuntime._gml_step_method_positions[&"_on_step"] == [0, 2], "Step positions " + str(GMRuntime._gml_step_method_positions)):
             \t\treturn
             \tif not _check(GMRuntime.gml_event_scheduler_trace().is_empty() and GMRuntime.gml_input_dispatch_trace().is_empty(), "events were recorded with tracing off"):
+            \t\treturn
+            \t# The list is kept from step to step while no instance goes away,
+            \t# and drops the instances that went away.
+            \tvar kept_list = GMRuntime._gml_step_entries
+            \t_frame()
+            \tif not _check(is_same(GMRuntime._gml_step_entries, kept_list) and kept_list.size() == 3, "the step list was rebuilt without a removal"):
+            \t\treturn
+            \tGMRuntime.gml_instance_destroy(a.id)
+            \tlog.clear()
+            \t_frame()
+            \tif not _check(GMRuntime._gml_step_entries.size() == 2 and log == ["L:begin", "C:begin", "C:step", "L:end", "C:end"], "after a destroy: " + str(log)):
             \t\treturn
 
             \t# Tracing keeps only the latest records.
@@ -399,6 +446,7 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(project_dir))
             _write_text(project_dir / "listed_instance.gd", listed_instance_script)
+            _write_text(project_dir / "late_instance.gd", late_instance_script)
             _write_text(project_dir / "moving_instance.gd", moving_instance_script)
             _write_text(project_dir / "smoke.gd", smoke_script)
             _write_text(project_dir / "smoke.tscn", smoke_scene)
@@ -411,6 +459,144 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("EVENT_SCHEDULER_LIST_SMOKE_OK", result.stdout)
+        self.assertNotIn("SCRIPT ERROR", result.stdout)
+
+    def test_animation_end_wraps_in_list_order(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        # Four sub-images without a sprite asset: image_index advances by
+        # image_speed per step and wraps at 4.
+        animated_instance_script = textwrap.dedent(
+            """\
+            extends Node2D
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var label = ""
+            var log = []
+            var id = GMRuntime.gml_instance_noone()
+            var sprite_index = -1
+            var image_index = 0.0
+            var image_number = 4
+            var image_speed = 0.0
+            var on_end = null
+
+            func configure(label_value, log_ref):
+            \tlabel = str(label_value)
+            \tlog = log_ref
+
+            func _ready():
+            \tid = GMRuntime.gml_instance_register(self, label, [])
+
+            func _exit_tree():
+            \tGMRuntime.gml_instance_unregister(id)
+
+            func _gm_apply_image_index():
+            \tpass
+
+            func _on_animation_end():
+            \tlog.append(label + ":end@" + str(image_index))
+            \tif on_end != null:
+            \t\ton_end.call()
+            """
+        )
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const AnimatedInstance = preload("res://animated_instance.gd")
+
+            var log = []
+            var probes = {}
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tcall_deferred("_run")
+
+            func _frame():
+            \tGMRuntime.gml_event_scheduler_set_enabled(true)
+            \tGMRuntime.gml_event_scheduler_frame(0.016, 1)
+            \tGMRuntime.gml_event_scheduler_set_enabled(false)
+
+            func _add(label, image_index, image_speed):
+            \tvar inst = AnimatedInstance.new()
+            \tinst.configure(label, log)
+            \tinst.image_index = image_index
+            \tinst.image_speed = image_speed
+            \tadd_child(inst)
+            \tprobes[label] = inst
+            \treturn inst
+
+            func _q_end():
+            \tprobes["Q"].image_speed = 0.0
+            \tprobes["P"].image_index = 6.0
+            \tprobes["R"].image_index = -1.0
+
+            func _run():
+            \tGMRuntime.gml_event_scheduler_set_enabled(false)
+            \t_add("P", 0.0, 0.0)
+            \t_add("Q", 3.0, 1.0).on_end = _q_end
+            \t_add("R", 0.0, 0.0)
+            \t_add("S", 1.5, 0.5)
+            \t# Q's Animation End moves P and R outside their sub-images: R comes
+            \t# later in the list and wraps in the same step, P only in the next.
+            \t_frame()
+            \tif not _check(log == ["Q:end@0.0", "R:end@3.0"], "first step: " + str(log)):
+            \t\treturn
+            \tif not _check(probes["P"].image_index == 6.0 and probes["S"].image_index == 2.0, "first step images: " + str([probes["P"].image_index, probes["S"].image_index])):
+            \t\treturn
+            \tlog.clear()
+            \t_frame()
+            \tif not _check(log == ["P:end@2.0"], "second step: " + str(log)):
+            \t\treturn
+            \tlog.clear()
+            \t_frame()
+            \t_frame()
+            \t_frame()
+            \tif not _check(log == ["S:end@0.0"], "fifth step: " + str(log)):
+            \t\treturn
+            \tprint("ANIMATION_END_ORDER_OK")
+            \tget_tree().quit(0)
+            """
+        )
+
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as godot_tmp:
+            project_dir = Path(godot_tmp)
+            _write_text(project_dir / "project.godot", "[application]\n")
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "animated_instance.gd", animated_instance_script)
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            try:
+                result = run_headless_scene(godot_binary, project_dir, 'smoke.tscn', timeout=60)
+            except subprocess.TimeoutExpired as exc:
+                output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+                self.fail("Godot animation end smoke timed out\n" + output)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ANIMATION_END_ORDER_OK", result.stdout)
         self.assertNotIn("SCRIPT ERROR", result.stdout)
 
 

@@ -31,10 +31,18 @@ static var _gml_step_redraw_frame = -1
 static var _gml_step_redraws = 0
 # The step's instances (instance registry entries, in creation order) and
 # the GMLStepScriptInfo of each; _gml_step_creation_mark is the creation
-# counter when the list last took in new instances.
+# counter when the list last took in new instances, and
+# _gml_step_removal_mark the number of instances unregistered when it last
+# dropped the ones that are gone.
 static var _gml_step_entries = []
 static var _gml_step_infos = []
 static var _gml_step_creation_mark = 0
+static var _gml_step_removal_mark = 0
+# The list positions of the instances whose script has an event method, by
+# method name, for the methods _gml_step_dispatch_method runs. Each is
+# worked out on the method's first dispatch and kept up to date as the list
+# changes.
+static var _gml_step_method_positions = {}
 static var _gml_step_running = false
 # GMLStepScriptInfo by script, or by class name for nodes without a script.
 static var _gml_step_script_infos = {}
@@ -265,17 +273,40 @@ static func _gml_step_has_method(info, inst, method_name):
 static func _gml_step_collect_instances():
 	# The instance list of a new step: the last step's instances that still
 	# exist, then the instances created since. Creation order only grows, so
-	# this is every live instance in creation order.
-	var entries = []
-	var infos = []
-	for i in range(_gml_step_entries.size()):
-		if _gml_step_entry_active(_gml_step_entries[i]):
-			entries.append(_gml_step_entries[i])
-			infos.append(_gml_step_infos[i])
-	_gml_step_entries = entries
-	_gml_step_infos = infos
+	# this is every live instance in creation order. Every phase passes over
+	# instances that are gone, so the list only drops them after instances
+	# were unregistered (registering counts up the creation counter and
+	# unregistering shrinks the registry, so their difference grows with
+	# every instance unregistered).
+	var removal_mark = _gml_instance_creation_counter - _gml_instance_entries.size()
+	if removal_mark != _gml_step_removal_mark:
+		_gml_step_removal_mark = removal_mark
+		_gml_step_drop_inactive()
 	_gml_step_join_created_instances()
 	_gml_step_running = true
+	return null
+
+
+static func _gml_step_drop_inactive():
+	var entries = _gml_step_entries
+	var infos = _gml_step_infos
+	_gml_step_entries = []
+	_gml_step_infos = []
+	for method_name in _gml_step_method_positions.keys():
+		_gml_step_method_positions[method_name] = []
+	for i in range(entries.size()):
+		if _gml_step_entry_active(entries[i]):
+			_gml_step_append(entries[i], infos[i])
+	return null
+
+
+static func _gml_step_clear_list():
+	# The next step takes in every live instance again, in creation order;
+	# the method positions refer to the old list, so they go too.
+	_gml_step_entries = []
+	_gml_step_infos = []
+	_gml_step_method_positions = {}
+	_gml_step_creation_mark = 0
 	return null
 
 
@@ -288,8 +319,16 @@ static func _gml_step_add_entry(entry):
 	var inst = entry["instance"]
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
+	_gml_step_append(entry, _gml_step_script_info(inst))
+
+
+static func _gml_step_append(entry, info):
+	var position = _gml_step_entries.size()
 	_gml_step_entries.append(entry)
-	_gml_step_infos.append(_gml_step_script_info(inst))
+	_gml_step_infos.append(info)
+	for method_name in _gml_step_method_positions:
+		if _gml_step_has_method(info, entry["instance"], method_name):
+			_gml_step_method_positions[method_name].append(position)
 
 
 static func _gml_step_join_created_instances():
@@ -316,15 +355,6 @@ static func _gml_step_entry_active(entry):
 	return is_instance_valid(inst) and not inst.is_queued_for_deletion()
 
 
-static func _gml_step_instances():
-	# The running step's active instances, for helpers that take a list.
-	var instances = []
-	for entry in _gml_step_entries:
-		if _gml_step_entry_active(entry):
-			instances.append(entry["instance"])
-	return instances
-
-
 static func _gml_step_timeline_instances():
 	var instances = []
 	for i in range(_gml_step_entries.size()):
@@ -334,22 +364,35 @@ static func _gml_step_timeline_instances():
 
 
 static func _gml_step_dispatch_method(phase, method_name, frame):
-	# Runs one event method for every instance of the step that has it.
-	for i in range(_gml_step_entries.size()):
+	# Runs one event method for every instance of the step that has it, in
+	# list order; instances that join the list during the phase wait for
+	# the next phase.
+	var positions = _gml_step_method_positions.get(method_name)
+	if positions == null:
+		positions = _gml_step_find_method_positions(method_name)
+	for k in range(positions.size()):
 		if _gml_room_requested_change != null:
 			break
-		var entry = _gml_step_entries[i]
+		var entry = _gml_step_entries[positions[k]]
 		if bool(entry["destroyed"]):
 			continue
 		var inst = entry["instance"]
-		if not is_instance_valid(inst) or not _gml_step_has_method(_gml_step_infos[i], inst, method_name):
-			continue
-		if inst.is_queued_for_deletion():
+		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if _gml_event_scheduler_tracing:
 			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
 		inst.call(method_name)
 	return null
+
+
+static func _gml_step_find_method_positions(method_name):
+	var positions = []
+	for i in range(_gml_step_entries.size()):
+		var entry = _gml_step_entries[i]
+		if _gml_step_entry_active(entry) and _gml_step_has_method(_gml_step_infos[i], entry["instance"], method_name):
+			positions.append(i)
+	_gml_step_method_positions[method_name] = positions
+	return positions
 
 
 static func _gml_step_tick_alarms(frames, frame):
@@ -364,12 +407,16 @@ static func _gml_step_tick_alarms(frames, frame):
 
 static func _gml_step_apply_motion(frame):
 	# GameMaker's UpdateInstancePositions: friction, gravity, paths and speed
-	# for every instance.
+	# for every instance. This runs for every instance in every step, so the
+	# checks are written out here.
 	for i in range(_gml_step_entries.size()):
 		var info = _gml_step_infos[i]
-		if not info.moves or not _gml_step_entry_active(_gml_step_entries[i]):
+		if not info.moves:
 			continue
-		var inst = _gml_step_entries[i]["instance"]
+		var entry = _gml_step_entries[i]
+		var inst = entry["instance"]
+		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+			continue
 		if info.motion_members and _gml_step_motion_idle(inst):
 			continue
 		if _gml_event_scheduler_tracing:
@@ -382,20 +429,28 @@ static func _gml_step_motion_idle(inst):
 	# Whether UpdateInstancePositions would leave the instance alone: no
 	# hspeed/vspeed, no gravity, no speed for friction to reduce, and no path
 	# (path_index undefined or negative). Anything but plain numbers there
-	# takes the full motion step.
+	# takes the full motion step. Each member is read once, without helper
+	# calls: most instances stand still in most steps.
+	var hspeed = inst.hspeed
+	if not ((hspeed is float or hspeed is int) and hspeed == 0):
+		return false
+	var vspeed = inst.vspeed
+	if not ((vspeed is float or vspeed is int) and vspeed == 0):
+		return false
+	var gravity = inst.gravity
+	if not ((gravity is float or gravity is int) and gravity == 0):
+		return false
 	var path_index = inst.path_index
 	if path_index is int or path_index is float:
 		if path_index >= 0:
 			return false
 	elif not (path_index == null or path_index is GMLUndefined):
 		return false
-	if not (_gml_step_is_zero(inst.hspeed) and _gml_step_is_zero(inst.vspeed) and _gml_step_is_zero(inst.gravity)):
-		return false
-	return _gml_step_is_zero(inst.friction) or _gml_step_is_zero(inst.speed)
-
-
-static func _gml_step_is_zero(value):
-	return (value is float or value is int) and value == 0
+	var friction = inst.friction
+	if (friction is float or friction is int) and friction == 0:
+		return true
+	var speed = inst.speed
+	return (speed is float or speed is int) and speed == 0
 
 
 static func _gml_step_update_images(frame):
@@ -406,6 +461,8 @@ static func _gml_step_update_images(frame):
 	# runs for every instance in every step, so it reads the members directly.
 	var fps = max(_gml_step_real(gml_game_speed_fps()), 1.0)
 	var count = _gml_step_entries.size()
+	# The positions of the instances that Animate left outside their frames.
+	var outside = []
 	for i in range(count):
 		var info = _gml_step_infos[i]
 		if not (info.tracks_previous or info.tracks_path_previous or info.animates):
@@ -415,22 +472,42 @@ static func _gml_step_update_images(frame):
 		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if info.tracks_previous:
-			var position = inst.global_position if inst is Node2D else _gml_instance_position(inst)
+			# In the space of x and y, which the motion step and solid
+			# rollback use too: an offset layer node does not move them.
+			var position = inst.position if inst is Node2D and not _gml_sequence_instances_exist else _gml_instance_position(inst)
 			inst.xprevious = position.x
 			inst.yprevious = position.y
 		if info.tracks_path_previous:
 			inst.path_positionprevious = inst.path_position
-		if info.animates:
-			_gml_step_animate_instance(inst, fps)
-	for i in range(count):
-		if not _gml_step_infos[i].animates:
-			continue
-		var entry = _gml_step_entries[i]
-		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
-			continue
-		_gml_step_wrap_image_index(inst, _gml_step_infos[i], frame)
+		if info.animates and _gml_step_animate_instance(inst, fps):
+			outside.append(i)
+	_gml_step_wrap_images(outside, count, frame)
 	return null
+
+
+static func _gml_step_wrap_images(outside, count, frame):
+	# UpdateImages, in list order. No game code runs before the first
+	# Animation End event, so until then only the instances Animate left
+	# outside their frames can wrap; after it, every later instance is
+	# looked at again.
+	for i in outside:
+		if _gml_step_wrap_entry(i, frame):
+			for later in range(i + 1, count):
+				_gml_step_wrap_entry(later, frame)
+			return null
+	return null
+
+
+static func _gml_step_wrap_entry(i, frame):
+	# Whether wrapping the instance at list position i ran its Animation End.
+	var info = _gml_step_infos[i]
+	if not info.animates:
+		return false
+	var entry = _gml_step_entries[i]
+	var inst = entry["instance"]
+	if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		return false
+	return _gml_step_wrap_image_index(inst, info, frame)
 
 
 static func _gml_step_real(value):
@@ -443,18 +520,23 @@ static func _gml_step_real(value):
 
 
 static func _gml_step_animate_instance(inst, fps):
+	# GameMaker's Animate; returns whether image_index is now outside the
+	# sprite's frames, where UpdateImages wraps it.
 	var image_speed = _gml_step_real(inst.image_speed)
-	if image_speed == 0.0:
-		return
-	var increment = image_speed
-	var playback = _gml_step_sprite_playback(inst.sprite_index)
-	if playback is Array:
-		# Same arithmetic as GameMaker: image_speed * (speed / game speed),
-		# or image_speed * speed for frames per game frame.
-		increment = image_speed * (playback[0] if playback[1] == 1 else playback[0] / fps)
-		if increment == 0.0:
-			return
-	inst.image_index = _gml_step_real(inst.image_index) + increment
+	if image_speed != 0.0:
+		var increment = image_speed
+		var playback = _gml_step_sprite_playback(inst.sprite_index)
+		if playback is Array:
+			# Same arithmetic as GameMaker: image_speed * (speed / game speed),
+			# or image_speed * speed for frames per game frame.
+			increment = image_speed * (playback[0] if playback[1] == 1 else playback[0] / fps)
+		if increment != 0.0:
+			inst.image_index = _gml_step_real(inst.image_index) + increment
+	var image_number = int(_gml_step_real(inst.image_number))
+	if image_number <= 0:
+		return false
+	var image_index = _gml_step_real(inst.image_index)
+	return image_index >= image_number or image_index < 0.0
 
 
 static func _gml_step_sprite_playback(sprite):
@@ -483,18 +565,20 @@ static func _gml_step_sprite_playback(sprite):
 
 
 static func _gml_step_wrap_image_index(inst, info, frame):
+	# Whether the instance's Animation End event ran.
 	var image_number = int(_gml_step_real(inst.image_number))
 	if image_number <= 0:
-		return
+		return false
 	var image_index = _gml_step_real(inst.image_index)
 	if image_index >= image_number:
 		inst.image_index = image_index - image_number
 	elif image_index < 0.0:
 		inst.image_index = image_index + image_number
 	else:
-		return
+		return false
 	if _gml_step_has_method(info, inst, &"_on_animation_end"):
-		_gml_step_dispatch_other_event(inst, "animation", &"_on_animation_end", frame)
+		return _gml_step_dispatch_other_event(inst, "animation", &"_on_animation_end", frame)
+	return false
 
 
 static func _gml_step_dispatch_other_event(inst, phase, method_name, frame):
@@ -508,11 +592,13 @@ static func _gml_step_dispatch_other_event(inst, phase, method_name, frame):
 
 static func _gml_step_handle_other(frame):
 	# GameMaker's HandleOther, run after instances moved: Outside Room (once
-	# when the instance leaves the room), Intersect Boundary, and the Outside
-	# View / Intersect View Boundary events of visible views. Instances with a
-	# collision mask are tested by their bounding box, others by x/y.
+	# when the instance leaves the room), Intersect Boundary, and, while the
+	# room has views enabled, the Outside View / Intersect View Boundary
+	# events of visible views. Instances with a collision mask are tested by
+	# their bounding box, others by x/y.
 	_gml_event_scheduler_record_phase("other", "", null, frame)
 	var room_size = null
+	var views_enabled = false
 	for i in range(_gml_step_entries.size()):
 		var handlers = _gml_step_infos[i].other_handlers
 		if handlers.is_empty() or not _gml_step_entry_active(_gml_step_entries[i]):
@@ -522,11 +608,13 @@ static func _gml_step_handle_other(frame):
 				_to_real(_gml_builtin_globals.get("room_width", 0)),
 				_to_real(_gml_builtin_globals.get("room_height", 0))
 			)
-		_gml_step_handle_other_instance(_gml_step_entries[i]["instance"], handlers, room_size, frame)
+			# Read once per step, like the runner's m_enableviews.
+			views_enabled = gml_view_get_enabled()
+		_gml_step_handle_other_instance(_gml_step_entries[i]["instance"], handlers, room_size, views_enabled, frame)
 	return null
 
 
-static func _gml_step_handle_other_instance(inst, handlers, room_size, frame):
+static func _gml_step_handle_other_instance(inst, handlers, room_size, views_enabled, frame):
 	var bounds = _gml_step_instance_bounds(inst)
 	if handlers.has("outside_room"):
 		var outside = _gml_step_outside_area(bounds, inst, Rect2(Vector2.ZERO, room_size))
@@ -538,7 +626,7 @@ static func _gml_step_handle_other_instance(inst, handlers, room_size, frame):
 	# earlier one destroyed it.
 	if handlers.has("boundary") and is_instance_valid(inst) and _gml_step_bounds_cross_room_edge(bounds, inst, room_size):
 		_gml_step_dispatch_other_event(inst, "other", &"_on_intersect_boundary", frame)
-	if handlers.has("views"):
+	if views_enabled and handlers.has("views"):
 		_gml_step_handle_view_events(inst, bounds, handlers["views"], frame)
 
 

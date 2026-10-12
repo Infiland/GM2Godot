@@ -465,6 +465,82 @@ _PERSISTENT_ROOM_TRACE = [
 ]
 
 
+# Coming back to a persistent room brings its instances back into the step
+# list (the list is built afresh, in creation order): each instance still
+# runs its Step event once per step, as in GameMaker.
+_REVISIT_STEPS_PROJECT = GameMakerProject(
+    name="PersistentRevisitSteps",
+    objects=(
+        GameMakerObject(
+            "o_ctrl",
+            {
+                EVENT_STEP: (
+                    'if (!variable_global_exists("t")) global.t = 0;\n'
+                    "global.t += 1;\n"
+                    "if (global.t == 2) room_goto(r_away);\n"
+                    "if (global.t == 4) room_goto(r_hub);\n"
+                ),
+            },
+            persistent=True,
+        ),
+        GameMakerObject("o_ticker", {EVENT_CREATE: "n = 0;\n", EVENT_STEP: "n += 1;\n"}),
+        GameMakerObject("o_away", {EVENT_STEP: "x += 0;\n"}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_hub",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (RoomInstance("inst_ctrl", "o_ctrl", 0, 0), RoomInstance("inst_ticker", "o_ticker", 0, 0)),
+                ),
+            ),
+            creation_order=("inst_ctrl", "inst_ticker"),
+            persistent=True,
+        ),
+        GameMakerRoom(
+            "r_away",
+            layers=(InstanceLayer("Instances", 0, (RoomInstance("inst_away", "o_away", 0, 0),)),),
+            creation_order=("inst_away",),
+        ),
+    ),
+)
+
+# Records every Step event the scheduler runs and reports the rooms entered
+# and any instance whose Step ran more than once in one step.
+_REVISIT_STEPS_PROBE = """extends Node
+
+const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+var _frames = 0
+
+
+func _ready():
+	GMRuntime.gml_event_scheduler_set_tracing(true)
+
+
+func _process(_delta):
+	_frames += 1
+	if _frames < 14:
+		return
+	var counts = {}
+	for record in GMRuntime.gml_event_scheduler_trace():
+		if record["method"] == "_on_step":
+			var key = str(record["frame"]) + ":" + str(record["instance"])
+			counts[key] = int(counts.get(key, 0)) + 1
+	var repeated = []
+	for key in counts:
+		if counts[key] > 1:
+			repeated.append(key)
+	var rooms = []
+	for change in GMRuntime.gml_room_transition_log():
+		rooms.append(change["room"])
+	print("ROOM_LIFECYCLE_TRACE " + JSON.stringify(["rooms:" + ",".join(rooms), "repeated_steps:" + ",".join(repeated)]))
+	get_tree().quit(0)
+"""
+
+
 # The persistent rooms that were left are still kept when the game ends,
 # by game_end() or by the program closing: they go with the game, freed
 # like the room being played, so nothing of theirs outlives it (no leaked
@@ -584,6 +660,10 @@ class TestRoomLifecycleGodot(unittest.TestCase):
     def test_persistent_room_keeps_its_state_until_game_restart(self) -> None:
         self.assertEqual(self._run_trace(_PERSISTENT_ROOM_PROJECT), _PERSISTENT_ROOM_TRACE)
 
+    def test_a_revisited_persistent_room_steps_each_instance_once(self) -> None:
+        trace = self._run_trace(_REVISIT_STEPS_PROJECT, probe=_REVISIT_STEPS_PROBE)
+        self.assertEqual(trace, ["rooms:r_away,r_hub", "repeated_steps:"])
+
     def test_persistent_rooms_kept_when_the_program_closes_are_freed(self) -> None:
         self.assertEqual(self._run_trace(_kept_rooms_exit_project(False)), _KEPT_ROOMS_TRACE)
 
@@ -594,7 +674,7 @@ class TestRoomLifecycleGodot(unittest.TestCase):
     def test_events_and_event_inherited_reach_the_nearest_ancestor_with_the_event(self) -> None:
         self.assertEqual(self._run_trace(_CHAIN_PROJECT), _CHAIN_TRACE)
 
-    def _run_trace(self, project: GameMakerProject, allowed_warning: str = "") -> list[str]:
+    def _run_trace(self, project: GameMakerProject, allowed_warning: str = "", probe: str = _PROBE) -> list[str]:
         godot_binary = find_smoke_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
@@ -603,7 +683,7 @@ class TestRoomLifecycleGodot(unittest.TestCase):
             root = Path(temporary_directory)
             write_gamemaker_project(root / "gamemaker", project)
             convert_gamemaker_project(root / "gamemaker", root / "godot")
-            add_probe_autoload(root / "godot", _PROBE)
+            add_probe_autoload(root / "godot", probe)
             if project.sprites:
                 imported = import_converted_project(godot_binary, root / "godot")
                 self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)

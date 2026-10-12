@@ -844,9 +844,7 @@ static func _gml_room_reset_step_list():
 		_gml_room_step_list_stale = true
 		return
 	_gml_room_step_list_stale = false
-	_gml_step_entries = []
-	_gml_step_infos = []
-	_gml_step_creation_mark = 0
+	_gml_step_clear_list()
 
 
 static func _gml_room_persistent_root():

@@ -177,10 +177,14 @@ def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
 def _uses_sprite_runtime(
     sprite_runtime: SpriteRuntimeConfig | None,
     code_bodies: _CodeBodies | None,
+    object_runtime: ObjectRuntimeConfig | None = None,
 ) -> bool:
     if sprite_runtime is None:
         return False
-    if sprite_runtime.initial_sprite_name is not None:
+    # Every GameMaker instance has sprite_index and the image_* variables,
+    # and another instance can set them (inst.sprite_index = spr, or inside a
+    # with block), so every object declares them.
+    if object_runtime is not None or sprite_runtime.initial_sprite_name is not None:
         return True
     return any(
         _SPRITE_RUNTIME_IDENTIFIER_RE.search(body) is not None
@@ -276,7 +280,15 @@ def _emit_sprite_runtime_prelude(
     declare_members: bool,
     track_collision: bool = False,
 ) -> None:
+    # Like GameMaker, an instance starts with its own object's sprite (-1 for
+    # none), not an ancestor's: every object script says which sprite that is,
+    # and the script that declares sprite_index starts it from there.
+    own_sprite = "-1"
+    if sprite_runtime.initial_sprite_name is not None:
+        own_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
+    own_sprite_function = f"\n\nfunc _gm_object_sprite_index():\n\treturn {own_sprite}"
     if not declare_members:
+        lines.append(own_sprite_function + "\n")
         return
     collision_dirty = _collision_dirty_line(track_collision)
 
@@ -298,12 +310,8 @@ def _emit_sprite_runtime_prelude(
 
     # Like GameMaker, sprite_index holds the sprite's asset index (-1 for no
     # sprite), so it compares equal to the sprite constants in GML code.
-    initial_sprite = "-1"
-    if sprite_runtime.initial_sprite_name is not None:
-        initial_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
-
     lines.append(
-        f"\nvar sprite_index = {initial_sprite}:"
+        "\nvar sprite_index = _gm_object_sprite_index():"
         "\n\tset(value):"
         "\n\t\tsprite_index = value"
         f"{collision_dirty}"
@@ -315,6 +323,7 @@ def _emit_sprite_runtime_prelude(
         "\n\nvar image_number = 1"
         "\nvar image_speed = 1.0"
         "\nvar _gm_sprite_visual_cache = null"
+        "\nvar _gm_sprite_runtime_started = false"
         "\nvar image_xscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_xscale = value"
@@ -338,7 +347,14 @@ def _emit_sprite_runtime_prelude(
         "\n\tset(value):"
         "\n\t\timage_alpha = value"
         "\n\t\t_gm_apply_image_transform()"
-        "\n\nfunc _gm_initialize_sprite_runtime():"
+        + own_sprite_function
+        # The instance's own _ready starts the sprite before its Create
+        # event; the ancestors' _ready that event_inherited() runs must not
+        # undo what that Create event set, so it starts only once.
+        + "\n\nfunc _gm_initialize_sprite_runtime():"
+        "\n\tif _gm_sprite_runtime_started:"
+        "\n\t\treturn"
+        "\n\t_gm_sprite_runtime_started = true"
         "\n\t_gm_apply_sprite_index()"
         "\n\tif has_meta(\"gamemaker_image_index\"):"
         "\n\t\timage_index = get_meta(\"gamemaker_image_index\")"
@@ -497,40 +513,11 @@ def _emit_sprite_runtime_prelude(
     )
 
 
-def _prepend_sprite_runtime_ready_body(
-    body: str,
-    sprite_runtime: SpriteRuntimeConfig,
-    *,
-    inherited_runtime: bool,
-) -> str:
-    init_lines: list[str] = []
-    if inherited_runtime and sprite_runtime.initial_sprite_name is not None:
-        init_lines.append(f"\tsprite_index = {_sprite_reference_expression(sprite_runtime.initial_sprite_name)}")
-    init_lines.append("\t_gm_initialize_sprite_runtime()")
-    init_body = "\n".join(init_lines)
+def _prepend_sprite_runtime_ready_body(body: str) -> str:
+    init_body = "\t_gm_initialize_sprite_runtime()"
     if body.strip() == "pass":
         return init_body
     return f"{init_body}\n{body}"
-
-
-def _sprite_runtime_construct_lines(
-    sprite_runtime: SpriteRuntimeConfig,
-    *,
-    inherited_runtime: bool,
-) -> list[str]:
-    # Sprites are not inherited in GameMaker: every instance starts with its
-    # own object's sprite, or none (-1). The script that declares
-    # sprite_index starts it with its own sprite; a child script sets its own.
-    lines: list[str] = []
-    if inherited_runtime:
-        initial_sprite = (
-            "-1"
-            if sprite_runtime.initial_sprite_name is None
-            else _sprite_reference_expression(sprite_runtime.initial_sprite_name)
-        )
-        lines.append(f"\tsprite_index = {initial_sprite}")
-    lines.append("\t_gm_initialize_sprite_runtime()")
-    return lines
 
 
 def _emit_object_runtime_prelude(
@@ -790,7 +777,7 @@ def generate_script_content(
     Returns:
         Complete .gd file content as a string.
     """
-    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
+    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies, object_runtime)
     uses_object_runtime = _uses_object_runtime(object_runtime)
     uses_motion_runtime = _uses_motion_runtime(object_runtime)
     if not event_list and not uses_sprite_runtime and not uses_object_runtime:
@@ -916,11 +903,9 @@ def generate_script_content(
             object_runtime,
             declare_members=base_script_path is None,
             emit_notification="_notification" not in function_names,
-            sprite_construct_lines=(
-                _sprite_runtime_construct_lines(sprite_runtime, inherited_runtime=inherited_sprite_runtime)
-                if constructs_sprite and sprite_runtime is not None
-                else ()
-            ),
+            # Its own object's sprite: _gm_object_sprite_index (virtual) starts
+            # sprite_index, and construction shows it.
+            sprite_construct_lines=("\t_gm_initialize_sprite_runtime()",) if constructs_sprite else (),
         )
     if uses_motion_runtime:
         _emit_motion_runtime_prelude(
@@ -937,11 +922,7 @@ def generate_script_content(
             if wrap_body is not None:
                 body = wrap_body(func, body, function_names)
         if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready" and not uses_object_runtime:
-            body = _prepend_sprite_runtime_ready_body(
-                body,
-                sprite_runtime,
-                inherited_runtime=inherited_sprite_runtime,
-            )
+            body = _prepend_sprite_runtime_ready_body(body)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":

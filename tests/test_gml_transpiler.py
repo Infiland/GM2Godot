@@ -3467,6 +3467,42 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tGMRuntime.gml_motion_set_speed(_gml_with_target_0, 3)",
         )
 
+    def test_move_and_collide_and_mp_steps_lower_to_runtime_motion_calls(self):
+        asset_names = {"o_wall", "o_block"}
+        cases = (
+            (
+                "hits = move_and_collide(hspd, vspd, o_wall)",
+                'hits = GMRuntime.gml_move_and_collide(self, hspd, vspd, GMRuntime.gml_asset_get_index("o_wall"))',
+            ),
+            (
+                "move_and_collide(4, 0, all, 8, 0, 1, 2, 2)",
+                "GMRuntime.gml_move_and_collide(self, 4, 0, GMRuntime.gml_instance_all(), 8, 0, 1, 2, 2)",
+            ),
+            ("mp_linear_step(gx, gy, 4, false)", "GMRuntime.gml_mp_linear_step(self, gx, gy, 4, false)"),
+            (
+                "mp_linear_step_object(gx, gy, 4, o_block)",
+                'GMRuntime.gml_mp_linear_step_object(self, gx, gy, 4, GMRuntime.gml_asset_get_index("o_block"))',
+            ),
+            ("mp_potential_step(gx, gy, 4, true)", "GMRuntime.gml_mp_potential_step(self, gx, gy, 4, true)"),
+            (
+                "mp_potential_step_object(gx, gy, 4, all)",
+                "GMRuntime.gml_mp_potential_step_object(self, gx, gy, 4, GMRuntime.gml_instance_all())",
+            ),
+            ("mp_potential_settings(45, 15, 2, false)", "GMRuntime.gml_mp_potential_settings(self, 45, 15, 2, false)"),
+            (
+                "mp_grid_add_instances(grid, o_wall, false)",
+                'GMRuntime.gml_mp_grid_add_instances(grid, GMRuntime.gml_asset_get_index("o_wall"), false)',
+            ),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source + ";", indent="", asset_names=asset_names), expected)
+        self.assertEqual(
+            transpile_gml_code("with (o_block) mp_linear_step(0, 0, 2, true);", indent="", asset_names=asset_names),
+            'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_block"), self, other):\n'
+            "\tGMRuntime.gml_mp_linear_step(_gml_with_target_0, 0, 0, 2, true)",
+        )
+
     def test_path_and_mp_grid_helpers_lower_asset_arguments(self):
         asset_names = {"path_patrol"}
 

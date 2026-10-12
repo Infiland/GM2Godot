@@ -170,6 +170,9 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             """\
 
             func _ready():
+            \t# The probe's parent is offset, as an instance layer moved by
+            \t# layer_x is: xprevious must stay in the space of x.
+            \tposition = Vector2(40, 25)
             \tprobe = Probe.new()
             \tprobe.name = "Probe"
             \tadd_child(probe)
@@ -815,6 +818,109 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "rooms" / "r_first" / "r_first.tscn", first_room)
             _write_text(project_dir / "rooms" / "r_second" / "r_second.tscn", second_room)
             self._run_project(project_dir, "res://rooms/r_first/r_first.tscn", "GAME_STEP_PATH_END_ROOM_CHANGE_SMOKE_OK")
+
+    def test_view_events_run_only_while_views_are_enabled(self) -> None:
+        # GameMaker's HandleOther (HTML5 Events.js) looks at the views only
+        # while the room has views enabled (view_enabled), and then only at
+        # the visible ones. The room below keeps view 0 visible with views
+        # off; the watcher sits outside the view and turns views on in its
+        # third step.
+        if _find_godot_binary() is None:
+            self.skipTest("Godot binary not available")
+        watcher_script = generate_script_content(
+            [_event(0, 0), _event(3, 0), _event(7, 40)],
+            code_bodies={
+                "_ready": transpile_gml_code("global.events = [];\nsteps = 0;\n"),
+                "_on_step": transpile_gml_code("steps += 1;\nif (steps == 3) view_enabled = true;\n"),
+                "_on_outside_view_0": transpile_gml_code(
+                    'array_push(global.events, "outside_view0:" + string(steps));\n'
+                ),
+            },
+            instance_variables=("steps",),
+            object_runtime=ObjectRuntimeConfig(object_name="o_watcher"),
+        )
+        checker_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            """
+        ) + _CHECK_HELPER + textwrap.dedent(
+            """\
+
+            func _process(_delta):
+            \tif Engine.get_process_frames() < 6:
+            \t\treturn
+            \tvar events = GMRuntime.gml_global_scope().get("events", [])
+            \tif not _check(events.size() >= 2, "no view events once views were enabled: " + str(events)):
+            \t\treturn
+            \tif not _check(str(events[0]) == "outside_view0:3", "view events ran while views were disabled: " + str(events)):
+            \t\treturn
+            \tprint("GAME_STEP_VIEW_EVENTS_SMOKE_OK")
+            \tget_tree().quit(0)
+            """
+        )
+        room = textwrap.dedent(
+            """\
+            [gd_scene load_steps=3 format=3]
+
+            [ext_resource type="Script" path="res://gm2godot/gml_room_node.gd" id="room"]
+            [ext_resource type="PackedScene" path="res://objects/o_watcher/o_watcher.tscn" id="o_watcher"]
+
+            [node name="r_view" type="Node2D"]
+            script = ExtResource("room")
+            metadata/gamemaker_room_width = 320
+            metadata/gamemaker_room_height = 180
+            metadata/gamemaker_room_persistent = false
+            metadata/gamemaker_view_settings = {"enableViews": false}
+            metadata/gamemaker_views = [{"visible": true, "xview": 0, "yview": 0, "wview": 160, "hview": 120}]
+
+            [node name="watcher" parent="." instance=ExtResource("o_watcher")]
+            position = Vector2(300, 150)
+            """
+        )
+        entries = (
+            AssetRegistryEntry(
+                id=100,
+                name="r_view",
+                kind="rooms",
+                asset_type="room",
+                type_name="Room",
+                source_path="rooms/r_view/r_view.yy",
+                godot_path="res://rooms/r_view/r_view.tscn",
+                legacy_id="rooms/r_view/r_view.yy",
+                metadata={"room_order": 0, "width": 320, "height": 180, "persistent": False, "volume": 1.0},
+            ),
+            AssetRegistryEntry(
+                id=200,
+                name="o_watcher",
+                kind="objects",
+                asset_type="object",
+                type_name="Object",
+                source_path="objects/o_watcher/o_watcher.yy",
+                godot_path="res://objects/o_watcher/o_watcher.tscn",
+                legacy_id="objects/o_watcher/o_watcher.yy",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                _project_file("GameStepViewEventsSmoke", "res://rooms/r_view/r_view.tscn")
+                + '\n[autoload]\n\nChecker="*res://checker.gd"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "gm2godot" / "gml_room_node.gd", render_room_runtime_script())
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(entries))
+            _write_text(project_dir / "checker.gd", checker_script)
+            _write_text(project_dir / "objects" / "o_watcher" / "o_watcher.gd", watcher_script)
+            _write_text(
+                project_dir / "objects" / "o_watcher" / "o_watcher.tscn",
+                _scene("o_watcher", "res://objects/o_watcher/o_watcher.gd"),
+            )
+            _write_text(project_dir / "rooms" / "r_view" / "r_view.tscn", room)
+            self._run_project(project_dir, "res://rooms/r_view/r_view.tscn", "GAME_STEP_VIEW_EVENTS_SMOKE_OK")
 
     def test_delta_time_and_get_timer_follow_the_step_clock(self) -> None:
         # GameMaker_DoAStep sets delta_time to the microseconds since the

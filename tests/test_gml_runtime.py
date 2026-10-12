@@ -679,6 +679,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("move_snap(16, 16)", "GMRuntime.gml_move_snap(self, 16, 16)"),
     RuntimeValueParityCase("place_snapped(16, 16)", "GMRuntime.gml_place_snapped(self, 16, 16)"),
     RuntimeValueParityCase(
+        "move_and_collide(4, 0, o_enemy)",
+        'GMRuntime.gml_move_and_collide(self, 4, 0, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "mp_linear_step_object(48, 48, 2, o_enemy)",
+        'GMRuntime.gml_mp_linear_step_object(self, 48, 48, 2, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase("mp_potential_step(48, 48, 2, false)", "GMRuntime.gml_mp_potential_step(self, 48, 48, 2, false)"),
+    RuntimeValueParityCase(
         "path_start(path_patrol, 4, 0, false)",
         'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 0, false)',
     ),
@@ -689,6 +698,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     ),
     RuntimeValueParityCase("mp_grid_create(0, 0, 4, 4, 16, 16)", "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)"),
     RuntimeValueParityCase("mp_grid_add_cell(grid, 1, 2)", "GMRuntime.gml_mp_grid_add_cell(grid, 1, 2)"),
+    RuntimeValueParityCase(
+        "mp_grid_add_instances(grid, o_enemy, true)",
+        'GMRuntime.gml_mp_grid_add_instances(grid, GMRuntime.gml_asset_get_index("o_enemy"), true)',
+    ),
     RuntimeValueParityCase(
         "mp_grid_path(grid, path_patrol, 0, 0, 48, 48, false)",
         'GMRuntime.gml_mp_grid_path(grid, GMRuntime.gml_asset_get_index("path_patrol"), 0, 0, 48, 48, false)',
@@ -1233,6 +1246,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_move_random",
             "gml_move_snap",
             "gml_place_snapped",
+            "gml_move_and_collide",
+            "gml_mp_linear_step",
+            "gml_mp_linear_step_object",
+            "gml_mp_potential_step",
+            "gml_mp_potential_step_object",
+            "gml_mp_potential_settings",
             "gml_path_registry_set",
             "gml_path_start",
             "gml_path_end",
@@ -1245,6 +1264,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mp_grid_clear_cell",
             "gml_mp_grid_add_rectangle",
             "gml_mp_grid_path",
+            "gml_mp_grid_add_instances",
             "gml_draw_begin",
             "gml_draw_end",
             "gml_draw_event_dispatch_frame",

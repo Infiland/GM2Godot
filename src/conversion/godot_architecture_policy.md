@@ -22,7 +22,10 @@ choices used for a project.
   depth, or creating it with `instance_create_depth`, puts the instance node on
   the room's managed layer node for that depth (GameMaker's managed layer, kept
   until the room ends), keeping `x`/`y`; a moved instance stays the same live
-  instance, so no CleanUp event runs for the move.
+  instance, so no CleanUp event runs for the move. Particle systems share these
+  managed layers: `part_system_create` without a layer starts on the one at
+  depth 0 and `part_system_depth` moves the system to the one at its depth;
+  `part_system_layer` puts it back on a layer, drawing with that layer.
 - Layers sharing a depth draw in GameMaker's order: a layer added at a depth
   already in use (a managed layer, `layer_create`, `layer_depth`) draws behind
   the layers already there, so its node goes before theirs in the room.

@@ -192,7 +192,8 @@ func _create_layer(object_name, layer_name):
 # Whether node is on the room's managed layer at depth.
 func _on_managed_layer(node, depth):
 \tvar layer = node.get_parent()
-\treturn layer != null and layer.get_parent() == self and layer.get_meta(GMRuntime.GML_MANAGED_LAYER_DEPTH_META, null) == depth
+\tvar key = GMRuntime.GML_MANAGED_LAYER_DEPTH_META
+\treturn layer != null and layer.get_parent() == self and layer.has_meta(key) and layer.get_meta(key) == depth
 
 func _report(tag, node, depth):
 \tprint(tag, " ", int(float(depth)), " ", node.z_index, " ", node.z_as_relative)
@@ -395,6 +396,22 @@ func _run():
 \tvar x = _painter("Instances", "X")
 \tx.depth = 400
 \tx.depth = 500
+\t# A particle system made without a layer starts on the managed layer at
+\t# depth 0; part_system_depth moves it to the managed layer at its depth,
+\t# even when its layer has that depth, and part_system_layer back onto a
+\t# layer, where it draws with that layer.
+\tvar system = GMRuntime.gml_part_system_create()
+\tvar system_node = GMRuntime._gml_particle_system_resolve(system)["node"]
+\tsystem_node.name = "Particles"
+\tvar made_on_managed = _on_managed_layer(system_node, 0)
+\tGMRuntime.gml_part_system_depth(system, 100)
+\tvar layered = GMRuntime.gml_part_system_create_layer("Top", false)
+\tvar layered_node = GMRuntime._gml_particle_system_resolve(layered)["node"]
+\tGMRuntime.gml_part_system_depth(layered, -100)
+\tvar left_layer = _on_managed_layer(layered_node, -100)
+\tGMRuntime.gml_part_system_layer(layered, "Spare")
+\tprint("PART ", made_on_managed, " ", _on_managed_layer(system_node, 100), " ", system_node.z_index == made.z_index, " ", left_layer)
+\tprint("PART_LAYER ", layered_node.get_parent().name, " ", layered_node.z_as_relative, " ", layered_node.z_index)
 \tawait get_tree().process_frame
 \tGMRuntime.gm2godot_draw_event_trace_enable(true)
 \tGMRuntime.gml_draw_event_trace_clear()
@@ -676,6 +693,21 @@ class TestEqualDepthLayerOrderGodot(unittest.TestCase):
 
     def test_managed_layer_shares_the_z_index_of_its_depth(self) -> None:
         self.assertEqual(self._line("TIE_Z"), "true true true")
+
+    def test_particle_systems_share_the_managed_layers(self) -> None:
+        # part_system_create puts a system without a layer at depth 0 on a
+        # managed layer (ParticleSystem_Create_GetLayer, yyParticle.js);
+        # part_system_depth re-adds it at the depth with managed layers
+        # (ProcessParticleDepthChange, yyRoom.js).
+        self.assertEqual(self._line("PART"), "true true true true")
+        positions = self._room_positions()
+        self.assertEqual(positions["Particles"], positions["MovedDown"], self.output)
+        self.assertLess(positions["Particles"], positions["Ground1"], self.output)
+
+    def test_part_system_layer_draws_the_system_with_its_layer(self) -> None:
+        # part_system_layer puts the system on the layer and gives it the
+        # layer's depth (ParticleSystem_Layer, yyParticle.js).
+        self.assertEqual(self._line("PART_LAYER"), "Spare true 0")
 
 
 if __name__ == "__main__":

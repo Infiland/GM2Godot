@@ -8,8 +8,10 @@ static func gml_part_system_exists(system):
 	return _gml_particle_system_resolve(system) != null
 
 
+# A system made without a layer goes on the room's managed layer at depth 0
+# (yyParticle.js ParticleSystem_Create_GetLayer).
 static func gml_part_system_create(partsys = null):
-	return _gml_particle_system_create(0, false, partsys)
+	return _gml_particle_system_create(null, false, partsys)
 
 
 static func gml_part_system_create_layer(layer, persistent, partsys = null):
@@ -23,6 +25,8 @@ static func gml_part_system_get_layer(system):
 	return record.get("layer", 0)
 
 
+# The system moves onto the layer and takes its depth (yyParticle.js
+# ParticleSystem_Layer): it draws with the layer.
 static func gml_part_system_layer(system, layer):
 	var record = _gml_particle_system_resolve(system)
 	if record == null:
@@ -35,6 +39,12 @@ static func gml_part_system_layer(system, layer):
 			if node.get_parent() is Node:
 				node.get_parent().remove_child(node)
 			parent.add_child(node)
+			if parent.has_meta(&"gamemaker_layer_depth"):
+				record["depth"] = _to_real(parent.get_meta(&"gamemaker_layer_depth"))
+			_gml_depth_forget(node.get_instance_id())
+			if node is CanvasItem:
+				node.z_as_relative = true
+				node.z_index = 0
 	return null
 
 
@@ -46,7 +56,14 @@ static func gml_part_system_depth(system, depth):
 	record["depth"] = depth_value
 	var node = record.get("node", null)
 	if node is Node2D:
-		_gml_depth_track(node, gml_depth_truncate(depth_value))
+		# GameMaker takes the system off its layer and adds it at the depth,
+		# to the room's managed layer there (yyRoom.js
+		# ProcessParticleDepthChange, AddNewElementAtDepth).
+		var truncated = gml_depth_truncate(depth_value)
+		var room_root = _gml_particle_scene_parent()
+		if room_root != null:
+			_gml_managed_layer_add(room_root, node, truncated)
+		_gml_depth_track(node, truncated)
 	return null
 
 
@@ -66,7 +83,7 @@ static func _gml_particle_system_create(layer, persistent, partsys = null):
 	var record = {
 		"asset": partsys,
 		"asset_name": "",
-		"layer": layer,
+		"layer": 0 if layer == null else layer,
 		"persistent": gml_bool(persistent),
 		"depth": 0.0,
 		"position": Vector2.ZERO,
@@ -754,8 +771,14 @@ static func _gml_particle_emitter_destroy_record(system_record, emitter):
 	gml_handle_invalidate(handle)
 
 
-static func _gml_particle_attach_node(node, layer = 0):
-	var parent = _gml_particle_parent_for_layer(layer)
+static func _gml_particle_attach_node(node, layer = null):
+	var parent = null
+	if layer == null:
+		var room_root = _gml_particle_scene_parent()
+		if room_root != null:
+			parent = _gml_managed_layer(room_root, 0)
+	else:
+		parent = _gml_particle_parent_for_layer(layer)
 	if parent != null:
 		parent.add_child(node)
 

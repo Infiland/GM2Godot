@@ -252,6 +252,14 @@ static func gml_point_distance(x1, y1, x2, y2):
 	return Vector2(_to_real(x1), _to_real(y1)).distance_to(Vector2(_to_real(x2), _to_real(y2)))
 
 
+# GameMaker's point_in_rectangle (Function_Collision.js): whether the point is
+# inside the rectangle from (x1, y1) to (x2, y2), edges included.
+static func gml_point_in_rectangle(px, py, x1, y1, x2, y2):
+	var point_x = _to_real(px)
+	var point_y = _to_real(py)
+	return point_x >= _to_real(x1) and point_x <= _to_real(x2) and point_y >= _to_real(y1) and point_y <= _to_real(y2)
+
+
 static func gml_point_direction(x1, y1, x2, y2):
 	if not (_is_real_convertible(x1) and _is_real_convertible(y1) and _is_real_convertible(x2) and _is_real_convertible(y2)):
 		return gml_error("GML point_direction requires real-convertible arguments")

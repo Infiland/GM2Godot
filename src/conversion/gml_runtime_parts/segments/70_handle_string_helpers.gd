@@ -492,6 +492,21 @@ static func gml_string_pos(subvalue, value):
 	return found + 1
 
 
+# GameMaker's string_count (Function_String.js): how many times substr occurs
+# in str, overlapping occurrences included; 0 for an empty substr.
+static func gml_string_count(subvalue, value):
+	var s = gml_string(value)
+	var sub = gml_string(subvalue)
+	if sub == "":
+		return 0
+	var count = 0
+	var found = s.find(sub)
+	while found != -1:
+		count += 1
+		found = s.find(sub, found + 1)
+	return count
+
+
 static func gml_string_replace(value, old_char, new_str):
 	var s = gml_string(value)
 	var old = gml_string(old_char)

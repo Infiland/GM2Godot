@@ -23,6 +23,14 @@ static func gml_array_set(array_value, index, value):
 	return value
 
 
+# GameMaker's array_set (yyVariable.js): array[index] = value. It returns
+# undefined, and a value that is not an array is left alone.
+static func gml_array_set_function(array_value, index, value):
+	if typeof(array_value) == TYPE_ARRAY:
+		gml_array_set(array_value, index, value)
+	return gml_undefined()
+
+
 static func gml_array_push(array_value, values):
 	if GML_ARRAY_COPY_ON_WRITE_ENABLED:
 		return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)

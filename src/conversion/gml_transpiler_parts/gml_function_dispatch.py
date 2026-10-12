@@ -200,6 +200,7 @@ _DS_GRID_ARITY: dict[str, tuple[int, int | None]] = {
 _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_equals": (2, 2),
     "array_push": (2, None),
+    "array_set": (3, 3),
     "array_push_back": (2, 2),
     "array_create": (1, 2),
     "array_length_1d": (1, 1),
@@ -227,6 +228,7 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_ord_at": (2, 2),
     "string_copy": (3, 3),
     "string_pos": (2, 2),
+    "string_count": (2, 2),
     "string_replace": (3, 3),
     "string_replace_all": (3, 3),
     "string_hash_to_newline": (1, 1),
@@ -283,6 +285,7 @@ _MATH_ARITY: dict[str, tuple[int, int | None]] = {
     "math_set_epsilon": (1, 1),
     "math_get_epsilon": (0, 0),
     "point_distance": (4, 4),
+    "point_in_rectangle": (6, 6),
     "point_direction": (4, 4),
     "lengthdir_x": (2, 2),
     "lengthdir_y": (2, 2),

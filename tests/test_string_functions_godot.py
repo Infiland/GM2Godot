@@ -30,6 +30,17 @@ _JOIN_CASES: tuple[tuple[str, object], ...] = (
     ('string_join("")', ""),
 )
 
+# string_count(substr, str) counts overlapping occurrences too.
+_COUNT_CASES: tuple[tuple[str, object], ...] = (
+    ('string_count("Easy", "Easy, Medium, Easy")', 2),
+    ('string_count("aa", "aaaa")', 3),
+    ('string_count("abab", "abababab")', 3),
+    ('string_count("x", "abc")', 0),
+    ('string_count("", "abc")', 0),
+    ('string_count("a", "")', 0),
+    ('string_count(1, "1 11 2")', 3),
+)
+
 
 
 def _js_to_fixed(value: float, places: int) -> str:
@@ -144,6 +155,12 @@ class TestStringFunctionsGodot(unittest.TestCase):
     def test_string_join_joins_the_values_after_the_delimiter(self) -> None:
         actual = run_string_probe(self, _JOIN_CASES)
         for (expression, expected), value in zip(_JOIN_CASES, actual, strict=True):
+            with self.subTest(expression=expression):
+                self.assertEqual(value, expected)
+
+    def test_string_count_counts_overlapping_occurrences(self) -> None:
+        actual = run_string_probe(self, _COUNT_CASES)
+        for (expression, expected), value in zip(_COUNT_CASES, actual, strict=True):
             with self.subTest(expression=expression):
                 self.assertEqual(value, expected)
 

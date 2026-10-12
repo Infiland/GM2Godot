@@ -1003,6 +1003,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_string_format(score, 6, 2)",
         )
 
+    def test_transpiles_string_count_point_in_rectangle_and_array_set(self):
+        self.assertEqual(
+            transpile_gml_expression('string_count("Easy", tags)'),
+            'GMRuntime.gml_string_count("Easy", tags)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("point_in_rectangle(mx, my, 40, 720, 120, 760)"),
+            "GMRuntime.gml_point_in_rectangle(mx, my, 40, 720, 120, 760)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("array_set(items, 2, 5)"),
+            "GMRuntime.gml_array_set_function(items, 2, 5)",
+        )
+
     def test_transpiles_date_functions_and_time_zone_constants(self):
         self.assertEqual(
             transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),

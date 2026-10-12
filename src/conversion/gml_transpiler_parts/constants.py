@@ -950,6 +950,7 @@ MATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "math_set_epsilon": "gml_math_set_epsilon",
     "math_get_epsilon": "gml_math_get_epsilon",
     "point_distance": "gml_point_distance",
+    "point_in_rectangle": "gml_point_in_rectangle",
     "point_direction": "gml_point_direction",
     "lengthdir_x": "gml_lengthdir_x",
     "lengthdir_y": "gml_lengthdir_y",
@@ -1230,6 +1231,7 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "string_ord_at": "gml_string_ord_at",
     "string_copy": "gml_string_copy",
     "string_pos": "gml_string_pos",
+    "string_count": "gml_string_count",
     "string_replace": "gml_string_replace",
     "string_replace_all": "gml_string_replace_all",
     "string_hash_to_newline": "gml_string_hash_to_newline",
@@ -1253,6 +1255,7 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 ARRAY_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",
+    "array_set": "gml_array_set_function",
     "array_push_back": "gml_array_push_back",
     "array_create": "gml_array_create",
     "array_length_1d": "gml_array_length_1d",

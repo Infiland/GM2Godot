@@ -1017,6 +1017,14 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set_function(items, 2, 5)",
         )
 
+    def test_transpiles_device_mouse_buttons_and_mouse_wheel_calls(self):
+        self.assertEqual(
+            transpile_gml_expression("device_mouse_check_button_released(0, mb_left)"),
+            "GMRuntime.gml_device_mouse_check_button_released(0, MOUSE_BUTTON_LEFT)",
+        )
+        self.assertEqual(transpile_gml_expression("mouse_wheel_up()"), "GMRuntime.gml_mouse_wheel_up()")
+        self.assertEqual(transpile_gml_expression("mouse_wheel_down()"), "GMRuntime.gml_mouse_wheel_down()")
+
     def test_transpiles_date_functions_and_time_zone_constants(self):
         self.assertEqual(
             transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),

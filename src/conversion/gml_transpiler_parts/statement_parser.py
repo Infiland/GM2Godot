@@ -461,6 +461,10 @@ class _StatementParser:
         self._consume("(")
         header_tokens = self._read_balanced_tokens("(", ")")
         header_parts = split_top_level_tokens(header_tokens, ";")
+        if len(header_parts) == 4 and all(token.kind == "NEWLINE" for token in header_parts[3]):
+            # The operation may end with a semicolon: the manual's form is
+            # for (<assignment>; <expression>; <operation>;).
+            header_parts = header_parts[:3]
         if len(header_parts) != 3:
             raise GMLTranspileError("Expected for initializer, condition, and operation clauses")
 

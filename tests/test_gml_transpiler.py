@@ -3156,6 +3156,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\ti = GMRuntime.gml_add(i, 1)",
         )
 
+    def test_for_loop_header_may_end_with_a_semicolon(self):
+        # The manual's form is for (<assignment>; <expression>; <operation>;).
+        for source in (
+            "for (var i = 0; i < 3; i++;) total += i;",
+            "for (var i = 0; i < 3; i++;\n) total += i;",
+        ):
+            self.assertEqual(
+                transpile_gml_code(source, indent=""),
+                transpile_gml_code("for (var i = 0; i < 3; i++) total += i;", indent=""),
+            )
+        with self.assertRaisesRegex(GMLTranspileError, "Expected for initializer"):
+            transpile_gml_code("for (var i = 0; i < 3; i++; i++) total += i;", indent="")
+
     def test_for_continue_runs_operation_clause(self):
         self.assertEqual(
             transpile_gml_code(

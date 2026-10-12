@@ -41,6 +41,10 @@ static var _gml_step_script_infos = {}
 # [playback speed, speed type] by sprite reference, or false when the
 # reference is not a sprite.
 static var _gml_step_sprite_playback_cache = {}
+# The clock of the current tick (GameMaker's g_CurrentTime) and of the last
+# step (delta_time's last_time), in microseconds; -1 before the first.
+static var _gml_step_tick_usec = -1
+static var _gml_step_last_usec = -1
 
 
 class GMLStepScriptInfo:
@@ -87,6 +91,13 @@ static func gml_event_scheduler_game_frame(delta_seconds = 0.0):
 	# up to GML_STEP_MAX_STEPS_PER_TICK steps. Returns the last change
 	# performed ("", "room", "game_restart" or "game_end").
 	_gml_step_frame_drawable = false
+	var now = Time.get_ticks_usec()
+	# GameMaker_Tick: the global time source and the call_later sources take
+	# the real time since the last tick.
+	gml_time_source_frame_tick(
+		now - _gml_step_tick_usec if _gml_step_tick_usec >= 0 else _to_real(delta_seconds) * 1000000.0
+	)
+	_gml_step_tick_usec = now
 	var outcome = _gml_step_run_tick(max(_to_real(delta_seconds), 0.0))
 	# Without the pump's step latching, input edges last one frame.
 	gml_input_end_frame()
@@ -98,6 +109,7 @@ static func _gml_step_run_tick(seconds):
 	if outcome == "game_end" or outcome == "game_restart":
 		return outcome
 	for _step in range(GML_STEP_MAX_STEPS_PER_TICK):
+		_gml_step_measure_delta_time(seconds)
 		gml_event_scheduler_frame(seconds, 1)
 		# Repeated steps inside one tick do not advance real time.
 		seconds = 0.0
@@ -108,6 +120,25 @@ static func _gml_step_run_tick(seconds):
 		if outcome != "room":
 			return outcome
 	return outcome
+
+
+static func _gml_step_measure_delta_time(seconds):
+	# GameMaker_DoAStep starts by setting delta_time to the microseconds
+	# since the previous step, measured on the tick clock, so a further step
+	# in the same tick (after a room change) gets 0. The first step of the
+	# game takes the length of its frame.
+	var now = _gml_step_tick_usec if _gml_step_tick_usec >= 0 else Time.get_ticks_usec()
+	var delta = int(round(seconds * 1000000.0))
+	if _gml_step_last_usec >= 0:
+		delta = now - _gml_step_last_usec
+	_gml_step_last_usec = now
+	_gml_builtin_globals["delta_time"] = max(delta, 0)
+	return null
+
+
+static func gml_get_timer():
+	# The microseconds the game has been running (GameMaker's get_timer).
+	return Time.get_ticks_usec()
 
 
 static func gml_event_scheduler_frame_drawable():
@@ -145,17 +176,17 @@ static func gml_event_create_blocked(inst):
 
 
 static func gml_game_speed_fps():
-	# The game speed in steps per second: room_speed once the game has set
-	# it, otherwise the configured frame rate (option_game_speed).
-	var room_speed = _to_real(_gml_builtin_globals.get("room_speed", 0))
-	if room_speed > 0.0:
-		return room_speed
-	if Engine.max_fps > 0:
-		return float(Engine.max_fps)
-	var configured_fps = int(ProjectSettings.get_setting("application/run/max_fps", 0))
-	if configured_fps > 0:
-		return float(configured_fps)
-	return 60.0
+	# The game speed in steps per second, which room_speed reads (GameMaker's
+	# g_GameTimer.GetFPS): the project's game speed until game_set_speed or
+	# room_speed changes it. With an unfixed frame rate it is the rate of the
+	# last step, or 30 before the first.
+	var fps = _to_real(_gml_builtin_globals.get("room_speed", 0))
+	if fps > 0.0:
+		return fps
+	var delta = _to_real(_gml_builtin_globals.get("delta_time", 0))
+	if delta > 0.0:
+		return 1000000.0 / delta
+	return 30.0
 
 
 static func gml_image_frame_for_index(image_index, image_number):

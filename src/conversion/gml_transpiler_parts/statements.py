@@ -330,11 +330,8 @@ def transpile_statement(
         )
         if global_target is not None:
             global_scope, member_name = global_target
-            current_value = f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
-            return [
-                f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
-                f"GMRuntime.{helper}({current_value}, 1))"
-            ]
+            current_value = _global_scope_read(global_scope, member_name)
+            return [_global_scope_write(global_scope, member_name, f"GMRuntime.{helper}({current_value}, 1)")]
         motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
         if motion_target is not None:
             instance_target, member_name = motion_target
@@ -772,21 +769,20 @@ def transpile_statement(
         if global_target is not None:
             global_scope, member_name = global_target
             if operator in ("=", ":="):
-                return [*prelude_lines, f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
-            current_value = f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
+                return [*prelude_lines, _global_scope_write(global_scope, member_name, value)]
+            current_value = _global_scope_read(global_scope, member_name)
             if operator == "??=":
                 return _nullish_assignment_lines(
                     prelude_lines,
                     current_value,
                     value_prelude_lines,
-                    [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"],
+                    [_global_scope_write(global_scope, member_name, value)],
                 )
             if operator in COMPOUND_RUNTIME_FUNCTIONS:
                 helper = COMPOUND_RUNTIME_FUNCTIONS[operator]
                 return [
                     *prelude_lines,
-                    f"GMRuntime.gml_struct_set({global_scope}, {member_name}, "
-                    f"GMRuntime.{helper}({current_value}, {value}))"
+                    _global_scope_write(global_scope, member_name, f"GMRuntime.{helper}({current_value}, {value})"),
                 ]
             raise GMLTranspileError("Unsupported global assignment operator")
         motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
@@ -1676,6 +1672,24 @@ def _global_scope_assignment_parts(
     return "GMRuntime.gml_global_scope()", json.dumps(name)
 
 
+# Global built-ins the runtime owns: they are read and assigned through
+# GMRuntime.gml_builtin_global and gml_builtin_global_set, not the global
+# struct (room_speed is the game speed).
+_RUNTIME_OWNED_GLOBAL_VARIABLES = frozenset({"room_speed"})
+
+
+def _global_scope_read(global_scope: str, member_name: str) -> str:
+    if json.loads(member_name) in _RUNTIME_OWNED_GLOBAL_VARIABLES:
+        return f"GMRuntime.gml_builtin_global({member_name})"
+    return f"GMRuntime.gml_struct_get({global_scope}, {member_name})"
+
+
+def _global_scope_write(global_scope: str, member_name: str, value: str) -> str:
+    if json.loads(member_name) in _RUNTIME_OWNED_GLOBAL_VARIABLES:
+        return f"GMRuntime.gml_builtin_global_set({member_name}, {value})"
+    return f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"
+
+
 def _record_instance_assignment(
     target: str,
     local_names: Iterable[str],
@@ -2145,8 +2159,8 @@ def _assignment_target_reader_writer(
     if global_target is not None:
         global_scope, member_name = global_target
         return (
-            f"GMRuntime.gml_struct_get({global_scope}, {member_name})",
-            lambda value: [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"],
+            _global_scope_read(global_scope, member_name),
+            lambda value: [_global_scope_write(global_scope, member_name, value)],
         )
 
     motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
@@ -2636,7 +2650,7 @@ def _transpile_assignment_to_emitted_value(
     )
     if global_target is not None:
         global_scope, member_name = global_target
-        return [f"GMRuntime.gml_struct_set({global_scope}, {member_name}, {value})"]
+        return [_global_scope_write(global_scope, member_name, value)]
     motion_target = _motion_assignment_parts(target_expr, local_names, scope_context)
     if motion_target is not None:
         instance_target, member_name = motion_target

@@ -184,12 +184,14 @@ static var _gml_builtin_globals = {
 	"argument": [],
 	"argument_count": 0,
 	"async_load": {},
+	"delta_time": 0,
 	"display_aa": 0,
 	"event_data": {},
 	"instance_count": 0,
 	"room": _gml_undefined,
 	"room_height": 0,
-	"room_speed": 0,
+	# The game speed, seeded from the project's Game Options.
+	"room_speed": _gml_game_speed_project_fps(),
 	"room_width": 0
 }
 
@@ -282,9 +284,22 @@ static func gml_builtin_global(name):
 		return gml_os_type()
 	if key == "os_version":
 		return gml_os_version()
+	if key == "room_speed":
+		return gml_game_speed_fps()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()
+
+
+static func gml_builtin_global_set(name, value):
+	# Assigns a global built-in the runtime owns. room_speed sets the game
+	# speed, as GameMaker's set_room_speed does (yyBuiltIn.js).
+	var key = str(name)
+	if key == "room_speed":
+		_gml_game_speed_set(_to_real(value))
+	else:
+		_gml_builtin_globals[key] = value
+	return value
 
 
 # The `is` checks below first make sure the value is a live object: GML code

@@ -95,31 +95,33 @@ static func gml_timeline_step(instance):
 	var timeline = state.get("index", -1)
 	if not gml_timeline_exists(timeline):
 		return false
-	var position = _to_real(state.get("position", 0.0))
+	# HandleTimeLine: the position moves on first, then the moments from the
+	# old position up to the new one run (the old one included, the new one
+	# not; backwards, the other way round), so moment 0 runs in the first
+	# step and moment n in step n + 1. A looping timeline then starts over
+	# once the position has passed its last moment.
+	var previous_position = _to_real(state.get("position", 0.0))
 	var speed_value = _to_real(state.get("speed", 1.0))
-	var previous_position = position
-	position += speed_value
-	var max_moment = gml_timeline_max_moment(timeline)
-	if bool(state.get("loop", false)) and max_moment >= 0:
-		var span = float(max_moment + 1)
-		_gml_timeline_dispatch_wrapped(
-			instance,
-			timeline,
-			previous_position,
-			position,
-			span
-		)
-		position = fposmod(position, span)
-	else:
-		_gml_timeline_dispatch_between(
-			instance,
-			timeline,
-			previous_position,
-			position,
-			speed_value
-		)
-	state["position"] = position
+	state["position"] = previous_position + speed_value
 	_gml_timeline_apply_state(instance, state)
+	_gml_timeline_dispatch_between(
+		instance,
+		timeline,
+		previous_position,
+		state["position"],
+		speed_value
+	)
+	# The moments may have changed the timeline variables.
+	var position = _to_real(_gml_object_timeline_get(instance, "timeline_position", state["position"]))
+	var max_moment = gml_timeline_max_moment(timeline)
+	if bool(_gml_object_timeline_get(instance, "timeline_loop", state.get("loop", false))) and max_moment >= 0:
+		if speed_value > 0.0 and position > max_moment:
+			position = 0.0
+		elif speed_value <= 0.0 and position < 0.0:
+			position = float(max_moment)
+	state["position"] = position
+	if instance is Object and _object_has_property(instance, "timeline_position"):
+		instance.set("timeline_position", position)
 	return true
 
 
@@ -349,49 +351,16 @@ static func _gml_timeline_dispatch_between(instance, timeline, previous_position
 		return
 	var ordered_moments = moments.keys()
 	ordered_moments.sort()
-	if speed_value < 0.0:
+	if speed_value <= 0.0:
 		ordered_moments.reverse()
 	for moment in ordered_moments:
 		var moment_value = float(moment)
-		if speed_value >= 0.0 and (moment_value <= previous_position or moment_value > position):
+		if speed_value > 0.0 and (moment_value < previous_position or moment_value >= position):
 			continue
-		if speed_value < 0.0 and (moment_value >= previous_position or moment_value < position):
+		if speed_value <= 0.0 and (moment_value > previous_position or moment_value <= position):
 			continue
 		for action in moments[moment]:
 			_gml_sequence_timeline_dispatch_action(instance, action)
-
-
-static func _gml_timeline_dispatch_wrapped(instance, timeline, previous_position, position, span):
-	var moments = _gml_timeline_moments(timeline)
-	if moments == null or span <= 0.0 or is_equal_approx(previous_position, position):
-		return
-	var ordered_moments = moments.keys()
-	ordered_moments.sort()
-	var direction = 1 if position > previous_position else -1
-	if direction < 0:
-		ordered_moments.reverse()
-	var first_cycle = int(floor(previous_position / span))
-	var last_cycle = int(floor(position / span))
-	var cycle = first_cycle
-	while (
-		(direction > 0 and cycle <= last_cycle)
-		or (direction < 0 and cycle >= last_cycle)
-	):
-		for moment in ordered_moments:
-			var event_position = float(moment) + float(cycle) * span
-			if direction > 0 and (
-				event_position <= previous_position
-				or event_position > position
-			):
-				continue
-			if direction < 0 and (
-				event_position >= previous_position
-				or event_position < position
-			):
-				continue
-			for action in moments[moment]:
-				_gml_sequence_timeline_dispatch_action(instance, action)
-		cycle += direction
 
 
 static func _gml_object_timeline_get(instance, member_name, fallback):

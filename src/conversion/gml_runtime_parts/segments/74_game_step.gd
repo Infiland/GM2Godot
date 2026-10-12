@@ -417,6 +417,8 @@ static func _gml_step_update_images(frame):
 	# every step, so it reads the members directly.
 	var fps = max(_gml_step_real(gml_game_speed_fps()), 1.0)
 	var count = _gml_step_entries.size()
+	# The positions of the instances that Animate left outside their frames.
+	var outside = []
 	for i in range(count):
 		var info = _gml_step_infos[i]
 		if not (info.tracks_previous or info.animates):
@@ -428,20 +430,38 @@ static func _gml_step_update_images(frame):
 		if info.tracks_previous:
 			# In the space of x and y, which the motion step and solid
 			# rollback use too: an offset layer node does not move them.
-			var position = _gml_collision_instance_xy(inst) if inst is Node2D else _gml_instance_position(inst)
+			var position = inst.position if inst is Node2D and not _gml_sequence_instances_exist else _gml_instance_position(inst)
 			inst.xprevious = position.x
 			inst.yprevious = position.y
-		if info.animates:
-			_gml_step_animate_instance(inst, fps)
-	for i in range(count):
-		if not _gml_step_infos[i].animates:
-			continue
-		var entry = _gml_step_entries[i]
-		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
-			continue
-		_gml_step_wrap_image_index(inst, _gml_step_infos[i], frame)
+		if info.animates and _gml_step_animate_instance(inst, fps):
+			outside.append(i)
+	_gml_step_wrap_images(outside, count, frame)
 	return null
+
+
+static func _gml_step_wrap_images(outside, count, frame):
+	# UpdateImages, in list order. No game code runs before the first
+	# Animation End event, so until then only the instances Animate left
+	# outside their frames can wrap; after it, every later instance is
+	# looked at again.
+	for i in outside:
+		if _gml_step_wrap_entry(i, frame):
+			for later in range(i + 1, count):
+				_gml_step_wrap_entry(later, frame)
+			return null
+	return null
+
+
+static func _gml_step_wrap_entry(i, frame):
+	# Whether wrapping the instance at list position i ran its Animation End.
+	var info = _gml_step_infos[i]
+	if not info.animates:
+		return false
+	var entry = _gml_step_entries[i]
+	var inst = entry["instance"]
+	if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		return false
+	return _gml_step_wrap_image_index(inst, info, frame)
 
 
 static func _gml_step_real(value):
@@ -454,18 +474,23 @@ static func _gml_step_real(value):
 
 
 static func _gml_step_animate_instance(inst, fps):
+	# GameMaker's Animate; returns whether image_index is now outside the
+	# sprite's frames, where UpdateImages wraps it.
 	var image_speed = _gml_step_real(inst.image_speed)
-	if image_speed == 0.0:
-		return
-	var increment = image_speed
-	var playback = _gml_step_sprite_playback(inst.sprite_index)
-	if playback is Array:
-		# Same arithmetic as GameMaker: image_speed * (speed / game speed),
-		# or image_speed * speed for frames per game frame.
-		increment = image_speed * (playback[0] if playback[1] == 1 else playback[0] / fps)
-		if increment == 0.0:
-			return
-	inst.image_index = _gml_step_real(inst.image_index) + increment
+	if image_speed != 0.0:
+		var increment = image_speed
+		var playback = _gml_step_sprite_playback(inst.sprite_index)
+		if playback is Array:
+			# Same arithmetic as GameMaker: image_speed * (speed / game speed),
+			# or image_speed * speed for frames per game frame.
+			increment = image_speed * (playback[0] if playback[1] == 1 else playback[0] / fps)
+		if increment != 0.0:
+			inst.image_index = _gml_step_real(inst.image_index) + increment
+	var image_number = int(_gml_step_real(inst.image_number))
+	if image_number <= 0:
+		return false
+	var image_index = _gml_step_real(inst.image_index)
+	return image_index >= image_number or image_index < 0.0
 
 
 static func _gml_step_sprite_playback(sprite):
@@ -494,18 +519,20 @@ static func _gml_step_sprite_playback(sprite):
 
 
 static func _gml_step_wrap_image_index(inst, info, frame):
+	# Whether the instance's Animation End event ran.
 	var image_number = int(_gml_step_real(inst.image_number))
 	if image_number <= 0:
-		return
+		return false
 	var image_index = _gml_step_real(inst.image_index)
 	if image_index >= image_number:
 		inst.image_index = image_index - image_number
 	elif image_index < 0.0:
 		inst.image_index = image_index + image_number
 	else:
-		return
+		return false
 	if _gml_step_has_method(info, inst, &"_on_animation_end"):
-		_gml_step_dispatch_other_event(inst, "animation", &"_on_animation_end", frame)
+		return _gml_step_dispatch_other_event(inst, "animation", &"_on_animation_end", frame)
+	return false
 
 
 static func _gml_step_dispatch_other_event(inst, phase, method_name, frame):

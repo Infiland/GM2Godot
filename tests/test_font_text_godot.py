@@ -42,6 +42,7 @@ from tests.gamemaker_font_reference import (
     WHITE,
     Colour,
     GameMakerTextReference,
+    ReferenceGlyph,
     ReferenceQuad,
     ReferenceVertexQuad,
     SyntheticFont,
@@ -85,9 +86,13 @@ class _TextCase:
         }
 
 
+# GameMaker rounds no glyph position, so a glyph edge exactly on a pixel
+# centre (a coordinate ending in .5 here) leaves the lit pixels to the GPU's
+# tie rules. The origins keep every edge clear of pixel centres, including the
+# half-pixel offsets of centred lines.
 _CASES = (
-    _TextCase("fnt_plain", 10.5, 12.25, "Hello, World!\nSecond line"),
-    _TextCase("fnt_plain", 300.0, 60.0, "Centered text\r\nwith CRLF", halign=FA_CENTER, valign=FA_MIDDLE),
+    _TextCase("fnt_plain", 10.75, 12.25, "Hello, World!\nSecond line"),
+    _TextCase("fnt_plain", 300.25, 60.0, "Centered text\r\nwith CRLF", halign=FA_CENTER, valign=FA_MIDDLE),
     _TextCase("fnt_plain", 780.49, 20.51, "Right \u00e9 and missing \u2603 glyphs", halign=FA_RIGHT),
     _TextCase(
         "fnt_plain",
@@ -99,7 +104,7 @@ _CASES = (
         valign=FA_BOTTOM,
     ),
     _TextCase("fnt_kerned", 30.0, 230.0, "AVATAR To Vo AV VA V A"),
-    _TextCase("fnt_kerned", 420.0, 230.0, "A\u0416A soft\u00adhyphen \u0436", halign=FA_CENTER),
+    _TextCase("fnt_kerned", 420.25, 230.0, "A\u0416A soft\u00adhyphen \u0436", halign=FA_CENTER),
     _TextCase(
         "fnt_kerned",
         780.0,
@@ -110,7 +115,8 @@ _CASES = (
         halign=FA_RIGHT,
         valign=FA_MIDDLE,
     ),
-    _TextCase("fnt_sdf", 40.5, 330.0, "SDF text\nline two"),
+    _TextCase("fnt_sdf", 40.75, 330.0, "SDF text\nline two"),
+    _TextCase("fnt_plain", 560.0, 420.0, "CR LF\r\nends\r\nLF CR\n\rlines\r\n", halign=FA_RIGHT, valign=FA_BOTTOM),
 )
 
 
@@ -238,6 +244,10 @@ _MEASURED_TEXTS: tuple[tuple[str, int, int], ...] = (
     ("\n", -1, -1),
     ("A\n", -1, -1),
     ("x\r\ny\n\rz", -1, -1),
+    ("AB\r\nCD", -1, -1),
+    ("x\r\n", -1, -1),
+    ("a\r\n\nb\n\r\r", -1, -1),
+    ("\r\n", -1, -1),
     ("\u2603 missing", -1, -1),
     ("tab\there", -1, -1),
     ("the quick brown fox jumps over", -1, 40),
@@ -385,7 +395,7 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
 
         func _ready():
         \tvar data = JSON.parse_string(FileAccess.get_file_as_string(DATA_PATH))
-        \tvar result = {{"fonts": {{}}, "measures": [], "cases": [], "transforms": []}}
+        \tvar result = {{"fonts": {{}}, "measures": [], "splits": [], "cases": [], "transforms": []}}
         \tfor name in data["fonts"]:
         \t\tresult["fonts"][name] = _font_record(name)
         \tfor measure in data["measures"]:
@@ -397,6 +407,7 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\t\tGMRuntime.gml_string_width_ext(text, measure["sep"], measure["width"]),
         \t\t\tGMRuntime.gml_string_height_ext(text, measure["sep"], measure["width"]),
         \t\t])
+        \t\tresult["splits"].append(GMRuntime._gml_font_split_text(GMRuntime._gml_draw_font_info(), text, measure["width"]))
         \tfor case in data["cases"]:
         \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
         \t\tGMRuntime.gml_draw_set_halign(case["halign"])
@@ -407,8 +418,13 @@ def _write_probe(project_dir: Path, data_path: Path, output_dir: Path) -> None:
         \t\tvar quads = []
         \t\tfor line in layout["lines"]:
         \t\t\tlines.append([line["x"], line["y"], line["width"]])
-        \t\t\tvar baseline = GMRuntime._gml_draw_text_line_baseline(origin, line, layout)
-        \t\t\tquads.append_array(_line_quads(layout, line, baseline))
+        \t\t\tvar transform = GMRuntime._gml_draw_text_line_transform(origin, line, Vector2.ONE, 0.0)
+        \t\t\tfor quad in _line_quads(layout, line, Vector2(0.0, float(layout["ascent"]))):
+        \t\t\t\tif typeof(quad[0]) != TYPE_STRING:
+        \t\t\t\t\tvar corner = transform * Vector2(quad[1], quad[2])
+        \t\t\t\t\tquad[1] = corner.x
+        \t\t\t\t\tquad[2] = corner.y
+        \t\t\t\tquads.append(quad)
         \t\tresult["cases"].append({{"line_step": layout["line_step"], "lines": lines, "quads": quads}})
         \tfor case in data["transforms"]:
         \t\tGMRuntime.gml_draw_set_font(GMRuntime.gml_asset_get_index(case["font"]))
@@ -450,7 +466,7 @@ def _write_renderer(project_dir: Path, data_path: Path) -> None:
         \t\tGMRuntime.gml_draw_set_halign(case["halign"])
         \t\tGMRuntime.gml_draw_set_valign(case["valign"])
         \t\tvar layout = GMRuntime._gml_draw_text_layout(case["text"], case["sep"], case["width"])
-        \t\tGMRuntime._gml_draw_text_emit(get_canvas_item(), Vector2(case["x"], case["y"]), layout, Color.WHITE)
+        \t\tGMRuntime._gml_draw_text_on(self, Vector2(case["x"], case["y"]), layout, Vector2.ONE, 0.0, Color.WHITE, Transform2D.IDENTITY)
         \tfor case in data["transforms"]:
         \t\tif not case["render"]:
         \t\t\tcontinue
@@ -489,7 +505,7 @@ def _project_settings() -> str:
     )
 
 
-def _quad_tuple(quad: ReferenceQuad) -> tuple[int, ...]:
+def _quad_tuple(quad: ReferenceQuad) -> tuple[float, ...]:
     return (quad.code, quad.left, quad.top, quad.w, quad.h, quad.atlas_x, quad.atlas_y)
 
 
@@ -500,6 +516,53 @@ def _max_channel_difference(actual: Image.Image, expected: Image.Image) -> int:
         if isinstance(high, (int, float)):
             worst = max(worst, int(high))
     return worst
+
+
+class TestGameMakerTextReference(unittest.TestCase):
+    """Pins the reference model to results of the runner's own functions."""
+
+    @staticmethod
+    def _reference() -> GameMakerTextReference:
+        # Shifts of a pixel font whose first glyph is a 2 px space.
+        shifts = {32: 2, 65: 5, 66: 5, 67: 6, 68: 6, 120: 4}
+        return GameMakerTextReference(
+            glyphs={code: ReferenceGlyph(code, 0, 0, 0, 0, shift, 0) for code, shift in shifts.items()},
+            line_height=14,
+            ascender_offset=0,
+            kerning={},
+            sdf_spread=0,
+        )
+
+    def test_no_wrap_split_follows_split_text_block(self) -> None:
+        # yyFont.js Split_TextBlock: the second character of a CR LF or
+        # LF CR pair starts the next line instead of being dropped.
+        expected = {
+            "": [],
+            "\n": [""],
+            "x\n": ["x"],
+            "x\n\n": ["x", ""],
+            "AB\r\nCD": ["AB", "\nCD"],
+            "A\n\rBCD": ["A", "\rBCD"],
+            "x\r\n": ["x", "\n"],
+            "\r\n": ["", "\n"],
+            "a\r\n\r\nb": ["a", "\n", "\nb"],
+            "a\r\n\nb": ["a", "\n\nb"],
+            "a\n\r\r": ["a", "\r\r"],
+        }
+        reference = self._reference()
+        for text, lines in expected.items():
+            with self.subTest(text=text):
+                self.assertEqual(reference.split(text), lines)
+
+    def test_crlf_text_measures_the_carried_character(self) -> None:
+        # TextWidth counts the carried LF or CR as the first glyph's shift and
+        # string_height counts the extra line.
+        reference = self._reference()
+        self.assertEqual(reference.string_width("AB\r\nCD"), 14)
+        self.assertEqual(reference.string_width("AB\nCD"), 12)
+        self.assertEqual(reference.string_width("A\r\nBCD"), 19)
+        self.assertEqual(reference.string_height("x\r\n"), 28)
+        self.assertEqual(reference.string_height("x\n"), 14)
 
 
 class TestFontTextGodot(unittest.TestCase):
@@ -743,6 +806,18 @@ class TestFontTextGodot(unittest.TestCase):
                     ],
                 )
 
+    def test_lines_split_like_gamemaker(self) -> None:
+        splits = self._result_list("splits")
+        expected_rows = [
+            (font, text, width)
+            for font in self.references
+            for text, _sep, width in _MEASURED_TEXTS
+        ]
+        self.assertEqual(len(splits), len(expected_rows))
+        for (font, text, width), actual in zip(expected_rows, splits, strict=True):
+            with self.subTest(font=font, text=text, width=width):
+                self.assertEqual(actual, self.references[font].split(text, width))
+
     def test_text_layout_matches_gamemaker(self) -> None:
         cases = self._result_list("cases")
         self.assertEqual(len(cases), len(_CASES))
@@ -781,10 +856,14 @@ class TestFontTextGodot(unittest.TestCase):
             )
             with self.subTest(text=case.text):
                 self.assertTrue(expected)
-                self.assertEqual(
-                    [tuple(cast(list[int], quad)) for quad in cast(list[object], quads)],
-                    [_quad_tuple(quad) for quad in expected],
-                )
+                actual_quads = [tuple(cast(list[float], quad)) for quad in cast(list[object], quads)]
+                self.assertEqual(len(actual_quads), len(expected), actual_quads)
+                for actual_quad, expected_quad in zip(actual_quads, expected, strict=True):
+                    wanted = _quad_tuple(expected_quad)
+                    # Godot keeps positions in single precision.
+                    self.assertEqual(actual_quad[:1] + actual_quad[3:], wanted[:1] + wanted[3:], actual_quad)
+                    self.assertAlmostEqual(actual_quad[1], wanted[1], places=3, msg=actual_quad)
+                    self.assertAlmostEqual(actual_quad[2], wanted[2], places=3, msg=actual_quad)
 
     def test_transformed_and_coloured_text_matches_gamemaker_quads(self) -> None:
         transforms = self._result_list("transforms")

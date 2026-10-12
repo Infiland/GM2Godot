@@ -45,6 +45,15 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
 from src.conversion.gml_transpiler_parts.shared_models import Token
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
+from src.conversion.object_variables import (
+    VARIABLE_DEFINITIONS_FUNCTION,
+    VariableDefinition,
+    VariableOverride,
+    object_pre_create_gml,
+    parse_variable_definitions,
+    parse_variable_overrides,
+    variable_definition_identifiers,
+)
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_manifest import (
@@ -129,6 +138,9 @@ class ParsedObject(TypedDict):
     event_list: list[JsonObject]
     solid: bool
     persistent: bool
+    # The object's Variable Definitions and its overrides of inherited ones.
+    variable_definitions: tuple[VariableDefinition, ...]
+    variable_overrides: tuple[VariableOverride, ...]
 
 
 class ObjectProcessResult(TypedDict):
@@ -1012,6 +1024,8 @@ class ObjectConverter(BaseConverter):
                 event_list=event_list,
                 solid=bool(data.get("solid", False)),
                 persistent=bool(data.get("persistent", False)),
+                variable_definitions=parse_variable_definitions(data.get("properties")),
+                variable_overrides=parse_variable_overrides(data.get("overriddenProperties")),
             )
             # The object's collision mask ("Collision Mask" in the object
             # editor) starts every instance's mask_index.
@@ -1173,6 +1187,7 @@ class ObjectConverter(BaseConverter):
         enum_values: Mapping[str, Mapping[str, int]] | None = None,
         macro_values: Mapping[str, str] | None = None,
         inherited_member_names: frozenset[str] | None = None,
+        variable_definitions: ObjectEventSource | None = None,
     ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap], bool]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
@@ -1253,6 +1268,18 @@ class ObjectConverter(BaseConverter):
             instance_variables.update(
                 _script_assigned_instance_variable_names(
                     source,
+                    asset_names=asset_name_set,
+                    macro_configuration=self.macro_configuration,
+                )
+            )
+
+        # The object's Pre-Create code (its Variable Definitions) converts
+        # like an event.
+        if variable_definitions is not None:
+            source_entries.append(variable_definitions)
+            instance_variables.update(
+                _script_assigned_instance_variable_names(
+                    variable_definitions["source"],
                     asset_names=asset_name_set,
                     macro_configuration=self.macro_configuration,
                 )
@@ -1473,6 +1500,53 @@ class ObjectConverter(BaseConverter):
                 ),
             )
 
+    def _object_variable_definitions(
+        self,
+        object_name: str,
+        parsed: ParsedObject,
+    ) -> tuple[ObjectEventSource | None, bool]:
+        """Return an object's Pre-Create source and whether its instances run one.
+
+        GameMaker compiles the Variable Definitions of an object with
+        definitions or overrides of its own into its Pre-Create event, which
+        starts with event_inherited(); an object without them runs its
+        nearest ancestor's (the generated method is inherited).
+        """
+        inherited_definitions: dict[str, VariableDefinition] = {}
+        ancestors_define = False
+        seen = {object_name}
+        ancestor_name = parsed["parent_object_name"]
+        ancestor_source_path = parsed["parent_object_source_path"]
+        while ancestor_name is not None and ancestor_name not in seen:
+            seen.add(ancestor_name)
+            ancestor = self._parse_object_yy(ancestor_name, ancestor_source_path)
+            if ancestor is None:
+                break
+            if ancestor["variable_definitions"] or ancestor["variable_overrides"]:
+                ancestors_define = True
+            for definition in ancestor["variable_definitions"]:
+                inherited_definitions.setdefault(definition.name, definition)
+            ancestor_name = ancestor["parent_object_name"]
+            ancestor_source_path = ancestor["parent_object_source_path"]
+        if not (parsed["variable_definitions"] or parsed["variable_overrides"]):
+            return None, ancestors_define
+        resolved = self._resolve_object_yy_source(object_name, parsed["source_path"])
+        source: ObjectEventSource = {
+            # Diagnostics name the source by its object-editor panel.
+            "mapping": EventMapping(VARIABLE_DEFINITIONS_FUNCTION, "", 0, "Variable Definitions"),
+            "source_path": resolved.filesystem_path if resolved is not None else parsed["source_path"],
+            "source": object_pre_create_gml(
+                parsed["variable_definitions"],
+                parsed["variable_overrides"],
+                inherited_definitions,
+                inherited=ancestors_define,
+            ),
+            "inherited_event_call": (
+                f"super.{VARIABLE_DEFINITIONS_FUNCTION}()" if ancestors_define else None
+            ),
+        }
+        return source, True
+
     def _inherited_event_call(self, mapping: EventMapping) -> str:
         if not mapping.params:
             return f"super.{mapping.godot_func}()"
@@ -1588,6 +1662,12 @@ class ObjectConverter(BaseConverter):
             parsed = self._parse_object_yy(object_name, source_path)
             if parsed is None:
                 return None
+            names.update(
+                variable_definition_identifiers(
+                    parsed["variable_definitions"],
+                    parsed["variable_overrides"],
+                )
+            )
             for event in parsed["event_list"]:
                 mapping = map_input_event(event) if is_input_event(event) else map_event(event)
                 if mapping is None or not mapping.gml_filename:
@@ -1758,6 +1838,10 @@ class ObjectConverter(BaseConverter):
             )
             if ancestor_names is not None:
                 inherited_member_names = ancestor_names | frozenset(asset_names or ())
+        variable_definitions, runs_variable_definitions = self._object_variable_definitions(
+            object_name,
+            parsed,
+        )
         (
             code_bodies,
             instance_variables,
@@ -1783,6 +1867,7 @@ class ObjectConverter(BaseConverter):
             enum_values=enum_values,
             macro_values=macro_values,
             inherited_member_names=inherited_member_names,
+            variable_definitions=variable_definitions,
         )
         if has_event_blocker:
             # An object is one logical resource. Publishing a script with only
@@ -1826,6 +1911,7 @@ class ObjectConverter(BaseConverter):
                     parent_object_name,
                     parent_object_source_path,
                 ),
+                runs_variable_definitions=runs_variable_definitions,
             ),
             base_script_path=parent_script_res_path,
         )

@@ -3419,7 +3419,10 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "spriteMaskId"])
+        self.assertEqual(
+            trace,
+            ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "properties", "overriddenProperties", "spriteMaskId"],
+        )
         self.assertTrue(parsed["solid"])
         self.assertFalse(parsed["persistent"])
 

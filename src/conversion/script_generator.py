@@ -14,6 +14,7 @@ from src.conversion.gml_transpiler_parts.constants import (
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.json_values import JsonObject
 from src.conversion.object_metadata import gamemaker_event_integer
+from src.conversion.object_variables import VARIABLE_DEFINITIONS_FUNCTION
 
 _CodeBodies: TypeAlias = Mapping[str, str]
 _MapEvent: TypeAlias = Callable[[JsonObject], EventMapping | None]
@@ -164,6 +165,9 @@ class ObjectRuntimeConfig:
     # override.
     inherited_input_functions: tuple[str, ...] = ()
     mask_sprite_name: str | None = None
+    # The object or an ancestor has Variable Definitions: its instances run
+    # them (and their Room Editor overrides) before the Create event.
+    runs_variable_definitions: bool = False
 
 
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
@@ -660,6 +664,29 @@ def _guard_create_event_body(body: str) -> str:
     return "\tif GMRuntime.gml_event_create_blocked(self):\n\t\treturn\n" + body
 
 
+def _run_variable_definitions_before_create(body: str) -> str:
+    # GameMaker assigns an instance's Variable Definitions (its object's
+    # Pre-Create event, then the values its room placement overrides) right
+    # before its Create event. The runtime runs them once per instance, so a
+    # parent's Create event run by event_inherited() does not run them again.
+    call = "\tGMRuntime.gml_instance_pre_create(self)"
+    if body.strip() == "pass":
+        return call
+    return f"{call}\n{body}"
+
+
+def _add_variable_definitions(
+    code_bodies: dict[str, str],
+    object_runtime: ObjectRuntimeConfig | None,
+) -> list[EventMapping]:
+    """Run Variable Definitions in _ready; return the function they need."""
+    if object_runtime is not None and object_runtime.runs_variable_definitions:
+        code_bodies["_ready"] = _run_variable_definitions_before_create(code_bodies["_ready"])
+    if VARIABLE_DEFINITIONS_FUNCTION in code_bodies:
+        return [EventMapping(VARIABLE_DEFINITIONS_FUNCTION, "", 0, "")]
+    return []
+
+
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
     init_lines = ["\t_gm_construct_instance()"]
     should_call_parent_ready = object_runtime.inherit_ready
@@ -819,7 +846,7 @@ def generate_script_content(
         function_names = {func.godot_func for func in unique_functions}
     if uses_object_runtime:
         effective_code_bodies["_ready"] = _guard_create_event_body(effective_code_bodies.get("_ready", "\tpass"))
-        required_functions: list[EventMapping] = []
+        required_functions = _add_variable_definitions(effective_code_bodies, object_runtime)
         if "_ready" not in function_names:
             required_functions.append(EventMapping("_ready", "", 0, ""))
         if "_exit_tree" not in function_names:

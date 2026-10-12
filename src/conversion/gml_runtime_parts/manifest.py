@@ -231,6 +231,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_time_alarms_godot.py",),
     ),
     _segment(
+        "56_object_variable_definitions.gd",
+        "Object Variable Definitions and room instance overrides run before the Create event.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+        ),
+        tests=("tests/test_variable_definitions_godot.py",),
+    ),
+    _segment(
         "57_ds_lists_stacks_queues.gd",
         "List, stack, queue, and priority data structure handles with destroyed-handle guards.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd"),

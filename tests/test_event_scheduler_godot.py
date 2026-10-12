@@ -461,6 +461,144 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
         self.assertIn("EVENT_SCHEDULER_LIST_SMOKE_OK", result.stdout)
         self.assertNotIn("SCRIPT ERROR", result.stdout)
 
+    def test_animation_end_wraps_in_list_order(self) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+
+        # Four sub-images without a sprite asset: image_index advances by
+        # image_speed per step and wraps at 4.
+        animated_instance_script = textwrap.dedent(
+            """\
+            extends Node2D
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var label = ""
+            var log = []
+            var id = GMRuntime.gml_instance_noone()
+            var sprite_index = -1
+            var image_index = 0.0
+            var image_number = 4
+            var image_speed = 0.0
+            var on_end = null
+
+            func configure(label_value, log_ref):
+            \tlabel = str(label_value)
+            \tlog = log_ref
+
+            func _ready():
+            \tid = GMRuntime.gml_instance_register(self, label, [])
+
+            func _exit_tree():
+            \tGMRuntime.gml_instance_unregister(id)
+
+            func _gm_apply_image_index():
+            \tpass
+
+            func _on_animation_end():
+            \tlog.append(label + ":end@" + str(image_index))
+            \tif on_end != null:
+            \t\ton_end.call()
+            """
+        )
+
+        smoke_script = textwrap.dedent(
+            """\
+            extends Node
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+            const AnimatedInstance = preload("res://animated_instance.gd")
+
+            var log = []
+            var probes = {}
+
+            func _check(condition, message):
+            \tif not condition:
+            \t\tpush_error(str(message))
+            \t\tget_tree().quit(1)
+            \t\treturn false
+            \treturn true
+
+            func _ready():
+            \tcall_deferred("_run")
+
+            func _frame():
+            \tGMRuntime.gml_event_scheduler_set_enabled(true)
+            \tGMRuntime.gml_event_scheduler_frame(0.016, 1)
+            \tGMRuntime.gml_event_scheduler_set_enabled(false)
+
+            func _add(label, image_index, image_speed):
+            \tvar inst = AnimatedInstance.new()
+            \tinst.configure(label, log)
+            \tinst.image_index = image_index
+            \tinst.image_speed = image_speed
+            \tadd_child(inst)
+            \tprobes[label] = inst
+            \treturn inst
+
+            func _q_end():
+            \tprobes["Q"].image_speed = 0.0
+            \tprobes["P"].image_index = 6.0
+            \tprobes["R"].image_index = -1.0
+
+            func _run():
+            \tGMRuntime.gml_event_scheduler_set_enabled(false)
+            \t_add("P", 0.0, 0.0)
+            \t_add("Q", 3.0, 1.0).on_end = _q_end
+            \t_add("R", 0.0, 0.0)
+            \t_add("S", 1.5, 0.5)
+            \t# Q's Animation End moves P and R outside their sub-images: R comes
+            \t# later in the list and wraps in the same step, P only in the next.
+            \t_frame()
+            \tif not _check(log == ["Q:end@0.0", "R:end@3.0"], "first step: " + str(log)):
+            \t\treturn
+            \tif not _check(probes["P"].image_index == 6.0 and probes["S"].image_index == 2.0, "first step images: " + str([probes["P"].image_index, probes["S"].image_index])):
+            \t\treturn
+            \tlog.clear()
+            \t_frame()
+            \tif not _check(log == ["P:end@2.0"], "second step: " + str(log)):
+            \t\treturn
+            \tlog.clear()
+            \t_frame()
+            \t_frame()
+            \t_frame()
+            \tif not _check(log == ["S:end@0.0"], "fifth step: " + str(log)):
+            \t\treturn
+            \tprint("ANIMATION_END_ORDER_OK")
+            \tget_tree().quit(0)
+            """
+        )
+
+        smoke_scene = textwrap.dedent(
+            """\
+            [gd_scene load_steps=2 format=3]
+
+            [ext_resource type="Script" path="res://smoke.gd" id="smoke_script"]
+
+            [node name="Smoke" type="Node"]
+            script = ExtResource("smoke_script")
+            """
+        )
+
+        with tempfile.TemporaryDirectory() as godot_tmp:
+            project_dir = Path(godot_tmp)
+            _write_text(project_dir / "project.godot", "[application]\n")
+            write_gml_runtime(str(project_dir))
+            _write_text(project_dir / "animated_instance.gd", animated_instance_script)
+            _write_text(project_dir / "smoke.gd", smoke_script)
+            _write_text(project_dir / "smoke.tscn", smoke_scene)
+
+            try:
+                result = run_headless_scene(godot_binary, project_dir, 'smoke.tscn', timeout=60)
+            except subprocess.TimeoutExpired as exc:
+                output = exc.output.decode("utf-8", errors="replace") if isinstance(exc.output, bytes) else str(exc.output or "")
+                self.fail("Godot animation end smoke timed out\n" + output)
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("ANIMATION_END_ORDER_OK", result.stdout)
+        self.assertNotIn("SCRIPT ERROR", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

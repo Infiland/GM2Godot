@@ -1220,6 +1220,13 @@ static func _gml_draw_dispatch_phase(phase, instances, plan):
 	if phase_name == "draw":
 		dispatched += _gml_draw_count_default_draws(plan["defaults"])
 	for inst in instances:
+		# Once an event requests a room change, GameMaker runs no further
+		# draw events in the frame, for any instance (yyObject.PerformEvent
+		# returns while New_Room != -1; Draw is not among the events
+		# persistent instances keep). Instances without a Draw event are
+		# still drawn.
+		if _gml_event_scheduler_event_blocked(inst, false):
+			break
 		if not _gml_draw_instance_drawable(inst):
 			continue
 		if _gml_draw_trace_enabled:

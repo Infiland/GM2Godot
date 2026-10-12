@@ -126,6 +126,59 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["ok:7", "method:mono!110:2", "sum:6"])
 
+    def test_methods_use_switch_try_with_and_repeat_like_their_enclosing_code(self) -> None:
+        # These statements declare converter temporaries; a method is a
+        # GDScript lambda inside the enclosing code, so its temporaries must
+        # not reuse the enclosing function's or event's.
+        scripts = {
+            "scr_ok": "function ok_value() { return 7; }\n",
+            "scr_statements": (
+                "function statements_value(_k) {\n"
+                "    var _out = \"\";\n"
+                "    switch (_k) { case 1: _out += \"s\"; break; }\n"
+                "    try { throw \"x\"; } catch (_e) { _out += \"t\"; }\n"
+                "    repeat (2) { _out += \"r\"; }\n"
+                "    with (o_main) {\n"
+                "        var _m = function(_j) {\n"
+                "            var _in = \"\";\n"
+                "            switch (_j) { case 2: _in += \"S\"; break; }\n"
+                "            try { throw \"y\"; } catch (_e) { _in += \"T\"; }\n"
+                "            repeat (3) { _in += \"R\"; }\n"
+                "            with (o_main) { _in += \"W\"; }\n"
+                "            var _n = function() {\n"
+                "                var _deep = \"\";\n"
+                "                switch (1) { case 1: _deep = \"D\"; break; }\n"
+                "                with (o_main) { _deep += \"w\"; }\n"
+                "                return _deep;\n"
+                "            };\n"
+                "            return _in + _n();\n"
+                "        };\n"
+                "        _out += \"W\" + _m(2);\n"
+                "    }\n"
+                "    return _out;\n"
+                "}\n"
+            ),
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("script:" + statements_value(1));\n'
+            "var _out = \"\";\n"
+            'switch (x) { case 0: _out += "s"; break; }\n'
+            'with (self) { _out += "w"; }\n'
+            "event_method = function() {\n"
+            '    var _in = "";\n'
+            '    switch (y) { case 0: _in += "S"; break; }\n'
+            '    with (self) { _in += "W"; }\n'
+            "    return _in;\n"
+            "};\n"
+            'trace("event:" + _out + event_method());\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "script:strrWSTRRRWDw", "event:swSW"])
+
     def test_increments_inside_methods_run_when_the_method_runs(self) -> None:
         scripts = {
             "scr_counter": (

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -1130,6 +1131,32 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         # A local that reuses no enclosing name keeps its own name.
         self.assertIn("\t\t\tvar _i = 0\n", code)
 
+    def test_method_temporaries_are_named_apart_from_the_enclosing_code(self):
+        # switch, try, with and repeat declare temporaries. A method is a
+        # GDScript lambda inside the enclosing code, where GDScript rejects
+        # redeclaring a name already in scope, so a method (or a method in a
+        # method) using the same constructs needs temporaries of its own.
+        code = transpile_gml_code(
+            "switch (a) { case 1: b = 1; break; }\n"
+            "try { b = 2; } catch (_e) { b = 3; }\n"
+            "repeat (2) { b += 1; }\n"
+            "with (obj_thing) {\n"
+            "    f = function(_k) {\n"
+            "        switch (_k) { case 2: return 2; }\n"
+            "        try { throw 1; } catch (_e) { _k = 0; }\n"
+            "        repeat (2) { _k += 1; }\n"
+            "        with (obj_thing) { y = 1; }\n"
+            "        var g = function() { switch (a) { default: return 0; } };\n"
+            "        return g();\n"
+            "    };\n"
+            "}\n"
+        )
+
+        declared = re.findall(r"\b(?:var|for)\s+(_gml_\w+)", code)
+        for prefix in ("_gml_switch_value_", "_gml_try_control_", "_gml_repeat_index_", "_gml_with_target_"):
+            self.assertGreaterEqual(sum(name.startswith(prefix) for name in declared), 2, code)
+        self.assertEqual(len(declared), len(set(declared)), code)
+
     def test_increments_inside_methods_stay_in_the_method_body(self):
         # A method's ++ and -- run each time the method is called, not where
         # the method is declared.
@@ -1156,13 +1183,13 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "\t\t_n = _gm2gd_mutation_value_1\n"
             "\t\treturn [_gm2gd_mutation_value_0, _gm2gd_mutation_value_1]\n"
             "\t)\n"
-            "\tvar _gm2gd_mutation_value_0 = j\n"
-            "\tj = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
+            "\tvar _gm2gd_mutation_value_2 = j\n"
+            "\tj = GMRuntime.gml_add(_gm2gd_mutation_value_2, 1)\n"
             "\tvar g = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null, a = null):\n"
             "\t\tif a == null: a = GMRuntime.gml_undefined()\n"
             "\t\ta = GMRuntime.gml_sub(a, 1)\n"
             "\t\treturn a\n"
-            "\t), _gm2gd_mutation_value_0]",
+            "\t), _gm2gd_mutation_value_2]",
         )
 
     def test_struct_literals_may_repeat_a_variable_name(self):

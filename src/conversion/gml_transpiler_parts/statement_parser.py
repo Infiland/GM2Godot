@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from typing import Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import ASSIGNMENT_OPERATORS, BINARY_PRECEDENCE, EOF
@@ -1116,6 +1117,16 @@ class _StatementParser:
         return GMLTranspileError(message, line=token.line, column=token.column)
 
 
+# The temporaries counter of the statements being parsed. Statements parsed
+# while it is set are a method's body written in them, which becomes a GDScript
+# lambda inside them; redeclaring a name already in scope there is a parse
+# error, so the method numbers its temporaries (switch, try, with, repeat...)
+# from the same counter.
+_ACTIVE_GENERATED_COUNTER: ContextVar[list[int] | None] = ContextVar(
+    "gml_active_generated_counter", default=None
+)
+
+
 def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     parser = _StatementParser(
         list(request.tokens),
@@ -1135,8 +1146,13 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         static_scope_prefix=request.static_scope_prefix,
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
+        generated_counter=_ACTIVE_GENERATED_COUNTER.get(),
     )
-    lines = parser.parse()
+    active_counter = _ACTIVE_GENERATED_COUNTER.set(parser.generated_counter)
+    try:
+        lines = parser.parse()
+    finally:
+        _ACTIVE_GENERATED_COUNTER.reset(active_counter)
     return GMLStatementResult(
         lines=tuple(lines),
         local_names=frozenset(parser.local_names),

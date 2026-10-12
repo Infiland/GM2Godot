@@ -13,7 +13,7 @@ static func gml_div(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
-		return GMLInt64.new(int(_to_int64_value(left) / right_int))
+		return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))
 	# GML `/` is always real division, even when both operands hold whole
 	# numbers (5 / 2 == 2.5); only int64 / int64 keeps integer semantics
 	# (the runner's yyfdivide turns an int64 divided by, or dividing, any
@@ -51,8 +51,19 @@ static func gml_int_div(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
-		return GMLInt64.new(int(_to_int64_value(left) / right_int))
+		return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))
 	return _gml_real_int_div(_to_real(left), _to_real(right))
+
+
+const GML_INT64_MIN = -9223372036854775807 - 1
+
+
+# An int64 quotient as the runner's Long.div gives it: the most negative
+# int64 divided by -1 is itself (Godot's int division crashes the game there).
+static func _gml_int64_quotient(left_int, right_int):
+	if right_int == -1 and left_int == GML_INT64_MIN:
+		return left_int
+	return left_int / right_int
 
 
 # `div` on reals, as the runner's yyfdiv: a zero divisor is an error, NaN
@@ -72,18 +83,21 @@ static func _gml_real_int_div(left_value, right_value):
 		return right_value if is_finite(left_value) else 1
 	if left_value == right_value:
 		return 1
-	var right_int = _gml_truncate_real(right_value)
-	if right_int == 0:
+	var divisor = _gml_truncate_real(right_value)
+	if divisor == 0.0:
 		return 0
-	return _gml_truncate_real(left_value) / right_int
+	# The truncated operands stay reals, so a value beyond the int64 range
+	# cannot overflow; the quotient is an int only when an int64 holds it.
+	var quotient = _gml_truncate_real(left_value) / divisor
+	return _gml_whole_real(quotient - fmod(quotient, 1.0))
 
 
-# A real truncated toward zero to an integer; infinities give 0, as the
+# A real truncated toward zero to a whole real; infinities give 0, as the
 # runner's ~~ does.
 static func _gml_truncate_real(value):
 	if is_inf(value):
-		return 0
-	return int(value)
+		return 0.0
+	return value - fmod(value, 1.0)
 
 
 static func gml_real(value):
@@ -227,6 +241,10 @@ static func gml_mod(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 modulo by zero")
+		# Any int64 modulo -1 is 0, as the runner's Long.mod gives it
+		# (Godot's int % crashes the game on the most negative int64).
+		if right_int == -1:
+			return GMLInt64.new(0)
 		return GMLInt64.new(_to_int64_value(left) % right_int)
 	if _returns_int32_arithmetic_result(left, right):
 		var right_int = _to_int32_value(right)

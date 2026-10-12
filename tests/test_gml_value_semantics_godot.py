@@ -125,6 +125,24 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("int64(7) div 2.5 type", GMRuntime.gml_typeof(int64_quotient), "int64")
             _expect("int64(7) div 2.5", GMRuntime.gml_real(int64_quotient), 3.0)
             _expect("7 div int64(2)", GMRuntime.gml_int_div(7, GMRuntime.gml_int64(2)), 3)
+            # Reals beyond the int64 range keep their whole value; dividing
+            # them must not overflow (or trap the CPU on INT64_MIN / -1).
+            _expect("1e20 div -1", GMRuntime.gml_int_div(1e20, -1), -1e20)
+            _expect("1e20 div -1.5", GMRuntime.gml_int_div(1e20, -1.5), -1e20)
+            _expect("-2^63 div -1", GMRuntime.gml_int_div(-9223372036854775808.0, -1), 9223372036854775808.0)
+            _expect("1e20 div 3", GMRuntime.gml_int_div(1e20, 3), 1e20 / 3.0)
+            _expect("-1e20 div 3", GMRuntime.gml_int_div(-1e20, 3), -1e20 / 3.0)
+            _expect("1e20 div 1e19", GMRuntime.gml_int_div(1e20, 1e19), 10)
+            _expect("5000000000 div 2", GMRuntime.gml_int_div(5000000000.0, 2), 2500000000)
+            _expect("-2147483648 div -1", GMRuntime.gml_int_div(-2147483648, -1), 2147483648)
+            # The runner's Long.div and Long.mod: the most negative int64
+            # divided by -1 is itself, with remainder 0.
+            var int64_min = GMRuntime.gml_shift_left(1, 63)
+            _expect("(1 << 63) div -1", GMRuntime.gml_int_div(int64_min, -1).value, -9223372036854775807 - 1)
+            _expect("(1 << 63) div -1.5", GMRuntime.gml_int_div(int64_min, -1.5).value, -9223372036854775807 - 1)
+            _expect("(1 << 63) / int64(-1)", GMRuntime.gml_div(int64_min, GMRuntime.gml_int64(-1)).value, -9223372036854775807 - 1)
+            _expect("(1 << 63) mod -1", GMRuntime.gml_mod(int64_min, -1).value, 0)
+            _expect("(1 << 63) div 2", GMRuntime.gml_int_div(int64_min, 2).value, -4611686018427387904)
             _expect("5.5 mod 2", GMRuntime.gml_mod(5.5, 2), 1.5)
             _expect("-5 mod 3", GMRuntime.gml_mod(-5, 3), -2)
             """,

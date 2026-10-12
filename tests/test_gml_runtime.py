@@ -3235,10 +3235,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_int_div(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLInt64.new(int(_to_int64_value(left) / right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("if right_int == -1 and left_int == GML_INT64_MIN:", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 division by zero")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_real_int_div(left_value, right_value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return _gml_truncate_real(left_value) / right_int", GML_RUNTIME_SCRIPT)
+        self.assertIn("var quotient = _gml_truncate_real(left_value) / divisor", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_whole_real(quotient - fmod(quotient, 1.0))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_checks_int32_range_over_godot_ints(self):
         self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)

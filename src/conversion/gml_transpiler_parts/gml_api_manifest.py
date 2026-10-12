@@ -2053,11 +2053,11 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "path_start",
         "Paths and Motion Planning",
-        "partial",
+        "implemented",
         "src.conversion.gml_runtime_parts.segments.47_paths_motion_planning",
         "yes",
         "yes",
-        "partial",
+        "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Paths/path_start.htm",
         "Follows the path like the runner's Assign_Path/Adapt_Path: all four end actions, applied before Path End.",

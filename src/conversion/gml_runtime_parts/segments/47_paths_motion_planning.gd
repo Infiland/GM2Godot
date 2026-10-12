@@ -330,6 +330,30 @@ static func _gml_path_adapt(instance):
 	return at_end
 
 
+static func _gml_path_follows(instance):
+	# Whether the instance follows a path: path_index is a path, not -1.
+	var path_index = instance.get(&"path_index")
+	if path_index == null:
+		path_index = _gml_motion_read(instance, "path_index", -1)
+	return (path_index is int or path_index is float) and path_index >= 0
+
+
+static func _gml_path_motion_step(instance):
+	# The runner's UpdatePositions for an instance on a path: friction and
+	# gravity, then the path (which leaves speed 0), then Path End, then the
+	# move by hspeed/vspeed, so only a speed set in Path End moves it.
+	_gml_motion_adapt_speed(instance)
+	if _gml_path_adapt(instance):
+		_gml_path_dispatch_end(instance)
+		if not is_instance_valid(instance):
+			return
+	var hspeed_value = _gml_motion_real(instance, "hspeed", 0.0)
+	var vspeed_value = _gml_motion_real(instance, "vspeed", 0.0)
+	if hspeed_value != 0.0 or vspeed_value != 0.0:
+		var position = _gml_motion_position(instance)
+		_gml_motion_set_position(instance, Vector2(position.x + hspeed_value, position.y + vspeed_value))
+
+
 static func _gml_path_dispatch_end(instance):
 	# Path End is an Other event: after a room change request only persistent
 	# instances (or every instance of a persistent room) still get it.

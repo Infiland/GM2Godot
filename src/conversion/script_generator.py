@@ -605,7 +605,6 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
         "\n\typrevious = position.y"
         "\n\tGMRuntime.gml_motion_sync_from_speed_direction(self)"
         "\n\nfunc _gm_apply_motion_step():"
-        "\n\tGMRuntime.gml_path_step(self)"
         "\n\tGMRuntime.gml_motion_step(self)\n"
     )
 

@@ -388,6 +388,56 @@ class TestPathsGodot(unittest.TestCase):
             ],
         )
 
+    def test_friction_and_gravity_act_before_the_path_and_speed_after_path_end(self) -> None:
+        # Each step GameMaker applies friction and gravity, then the path
+        # (which leaves speed 0, so gravity does not pull a path follower off
+        # its path), then Path End, then moves the instance by hspeed/vspeed:
+        # a speed set in Path End moves the instance in that same step, before
+        # friction slows it (yyInstance.js UpdatePositions).
+        trace = self._run_trace(
+            {
+                "o_heavy": {
+                    EVENT_CREATE: "gravity = 1;\npath_start(pth_line, 10, path_action_stop, true);\n",
+                    EVENT_STEP: 'trace("heavy:" + f3(x) + "," + f3(y) + "," + f3(speed) + "," + f3(vspeed));\n',
+                    EVENT_PATH_END: 'trace("heavy_end:" + f3(x) + "," + f3(y) + "," + f3(speed) + "," + f3(vspeed));\n',
+                },
+                "o_launch": {
+                    EVENT_CREATE: "friction = 1;\npath_start(pth_line, 20, path_action_stop, true);\n",
+                    EVENT_STEP: 'trace("launch:" + f3(x) + "," + f3(speed) + "," + f3(direction));\n',
+                    EVENT_PATH_END: 'speed = 5;\ntrace("launch_end:" + f3(x) + "," + f3(speed) + "," + f3(direction));\n',
+                },
+            },
+            (("o_heavy", 100, 50), ("o_launch", 100, 50)),
+            (GameMakerPath("pth_line", ((0, 0, 100), (40, 0, 100))),),
+            frames=8,
+        )
+        self.assertEqual(
+            [line for line in trace if line.startswith("heavy")],
+            [
+                "heavy:0,0,0,0",
+                "heavy:10000,0,0,0",
+                "heavy:20000,0,0,0",
+                "heavy:30000,0,0,0",
+                "heavy_end:40000,0,0,0",
+                "heavy:40000,0,0,0",
+                "heavy:40000,1000,1000,1000",
+                "heavy:40000,3000,2000,2000",
+            ],
+        )
+        self.assertEqual(
+            [line for line in trace if line.startswith("launch")],
+            [
+                "launch:0,0,0",
+                "launch:20000,0,0",
+                "launch_end:40000,5000,0",
+                "launch:45000,5000,0",
+                "launch:49000,4000,0",
+                "launch:52000,3000,0",
+                "launch:54000,2000,0",
+                "launch:55000,1000,0",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

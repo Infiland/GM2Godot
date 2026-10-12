@@ -110,6 +110,7 @@ static func gml_instance_unregister(instance_or_handle):
 		return false
 	_gml_instance_entries.erase(handle.index)
 	_gml_instance_handles_by_node_id.erase(entry["node_id"])
+	_gml_depth_forget(entry["node_id"])
 	_gml_collision_forget_box_lists(entry)
 	_gml_instance_order_erase(_gml_instance_live_order, entry)
 	for selector_id in entry["selector_ids"]:

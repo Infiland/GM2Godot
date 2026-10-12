@@ -68,7 +68,11 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
         self.assertIn("\t_gm_initialize_motion_runtime()", content)
         self.assertNotIn("func _process(delta):", content)
-        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+        # Moving to another layer node is not leaving the room: no unregistering.
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()',
+            content,
+        )
 
     def test_object_runtime_reports_collision_changes(self):
         # The runtime keeps each instance's collision state until the node's
@@ -161,7 +165,11 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
             content,
         )
-        self.assertIn("func _exit_tree():\n\tsuper._exit_tree()\n\t_gm_unregister_instance()", content)
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n'
+            "\tsuper._exit_tree()\n\t_gm_unregister_instance()",
+            content,
+        )
 
     def test_inherited_sprite_runtime_reuses_parent_members(self):
         content = generate_script_content(

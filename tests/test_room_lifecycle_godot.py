@@ -27,6 +27,11 @@ from tests.godot_test_support import find_smoke_godot_binary
 EVENT_GAME_END = (7, 3)
 EVENT_ROOM_END = (7, 5)
 
+# The one warning game_end() prints (the runtime's GML_ROOM_UNSUPPORTED_EXIT_MESSAGE).
+_GAME_END_WARNING = (
+    "GM2Godot maps game_end to SceneTree.quit(); platform-specific close prompts and window behavior are not emulated."
+)
+
 _TRACE_SCRIPT = (
     "function trace(_text) {\n"
     '    if (!variable_global_exists("trace")) global.trace = [];\n'
@@ -460,6 +465,69 @@ _PERSISTENT_ROOM_TRACE = [
 ]
 
 
+# The persistent rooms that were left are still kept when the game ends,
+# by game_end() or by the program closing: they go with the game, freed
+# like the room being played, so nothing of theirs outlives it (no leaked
+# nodes or resources reported at exit).
+def _kept_rooms_exit_project(end_with_game_end: bool) -> GameMakerProject:
+    end_step = 'if (global.t == 7) game_end();\n' if end_with_game_end else ""
+    return GameMakerProject(
+        name="KeptRoomsExit",
+        scripts={"scr_trace": _TRACE_SCRIPT},
+        objects=(
+            GameMakerObject(
+                "o_ctrl",
+                {
+                    EVENT_CREATE: "global.t = 0;\n",
+                    EVENT_STEP: (
+                        "global.t += 1;\n"
+                        "if (global.t == 3) room_goto(r_side);\n"
+                        "if (global.t == 5) room_goto(r_away);\n" + end_step
+                    ),
+                    EVENT_GAME_END: (
+                        'trace("game_end:" + room_get_name(room));\n'
+                        'show_debug_message("ROOM_LIFECYCLE_TRACE " + json_stringify(global.trace));\n'
+                    ),
+                },
+                persistent=True,
+            ),
+            GameMakerObject(
+                "o_counter",
+                {
+                    EVENT_CREATE: 'n = 0;\ntrace("create_counter");\ninstance_create_layer(0, 0, "Things", o_made);\n',
+                    EVENT_STEP: "n += 1;\n",
+                    EVENT_ROOM_START: 'trace(room_get_name(room) + "_start:n=" + string(n));\n',
+                },
+            ),
+            GameMakerObject("o_made", {}),
+        ),
+        rooms=(
+            GameMakerRoom(
+                "r_hub",
+                layers=(
+                    InstanceLayer(
+                        "Things",
+                        0,
+                        (RoomInstance("inst_ctrl", "o_ctrl", 0, 0), RoomInstance("inst_counter", "o_counter", 0, 0)),
+                    ),
+                ),
+                creation_order=("inst_ctrl", "inst_counter"),
+                persistent=True,
+            ),
+            GameMakerRoom(
+                "r_side",
+                layers=(InstanceLayer("Things", 0, (RoomInstance("inst_side", "o_counter", 0, 0),)),),
+                creation_order=("inst_side",),
+                persistent=True,
+            ),
+            GameMakerRoom("r_away", layers=(InstanceLayer("Instances", 0, ()),), creation_order=()),
+        ),
+    )
+
+
+_KEPT_ROOMS_TRACE = ["create_counter", "r_hub_start:n=0", "create_counter", "r_side_start:n=0"]
+
+
 # An object runs the event of its nearest ancestor that has one, and
 # event_inherited() runs the nearest ancestor's event above the object, even
 # when the parent in between has no such event (runner yyInstance
@@ -516,10 +584,17 @@ class TestRoomLifecycleGodot(unittest.TestCase):
     def test_persistent_room_keeps_its_state_until_game_restart(self) -> None:
         self.assertEqual(self._run_trace(_PERSISTENT_ROOM_PROJECT), _PERSISTENT_ROOM_TRACE)
 
+    def test_persistent_rooms_kept_when_the_program_closes_are_freed(self) -> None:
+        self.assertEqual(self._run_trace(_kept_rooms_exit_project(False)), _KEPT_ROOMS_TRACE)
+
+    def test_persistent_rooms_kept_when_game_end_runs_are_freed(self) -> None:
+        trace = self._run_trace(_kept_rooms_exit_project(True), allowed_warning=_GAME_END_WARNING)
+        self.assertEqual(trace, [*_KEPT_ROOMS_TRACE, "game_end:r_away"])
+
     def test_events_and_event_inherited_reach_the_nearest_ancestor_with_the_event(self) -> None:
         self.assertEqual(self._run_trace(_CHAIN_PROJECT), _CHAIN_TRACE)
 
-    def _run_trace(self, project: GameMakerProject) -> list[str]:
+    def _run_trace(self, project: GameMakerProject, allowed_warning: str = "") -> list[str]:
         godot_binary = find_smoke_godot_binary()
         if godot_binary is None:
             self.skipTest("Godot binary not available")
@@ -537,7 +612,8 @@ class TestRoomLifecycleGodot(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertNotIn("ERROR:", output)
-        self.assertNotIn("WARNING:", output)
+        warnings = [line for line in output.splitlines() if "WARNING:" in line]
+        self.assertEqual(warnings, [f"WARNING: {allowed_warning}"] if allowed_warning else [], output)
         trace_lines = [line for line in output.splitlines() if line.startswith("ROOM_LIFECYCLE_TRACE ")]
         self.assertEqual(len(trace_lines), 1, output)
         return json.loads(trace_lines[0].removeprefix("ROOM_LIFECYCLE_TRACE "))

@@ -782,7 +782,9 @@ static func _gml_room_particle_layer_nodes(scene):
 
 
 # game_restart() starts every room afresh: the persistent rooms that were
-# left go, with their instances, layers and room particle systems.
+# left go, with their instances, layers and room particle systems. They go
+# the same way when the program closes (gm2godot_runtime_shutdown), so
+# nothing of theirs outlives the game.
 static func _gml_room_drop_parked_rooms():
 	for record in _gml_room_parked.values():
 		for entry in record["instances"]:

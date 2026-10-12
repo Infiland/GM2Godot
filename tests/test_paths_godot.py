@@ -43,12 +43,75 @@ _TRACE_SCRIPT = (
     "function following(_path_index) {\n"
     '    return (_path_index == -1) ? "none" : "on";\n'
     "}\n"
+    "function str_bool(_value) {\n"
+    '    return _value ? "yes" : "no";\n'
+    "}\n"
+    "function pts(_path) {\n"
+    '    var _text = "";\n'
+    "    for (var _i = 0; _i < path_get_number(_path); _i++) {\n"
+    '        _text += f3(path_get_point_x(_path, _i)) + " " + f3(path_get_point_y(_path, _i)) + " "'
+    ' + f3(path_get_point_speed(_path, _i)) + ";";\n'
+    "    }\n"
+    "    return _text;\n"
+    "}\n"
 )
 # What the end action tests trace: x, y, path_position, path_speed (times
 # 1000) and whether the instance still follows a path.
 _PATH_STATE = (
     'f3(x) + "," + f3(y) + "," + f3(path_position) + "," + f3(path_speed) + "," + following(path_index)'
 )
+
+
+# Builds and edits paths at run time, tracing them (Create of o_editor).
+_EDITING_GML = """\
+var p = path_add();
+trace("new:" + str_bool(path_exists(p)) + "," + (path_get_closed(p) ? "closed" : "open")
+    + "," + string(path_get_kind(p)) + "," + string(path_get_precision(p))
+    + "," + string(path_get_number(p)) + "," + f3(path_get_length(p)) + "," + path_get_name(p) + ".");
+path_add_point(p, 0, 0, 100);
+path_add_point(p, 30, 0, 100);
+path_add_point(p, 30, 40, 50);
+trace("closed:" + f3(path_get_length(p)) + "," + f3(path_get_x(p, 0.9)) + "," + f3(path_get_y(p, 0.9))
+    + "," + f3(path_get_speed(p, 0.9)));
+path_set_closed(p, false);
+trace("open:" + f3(path_get_length(p)));
+path_insert_point(p, 1, 10, 0, 100);
+path_change_point(p, 3, 30, 20, 100);
+path_delete_point(p, 0);
+trace("edit:" + pts(p));
+path_insert_point(p, 9, 0, 0, 100);
+path_delete_point(p, -1);
+path_change_point(p, 3, 0, 0, 0);
+trace("ignored:" + pts(p));
+var q = path_duplicate(p);
+path_reverse(q);
+path_append(q, p);
+trace("dup:" + str_bool(q != p) + "," + pts(q) + f3(path_get_length(q)));
+path_shift(q, 5, -5);
+trace("shift:" + pts(q));
+path_rescale(q, 2, 0.5);
+trace("rescale:" + pts(q));
+path_rotate(q, 90);
+trace("rotate:" + pts(q));
+path_flip(q);
+trace("flip:" + pts(q));
+path_mirror(q);
+trace("mirror:" + pts(q));
+path_set_kind(q, 1);
+path_set_precision(q, 2);
+trace("smooth:" + string(path_get_kind(q)) + "," + string(path_get_precision(q)) + "," + f3(path_get_length(q))
+    + "," + f3(path_get_x(q, 0.3)) + "," + f3(path_get_y(q, 0.3)));
+path_set_kind(q, 5);
+path_set_precision(q, 12);
+trace("clamp:" + string(path_get_kind(q)) + "," + string(path_get_precision(q)));
+path_assign(q, pth_line);
+trace("assign:" + path_get_name(q) + "," + (path_get_closed(q) ? "closed" : "open") + "," + pts(q)
+    + f3(path_get_length(q)));
+path_clear_points(p);
+trace("clear:" + string(path_get_number(p)) + "," + f3(path_get_length(p)) + "," + str_bool(path_exists(p)));
+path_delete(p);
+trace("delete:" + str_bool(path_exists(p)) + "," + str_bool(path_exists(q)));
+"""
 
 
 @dataclass(frozen=True)
@@ -436,6 +499,105 @@ class TestPathsGodot(unittest.TestCase):
                 "launch:54000,2000,0",
                 "launch:55000,1000,0",
             ],
+        )
+
+    def test_paths_are_made_and_edited_at_run_time_like_gamemaker(self) -> None:
+        # path_add makes an empty closed straight path with precision 4 and
+        # no name; the editing functions change its points and settings and
+        # rebuild it, ignoring point indices out of range. Rescaling,
+        # rotating, flipping and mirroring work around the centre of the
+        # points' bounding box, path_assign and path_duplicate copy the name
+        # too, and kind and precision are clamped (Function_Path.js,
+        # yyPath.js).
+        trace = self._run_trace(
+            {
+                "o_editor": {
+                    EVENT_CREATE: _EDITING_GML,
+                },
+            },
+            (("o_editor", 0, 0),),
+            (GameMakerPath("pth_line", ((0, 0, 100), (40, 0, 100))),),
+            frames=2,
+        )
+        self.assertEqual(
+            trace,
+            [
+                "new:yes,closed,0,4,0,0,.",
+                "closed:120000,7200,9600,88000",
+                "open:70000",
+                "edit:10000 0 100000;30000 0 100000;30000 20000 100000;",
+                "ignored:10000 0 100000;30000 0 100000;30000 20000 100000;",
+                "dup:yes,30000 20000 100000;30000 0 100000;10000 0 100000;10000 0 100000;30000 0 100000;"
+                "30000 20000 100000;80000",
+                "shift:35000 15000 100000;35000 -5000 100000;15000 -5000 100000;15000 -5000 100000;"
+                "35000 -5000 100000;35000 15000 100000;",
+                "rescale:45000 10000 100000;45000 0 100000;5000 0 100000;5000 0 100000;45000 0 100000;"
+                "45000 10000 100000;",
+                "rotate:30000 -15000 100000;20000 -15000 100000;20000 25000 100000;20000 25000 100000;"
+                "20000 -15000 100000;30000 -15000 100000;",
+                "flip:30000 25000 100000;20000 25000 100000;20000 -15000 100000;20000 -15000 100000;"
+                "20000 25000 100000;30000 25000 100000;",
+                "mirror:20000 25000 100000;30000 25000 100000;30000 -15000 100000;30000 -15000 100000;"
+                "30000 25000 100000;20000 25000 100000;",
+                "smooth:1,2,82861,29816,6571",
+                "clamp:0,8",
+                "assign:pth_line,open,0 0 100000;40000 0 100000;40000",
+                "clear:0,0,yes",
+                "delete:no,yes",
+            ],
+        )
+
+    def test_instances_follow_paths_made_with_path_add(self) -> None:
+        # A path from path_add is closed, so a relative path runs back to
+        # where it started. Once its path is deleted an instance stops where
+        # it is but keeps path_index.
+        follower = (
+            "r = path_add();\n"
+            "path_add_point(r, 0, 0, 100);\n"
+            "path_add_point(r, 0, 40, 100);\n"
+            "path_start(r, 10, path_action_stop, false);\n"
+            "steps = 0;\n"
+        )
+        state = (
+            'f3(x) + "," + f3(y) + "," + f3(path_position) + "," + str_bool(path_index == r)'
+            ' + "," + str_bool(path_exists(r))'
+        )
+        trace = self._run_trace(
+            {
+                "o_maker": {
+                    EVENT_CREATE: follower,
+                    EVENT_STEP: f'trace("maker:" + {state});\n',
+                    EVENT_PATH_END: 'trace("maker_end:" + f3(y) + "," + str_bool(path_index == -1));\n',
+                },
+                "o_dropper": {
+                    EVENT_CREATE: follower,
+                    EVENT_STEP: f'steps += 1;\nif (steps == 3) path_delete(r);\ntrace("dropper:" + {state});\n',
+                },
+            },
+            (("o_maker", 100, 50), ("o_dropper", 100, 50)),
+            (),
+            frames=11,
+        )
+        self.assertEqual(
+            [line for line in trace if line.startswith("maker")],
+            [
+                "maker:100000,50000,0,yes,yes",
+                "maker:100000,60000,125,yes,yes",
+                "maker:100000,70000,250,yes,yes",
+                "maker:100000,80000,375,yes,yes",
+                "maker:100000,90000,500,yes,yes",
+                "maker:100000,80000,625,yes,yes",
+                "maker:100000,70000,750,yes,yes",
+                "maker:100000,60000,875,yes,yes",
+                "maker_end:50000,yes",
+                "maker:100000,50000,1000,no,yes",
+                "maker:100000,50000,1000,no,yes",
+            ],
+        )
+        self.assertEqual(
+            [line for line in trace if line.startswith("dropper")],
+            ["dropper:100000,50000,0,yes,yes", "dropper:100000,60000,125,yes,yes"]
+            + ["dropper:100000,70000,250,yes,no"] * 8,
         )
 
 

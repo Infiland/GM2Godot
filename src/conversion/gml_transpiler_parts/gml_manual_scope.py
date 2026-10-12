@@ -377,8 +377,8 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Paths/Paths.htm",
         ("Paths and Motion Planning", "Motion Helpers"),
-        ("tests/test_path_registry.py", "tests/test_paths_motion_godot.py"),
-        "Registry and path-follow subset exist; real Path2D/Curve2D and exact interpolation remain open.",
+        ("tests/test_path_registry.py", "tests/test_paths_godot.py", "tests/test_paths_motion_godot.py"),
+        "Path assets, path_add editing and path following match the runner; draw_path remains open.",
     ),
     _entry(
         "reference_rooms_layers",

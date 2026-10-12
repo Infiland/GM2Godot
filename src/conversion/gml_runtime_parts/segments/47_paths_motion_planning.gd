@@ -140,6 +140,220 @@ static func gml_path_get_speed(path, pos):
 	return _gml_path_position(entry, _to_real(pos))[2]
 
 
+static func gml_path_add():
+	# A new empty path (yyPath()): straight, closed, precision 4, no name.
+	_gml_path_registry_ensure_loaded()
+	var path_id = gml_asset_register_dynamic("path_" + str(_gml_asset_next_dynamic_id), "path")
+	_gml_paths_by_id[path_id] = _gml_path_new(path_id, "")
+	return path_id
+
+
+static func gml_path_delete(path):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	_gml_paths_by_id.erase(entry["id"])
+	for name in _gml_paths_by_name.keys():
+		if is_same(_gml_paths_by_name[name], entry):
+			_gml_paths_by_name.erase(name)
+	gml_asset_release(entry["id"])
+	return null
+
+
+static func gml_path_duplicate(path):
+	# A new path with the points and settings of path (name included), or
+	# -1 when path does not exist.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return -1
+	var path_id = gml_path_add()
+	_gml_path_copy(_gml_paths_by_id[path_id], entry)
+	return path_id
+
+
+static func gml_path_assign(path, source):
+	var entry: Variant = _gml_path_resolve(path)
+	var from: Variant = _gml_path_resolve(source)
+	if entry != null and from != null:
+		_gml_path_copy(entry, from)
+	return null
+
+
+static func gml_path_append(path, source):
+	# Adds copies of source's points to the end of path.
+	var entry: Variant = _gml_path_resolve(path)
+	var from: Variant = _gml_path_resolve(source)
+	if entry == null or from == null or from["points"].is_empty():
+		return null
+	entry["points"].append_array(_gml_path_points_copy(from["points"]))
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_add_point(path, x, y, speed):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	entry["points"].append(_gml_path_point(x, y, speed))
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_insert_point(path, n, x, y, speed):
+	# Inserts the point before point n; n may be the number of points.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var index = _gml_path_int(n)
+	if index < 0 or index > entry["points"].size():
+		return null
+	entry["points"].insert(index, _gml_path_point(x, y, speed))
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_change_point(path, n, x, y, speed):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var index = _gml_path_int(n)
+	if index < 0 or index >= entry["points"].size():
+		return null
+	entry["points"][index] = _gml_path_point(x, y, speed)
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_delete_point(path, n):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var index = _gml_path_int(n)
+	if index < 0 or index >= entry["points"].size():
+		return null
+	entry["points"].remove_at(index)
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_clear_points(path):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	entry["points"] = []
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_set_kind(path, kind):
+	# 1 is smooth; any other kind than 0 or 1 is straight (0). -1 when path
+	# does not exist.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return -1
+	var value = _gml_path_int(kind)
+	entry["kind"] = value if value == 0 or value == 1 else 0
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_set_closed(path, closed):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return -1
+	entry["closed"] = gml_bool(closed)
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_set_precision(path, precision):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return -1
+	entry["precision"] = clampi(_gml_path_int(precision), 0, 8)
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_shift(path, xoff, yoff):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var dx = _gml_path_real(xoff)
+	var dy = _gml_path_real(yoff)
+	for point in entry["points"]:
+		point["x"] = point["x"] + dx
+		point["y"] = point["y"] + dy
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_rescale(path, xscale, yscale):
+	# Scales the points from the centre of their bounding box.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var sx = _gml_path_real(xscale)
+	var sy = _gml_path_real(yscale)
+	var center = _gml_path_center(entry)
+	for point in entry["points"]:
+		point["x"] = (point["x"] - center.x) * sx + center.x
+		point["y"] = (point["y"] - center.y) * sy + center.y
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_rotate(path, angle):
+	# Turns the points angle degrees counterclockwise around the centre of
+	# their bounding box.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var radians = _gml_path_real(angle) * PI / 180.0
+	var center = _gml_path_center(entry)
+	for point in entry["points"]:
+		var xx = point["x"] - center.x
+		var yy = point["y"] - center.y
+		point["x"] = xx * cos(radians) + yy * sin(radians) + center.x
+		point["y"] = yy * cos(radians) - xx * sin(radians) + center.y
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_reverse(path):
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null or entry["points"].size() <= 1:
+		return null
+	entry["points"].reverse()
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_flip(path):
+	# Flips the points vertically around the centre of their bounding box.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var center = _gml_path_center(entry)
+	for point in entry["points"]:
+		point["y"] = -(point["y"] - center.y) + center.y
+	_gml_path_compute_internal(entry)
+	return null
+
+
+static func gml_path_mirror(path):
+	# Mirrors the points horizontally around the centre of their bounding
+	# box.
+	var entry: Variant = _gml_path_resolve(path)
+	if entry == null:
+		return null
+	var center = _gml_path_center(entry)
+	for point in entry["points"]:
+		point["x"] = -(point["x"] - center.x) + center.x
+	_gml_path_compute_internal(entry)
+	return null
+
+
 static func gml_mp_grid_create(left, top, hcells, vcells, cellwidth, cellheight):
 	var grid = {
 		"left": _to_real(left),
@@ -460,6 +674,41 @@ static func _gml_path_point_from(point):
 	if typeof(point) == TYPE_ARRAY and point.size() >= 2:
 		return {"x": _to_real(point[0]), "y": _to_real(point[1]), "speed": _to_real(point[2]) if point.size() >= 3 else 100.0}
 	return {"x": 0.0, "y": 0.0, "speed": 100.0}
+
+
+static func _gml_path_point(x, y, speed):
+	return {"x": _gml_path_real(x), "y": _gml_path_real(y), "speed": _gml_path_real(speed)}
+
+
+static func _gml_path_copy(path, source):
+	# yyPath.Assign: everything but the id, the name included.
+	path["name"] = source["name"]
+	path["kind"] = source["kind"]
+	path["closed"] = source["closed"]
+	path["precision"] = source["precision"]
+	path["points"] = _gml_path_points_copy(source["points"])
+	_gml_path_compute_internal(path)
+
+
+static func _gml_path_points_copy(points):
+	var copy = []
+	for point in points:
+		copy.append({"x": point["x"], "y": point["y"], "speed": point["speed"]})
+	return copy
+
+
+static func _gml_path_center(path):
+	# Center: the middle of the bounding box of the defining points.
+	var xmin = 100000000.0
+	var xmax = -100000000.0
+	var ymin = 100000000.0
+	var ymax = -100000000.0
+	for point in path["points"]:
+		xmin = min(xmin, point["x"])
+		xmax = max(xmax, point["x"])
+		ymin = min(ymin, point["y"])
+		ymax = max(ymax, point["y"])
+	return Vector2((xmin + xmax) / 2.0, (ymin + ymax) / 2.0)
 
 
 static func _gml_path_point_field(path, n, field):

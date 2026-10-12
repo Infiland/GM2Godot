@@ -3498,11 +3498,35 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ("path_get_x", ", 0.5"),
             ("path_get_y", ", 0.5"),
             ("path_get_speed", ", 0.5"),
+            ("path_delete", ""),
+            ("path_duplicate", ""),
+            ("path_clear_points", ""),
+            ("path_reverse", ""),
+            ("path_flip", ""),
+            ("path_mirror", ""),
+            ("path_add_point", ", 10, 20, 100"),
+            ("path_insert_point", ", 1, 10, 20, 100"),
+            ("path_change_point", ", 1, 10, 20, 100"),
+            ("path_delete_point", ", 1"),
+            ("path_set_kind", ", 1"),
+            ("path_set_closed", ", false"),
+            ("path_set_precision", ", 8"),
+            ("path_shift", ", 5, -5"),
+            ("path_rescale", ", 2, 0.5"),
+            ("path_rotate", ", 90"),
         ):
             with self.subTest(name=name):
                 self.assertEqual(
                     transpile_gml_expression(f"{name}(path_patrol{arguments})", asset_names=asset_names),
                     f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"){arguments})',
+                )
+        self.assertEqual(transpile_gml_expression("path_add()"), "GMRuntime.gml_path_add()")
+        for name in ("path_assign", "path_append"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol, path_patrol)", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"), '
+                    'GMRuntime.gml_asset_get_index("path_patrol"))',
                 )
         self.assertEqual(
             transpile_gml_expression("mp_grid_create(0, 0, 4, 4, 16, 16)"),

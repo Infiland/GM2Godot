@@ -363,12 +363,16 @@ static func _gml_step_tick_alarms(frames, frame):
 
 static func _gml_step_apply_motion(frame):
 	# GameMaker's UpdateInstancePositions: friction, gravity, paths and speed
-	# for every instance.
+	# for every instance. This runs for every instance in every step, so the
+	# checks are written out here.
 	for i in range(_gml_step_entries.size()):
 		var info = _gml_step_infos[i]
-		if not info.moves or not _gml_step_entry_active(_gml_step_entries[i]):
+		if not info.moves:
 			continue
-		var inst = _gml_step_entries[i]["instance"]
+		var entry = _gml_step_entries[i]
+		var inst = entry["instance"]
+		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+			continue
 		if info.motion_members and _gml_step_motion_idle(inst):
 			continue
 		if _gml_event_scheduler_tracing:
@@ -381,20 +385,28 @@ static func _gml_step_motion_idle(inst):
 	# Whether UpdateInstancePositions would leave the instance alone: no
 	# hspeed/vspeed, no gravity, no speed for friction to reduce, and no path
 	# (path_index undefined or negative). Anything but plain numbers there
-	# takes the full motion step.
+	# takes the full motion step. Each member is read once, without helper
+	# calls: most instances stand still in most steps.
+	var hspeed = inst.hspeed
+	if not ((hspeed is float or hspeed is int) and hspeed == 0):
+		return false
+	var vspeed = inst.vspeed
+	if not ((vspeed is float or vspeed is int) and vspeed == 0):
+		return false
+	var gravity = inst.gravity
+	if not ((gravity is float or gravity is int) and gravity == 0):
+		return false
 	var path_index = inst.path_index
 	if path_index is int or path_index is float:
 		if path_index >= 0:
 			return false
 	elif not (path_index == null or path_index is GMLUndefined):
 		return false
-	if not (_gml_step_is_zero(inst.hspeed) and _gml_step_is_zero(inst.vspeed) and _gml_step_is_zero(inst.gravity)):
-		return false
-	return _gml_step_is_zero(inst.friction) or _gml_step_is_zero(inst.speed)
-
-
-static func _gml_step_is_zero(value):
-	return (value is float or value is int) and value == 0
+	var friction = inst.friction
+	if (friction is float or friction is int) and friction == 0:
+		return true
+	var speed = inst.speed
+	return (speed is float or speed is int) and speed == 0
 
 
 static func _gml_step_update_images(frame):

@@ -76,6 +76,7 @@ _OBJECTS: dict[str, dict[str, str]] = {
     },
     "o_draw_depth": {"_on_draw": "draw_rectangle(0, 0, 1, 1, false); depth = -70;"},
     "o_create_depth": {"_ready": "depth = -80;", "_exit_tree": 'show_debug_message("CLEANUP");'},
+    "o_early_depth": {"_ready": "depth = 100;", "_on_draw": "draw_rectangle(0, 0, 1, 1, false);"},
 }
 # GameMaker event (type, number) of each generated method.
 _EVENTS = {"_ready": (0, 0), "_on_draw": (8, 0), "_exit_tree": (12, 0)}
@@ -125,7 +126,12 @@ def _write_objects(project_dir: Path) -> None:
     _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(tuple(entries)))
 
 
-def _room_scene(script_name: str, layers: tuple[tuple[str, int], ...]) -> str:
+def _room_scene(
+    script_name: str,
+    layers: tuple[tuple[str, int], ...],
+    placed: tuple[tuple[str, str, str], ...] = (),
+) -> str:
+    """A room scene with the layers and placed (name, object, layer) instances."""
     room = IndexedRoom(
         name="r",
         yy_path="rooms/r/r.yy",
@@ -140,17 +146,26 @@ def _room_scene(script_name: str, layers: tuple[tuple[str, int], ...]) -> str:
         ],
     )
     node_lines = serialize_room_layers(room).node_lines
+    placed_resources: list[str] = []
+    placed_nodes: list[str] = []
+    for index, (node_name, object_name, layer_name) in enumerate(placed, start=2):
+        placed_resources.append(
+            f'[ext_resource type="PackedScene" path="res://objects/{object_name}/{object_name}.tscn" id="{index}"]'
+        )
+        placed_nodes.extend([f'[node name="{node_name}" parent="{layer_name}" instance=ExtResource("{index}")]', ""])
     return "\n".join(
         [
-            "[gd_scene load_steps=2 format=3]",
+            f"[gd_scene load_steps={2 + len(placed)} format=3]",
             "",
             f'[ext_resource type="Script" path="res://{script_name}" id="1"]',
+            *placed_resources,
             "",
             '[node name="Room" type="Node2D"]',
             'script = ExtResource("1")',
             'metadata/gm2godot_room_root_policy = "gm_room_node2d"',
             "",
             *node_lines,
+            *placed_nodes,
             "",
         ]
     )
@@ -173,6 +188,11 @@ func _create_depth(object_name, depth):
 
 func _create_layer(object_name, layer_name):
 \treturn GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(0, 0, layer_name, GMRuntime.gml_asset_get_index(object_name), self))
+
+# Whether node is on the room's managed layer at depth.
+func _on_managed_layer(node, depth):
+\tvar layer = node.get_parent()
+\treturn layer != null and layer.get_parent() == self and layer.get_meta(GMRuntime.GML_MANAGED_LAYER_DEPTH_META, null) == depth
 
 func _report(tag, node, depth):
 \tprint(tag, " ", int(float(depth)), " ", node.z_index, " ", node.z_as_relative)
@@ -214,8 +234,11 @@ func _run():
 \t# Draw order: -10.5 truncates to -10, so it shares -10's layer and draws
 \t# in creation order there; -11 draws after both.
 \tvar half = _create_depth("o_painter", -10.5)
+\thalf.name = "Half"
 \tvar ten = _create_depth("o_painter", -10)
+\tten.name = "Ten"
 \tvar eleven = _create_depth("o_painter", -11)
+\televen.name = "Eleven"
 \tGMRuntime.gm2godot_draw_event_trace_enable(true)
 \tGMRuntime.gml_draw_event_trace_clear()
 \tGMRuntime.gml_draw_event_dispatch_frame([eleven, ten, half])
@@ -271,7 +294,7 @@ func _run():
 \tvar mover = _create_layer("o_mover", "Hidden")
 \tmover.position = Vector2(30, 40)
 \tmover.depth = -50
-\tprint("MOVED ", mover.get_parent() == self, " ", mover.position, " ", mover.z_index, " ", _exists(mover))
+\tprint("MOVED ", _on_managed_layer(mover, -50), " ", mover.position, " ", mover.z_index, " ", _exists(mover))
 \t# Hiding the room layer it left does not hide it.
 \tGMRuntime.gml_layer_set_visible("Hidden", false)
 \tGMRuntime.gm2godot_draw_event_trace_enable(true)
@@ -302,7 +325,7 @@ func _run():
 \tvar drawer = _create_layer("o_draw_depth", "Front")
 \tGMRuntime.gml_draw_event_dispatch_frame([drawer])
 \tvar sink = GMRuntime.gm2godot_draw_debug_sink_for(drawer, "draw")
-\tprint("DRAW_DEPTH ", drawer.get_parent() == self, " ", drawer.z_index, " ", int(sink.get("commands", 0)))
+\tprint("DRAW_DEPTH ", _on_managed_layer(drawer, -70), " ", drawer.z_index, " ", int(sink.get("commands", 0)))
 \t# A Create event that sets depth while its layer is still adding its
 \t# children moves the instance once the layer can let it go.
 \tvar late_layer = Node2D.new()
@@ -312,11 +335,81 @@ func _run():
 \tlate_layer.add_child(late)
 \tadd_child(late_layer)
 \tawait get_tree().process_frame
-\tprint("CREATE_DEPTH ", late.get_parent() == self, " ", late.z_index, " ", _exists(late))
+\tprint("CREATE_DEPTH ", _on_managed_layer(late, -80), " ", late.z_index, " ", _exists(late))
 \tprint("DESTROYING")
 \tGMRuntime.gml_instance_destroy(mover)
 \tawait get_tree().process_frame
 \tprint("DEPTH_LAYERS_OK")
+\tget_tree().quit(0)
+"""
+
+
+# Room layers in .yy order; Ground, Far and Spare share depths with layers and
+# managed layers the script adds.
+_TIE_ROOM_LAYERS = (("Top", -100), ("Instances", 0), ("Spare", 50), ("Ground", 100), ("Far", 500))
+
+_TIE_SCRIPT = _HELPERS + """
+func _ready():
+\tGMRuntime.gml_layer_register_scene(self)
+\tcall_deferred("_run")
+
+func _painter(layer_name, label):
+\tvar inst = _create_layer("o_painter", layer_name)
+\tinst.name = label
+\treturn inst
+
+func _run():
+\t# depth = the depth of a later room layer, then of an earlier one.
+\tvar ground = _painter("Ground", "Ground1")
+\tvar down = _painter("Instances", "MovedDown")
+\tdown.depth = 100
+\tvar top = _painter("Top", "Top1")
+\tvar up = _painter("Ground", "MovedUp")
+\tup.depth = -100
+\t# instance_create_depth at that depth joins the same managed layer.
+\tvar made = _create_depth("o_painter", 100)
+\tmade.name = "Created100"
+\t# layer_create and layer_depth add a layer behind every layer of its depth.
+\tGMRuntime.gml_layer_create(100, "Late")
+\t_painter("Late", "Late1")
+\t_painter("Spare", "Spare1")
+\tGMRuntime.gml_layer_depth("Spare", 100)
+\t# A managed layer emptied of its instances stays where it was.
+\tvar a = _painter("Instances", "A")
+\ta.depth = 200
+\tvar b = _painter("Instances", "B")
+\tb.depth = 200
+\ta.depth = 300
+\tGMRuntime.gml_instance_destroy(b)
+\tGMRuntime.gml_layer_create(200, "After200")
+\t_painter("After200", "After200Inst")
+\tvar c = _painter("Instances", "C")
+\tc.depth = 200
+\t# An instance alone on its managed layer takes that layer to the new depth,
+\t# behind every layer there, and it takes in the managed layer already there.
+\t_painter("Far", "Far1")
+\tvar y = _painter("Instances", "Y")
+\ty.depth = 500
+\tGMRuntime.gml_layer_create(500, "Over500")
+\t_painter("Over500", "Over500Inst")
+\tvar x = _painter("Instances", "X")
+\tx.depth = 400
+\tx.depth = 500
+\tawait get_tree().process_frame
+\tGMRuntime.gm2godot_draw_event_trace_enable(true)
+\tGMRuntime.gml_draw_event_trace_clear()
+\tGMRuntime.gml_draw_event_dispatch_frame()
+\tprint("TIE_DRAW ", " ".join(_draw_order()))
+\tvar tree = []
+\tfor child in get_children():
+\t\tvar names = [str(child.name)]
+\t\tfor inner in child.get_children():
+\t\t\tnames.append(str(inner.name))
+\t\ttree.append(",".join(names))
+\tprint("TIE_TREE ", " ".join(tree))
+\tvar ground_layer = ground.get_parent()
+\tprint("TIE_Z ", down.z_index == ground_layer.z_index, " ", made.z_index == ground_layer.z_index, " ", up.z_index == top.get_parent().z_index)
+\tprint("TIE_OK")
 \tget_tree().quit(0)
 """
 
@@ -483,6 +576,106 @@ class TestDepthAssignmentLeavesLayerGodot(unittest.TestCase):
         before, _marker, after = self.output.partition("DESTROYING")
         self.assertEqual(before.count("CLEANUP"), 0, self.output)
         self.assertEqual(after.partition("DEPTH_LAYERS_OK")[0].count("CLEANUP"), 1, self.output)
+
+
+class TestEqualDepthLayerOrderGodot(unittest.TestCase):
+    """Layers sharing a depth draw in GameMaker's order.
+
+    GameMaker keeps a room's layers in one list sorted by depth and inserts a
+    layer after every layer of the same depth (yyOList.Add); DrawRoomLayers and
+    ExecuteDrawEvent (yyRoom.js) walk that list from its end, so of the layers
+    sharing a depth the one added last draws first, behind the others. Managed
+    layers (AddDynamicLayer, Function_Layers.js), layer_create and layer_depth
+    (ChangeLayerDepth) all add a layer that way. Godot draws equal z_index in
+    tree order, so the added layer node must come first in the room.
+    """
+
+    output = ""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            raise unittest.SkipTest("Godot binary not available")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                '[application]\nconfig/name="DepthTieSmoke"\nrun/main_scene="res://smoke.tscn"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            _write_objects(project_dir)
+            _write_text(project_dir / "smoke.gd", _TIE_SCRIPT)
+            # Early's Create event sets depth = 100 while the room still adds
+            # its children: its managed layer is the first at that depth.
+            room = _room_scene("smoke.gd", _TIE_ROOM_LAYERS, (("Early", "o_early_depth", "Instances"),))
+            _write_text(project_dir / "smoke.tscn", room)
+            result = _run_godot(godot_binary, project_dir)
+        cls.output = result.stdout + result.stderr
+        cls.returncode = result.returncode
+
+    def _line(self, tag: str) -> str:
+        lines = re.findall(rf"^{tag} (.*)$", self.output, re.MULTILINE)
+        self.assertEqual(len(lines), 1, self.output)
+        return lines[0]
+
+    def _room_positions(self) -> dict[str, int]:
+        # The index of the room child (layer or managed layer) holding each node.
+        positions: dict[str, int] = {}
+        for index, entry in enumerate(self._line("TIE_TREE").split(" ")):
+            for name in entry.split(","):
+                positions[name] = index
+        return positions
+
+    def test_smoke_runs_cleanly(self) -> None:
+        self.assertEqual(self.returncode, 0, self.output)
+        self.assertIn("TIE_OK", self.output)
+        self.assertNotIn("SCRIPT ERROR", self.output)
+        self.assertNotIn("ERROR:", self.output)
+
+    def test_draw_events_follow_gamemaker_layer_order_at_each_depth(self) -> None:
+        order = self._line("TIE_DRAW").split(" ")
+        # Instances on one layer draw in tree order (a documented deviation:
+        # GameMaker does not guarantee one), so the instances on the managed
+        # layer at 100 only have to share their place.
+        expected = [
+            ["X"], ["Y"], ["Over500Inst"], ["Far1"],
+            ["A"],
+            ["After200Inst"], ["C"],
+            ["Spare1"], ["Late1"], ["Early", "MovedDown", "Created100"], ["Ground1"],
+            ["MovedUp"], ["Top1"],
+        ]
+        grouped: list[list[str]] = []
+        for group in expected:
+            grouped.append(sorted(order[: len(group)]))
+            order = order[len(group):]
+        self.assertEqual(grouped, [sorted(group) for group in expected], self.output)
+        self.assertEqual(order, [], self.output)
+
+    def test_layer_added_at_a_depth_comes_first_in_the_room(self) -> None:
+        positions = self._room_positions()
+        # (behind, in front) pairs that share a depth and so a z_index.
+        for behind, front in (
+            ("Early", "Ground1"),
+            ("MovedDown", "Ground1"),
+            ("Created100", "Ground1"),
+            ("Late1", "MovedDown"),
+            ("Spare1", "Late1"),
+            ("MovedUp", "Top1"),
+            ("After200Inst", "C"),
+            ("X", "Over500Inst"),
+            ("Over500Inst", "Far1"),
+        ):
+            with self.subTest(behind=behind, front=front):
+                self.assertLess(positions[behind], positions[front], self.output)
+        # The managed layer made while the room loaded is the one later
+        # moves join; the merged managed layer holds both of its instances.
+        self.assertEqual(positions["Early"], positions["MovedDown"], self.output)
+        self.assertEqual(positions["Early"], positions["Created100"], self.output)
+        self.assertEqual(positions["X"], positions["Y"], self.output)
+
+    def test_managed_layer_shares_the_z_index_of_its_depth(self) -> None:
+        self.assertEqual(self._line("TIE_Z"), "true true true")
 
 
 if __name__ == "__main__":

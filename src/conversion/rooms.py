@@ -569,7 +569,7 @@ class RoomConverter(BaseConverter):
             raise _RoomCreationCodeBlocked(message) from exc
 
         try:
-            return transpile_gml_code(
+            code = transpile_gml_code(
                 source,
                 asset_names=asset_names,
                 top_level_global_scope=top_level_global_scope,
@@ -606,6 +606,15 @@ class RoomConverter(BaseConverter):
                 )
             self._safe_log(message)
             raise _RoomCreationCodeBlocked(message) from exc
+        if self.diagnostics is not None:
+            self.diagnostics.add_unsupported_calls(
+                code,
+                source_path=source_path,
+                resource=room_name,
+                resource_type="room",
+                event=label,
+            )
+        return code
 
     def _render_room_script(
         self,

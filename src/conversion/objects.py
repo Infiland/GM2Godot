@@ -1305,6 +1305,14 @@ class ObjectConverter(BaseConverter):
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
+                if self.diagnostics is not None:
+                    self.diagnostics.add_unsupported_calls(
+                        result.code,
+                        source_path=source_path,
+                        resource=object_name,
+                        resource_type="object",
+                        event=mapping.godot_func,
+                    )
             except GMLTranspileError as exc:
                 has_event_blocker = True
                 message = (

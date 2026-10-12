@@ -3734,12 +3734,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_camera_display_unsupported_gif_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "gif_open.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_open(320, 180);", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "gif_add_surface.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_add_surface(gif_id, surf, 6);", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "gif_save_buffer.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_save_buffer(gif_id);", indent="")
+        # An unsupported call fails on its own at run time; the code around it
+        # still converts.
+        self.assertRegex(
+            transpile_gml_code("gif_open(320, 180);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_open", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[320, 180\]\)$',
+        )
+        self.assertRegex(
+            transpile_gml_code("gif_add_surface(gif_id, surf, 6);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_add_surface", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[gif_id, surf, 6\]\)$',
+        )
+        self.assertRegex(
+            transpile_gml_code("gif_save_buffer(gif_id);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_save_buffer", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[gif_id\]\)$',
+        )
 
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
@@ -4616,8 +4624,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_sequence_track_authoring_rejects_with_diagnostic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "sequence_track_new.*unsupported.*#567"):
-            transpile_gml_code("sequence_track_new(seqtracktype_graphic);", indent="")
+        self.assertRegex(
+            transpile_gml_code("sequence_track_new(seqtracktype_graphic);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("sequence_track_new", "[^"]*unsupported[^"]*#567[^"]*", \[',
+        )
 
     def test_ds_list_collection_helpers_lower_to_runtime(self):
         self.assertEqual(
@@ -5320,8 +5330,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("xboxlive_achievements_set_progress(user_id, 'Achievement');", indent="")
 
     def test_os_device_media_unsupported_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):
-            transpile_gml_code("device_get_tilt_y();", indent="")
+        self.assertRegex(
+            transpile_gml_code("device_get_tilt_y();", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("device_get_tilt_y", "[^"]*unsupported[^"]*#569[^"]*sensor[^"]*", \[\]\)$',
+        )
 
     def test_extension_function_mappings_emit_configured_hook_calls(self):
         self.assertEqual(
@@ -5360,14 +5372,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_unmapped_extension_function_reports_actionable_diagnostic(self):
-        with self.assertRaisesRegex(
-            GMLTranspileError,
-            "ads_show_rewarded.*AdSDK.*gm2godot_extension_functions.json",
-        ):
-            transpile_gml_expression(
-                'ads_show_rewarded("zone_1")',
+        # Without a mapping the call fails on its own at run time with the
+        # actionable message; the rest of the script still converts.
+        self.assertRegex(
+            transpile_gml_code(
+                'ads_show_rewarded("zone_1");\nscore = 1;',
+                indent="",
                 extension_functions={"ads_show_rewarded": "AdSDK"},
-            )
+            ),
+            r'^GMRuntime\.gml_unsupported_call\("ads_show_rewarded", '
+            r'"[^"]*AdSDK[^"]*gm2godot_extension_functions\.json[^"]*", \["zone_1"\]\)\n'
+            r"score = 1$",
+        )
 
     def test_extension_mapping_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "ads_show_rewarded.*expects 1.*got 0"):

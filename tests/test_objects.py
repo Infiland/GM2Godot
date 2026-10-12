@@ -1961,7 +1961,7 @@ class TestScriptGeneration(unittest.TestCase):
             "Create_0.gml",
         )
         with open(source_path, "w", encoding="utf-8") as f:
-            f.write('show_message_async("Hello");')
+            f.write("score = ;")
         with open(
             os.path.join(
                 self.gm_dir,
@@ -2061,9 +2061,60 @@ class TestScriptGeneration(unittest.TestCase):
         recorded = converter.diagnostics.diagnostics()
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0].code, "GM2GD-GML-TRANSPILE")
-        self.assertEqual(recorded[0].api, "show_message_async")
-        self.assertEqual(recorded[0].issue_number, 507)
         self.assertEqual(recorded[0].resource, "o_blocked")
+        self.assertEqual(recorded[0].resource_type, "object")
+        self.assertEqual(recorded[0].event, "_ready")
+
+    def test_unsupported_call_keeps_the_rest_of_the_event(self):
+        # GameMaker runs the rest of an event around a call the converted game
+        # cannot make; only that call fails, at run time.
+        self._setup_object(
+            "o_asks",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_asks", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write('show_message_async("Hello");\nscore = 1;')
+        self._write_object_manifest("o_asks")
+
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"objects": objects_enabled},
+        )
+
+        self.assertEqual(outcome.state, "success")
+        with open(
+            os.path.join(self.godot_dir, "objects", "o_asks", "o_asks.gd"),
+            encoding="utf-8",
+        ) as f:
+            script = f.read()
+        self.assertRegex(
+            script,
+            r'\tGMRuntime\.gml_unsupported_call\("show_message_async", "[^"]*#507[^"]*", \["Hello"\]\)\n'
+            r'\t[^\n]*score[^\n]*1',
+        )
+        recorded = converter.diagnostics.diagnostics()
+        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-UNSUPPORTED-CALL"])
+        self.assertEqual(recorded[0].severity, "warning")
+        self.assertEqual(recorded[0].api, "show_message_async")
+        self.assertEqual(recorded[0].manifest_entry, "show_message_async")
+        self.assertEqual(recorded[0].issue_number, 507)
+        self.assertEqual(recorded[0].resource, "o_asks")
         self.assertEqual(recorded[0].resource_type, "object")
         self.assertEqual(recorded[0].event, "_ready")
 

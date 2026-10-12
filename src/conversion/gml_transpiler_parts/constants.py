@@ -1996,6 +1996,10 @@ DRAW_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 
 # fmt: on
 
+# The runtime function a call the converted game cannot run is emitted as: it
+# reports the function once and returns undefined (see the emitter).
+UNSUPPORTED_CALL_RUNTIME_FUNCTION: Final[str] = "gml_unsupported_call"
+
 __all__: Final[tuple[str, ...]] = (
     "EOF",
     "MULTI_CHAR_OPERATORS",
@@ -2061,4 +2065,5 @@ __all__: Final[tuple[str, ...]] = (
     "OS_DEBUG_GC_RUNTIME_FUNCTIONS",
     "PLATFORM_SERVICE_RUNTIME_FUNCTIONS",
     "DRAW_RUNTIME_FUNCTIONS",
+    "UNSUPPORTED_CALL_RUNTIME_FUNCTION",
 )

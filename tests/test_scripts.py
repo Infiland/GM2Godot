@@ -243,6 +243,43 @@ class TestScriptConverter(unittest.TestCase):
             )
         )
 
+    def test_unsupported_call_keeps_the_script(self) -> None:
+        # A call the converted game cannot make fails on its own at run time;
+        # GameMaker runs the rest of the script, so the script still converts.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            'function scr_modern() {\n    show_question("Quit?");\n    return 7;\n}\n',
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        result = converter.conversion_step_result()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertRegex(
+            script,
+            r'\tGMRuntime\.gml_unsupported_call\("show_question", "[^"]*#515[^"]*", \["Quit\?"\]\)\n'
+            r"\treturn 7\n",
+        )
+        self.assertEqual(result.resources.completed, 2)
+        self.assertEqual(result.resources.skipped, 0)
+        unsupported = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-UNSUPPORTED-CALL"
+        ]
+        self.assertEqual(len(unsupported), 1)
+        self.assertEqual(unsupported[0].severity, "warning")
+        self.assertEqual(unsupported[0].api, "show_question")
+        self.assertEqual(unsupported[0].issue_number, 515)
+        self.assertEqual(unsupported[0].resource, "scr_modern")
+        self.assertEqual(unsupported[0].resource_type, "script")
+        self.assertFalse(
+            any(diagnostic.code == "GM2GD-GML-TRANSPILE" for diagnostic in diagnostics.diagnostics())
+        )
+
     def test_missing_only_declared_script_is_requested_and_skipped(self) -> None:
         _write_json(
             self.gm_dir / "ScriptTest.yyp",

@@ -920,6 +920,13 @@ class ScriptConverter(BaseConverter):
             self._safe_log(message)
             return ()
 
+        if self.diagnostics is not None:
+            self.diagnostics.add_unsupported_calls(
+                script_content,
+                source_path=source_path,
+                resource=entry.name,
+                resource_type="script",
+            )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(script_content)

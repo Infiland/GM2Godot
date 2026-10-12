@@ -5565,7 +5565,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "path_scale = GMRuntime.gml_mul(path_scale, 2)\n"
             "path_speed = speed",
         )
-        self.assertEqual(instance_variables, set())
+        self.assertEqual(
+            transpile_gml_code(
+                "path_orientation = 90; path_endaction = path_action_reverse; last = path_positionprevious;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "path_orientation = 90\n"
+            "path_endaction = 3\n"
+            "last = path_positionprevious",
+        )
+        self.assertEqual(instance_variables, {"last"})
 
     def test_transpiles_current_simple_topdown_step_body(self):
         source = """

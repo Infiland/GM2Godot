@@ -32,6 +32,7 @@ GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm
 GameMaker_Language/GML_Reference/Asset_Management/Particle_Systems/Particle_Systems.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/Path_Manipulation/path_exists.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/Paths.htm
+GameMaker_Language/GML_Reference/Asset_Management/Paths/path_end.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_closed.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_kind.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_length.htm
@@ -44,6 +45,7 @@ GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_precision.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_speed.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_x.htm
 GameMaker_Language/GML_Reference/Asset_Management/Paths/path_get_y.htm
+GameMaker_Language/GML_Reference/Asset_Management/Paths/path_start.htm
 GameMaker_Language/GML_Reference/Asset_Management/Rooms/General_Layer_Functions/General_Layer_Functions.htm
 GameMaker_Language/GML_Reference/Asset_Management/Rooms/Rooms.htm
 GameMaker_Language/GML_Reference/Asset_Management/Rooms/Tile_Map_Layers/Tile_Map_Layers.htm

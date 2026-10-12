@@ -14,11 +14,14 @@ const GML_MP_GRID_HANDLE_KIND = "mp_grid"
 # A smooth path's pieces stop dividing once a control leg is no longer than
 # 4 pixels (HandlePiece compares squared lengths with 16).
 const GML_PATH_SMOOTH_MIN_SQUARED = 16.0
+# Where an instance's path starts in the room (the runner's path_xstart and
+# path_ystart): path_start sets it, path_action_continue moves it on. Kept
+# as node metadata, out of GML's sight.
+const GML_PATH_START_META = "_gm_path_start"
 
 static var _gml_path_registry_loaded = false
 static var _gml_paths_by_id = {}
 static var _gml_paths_by_name = {}
-static var _gml_path_states = {}
 
 
 static func gml_path_registry_set(entries):
@@ -31,45 +34,28 @@ static func gml_path_registry_set(entries):
 
 
 static func gml_path_start(current_self, path, speed, endaction, absolute):
-	var entry: Variant = _gml_path_resolve(path)
-	if entry == null:
-		return gml_undefined()
+	var speed_value = _gml_path_real(speed)
+	var action = _gml_path_int(endaction)
+	var is_absolute = gml_bool(absolute)
 	for instance in _gml_motion_instances(current_self):
-		if not (instance is Node2D):
-			continue
-		if entry["ix"].is_empty():
-			continue
-		var path_id = int(entry["id"])
-		var first_node = _gml_path_position(entry, 0.0)
-		var first = Vector2(first_node[0], first_node[1])
-		var is_absolute = gml_bool(absolute)
-		var origin = Vector2.ZERO if is_absolute else _gml_instance_position(instance) - first
-		_gml_path_states[_gml_path_state_key(instance)] = {
-			"path_id": path_id,
-			"origin": origin,
-			"absolute": is_absolute,
-			"endaction": int(_to_real(endaction)),
-			"direction": 1
-		}
-		_gml_motion_write(instance, "path_index", path_id)
-		_gml_motion_write(instance, "path_position", 0.0)
-		_gml_motion_write(instance, "path_speed", _to_real(speed))
-		_gml_motion_set_position(instance, origin + first)
+		_gml_path_assign(instance, path, speed_value, 1.0, 0.0, is_absolute, action)
 	return null
 
 
 static func gml_path_end(current_self):
+	# The runner's Assign_Path(-1, ...): the instance no longer follows a
+	# path; path_speed, path_position and the rest keep their values.
 	for instance in _gml_motion_instances(current_self):
-		_gml_path_stop_instance(instance)
+		_gml_motion_write(instance, "path_index", -1)
 	return null
 
 
 static func gml_path_step(current_self):
-	if _gml_path_states.is_empty():
-		# No instance follows a path.
-		return null
+	# Moves each instance one step along its path (Adapt_Path) and runs its
+	# Path End event when it got to an end of the path.
 	for instance in _gml_motion_instances(current_self):
-		_gml_path_step_instance(instance)
+		if _gml_path_adapt(instance):
+			_gml_path_dispatch_end(instance)
 	return null
 
 
@@ -232,60 +218,148 @@ static func gml_mp_grid_path(grid, path, xstart, ystart, xgoal, ygoal, allowdiag
 	return true
 
 
-static func _gml_path_step_instance(instance):
-	var key = _gml_path_state_key(instance)
-	if not _gml_path_states.has(key):
+static func _gml_path_assign(instance, path, speed, scale, orientation, absolute, endaction):
+	# Assign_Path: whatever path the instance followed stops; a path that
+	# does not exist or has no length does not start. Positive speeds start
+	# at the beginning of the path, negative ones at its end. An absolute
+	# path starts where it lies in the room; a relative one puts its start
+	# where the instance is.
+	if not (instance is Node2D):
 		return
-	var path_id = int(_gml_motion_real(instance, "path_index", -1.0))
-	var entry: Variant = _gml_path_resolve(path_id)
+	_gml_motion_write(instance, "path_index", -1)
+	var entry: Variant = _gml_path_resolve(path)
 	if entry == null:
-		_gml_path_stop_instance(instance)
 		return
+	if entry["length"] <= 0.0 or scale < 0.0:
+		return
+	_gml_motion_write(instance, "path_index", entry["id"])
+	_gml_motion_write(instance, "path_speed", speed)
+	var position = 0.0 if speed >= 0.0 else 1.0
+	_gml_motion_write(instance, "path_position", position)
+	_gml_motion_write(instance, "path_positionprevious", position)
+	_gml_motion_write(instance, "path_scale", scale)
+	_gml_motion_write(instance, "path_orientation", orientation)
+	_gml_motion_write(instance, "path_endaction", endaction)
+	if absolute:
+		var at = _gml_path_position(entry, position)
+		_gml_motion_set_position(instance, Vector2(at[0], at[1]))
+		var first = _gml_path_position(entry, 0.0)
+		instance.set_meta(GML_PATH_START_META, [first[0], first[1]])
+	else:
+		var current = _gml_motion_position(instance)
+		instance.set_meta(GML_PATH_START_META, [current.x, current.y])
+
+
+static func _gml_path_adapt(instance):
+	# Adapt_Path: advances path_position by path_speed times the speed factor
+	# at the current position (scaled by path_scale), applies the end action
+	# when the position passes either end, and places the instance there,
+	# scaled and turned by path_orientation around the path's start. The
+	# move also sets direction; speed, hspeed and vspeed end up 0. Returns
+	# whether the instance got to an end with a nonzero path_speed.
+	if not (instance is Node2D):
+		return false
+	var path_index = _gml_path_real(_gml_motion_read(instance, "path_index", -1))
+	if path_index < 0.0:
+		return false
+	var entry: Variant = _gml_path_resolve(path_index)
+	if entry == null:
+		return false
 	var length = entry["length"]
-	if length <= 0.000001:
-		_gml_path_finish_instance(instance, entry)
-		return
-	var speed = _gml_motion_real(instance, "path_speed", 0.0)
-	if abs(speed) <= 0.000001:
-		return
-	var state = _gml_path_states[key]
-	var direction = int(state.get("direction", 1))
-	var next_position = _gml_motion_real(instance, "path_position", 0.0) + (speed / length) * direction
-	if next_position >= 1.0 or next_position <= 0.0:
-		_gml_motion_write(instance, "path_position", clamp(next_position, 0.0, 1.0))
-		_gml_motion_set_position(instance, state["origin"] + _gml_path_vector_at(entry, clamp(next_position, 0.0, 1.0)))
-		_gml_path_finish_instance(instance, entry)
-		return
-	_gml_motion_write(instance, "path_position", next_position)
-	_gml_motion_set_position(instance, state["origin"] + _gml_path_vector_at(entry, next_position))
+	if length <= 0.0:
+		return false
+	var scale = _gml_path_real(_gml_motion_read(instance, "path_scale", 1.0))
+	var radians = _gml_path_real(_gml_motion_read(instance, "path_orientation", 0.0)) * PI / 180.0
+	var speed = _gml_path_real(_gml_motion_read(instance, "path_speed", 0.0))
+	var position = _gml_path_real(_gml_motion_read(instance, "path_position", 0.0))
+	var factor = _gml_path_position(entry, position)[2] / (100.0 * scale)
+	position = position + speed * factor / length
+	var first = _gml_path_position(entry, 0.0)
+	var start = _gml_path_start_of(instance)
+	var at_end = false
+	if position >= 1.0 or position <= 0.0:
+		at_end = speed != 0.0
+		match _gml_path_int(_gml_motion_read(instance, "path_endaction", 0)):
+			0:
+				# path_action_stop
+				if speed != 0.0:
+					position = 1.0
+					_gml_motion_write(instance, "path_index", -1)
+			1:
+				# path_action_restart: on from the other end.
+				position = position + 1.0 if position < 0.0 else position - 1.0
+			2:
+				# path_action_continue: the path starts again where it ended.
+				var last = _gml_path_position(entry, 1.0)
+				var dx = last[0] - first[0]
+				var dy = last[1] - first[1]
+				var shift_x = scale * (dx * cos(radians) + dy * sin(radians))
+				var shift_y = scale * (dy * cos(radians) - dx * sin(radians))
+				if position < 0.0:
+					start = [start[0] - shift_x, start[1] - shift_y]
+					position = position + 1.0
+				else:
+					start = [start[0] + shift_x, start[1] + shift_y]
+					position = position - 1.0
+				instance.set_meta(GML_PATH_START_META, start)
+			3:
+				# path_action_reverse
+				if position < 0.0:
+					position = -position
+					speed = absf(speed)
+				else:
+					position = 2.0 - position
+					speed = -absf(speed)
+				_gml_motion_write(instance, "path_speed", speed)
+			_:
+				position = 1.0
+				_gml_motion_write(instance, "path_index", -1)
+	_gml_motion_write(instance, "path_position", position)
+	var node = _gml_path_position(entry, position)
+	var xx = node[0] - first[0]
+	var yy = node[1] - first[1]
+	var new_x = start[0] + scale * (xx * cos(radians) + yy * sin(radians))
+	var new_y = start[1] + scale * (yy * cos(radians) - xx * sin(radians))
+	# The runner sets hspeed/vspeed to the move, which turns direction
+	# along the path, then speed to 0, which zeroes hspeed/vspeed again.
+	var current = _gml_motion_position(instance)
+	_gml_motion_assign_hspeed(instance, new_x - current.x)
+	_gml_motion_assign_vspeed(instance, new_y - current.y)
+	_gml_motion_assign_speed(instance, 0.0)
+	_gml_motion_set_position(instance, Vector2(new_x, new_y))
+	return at_end
 
 
-static func _gml_path_finish_instance(instance, entry):
+static func _gml_path_dispatch_end(instance):
 	# Path End is an Other event: after a room change request only persistent
 	# instances (or every instance of a persistent room) still get it.
-	if instance != null and instance.has_method("_on_path_ended") and not _gml_event_scheduler_event_blocked(instance, true):
+	if instance.has_method("_on_path_ended") and not _gml_event_scheduler_event_blocked(instance, true):
 		instance.call("_on_path_ended")
-	var key = _gml_path_state_key(instance)
-	if not _gml_path_states.has(key):
-		return
-	var state = _gml_path_states[key]
-	if int(state.get("endaction", 0)) == 1:
-		_gml_motion_write(instance, "path_position", 0.0)
-		_gml_motion_set_position(instance, state["origin"] + _gml_path_vector_at(entry, 0.0))
-		return
-	_gml_path_stop_instance(instance)
 
 
-static func _gml_path_stop_instance(instance):
-	_gml_path_states.erase(_gml_path_state_key(instance))
-	_gml_motion_write(instance, "path_index", gml_undefined())
-	_gml_motion_write(instance, "path_speed", 0.0)
+static func _gml_path_start_of(instance):
+	if instance.has_meta(GML_PATH_START_META):
+		return instance.get_meta(GML_PATH_START_META)
+	return [0.0, 0.0]
 
 
-static func _gml_path_state_key(instance):
-	if instance is Object:
-		return instance.get_instance_id()
-	return 0
+static func _gml_path_real(value):
+	# A path number read the way the runner's setters store it; 0 for a value
+	# that is not a number (the runner reports an error there).
+	if value is float:
+		return value
+	if value is int:
+		return float(value)
+	var number = _to_real(value)
+	return number if number is float else 0.0
+
+
+static func _gml_path_int(value):
+	# yyGetInt32: the whole part of a number, 0 for NaN and infinities.
+	var number = _gml_path_real(value)
+	if not is_finite(number):
+		return 0
+	return int(number)
 
 
 static func _gml_path_resolve(path):
@@ -491,11 +565,6 @@ static func _gml_path_position(path, pos):
 		iy[index] + target * (iy[index + 1] - iy[index]) / width,
 		ispeed[index] + target * (ispeed[index + 1] - ispeed[index]) / width
 	]
-
-
-static func _gml_path_vector_at(path, pos):
-	var node = _gml_path_position(path, pos)
-	return Vector2(node[0], node[1])
 
 
 static func _gml_mp_grid_resolve(grid):

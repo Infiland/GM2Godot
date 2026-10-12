@@ -131,7 +131,7 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tGMRuntime.gml_path_step(runner)
         \tif not _check(_near(runner.position.x, 20) and runner.path_done, "path completion did not dispatch Path Ended"):
         \t\treturn
-        \tif not _check(GMRuntime.is_undefined(runner.path_index), "path_end state was not cleared"):
+        \tif not _check(runner.path_index == -1, "path_end state was not cleared"):
         \t\treturn
 
         \tvar grid = GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 10, 10)

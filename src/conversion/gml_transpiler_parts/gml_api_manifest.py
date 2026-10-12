@@ -2059,8 +2059,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "partial",
         "yes",
-        "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Uses generated path registry points and dispatches _on_path_ended for stop/restart end actions.",
+        "GameMaker_Language/GML_Reference/Asset_Management/Paths/path_start.htm",
+        "Follows the path like the runner's Assign_Path/Adapt_Path: all four end actions, applied before Path End.",
     ),
     _entry(
         "path_end",
@@ -2071,8 +2071,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "yes",
-        "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Stops generated runtime path-following state.",
+        "GameMaker_Language/GML_Reference/Asset_Management/Paths/path_end.htm",
+        "Sets path_index to -1; path_position, path_speed and the position are kept.",
     ),
     _entry(
         "path_exists",

@@ -1628,7 +1628,8 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
-        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()", content)
+        self.assertIn("\t_gm_constructed = true\n\t_gm_register_instance()", content)
         self.assertIn(
             'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()',
             content,
@@ -1676,10 +1677,7 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
-        self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
-            content,
-        )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
 
     def test_child_object_reuses_inherited_sprite_runtime_members(self):
         self._setup_object(
@@ -1801,7 +1799,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertIn("func _ready():", content)
-        self.assertIn("\t_gm_register_instance()", content)
+        self.assertIn("\t_gm_construct_instance()", content)
 
     def test_script_transpiles_create_event_gml_body(self):
         """Simple expression/operator GML bodies should populate event functions."""
@@ -2357,6 +2355,34 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tpass\n\tchild_after = true", child_content)
         self.assertNotIn("super._ready()", child_content)
 
+    def test_events_inherited_past_a_parent_without_them_reach_the_grandparent(self):
+        """GameMaker walks up the whole ancestor chain for an event."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}], parent_object_name="o_grandparent")
+        self._setup_object("o_leaf", event_list=[], parent_object_name="o_parent")
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("event_inherited(); child_after = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_leaf", "o_leaf.gd"), encoding="utf-8") as f:
+            leaf_content = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", leaf_content)
+        self.assertIn("\tsuper._ready()\n\tchild_after = true", child_content)
+
     def test_child_input_bindings_include_inherited_input_events(self):
         """A child with input events of its own still runs the ones it inherits."""
         self._setup_object("o_grandparent", event_list=[{"eventType": 6, "eventNum": 11}])
@@ -2727,8 +2753,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
+        self.assertIn("\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n", content)
         self.assertIn(
-            "\t_gm_initialize_sprite_runtime()\n"
+            "\t_gm_construct_instance()\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\timage_index = 2",

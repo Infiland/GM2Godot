@@ -674,7 +674,6 @@ import_required = json.loads(sys.argv[4])
 requested_frames = int(sys.argv[2])
 known_warnings = [
     "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
-    "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
 ]
 if expected_warnings not in [[], known_warnings] or type(import_required) is not bool:
     raise SystemExit("Invalid runtime warning or import policy")

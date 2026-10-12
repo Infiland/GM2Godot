@@ -68,8 +68,16 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             "func _gm_apply_motion_step():\n\tGMRuntime.gml_path_step(self)\n\tGMRuntime.gml_motion_step(self)",
             content,
         )
-        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
-        self.assertIn("\t_gm_initialize_motion_runtime()", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()", content)
+        self.assertIn(
+            "func _gm_construct_instance():\n"
+            "\tif _gm_constructed:\n"
+            "\t\treturn\n"
+            "\t_gm_constructed = true\n"
+            "\t_gm_register_instance()\n"
+            "\t_gm_initialize_motion_runtime()\n",
+            content,
+        )
         self.assertNotIn("func _process(delta):", content)
         # Moving to another layer node is not leaving the room: no unregistering.
         self.assertIn(
@@ -163,10 +171,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\nvar object_index =", content)
         self.assertNotIn("\nvar depth:", content)
         self.assertNotIn("\nvar _gm_depth", content)
-        self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
-            content,
-        )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
         self.assertIn(
             'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()\n',
             content,
@@ -196,15 +201,44 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
+        # The child builds its instance with its own sprite once; its
+        # parent's Create event (super._ready()) does not build it again.
         self.assertIn(
-            "func _ready():\n"
+            "func _gm_construct_instance():\n"
+            "\tif _gm_constructed:\n"
+            "\t\treturn\n"
+            "\t_gm_constructed = true\n"
             "\t_gm_register_instance()\n"
             "\t_gm_initialize_motion_runtime()\n"
             "\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n"
-            "\t_gm_initialize_sprite_runtime()\n"
-            "\tsuper._ready()",
+            "\t_gm_initialize_sprite_runtime()\n",
             content,
         )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
+
+    def test_child_without_its_own_sprite_starts_with_no_sprite(self):
+        # GameMaker sprites are per object: a child object without a sprite
+        # starts with sprite_index -1, not its parent's sprite.
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                sprite_scene_paths={"s_parent": "res://sprites/s_parent/s_parent.tscn"},
+                inherit_runtime=True,
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+                inherit_ready=True,
+            ),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertIn(
+            "\t_gm_initialize_motion_runtime()\n\tsprite_index = -1\n\t_gm_initialize_sprite_runtime()\n",
+            content,
+        )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
 
     def test_child_without_parent_sprite_runtime_declares_own_members(self):
         content = generate_script_content(
@@ -223,8 +257,10 @@ class TestScriptGeneratorBasic(unittest.TestCase):
 
         self.assertIn("\nvar sprite_index = -1:", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
+        self.assertIn("\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n", content)
         self.assertIn(
-            "\t_gm_initialize_sprite_runtime()\n"
+            "func _ready():\n"
+            "\t_gm_construct_instance()\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\tsprite_index = \"s_child\"",
@@ -372,8 +408,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
         self.assertIn(
             "func _ready():\n"
-            "\t_gm_register_instance()\n"
-            "\t_gm_initialize_motion_runtime()\n"
+            "\t_gm_construct_instance()\n"
             "\tget_tree().auto_accept_quit = false\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
@@ -388,7 +423,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
             object_runtime=ObjectRuntimeConfig(object_name="o_probe"),
         )
 
-        self.assertIn("func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n", content)
         self.assertNotIn("gml_event_create_blocked", content)
 
     def test_draw_gui_event(self):

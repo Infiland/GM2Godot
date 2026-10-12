@@ -1483,21 +1483,24 @@ class ObjectConverter(BaseConverter):
         parent_object_name: str | None,
         parent_object_source_path: str | None,
     ) -> set[str]:
-        if parent_object_name is None:
-            return set()
-
-        parsed_parent = self._parse_object_yy(
-            parent_object_name,
-            parent_object_source_path,
-        )
-        if parsed_parent is None:
-            return set()
-
+        # The events of every ancestor: like GameMaker, an object without an
+        # event runs its nearest ancestor's, and event_inherited() runs the
+        # nearest one above the object, even past a parent without it.
         function_names: set[str] = set()
-        for event in parsed_parent["event_list"]:
-            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
-            if mapping is not None:
-                function_names.add(mapping.godot_func)
+        seen: set[str] = set()
+        object_name = parent_object_name
+        source_path = parent_object_source_path
+        while object_name is not None and object_name not in seen:
+            seen.add(object_name)
+            parsed = self._parse_object_yy(object_name, source_path)
+            if parsed is None:
+                break
+            for event in parsed["event_list"]:
+                mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+                if mapping is not None:
+                    function_names.add(mapping.godot_func)
+            object_name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
         return function_names
 
     def _inherited_input_functions(

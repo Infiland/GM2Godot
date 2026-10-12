@@ -74,6 +74,10 @@ class RoomInstance:
     x: float
     y: float
     creation_code: str | None = None
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    rotation: float = 0.0
+    image_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -152,14 +156,14 @@ class GameMakerRoom:
 
 @dataclass(frozen=True)
 class GameMakerSprite:
-    """A sprite whose frames are RGBA images (rows of (r, g, b, a) pixels).
-    Without frames it has one opaque white frame, with a rectangle collision
-    mask over the whole image."""
+    """A sprite whose frames are RGBA images (rows of (r, g, b, a) pixels),
+    or a number of opaque white frames. Without frames it has one opaque
+    white frame, with a rectangle collision mask over the whole image."""
 
     name: str
-    width: int
-    height: int
-    frames: Sequence[Sequence[Sequence[tuple[int, int, int, int]]]] = ()
+    width: int = 16
+    height: int = 16
+    frames: int | Sequence[Sequence[Sequence[tuple[int, int, int, int]]]] = ()
     xorigin: int = 0
     yorigin: int = 0
     playback_speed: float = 0.0
@@ -287,7 +291,7 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "frozen": False,
         "hasCreationCode": instance.creation_code is not None,
         "ignore": False,
-        "imageIndex": 0,
+        "imageIndex": instance.image_index,
         "imageSpeed": 1.0,
         "inheritCode": False,
         "inheritedItemId": None,
@@ -301,9 +305,9 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "properties": [],
         "resourceType": "GMRInstance",
         "resourceVersion": "2.0",
-        "rotation": 0.0,
-        "scaleX": 1.0,
-        "scaleY": 1.0,
+        "rotation": instance.rotation,
+        "scaleX": instance.scale_x,
+        "scaleY": instance.scale_y,
         "x": instance.x,
         "y": instance.y,
     }
@@ -455,9 +459,14 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
 
 
 def _sprite_frames(sprite: GameMakerSprite) -> Sequence[Sequence[Sequence[tuple[int, int, int, int]]]]:
-    if sprite.frames:
+    if isinstance(sprite.frames, int):
+        count = sprite.frames
+    elif sprite.frames:
         return sprite.frames
-    return ([[(255, 255, 255, 255)] * sprite.width for _row in range(sprite.height)],)
+    else:
+        count = 1
+    white = [[(255, 255, 255, 255)] * sprite.width for _row in range(sprite.height)]
+    return tuple(white for _index in range(count))
 
 
 def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
@@ -659,6 +668,20 @@ def add_probe_autoload(godot_dir: Path, probe_source: str) -> None:
     settings_path.write_text(settings, encoding="utf-8")
 
 
+def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    """Import a converted project's resources (sprite images), as the editor does before a run."""
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
+
+
 def run_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment["HOME"] = str(godot_dir)
@@ -695,21 +718,6 @@ def run_converted_project_rendered(
             "--rendering-driver",
             "opengl3",
         ],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        env=environment,
-    )
-
-
-def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
-    """Import the converted project's resources (sprite images), which a
-    project needs before it runs."""
-    environment = dict(os.environ)
-    environment["HOME"] = str(godot_dir)
-    return subprocess.run(
-        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
         capture_output=True,
         text=True,
         timeout=timeout,

@@ -131,6 +131,8 @@ static func gm2godot_runtime_shutdown():
 	_gml_static_named_scopes.clear()
 	_gml_static_root.clear()
 	_gml_global_scope.clear()
+	# Last, once no GML data is left to reach their nodes.
+	_gml_room_drop_parked_rooms()
 
 
 static func gml_method_call(

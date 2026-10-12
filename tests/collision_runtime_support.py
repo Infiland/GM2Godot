@@ -146,26 +146,29 @@ def object_scene_path(name: str) -> str:
 def write_generated_object(
     project_dir: Path,
     name: str,
-    sprite: CollisionSprite,
+    sprite: CollisionSprite | None,
     *,
     solid: bool = False,
     mask_sprite_name: str | None = None,
     parent_object_names: tuple[str, ...] = (),
+    other_sprite_names: tuple[str, ...] = (),
 ) -> None:
     """Write a converted object without events: its script and its scene.
 
-    The scene holds the object's sprite as a child, as converted objects do,
-    so ``instance_create_*`` can instantiate it from the asset registry.
+    The scene holds the object's sprite (if it has one) as a child, as
+    converted objects do, so ``instance_create_*`` can instantiate it from the
+    asset registry. ``other_sprite_names`` are further sprites the object's
+    script can switch to, as the converter lists every sprite of the project.
     """
-    sprite_path = sprite_resource_path(sprite.name)
+    sprite_names = ((sprite.name,) if sprite is not None else ()) + other_sprite_names
     object_dir = project_dir / "objects" / name
     write_fixture_text(
         object_dir / f"{name}.gd",
         generate_script_content(
             [],
             sprite_runtime=SpriteRuntimeConfig(
-                initial_sprite_name=sprite.name,
-                sprite_scene_paths={sprite.name: sprite_path},
+                initial_sprite_name=sprite.name if sprite is not None else None,
+                sprite_scene_paths={sprite_name: sprite_resource_path(sprite_name) for sprite_name in sprite_names},
             ),
             object_runtime=ObjectRuntimeConfig(
                 object_name=name,
@@ -175,14 +178,21 @@ def write_generated_object(
             ),
         ),
     )
+    script_resource = f'[ext_resource type="Script" path="res://objects/{name}/{name}.gd" id="2"]\n\n'
+    root_node = f'[node name="{name}" type="Node2D"]\nscript = ExtResource("2")\n'
+    if sprite is None:
+        write_fixture_text(
+            object_dir / f"{name}.tscn",
+            "[gd_scene load_steps=2 format=3]\n\n" + script_resource + root_node,
+        )
+        return
     write_fixture_text(
         object_dir / f"{name}.tscn",
         "[gd_scene load_steps=3 format=3]\n\n"
-        f'[ext_resource type="PackedScene" path="{sprite_path}" id="1"]\n\n'
-        f'[ext_resource type="Script" path="res://objects/{name}/{name}.gd" id="2"]\n\n'
-        f'[node name="{name}" type="Node2D"]\n'
-        'script = ExtResource("2")\n\n'
-        f'[node name="{sprite.name}" parent="." instance=ExtResource("1")]\n',
+        f'[ext_resource type="PackedScene" path="{sprite_resource_path(sprite.name)}" id="1"]\n\n'
+        + script_resource
+        + root_node
+        + f'\n[node name="{sprite.name}" parent="." instance=ExtResource("1")]\n',
     )
 
 

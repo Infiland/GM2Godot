@@ -170,10 +170,14 @@ def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
 def _uses_sprite_runtime(
     sprite_runtime: SpriteRuntimeConfig | None,
     code_bodies: _CodeBodies | None,
+    object_runtime: ObjectRuntimeConfig | None = None,
 ) -> bool:
     if sprite_runtime is None:
         return False
-    if sprite_runtime.initial_sprite_name is not None:
+    # Every GameMaker instance has sprite_index and the image_* variables,
+    # and another instance can set them (inst.sprite_index = spr, or inside a
+    # with block), so every object declares them.
+    if object_runtime is not None or sprite_runtime.initial_sprite_name is not None:
         return True
     return any(
         _SPRITE_RUNTIME_IDENTIFIER_RE.search(body) is not None
@@ -494,8 +498,14 @@ def _prepend_sprite_runtime_ready_body(
     inherited_runtime: bool,
 ) -> str:
     init_lines: list[str] = []
-    if inherited_runtime and sprite_runtime.initial_sprite_name is not None:
-        init_lines.append(f"\tsprite_index = {_sprite_reference_expression(sprite_runtime.initial_sprite_name)}")
+    if inherited_runtime:
+        # The members come from the parent's script, which starts them with
+        # the parent's sprite; like GameMaker, an instance starts with its own
+        # object's sprite (-1 for none).
+        own_sprite = "-1"
+        if sprite_runtime.initial_sprite_name is not None:
+            own_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
+        init_lines.append(f"\tsprite_index = {own_sprite}")
     init_lines.append("\t_gm_initialize_sprite_runtime()")
     init_body = "\n".join(init_lines)
     if body.strip() == "pass":
@@ -726,7 +736,7 @@ def generate_script_content(
     Returns:
         Complete .gd file content as a string.
     """
-    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
+    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies, object_runtime)
     uses_object_runtime = _uses_object_runtime(object_runtime)
     uses_motion_runtime = _uses_motion_runtime(object_runtime)
     if not event_list and not uses_sprite_runtime and not uses_object_runtime:

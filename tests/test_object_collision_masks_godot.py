@@ -16,11 +16,13 @@ from tests.godot_test_support import find_smoke_godot_binary
 
 _BODY = CollisionSprite("spr_body", 32, 32, (16, 16), (0, 0, 31, 31))
 _HITBOX = CollisionSprite("spr_hitbox", 8, 8, (4, 4), (0, 0, 7, 7))
-# Objects with their sprite and the collision mask set in the object editor.
-_OBJECTS: tuple[tuple[str, CollisionSprite, str | None], ...] = (
+# Objects with their sprite and the collision mask set in the object editor;
+# o_empty has neither and no code of its own.
+_OBJECTS: tuple[tuple[str, CollisionSprite | None, str | None], ...] = (
     ("o_masked", _BODY, _HITBOX.name),
     ("o_plain", _BODY, None),
     ("o_target", _HITBOX, None),
+    ("o_empty", None, None),
 )
 
 
@@ -44,7 +46,15 @@ class TestObjectCollisionMasksGodot(unittest.TestCase):
                 application_settings="config/gm2godot_collision_compatibility=true\n",
             )
             for name, sprite, mask in _OBJECTS:
-                write_generated_object(project_dir, name, sprite, mask_sprite_name=mask)
+                write_generated_object(
+                    project_dir,
+                    name,
+                    sprite,
+                    mask_sprite_name=mask,
+                    other_sprite_names=tuple(
+                        other.name for other in (_BODY, _HITBOX) if sprite is None or other.name != sprite.name
+                    ),
+                )
             result = run_smoke_scene(godot_binary, project_dir)
             output = result.stdout + result.stderr
 

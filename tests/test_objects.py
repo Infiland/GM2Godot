@@ -1674,9 +1674,40 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
+            "func _ready():\n"
+            "\t_gm_register_instance()\n"
+            "\t_gm_initialize_motion_runtime()\n"
+            "\tsprite_index = -1\n"
+            "\t_gm_initialize_sprite_runtime()\n"
+            "\tsuper._ready()",
             content,
         )
+
+    def test_object_without_sprite_or_sprite_code_declares_sprite_members(self):
+        # Every GameMaker instance has sprite_index and the image_* variables,
+        # and another instance can give it a sprite.
+        self._setup_object("o_empty", event_list=[])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_empty", "o_empty.gd"), encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("\nvar sprite_index = -1:", content)
+        self.assertIn("\nvar image_xscale = 1.0:", content)
+        self.assertIn("func _gm_initialize_sprite_runtime():", content)
+
+    def test_child_object_without_sprite_does_not_start_with_parent_sprite(self):
+        self._setup_object("o_parent", sprite_name="s_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_child", event_list=[], parent_object_name="o_parent")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertIn("\tsprite_index = -1\n\t_gm_initialize_sprite_runtime()", content)
 
     def test_child_object_reuses_inherited_sprite_runtime_members(self):
         self._setup_object(

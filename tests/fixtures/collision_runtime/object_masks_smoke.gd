@@ -43,6 +43,7 @@ func _ready():
 func _run():
 	_run_initial_masks()
 	_run_mask_assignments()
+	_run_sprite_assignments()
 	if _failures.is_empty():
 		print("OBJECT_COLLISION_MASKS_OK")
 		get_tree().quit(0)
@@ -91,4 +92,26 @@ func _run_mask_assignments():
 	_expect("mask_index set in a with block", plain.mask_index, hitbox)
 	_expect("mask assigned to an object without one", _bbox(plain), [96.0, 196.0, 103.0, 203.0])
 	for inst in [masked, target, plain]:
+		GMRuntime.gml_instance_destroy(inst)
+
+
+# Every GameMaker instance has sprite_index (-1 without a sprite); another
+# instance can give it a sprite, which it then shows and collides with.
+func _run_sprite_assignments():
+	var body = GMRuntime.gml_asset_get_index("spr_body")
+	var o_target = GMRuntime.gml_asset_get_index("o_target")
+	var target = _make("o_target", 112, 100)
+	var empty = _make("o_empty", 100, 100)
+	_expect("an object without a sprite starts at -1", GMRuntime.gml_struct_get(empty, "sprite_index"), -1)
+	_expect("an object without a sprite collides with nothing", GMRuntime.gml_place_meeting(empty, 100, 100, o_target), false)
+	GMRuntime.gml_selector_set(empty, "sprite_index", body)
+	_expect("sprite set from another instance reads back", GMRuntime.gml_struct_get(empty, "sprite_index"), body)
+	_expect("sprite set from another instance gives the bbox", _bbox(empty), [84.0, 84.0, 115.0, 115.0])
+	_expect("sprite set from another instance collides", GMRuntime.gml_place_meeting(empty, 100, 100, o_target), true)
+	_expect("sprite set from another instance is shown", empty.get_node_or_null("spr_body") != null, true)
+	var other_empty = _make("o_empty", 100, 200)
+	GMRuntime.gml_variable_instance_set(other_empty, "sprite_index", body)
+	_expect("sprite set in a with block gives the bbox", _bbox(other_empty), [84.0, 184.0, 115.0, 215.0])
+	_expect("image_number follows the assigned sprite", GMRuntime.gml_struct_get(other_empty, "image_number"), 1)
+	for inst in [target, empty, other_empty]:
 		GMRuntime.gml_instance_destroy(inst)

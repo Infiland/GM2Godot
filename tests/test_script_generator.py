@@ -65,7 +65,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("\t_gm_depth = GMRuntime.gml_instance_depth_initial(self, _gm_depth)", content)
         self.assertIn("var speed = 0.0", content)
         self.assertIn(
-            "func _gm_apply_motion_step():\n\tGMRuntime.gml_path_step(self)\n\tGMRuntime.gml_motion_step(self)",
+            "func _gm_apply_motion_step():\n\tGMRuntime.gml_motion_step(self)",
             content,
         )
         self.assertIn("func _ready():\n\t_gm_construct_instance()", content)

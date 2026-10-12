@@ -608,8 +608,8 @@
     {
       "path": "src/conversion/gml_transpiler_parts/gml_function_dispatch.py",
       "function": "_build_function_descriptors",
-      "measured_complexity": 50,
-      "ceiling": 50,
+      "measured_complexity": 49,
+      "ceiling": 49,
       "reason": "Keep insertion order, duplicate collisions, final overrides and all public descriptor metadata.",
       "removal_action": "Extract core-value, resource/instance and platform registration phases with typed table helper.",
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-08e62a3c55d23968"

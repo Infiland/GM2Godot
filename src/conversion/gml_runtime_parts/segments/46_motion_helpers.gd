@@ -192,6 +192,9 @@ static func _gml_motion_step_instance(instance):
 		return
 	# xprevious/yprevious hold the position from the start of the step; the
 	# step loop records them before Begin Step.
+	if _gml_path_follows(instance):
+		_gml_path_motion_step(instance)
+		return
 
 	if _gml_motion_declares_members(instance):
 		# Without friction and gravity the instance just moves by

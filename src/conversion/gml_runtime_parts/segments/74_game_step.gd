@@ -50,6 +50,7 @@ static var _gml_step_last_usec = -1
 class GMLStepScriptInfo:
 	# The step-relevant members of one object script.
 	var tracks_previous = false
+	var tracks_path_previous = false
 	var animates = false
 	var moves = false
 	var motion_members = false
@@ -236,6 +237,7 @@ static func _gml_step_script_info(inst):
 		return info
 	info = GMLStepScriptInfo.new()
 	info.tracks_previous = "xprevious" in inst and "yprevious" in inst
+	info.tracks_path_previous = "path_positionprevious" in inst and "path_position" in inst
 	info.animates = inst.has_method("_gm_apply_image_index")
 	info.moves = inst.has_method("_gm_apply_motion_step")
 	info.motion_members = true
@@ -398,15 +400,15 @@ static func _gml_step_is_zero(value):
 
 static func _gml_step_update_images(frame):
 	# GameMaker's RememberOldPositions/Animate followed by UpdateImages: every
-	# instance stores xprevious/yprevious and advances image_index, then
-	# image_index is wrapped into 0..image_number and Animation End runs for
-	# each instance whose animation wrapped. This runs for every instance in
-	# every step, so it reads the members directly.
+	# instance stores xprevious/yprevious and path_positionprevious and
+	# advances image_index, then image_index is wrapped into 0..image_number
+	# and Animation End runs for each instance whose animation wrapped. This
+	# runs for every instance in every step, so it reads the members directly.
 	var fps = max(_gml_step_real(gml_game_speed_fps()), 1.0)
 	var count = _gml_step_entries.size()
 	for i in range(count):
 		var info = _gml_step_infos[i]
-		if not (info.tracks_previous or info.animates):
+		if not (info.tracks_previous or info.tracks_path_previous or info.animates):
 			continue
 		var entry = _gml_step_entries[i]
 		var inst = entry["instance"]
@@ -416,6 +418,8 @@ static func _gml_step_update_images(frame):
 			var position = inst.global_position if inst is Node2D else _gml_instance_position(inst)
 			inst.xprevious = position.x
 			inst.yprevious = position.y
+		if info.tracks_path_previous:
+			inst.path_positionprevious = inst.path_position
 		if info.animates:
 			_gml_step_animate_instance(inst, fps)
 	for i in range(count):

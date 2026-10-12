@@ -3478,10 +3478,65 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("path_end()"),
             "GMRuntime.gml_path_end(self)",
         )
+        # The Path End Action constants are GameMaker's 0..3.
+        self.assertEqual(
+            transpile_gml_expression("path_start(path_patrol, 4, path_action_reverse, false)", asset_names=asset_names),
+            'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 3, false)',
+        )
+        self.assertEqual(
+            [
+                transpile_gml_expression(name)
+                for name in ("path_action_stop", "path_action_restart", "path_action_continue", "path_action_reverse")
+            ],
+            ["0", "1", "2", "3"],
+        )
         self.assertEqual(
             transpile_gml_expression("path_get_length(path_patrol)", asset_names=asset_names),
             'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',
         )
+        for name, arguments in (
+            ("path_exists", ""),
+            ("path_get_name", ""),
+            ("path_get_kind", ""),
+            ("path_get_closed", ""),
+            ("path_get_precision", ""),
+            ("path_get_number", ""),
+            ("path_get_point_x", ", 1"),
+            ("path_get_point_y", ", 1"),
+            ("path_get_point_speed", ", 1"),
+            ("path_get_x", ", 0.5"),
+            ("path_get_y", ", 0.5"),
+            ("path_get_speed", ", 0.5"),
+            ("path_delete", ""),
+            ("path_duplicate", ""),
+            ("path_clear_points", ""),
+            ("path_reverse", ""),
+            ("path_flip", ""),
+            ("path_mirror", ""),
+            ("path_add_point", ", 10, 20, 100"),
+            ("path_insert_point", ", 1, 10, 20, 100"),
+            ("path_change_point", ", 1, 10, 20, 100"),
+            ("path_delete_point", ", 1"),
+            ("path_set_kind", ", 1"),
+            ("path_set_closed", ", false"),
+            ("path_set_precision", ", 8"),
+            ("path_shift", ", 5, -5"),
+            ("path_rescale", ", 2, 0.5"),
+            ("path_rotate", ", 90"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol{arguments})", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"){arguments})',
+                )
+        self.assertEqual(transpile_gml_expression("path_add()"), "GMRuntime.gml_path_add()")
+        for name in ("path_assign", "path_append"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol, path_patrol)", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"), '
+                    'GMRuntime.gml_asset_get_index("path_patrol"))',
+                )
         self.assertEqual(
             transpile_gml_expression("mp_grid_create(0, 0, 4, 4, 16, 16)"),
             "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)",
@@ -5616,7 +5671,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "path_scale = GMRuntime.gml_mul(path_scale, 2)\n"
             "path_speed = speed",
         )
-        self.assertEqual(instance_variables, set())
+        self.assertEqual(
+            transpile_gml_code(
+                "path_orientation = 90; path_endaction = path_action_reverse; last = path_positionprevious;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "path_orientation = 90\n"
+            "path_endaction = 3\n"
+            "last = path_positionprevious",
+        )
+        self.assertEqual(instance_variables, {"last"})
 
     def test_transpiles_current_simple_topdown_step_body(self):
         source = """

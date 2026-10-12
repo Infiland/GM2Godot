@@ -19,6 +19,7 @@ from tests.gamemaker_project_support import (
     GameMakerObject,
     GameMakerProject,
     GameMakerRoom,
+    GameMakerSequence,
     InstanceLayer,
     RoomInstance,
     add_probe_autoload,
@@ -360,6 +361,125 @@ _LAYER_MOVE_PROJECT = GameMakerProject(
 )
 _LAYER_MOVE_TRACE = ["moved:exists=yes:number=1:with=1", "clean_up_moved", "destroyed:number=0"]
 
+# layer_destroy destroys the instances on the layer: each one runs its
+# Destroy and then its Clean Up event, in the layer's order, also an instance
+# that a Destroy event creates on the layer, and an instance destroyed earlier
+# does not run them again (HTML5 runner: layer_destroy -> RemoveLayer, which
+# removes elements until none is left -> RemoveInstanceElement ->
+# instance_destroy, in Function_Layers.js; manual, layer_destroy).
+_LAYER_DESTROY_PROJECT = GameMakerProject(
+    name="LayerDestroy",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_on_layer",
+            {
+                EVENT_DESTROY: (
+                    'trace("destroy:" + string(x));\n'
+                    'if (x == 10) instance_create_layer(40, 0, "Other", o_on_layer);\n'
+                ),
+                EVENT_CLEAN_UP: 'trace("clean_up:" + string(x));\n',
+            },
+        ),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (variable_global_exists("done")) exit;\n'
+                    "global.done = true;\n"
+                    'var a = instance_create_layer(20, 0, "Other", o_on_layer);\n'
+                    "instance_destroy(global.thirty);\n"
+                    'layer_destroy("Other");\n'
+                    'trace("after:number=" + string(instance_number(o_on_layer))\n'
+                    '    + ":exists=" + (instance_exists(a) ? "yes" : "no"));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer("Instances", 0, (RoomInstance("inst_runner", "o_runner", 0, 0),)),
+                InstanceLayer(
+                    "Other",
+                    100,
+                    (
+                        RoomInstance("inst_ten", "o_on_layer", 10, 0),
+                        RoomInstance("inst_thirty", "o_on_layer", 30, 0, creation_code="global.thirty = id;\n"),
+                    ),
+                ),
+            ),
+            creation_order=("inst_runner", "inst_ten", "inst_thirty"),
+        ),
+    ),
+)
+_LAYER_DESTROY_TRACE = [
+    "destroy:30",
+    "clean_up:30",
+    "destroy:10",
+    "clean_up:10",
+    "destroy:20",
+    "clean_up:20",
+    "destroy:40",
+    "clean_up:40",
+    "after:number=0:exists=no",
+]
+
+# Destroying a sequence destroys the instances it created: each one runs its
+# Destroy and then its Clean Up event (HTML5 runner: layer_sequence_destroy ->
+# RemoveElementById -> CleanElementRuntimeData -> FreeInstance ->
+# CleanupInstances, which calls Command_Destroy for each instance the
+# sequence owns, in yySequence.js).
+_SEQUENCE_DESTROY_PROJECT = GameMakerProject(
+    name="SequenceDestroy",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_actor",
+            {
+                EVENT_CREATE: 'trace("create_actor");\n',
+                EVENT_DESTROY: 'trace("destroy_actor");\n',
+                EVENT_CLEAN_UP: 'trace("clean_up_actor");\n',
+            },
+        ),
+        GameMakerObject(
+            "o_runner",
+            {
+                EVENT_STEP: (
+                    'if (!variable_global_exists("stage")) {\n'
+                    "    global.stage = 1;\n"
+                    '    global.seq = layer_sequence_create("Sequences", 0, 0, seq_actor);\n'
+                    "} else if (global.stage == 1) {\n"
+                    "    global.stage = 2;\n"
+                    '    trace("before:number=" + string(instance_number(o_actor)));\n'
+                    "    layer_sequence_destroy(global.seq);\n"
+                    '    trace("after:number=" + string(instance_number(o_actor)));\n'
+                    "}\n"
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_one",
+            layers=(
+                InstanceLayer("Instances", 0, (RoomInstance("inst_runner", "o_runner", 0, 0),)),
+                InstanceLayer("Sequences", 100, ()),
+            ),
+            creation_order=("inst_runner",),
+        ),
+    ),
+    sequences=(GameMakerSequence("seq_actor", "o_actor"),),
+)
+_SEQUENCE_DESTROY_TRACE = [
+    "create_actor",
+    "before:number=1",
+    "destroy_actor",
+    "clean_up_actor",
+    "after:number=0",
+]
+
 _PROBE = """extends Node
 
 var _frames = 0
@@ -391,6 +511,12 @@ class TestInstanceDestroyGodot(unittest.TestCase):
 
     def test_moving_an_instance_to_another_layer_keeps_it(self) -> None:
         self.assertEqual(self._run_trace(_LAYER_MOVE_PROJECT), _LAYER_MOVE_TRACE)
+
+    def test_destroying_a_layer_destroys_its_instances(self) -> None:
+        self.assertEqual(self._run_trace(_LAYER_DESTROY_PROJECT), _LAYER_DESTROY_TRACE)
+
+    def test_destroying_a_sequence_destroys_its_instances(self) -> None:
+        self.assertEqual(self._run_trace(_SEQUENCE_DESTROY_PROJECT), _SEQUENCE_DESTROY_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

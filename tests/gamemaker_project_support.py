@@ -65,6 +65,16 @@ class GameMakerSprite:
 
 
 @dataclass(frozen=True)
+class GameMakerSequence:
+    """A sequence with one instance track: an instance of the object is in
+    the sequence from its first frame to its last."""
+
+    name: str
+    object_name: str
+    length: float = 60.0
+
+
+@dataclass(frozen=True)
 class RoomInstance:
     name: str
     object_name: str
@@ -97,6 +107,7 @@ class GameMakerProject:
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
     sprites: Sequence[GameMakerSprite] = ()
+    sequences: Sequence[GameMakerSequence] = ()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -211,6 +222,48 @@ def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
     )
 
 
+def _sequence_yy(sequence: GameMakerSequence) -> dict[str, object]:
+    object_path = f"objects/{sequence.object_name}/{sequence.object_name}.yy"
+    return {
+        "$GMSequence": "v1",
+        "%Name": sequence.name,
+        "name": sequence.name,
+        "resourceType": "GMSequence",
+        "resourceVersion": "2.0",
+        "length": sequence.length,
+        "playback": 0,
+        "playbackSpeed": 1.0,
+        "playbackSpeedType": 1,
+        "timeUnits": 1,
+        "events": {"Keyframes": []},
+        "moments": {"Keyframes": []},
+        "eventToFunction": {},
+        "tracks": [
+            {
+                "$GMInstanceTrack": "",
+                "name": sequence.object_name,
+                "resourceType": "GMInstanceTrack",
+                "interpolation": 1,
+                "keyframes": {
+                    "Keyframes": [
+                        {
+                            "Channels": {
+                                "0": {
+                                    "Id": {"name": sequence.object_name, "path": object_path},
+                                    "resourceType": "AssetInstanceKeyframe",
+                                },
+                            },
+                            "Key": 0.0,
+                            "Length": sequence.length,
+                        },
+                    ],
+                },
+                "tracks": [],
+            },
+        ],
+    }
+
+
 def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
     return {
         "$GMRInstance": "v1",
@@ -311,7 +364,7 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
 
 
 def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> None:
-    """Write the project's .yyp, objects, rooms and scripts."""
+    """Write the project's .yyp, objects, rooms, scripts, sprites and sequences."""
     resources: list[dict[str, object]] = []
     for sprite in project.sprites:
         _write_sprite(project_dir, sprite)
@@ -344,6 +397,9 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
         resources.append(
             {"id": {"name": game_object.name, "path": f"objects/{game_object.name}/{game_object.name}.yy"}}
         )
+    for sequence in project.sequences:
+        _write_json(project_dir / "sequences" / sequence.name / f"{sequence.name}.yy", _sequence_yy(sequence))
+        resources.append({"id": {"name": sequence.name, "path": f"sequences/{sequence.name}/{sequence.name}.yy"}})
     for room in project.rooms:
         room_dir = project_dir / "rooms" / room.name
         _write_json(room_dir / f"{room.name}.yy", _room_yy(room))

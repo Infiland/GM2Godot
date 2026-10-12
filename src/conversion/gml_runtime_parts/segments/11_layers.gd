@@ -187,10 +187,10 @@ static func gml_layer_destroy(layer):
 	if not (node is Node):
 		_gml_layer_unregister_handle(handle)
 		return false
+	# The instances on the layer are destroyed, as with instance_destroy (the
+	# runner's RemoveLayer calls RemoveInstanceElement for each one).
+	_gml_instances_destroy_under(node)
 	for child in _gml_layer_tree_nodes(node):
-		var instance_handle = _gml_instance_handle_for_node(child)
-		if gml_handle_is_valid(instance_handle):
-			gml_instance_unregister(instance_handle)
 		var element_handle = _gml_layer_element_handle_for_node(child)
 		if gml_handle_is_valid(element_handle):
 			_gml_layer_element_unregister_handle(element_handle)

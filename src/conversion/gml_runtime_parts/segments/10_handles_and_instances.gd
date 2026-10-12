@@ -302,6 +302,25 @@ static func _gml_instances_clean_up(root_node):
 		_gml_instance_clean_up(instance, entry)
 
 
+# Destroys the instances under root_node (a layer or a sequence that is
+# destroyed), in tree order: each one runs its Destroy and then its Clean Up
+# event, and so does an instance that those events create under root_node
+# (the runner removes a layer's elements until none is left).
+static func _gml_instances_destroy_under(root_node):
+	var visited = {}
+	var found = true
+	while found:
+		found = false
+		for node in _gml_layer_tree_nodes(root_node):
+			if visited.has(node):
+				continue
+			visited[node] = true
+			found = true
+			var handle = _gml_instance_handle_for_node(node)
+			if gml_handle_is_valid(handle):
+				gml_instance_destroy(handle)
+
+
 static func gml_instance_exists(target):
 	if _gml_instance_object_first(target) != null:
 		return true

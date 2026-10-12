@@ -1629,7 +1629,10 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
         self.assertIn("func _ready():\n\t_gm_register_instance()", content)
-        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()',
+            content,
+        )
 
     def test_script_records_persistent_object_state(self):
         self._setup_object("o_persist", event_list=[], persistent=True)

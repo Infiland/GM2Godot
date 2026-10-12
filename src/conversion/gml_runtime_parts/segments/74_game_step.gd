@@ -234,15 +234,36 @@ static func _gml_step_collect_instances():
 	# this is every live instance in creation order.
 	var entries = []
 	var infos = []
+	var activated_mark = -1
 	for i in range(_gml_step_entries.size()):
-		if _gml_step_entry_active(_gml_step_entries[i]):
-			entries.append(_gml_step_entries[i])
+		var entry = _gml_step_entries[i]
+		if _gml_step_entry_active(entry) and entry["step_order"] == entry["creation_order"]:
+			entries.append(entry)
 			infos.append(_gml_step_infos[i])
+			continue
+		entry["step_order"] = -1
+		if _gml_step_entry_active(entry) and (activated_mark < 0 or entry["creation_order"] < activated_mark):
+			# Deactivated and activated again since it joined: it moved to
+			# the end of the instance list.
+			activated_mark = entry["creation_order"]
 	_gml_step_entries = entries
 	_gml_step_infos = infos
+	if activated_mark >= 0:
+		_gml_step_creation_mark = min(_gml_step_creation_mark, activated_mark)
 	_gml_step_join_created_instances()
+	if activated_mark >= 0:
+		_gml_step_sort_entries()
 	_gml_step_running = true
 	return null
+
+
+static func _gml_step_sort_entries():
+	# Puts the list back in creation order after instances activated again
+	# joined it.
+	_gml_step_entries.sort_custom(_gml_instance_entry_order_less)
+	_gml_step_infos = []
+	for entry in _gml_step_entries:
+		_gml_step_infos.append(_gml_step_script_info(entry["instance"]))
 
 
 static func _gml_step_finish():
@@ -254,18 +275,21 @@ static func _gml_step_add_entry(entry):
 	var inst = entry["instance"]
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
+	entry["step_order"] = entry["creation_order"]
 	_gml_step_entries.append(entry)
 	_gml_step_infos.append(_gml_step_script_info(inst))
 
 
 static func _gml_step_join_created_instances():
-	# Adds the instances created since the list was last updated, like
-	# GameMaker's active list between phases.
+	# Adds the instances created (or activated again) since the list was
+	# last updated, like GameMaker's active list between phases.
 	if _gml_instance_creation_counter == _gml_step_creation_mark:
 		return null
 	var created = []
 	for entry in _gml_instance_entries.values():
-		if int(entry["creation_order"]) >= _gml_step_creation_mark and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
+		if int(entry["creation_order"]) < _gml_step_creation_mark or entry["step_order"] >= 0 or entry["deactivated"]:
+			continue
+		if not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
 			created.append(entry)
 	created.sort_custom(_gml_instance_entry_order_less)
 	for entry in created:
@@ -275,8 +299,9 @@ static func _gml_step_join_created_instances():
 
 
 static func _gml_step_entry_active(entry):
-	# Whether a step list entry still takes part: not destroyed or freed.
-	if bool(entry["destroyed"]):
+	# Whether a step list entry still takes part: not destroyed, deactivated
+	# or freed.
+	if bool(entry["destroyed"]) or entry["deactivated"]:
 		return false
 	var inst = entry["instance"]
 	return is_instance_valid(inst) and not inst.is_queued_for_deletion()
@@ -305,7 +330,7 @@ static func _gml_step_dispatch_method(phase, method_name, frame):
 		if _gml_room_requested_change != null:
 			break
 		var entry = _gml_step_entries[i]
-		if bool(entry["destroyed"]):
+		if bool(entry["destroyed"]) or entry["deactivated"]:
 			continue
 		var inst = entry["instance"]
 		if not is_instance_valid(inst) or not _gml_step_has_method(_gml_step_infos[i], inst, method_name):
@@ -378,7 +403,7 @@ static func _gml_step_update_images(frame):
 			continue
 		var entry = _gml_step_entries[i]
 		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		if entry["destroyed"] or entry["deactivated"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if info.tracks_previous:
 			var position = inst.global_position if inst is Node2D else _gml_instance_position(inst)
@@ -391,7 +416,7 @@ static func _gml_step_update_images(frame):
 			continue
 		var entry = _gml_step_entries[i]
 		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		if entry["destroyed"] or entry["deactivated"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		_gml_step_wrap_image_index(inst, _gml_step_infos[i], frame)
 	return null

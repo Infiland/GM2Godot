@@ -492,6 +492,9 @@ static func gml_variable_struct_names_count(struct_value):
 
 
 static func gml_variable_instance_get(instance_value, member_name):
+	if _gml_selector_direct_target(instance_value) == null and not _gml_instance_deactivated_targets(instance_value).is_empty():
+		# Unlike o.x, variable_instance_get only finds active instances.
+		return gml_undefined()
 	return gml_selector_get(instance_value, member_name)
 
 
@@ -572,6 +575,8 @@ static func gml_selector_get(target, member_name, current_self = null, current_o
 			return gml_struct_get(gml_static_get(script_callable), member_name)
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	return gml_struct_get(targets[0], member_name)
 
@@ -592,6 +597,8 @@ static func gml_selector_set(target, member_name, value, current_self = null, cu
 		return value
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	for instance in targets:
 		gml_struct_set(instance, member_name, value)
@@ -606,6 +613,8 @@ static func gml_selector_update(target, member_name, update_callable, current_se
 		return updated
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	var result = gml_undefined()
 	for instance in targets:
@@ -616,6 +625,8 @@ static func gml_selector_update(target, member_name, update_callable, current_se
 
 static func gml_selector_set_if_nullish(target, member_name, value_callable, current_self = null, current_other = null):
 	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
 	if targets.is_empty():
 		return gml_undefined()
 	var result = gml_undefined()

@@ -336,13 +336,13 @@ static func _gml_collision_dispatch_instance(context, first_pool, first_index, t
 		if second_pool == null:
 			continue
 		for second_index in range(second_pool.size()):
-			# Instances destroyed by an earlier event are passed over, and an
-			# instance's state is worked out again after events ran (they may
-			# move or change any instance).
-			if first["entry"]["destroyed"] or not is_instance_valid(first["inst"]):
+			# Instances destroyed or deactivated by an earlier event are passed
+			# over, and an instance's state is worked out again after events
+			# ran (they may move or change any instance).
+			if first["entry"]["destroyed"] or first["entry"]["deactivated"] or not is_instance_valid(first["inst"]):
 				return dispatched
 			var second = second_pool[second_index]
-			if is_same(second, first) or second["entry"]["destroyed"] or not is_instance_valid(second["inst"]):
+			if is_same(second, first) or second["entry"]["destroyed"] or second["entry"]["deactivated"] or not is_instance_valid(second["inst"]):
 				continue
 			# Two instances of the same object are tested once, in list order.
 			if second_index < first_index and second["chain"][0] == first["chain"][0]:

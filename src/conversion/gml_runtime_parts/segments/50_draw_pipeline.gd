@@ -1095,11 +1095,13 @@ static func _gml_draw_registered_instances():
 		return []
 	# New registrations bump the creation counter; a group count that differs
 	# from the registry also triggers a rescan (instances outside the tree).
-	if _gml_draw_group_scan_counter != _gml_instance_creation_counter or loop.get_node_count_in_group(GML_DRAW_INSTANCE_GROUP) != _gml_instance_entries.size():
+	# Deactivated instances leave the group (see 75_instance_activation.gd).
+	var listed = _gml_instance_entries.size() - _gml_instance_deactivated.size()
+	if _gml_draw_group_scan_counter != _gml_instance_creation_counter or loop.get_node_count_in_group(GML_DRAW_INSTANCE_GROUP) != listed:
 		_gml_draw_group_scan_counter = _gml_instance_creation_counter
 		for entry in _gml_instance_entries.values():
 			var inst = entry["instance"]
-			if is_instance_valid(inst) and inst is Node and not inst.is_in_group(GML_DRAW_INSTANCE_GROUP):
+			if is_instance_valid(inst) and inst is Node and not entry["deactivated"] and not inst.is_in_group(GML_DRAW_INSTANCE_GROUP):
 				inst.add_to_group(GML_DRAW_INSTANCE_GROUP)
 	var nodes = []
 	for inst in loop.get_nodes_in_group(GML_DRAW_INSTANCE_GROUP):
@@ -1108,7 +1110,7 @@ static func _gml_draw_registered_instances():
 		if entry == null:
 			inst.remove_from_group(GML_DRAW_INSTANCE_GROUP)
 			continue
-		if bool(entry["destroyed"]) or inst.is_queued_for_deletion():
+		if bool(entry["destroyed"]) or entry["deactivated"] or inst.is_queued_for_deletion():
 			continue
 		nodes.append(inst)
 	return nodes
@@ -1180,6 +1182,9 @@ static func _gml_draw_instance_drawable(inst):
 	if inst == null or not is_instance_valid(inst):
 		return false
 	if inst is Node and (not inst.is_inside_tree() or inst.is_queued_for_deletion()):
+		return false
+	if _gml_instance_node_deactivated(inst):
+		# Deactivated by an earlier event of this draw.
 		return false
 	if inst is CanvasItem:
 		return inst.is_visible_in_tree()

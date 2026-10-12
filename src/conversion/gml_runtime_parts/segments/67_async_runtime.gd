@@ -390,7 +390,8 @@ static func _gml_async_deliver(event):
 
 
 static func _gml_async_dispatch_node(node, handler_names):
-	if node == null:
+	# Deactivated instances get no asynchronous events.
+	if node == null or _gml_instance_node_deactivated(node):
 		return 0
 	var count = 0
 	for handler_name in handler_names:

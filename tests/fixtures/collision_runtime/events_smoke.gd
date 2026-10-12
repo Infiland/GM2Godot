@@ -64,6 +64,8 @@ func _run():
 	_case_solid(false)
 	_case_solid_changed_by_event()
 	_case_destroyed()
+	_case_queued_for_deletion()
+	_case_step_phase()
 	_case_spawned()
 	_case_spriteless()
 	_case_other_restored()
@@ -159,6 +161,28 @@ func _case_destroyed():
 	var gone = spawn("o_b", "gone", 400, 0)
 	GMRuntime.gml_instance_destroy(gone)
 	_expect("destroyed instances stop colliding", _dispatch(), ["a:b:killer<-b1@405", "b:a:b1<-killer@400"])
+	_clear()
+
+
+# A node queued for deletion is leaving the room like a destroyed instance,
+# and the step leaves it out of every phase, the collision events included.
+func _case_queued_for_deletion():
+	spawn("o_a", "a", 1400, 0)
+	var leaving = spawn("o_b", "leaving", 1405, 0)
+	leaving.queue_free()
+	_expect("instances queued for deletion stop colliding", _dispatch(), [])
+	_clear()
+
+
+# A step's collision phase takes in every instance of the step.
+func _case_step_phase():
+	spawn("o_a", "a", 1500, 0)
+	spawn("o_b", "b", 1505, 0)
+	entries.clear()
+	GMRuntime.gml_event_scheduler_set_enabled(true)
+	GMRuntime.gml_event_scheduler_frame(0.0, 1)
+	GMRuntime.gml_event_scheduler_set_enabled(false)
+	_expect("the step runs the collision events", entries.duplicate(), ["a:b:a<-b@1505", "b:a:b<-a@1500"])
 	_clear()
 
 

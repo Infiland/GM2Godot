@@ -295,7 +295,7 @@ static func _gml_collision_dispatch_context(instances, table, frame):
 		var pool = []
 		for entry in entries:
 			var inst = entry["instance"]
-			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 				continue
 			var key = inst.get_instance_id()
 			if allowed != null and not allowed.has(key):

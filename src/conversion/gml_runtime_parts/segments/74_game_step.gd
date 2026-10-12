@@ -311,15 +311,6 @@ static func _gml_step_entry_active(entry):
 	return is_instance_valid(inst) and not inst.is_queued_for_deletion()
 
 
-static func _gml_step_instances():
-	# The running step's active instances, for helpers that take a list.
-	var instances = []
-	for entry in _gml_step_entries:
-		if _gml_step_entry_active(entry):
-			instances.append(entry["instance"])
-	return instances
-
-
 static func _gml_step_timeline_instances():
 	var instances = []
 	for i in range(_gml_step_entries.size()):

@@ -333,6 +333,7 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
             "tests/test_fonts.py",
             "tests/test_font_atlas.py",
             "tests/test_font_text_godot.py",
+            "tests/test_font_view_render_godot.py",
             "tests/test_draw_sprite_text_godot.py",
         ),
         "Baked font atlases convert to fixed-size bitmap fonts with GameMaker glyph metrics, kerning, and text layout; "

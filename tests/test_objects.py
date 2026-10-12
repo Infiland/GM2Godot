@@ -2352,6 +2352,34 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tpass\n\tchild_after = true", child_content)
         self.assertNotIn("super._ready()", child_content)
 
+    def test_events_inherited_past_a_parent_without_them_reach_the_grandparent(self):
+        """GameMaker walks up the whole ancestor chain for an event."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}], parent_object_name="o_grandparent")
+        self._setup_object("o_leaf", event_list=[], parent_object_name="o_parent")
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("event_inherited(); child_after = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_leaf", "o_leaf.gd"), encoding="utf-8") as f:
+            leaf_content = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", leaf_content)
+        self.assertIn("\tsuper._ready()\n\tchild_after = true", child_content)
+
     def test_child_input_bindings_include_inherited_input_events(self):
         """A child with input events of its own still runs the ones it inherits."""
         self._setup_object("o_grandparent", event_list=[{"eventType": 6, "eventNum": 11}])

@@ -460,6 +460,43 @@ _PERSISTENT_ROOM_TRACE = [
 ]
 
 
+# An object runs the event of its nearest ancestor that has one, and
+# event_inherited() runs the nearest ancestor's event above the object, even
+# when the parent in between has no such event (runner yyInstance
+# PerformEvent and PerformEventInherited walk up pParent).
+_CHAIN_PROJECT = GameMakerProject(
+    name="EventChain",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject("o_base", {EVENT_CREATE: 'trace("base_create");\n'}),
+        GameMakerObject("o_middle", {EVENT_STEP: "x += 0;\n"}, parent="o_base"),
+        GameMakerObject("o_leaf", {}, parent="o_middle"),
+        GameMakerObject(
+            "o_leaf_inherit",
+            {EVENT_CREATE: 'trace("leaf_create");\nevent_inherited();\n'},
+            parent="o_middle",
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_chain",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_leaf", "o_leaf", 0, 0),
+                        RoomInstance("inst_leaf_inherit", "o_leaf_inherit", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_leaf", "inst_leaf_inherit"),
+        ),
+    ),
+)
+_CHAIN_TRACE = ["base_create", "leaf_create", "base_create"]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
@@ -478,6 +515,9 @@ class TestRoomLifecycleGodot(unittest.TestCase):
 
     def test_persistent_room_keeps_its_state_until_game_restart(self) -> None:
         self.assertEqual(self._run_trace(_PERSISTENT_ROOM_PROJECT), _PERSISTENT_ROOM_TRACE)
+
+    def test_events_and_event_inherited_reach_the_nearest_ancestor_with_the_event(self) -> None:
+        self.assertEqual(self._run_trace(_CHAIN_PROJECT), _CHAIN_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

@@ -315,6 +315,7 @@ static func _gml_step_dispatch_method(phase, method_name, frame):
 		if _gml_event_scheduler_tracing:
 			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
 		inst.call(method_name)
+		_gml_instance_change_flush()
 	return null
 
 

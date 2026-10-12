@@ -476,6 +476,7 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
     "instance_nearest": (3, 3),
     "instance_furthest": (3, 3),
     "instance_id_get": (1, 1),
+    "instance_change": (2, 2),
 }
 
 _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
@@ -1542,7 +1543,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in INSTANCE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INSTANCE_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = "runtime_instance_api"
-        if name in ("instance_create_layer", "instance_create_depth"):
+        if name in ("instance_create_layer", "instance_create_depth", "instance_change"):
             lowering_kind = "runtime_append_self"
         elif name == "instance_destroy":
             lowering_kind = "runtime_self_default"

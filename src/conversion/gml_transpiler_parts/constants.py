@@ -1293,6 +1293,7 @@ INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "instance_nearest": "gml_instance_nearest",
     "instance_furthest": "gml_instance_furthest",
     "instance_id_get": "gml_instance_id_get",
+    "instance_change": "gml_instance_change",
 })
 
 COLLISION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

@@ -1419,6 +1419,19 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Returns creation-ordered live instance handles from the runtime registry.",
     ),
     _entry(
+        "instance_change",
+        "Instances",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.76_instance_change",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Instances/instance_change.htm",
+        "Runs Destroy and Clean Up (perf), gives the node the new object's script, identity and sprite while "
+        "keeping its id and variables, then runs Create (perf); the switch happens once the calling event returns.",
+    ),
+    _entry(
         "with",
         "Cross-Instance Addressing",
         "partial",

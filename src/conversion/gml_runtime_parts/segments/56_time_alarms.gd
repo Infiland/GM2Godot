@@ -115,6 +115,8 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 	# the next phase (see 74_game_step.gd).
 	_gml_step_collect_instances()
 	for phase in GML_EVENT_PHASE_ORDER:
+		# instance_change waits for the event that asked for it to return.
+		_gml_instance_change_flush()
 		_gml_event_scheduler_run_phase(phase, seconds, frames, frame)
 		# GameMaker moves the instances and runs HandleOther before it looks
 		# for a room change again, so a change requested by a Path End event
@@ -122,6 +124,7 @@ static func gml_event_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
 		if phase != "motion" and gml_room_change_pending():
 			break
 		_gml_step_join_created_instances()
+	_gml_instance_change_flush()
 	_gml_step_finish()
 	return frame
 

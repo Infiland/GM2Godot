@@ -784,6 +784,7 @@ static func _gml_input_dispatch_binding(inst, binding, payload):
 		})
 	inst.call(method_name)
 	_gml_builtin_globals["event_data"] = previous_event_data
+	_gml_instance_change_flush()
 	return 1
 
 

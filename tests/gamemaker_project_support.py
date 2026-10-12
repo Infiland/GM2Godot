@@ -22,21 +22,32 @@ from src.gui.setting_value import SettingValue
 from tests.godot_test_support import write_fixture_text
 
 # GameMaker event file names by event type.
-_EVENT_FILE_PREFIXES = {0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 7: "Other", 8: "Draw"}
+_EVENT_FILE_PREFIXES = {
+    0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 4: "Collision", 7: "Other", 8: "Draw", 12: "CleanUp",
+}
 EVENT_CREATE = (0, 0)
 EVENT_DESTROY = (1, 0)
 EVENT_STEP = (3, 0)
 EVENT_BEGIN_STEP = (3, 1)
 EVENT_GAME_START = (7, 2)
 EVENT_ROOM_START = (7, 4)
+EVENT_DRAW = (8, 0)
+EVENT_CLEAN_UP = (12, 0)
+
+
+def collision_event(object_name: str) -> tuple[int, str]:
+    """The key of a Collision event with an object in GameMakerObject.events."""
+    return (4, object_name)
 
 
 @dataclass(frozen=True)
 class GameMakerObject:
     name: str
-    events: Mapping[tuple[int, int], str]
+    # (event type, number), or (4, object name) for a Collision event.
+    events: Mapping[tuple[int, int | str], str]
     persistent: bool = False
     parent: str | None = None
+    sprite: str | None = None
 
 
 @dataclass(frozen=True)
@@ -156,8 +167,8 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
             {
                 "$GMEvent": "v1",
                 "%Name": "",
-                "collisionObjectId": None,
-                "eventNum": event_number,
+                "collisionObjectId": _asset_ref("objects", event_number) if isinstance(event_number, str) else None,
+                "eventNum": 0 if isinstance(event_number, str) else event_number,
                 "eventType": event_type,
                 "isDnD": False,
                 "name": "",
@@ -181,7 +192,7 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "resourceType": "GMObject",
         "resourceVersion": "2.0",
         "solid": False,
-        "spriteId": None,
+        "spriteId": _asset_ref("sprites", game_object.sprite),
         "spriteMaskId": None,
         "visible": True,
     }

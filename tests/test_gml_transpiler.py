@@ -3271,6 +3271,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("instance_destroy()"),
             "GMRuntime.gml_instance_destroy(self)",
         )
+        # instance_change acts on the calling instance.
+        self.assertEqual(
+            transpile_gml_code("instance_change(o_enemy, true);", indent="", asset_names=asset_names),
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_enemy"), true, self)',
+        )
         self.assertEqual(
             transpile_gml_code("with (o_enemy) hp = 0;", indent="", asset_names=asset_names),
             'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"), self, other):\n'

@@ -56,6 +56,10 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		return gml_instance_noone()
 	var existing_handle = _gml_instance_handle_for_node(instance)
 	if gml_handle_is_valid(existing_handle):
+		if is_same(instance, _gml_instance_change_registering):
+			# instance_change: the instance takes another object (see
+			# 76_instance_change.gd).
+			_gml_instance_change_reindex(_gml_instance_entry(existing_handle), object_selector, parent_selectors)
 		return existing_handle
 	var object_id = _gml_object_selector_id(object_selector)
 	var object_name = _gml_object_selector_name(object_selector)

@@ -286,6 +286,8 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 		# GameMaker puts it on the room's managed layer at its depth.
 		parent = _gml_managed_layer(parent, gml_depth_truncate(depth_value))
 	parent.add_child(instance)
+	# An instance_change in its Create event happens before the creator goes on.
+	_gml_instance_change_flush_instance(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
 		handle = gml_instance_register(instance, int(entry["id"]), [])

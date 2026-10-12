@@ -1514,6 +1514,46 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn("#macro VALUE 7", result.source)
         self.assertNotIn("#region", result.source)
 
+    def test_macros_used_as_statements_run_their_statements(self):
+        # A macro is text substitution (manual: Constants, Macros): its value
+        # may be several statements, and it may be used on its own as a
+        # statement.
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro SET_FONT var _data = load(_name);\\\n"
+                "    _data.ready = true;\\\n"
+                "    if (_data.missing) return false;\\\n"
+                "    ++_count;\n"
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": SET_FONT; break;\n"
+                "        case \"b\": SET_FONT break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+            transpile_gml_code(
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count;; break;\n"
+                "        case \"b\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count; break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+        )
+        self.assertEqual(transpile_gml_code("#macro SET_X x = 5\nSET_X;", indent=""), "position.x = 5")
+        self.assertEqual(
+            transpile_gml_code("#macro LOG show_debug_message\nLOG(\"hi\");", indent=""),
+            'GMRuntime.gml_show_debug_message("hi", [])',
+        )
+
     def test_rejects_recursive_macros(self):
         with self.assertRaisesRegex(GMLTranspileError, "Recursive macro"):
             transpile_gml_code("#macro LOOP LOOP\nvalue = LOOP", indent="")

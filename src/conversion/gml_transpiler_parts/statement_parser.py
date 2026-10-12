@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, Mapping, MutableMapping, MutableSet
 
-from .constants import BINARY_PRECEDENCE, EOF
+from .constants import ASSIGNMENT_OPERATORS, BINARY_PRECEDENCE, EOF
 from .expression_api import (
     emit_instance_keyword_argument,
     evaluate_enum_value_tokens,
@@ -30,6 +30,7 @@ from .statement_boundaries import (
     scan_statement_end,
     skip_newline_tokens,
 )
+from .statement_macros import expand_statement_macros, macro_tokens_at
 from .statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
@@ -79,6 +80,13 @@ class _StatementParser:
         extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
         control_flow_capture: ControlFlowCapture | None = None,
     ) -> None:
+        # Macros whose value is statements are spliced in before anything
+        # reads the tokens, so their var declarations are hoisted like any
+        # other.
+        tokens = expand_statement_macros(
+            tokens,
+            {**_source_macro_values(tokens, macro_configuration), **(macro_values or {})},
+        )
         self.tokens = tokens
         self.position = 0
         initial_local_names = set(local_names or [])
@@ -140,6 +148,7 @@ class _StatementParser:
         return lines
 
     def _parse_statement(self) -> list[str]:
+        self._expand_statement_start_macro()
         if self._check_directive("#macro"):
             return self._parse_macro_statement()
         if self._check_identifier("globalvar"):
@@ -190,6 +199,33 @@ class _StatementParser:
             generated_counter=self.generated_counter,
             control_flow_capture=self.control_flow_capture,
         )
+
+    def _expand_statement_start_macro(self) -> None:
+        # A macro is text substitution, so one used as a statement runs its
+        # value as that statement: with #macro M x = 5, M; assigns x. (A
+        # write to the macro itself is left to report the constant.)
+        expanded: set[str] = set()
+        token = self._peek()
+        while (
+            token.kind == "IDENT"
+            and token.value in self.macro_values
+            and token.value not in expanded
+            and not self._macro_is_written(self.position)
+        ):
+            expanded.add(token.value)
+            self.tokens = [
+                *self.tokens[:self.position],
+                *macro_tokens_at(self.macro_values[token.value], token),
+                *self.tokens[self.position + 1:],
+            ]
+            token = self._peek()
+
+    def _macro_is_written(self, index: int) -> bool:
+        next_index = skip_newline_tokens(self.tokens, index + 1)
+        if next_index >= len(self.tokens):
+            return False
+        next_token = self.tokens[next_index]
+        return next_token.kind == "OP" and (next_token.value in ASSIGNMENT_OPERATORS or next_token.value in ("++", "--"))
 
     def _parse_macro_statement(self) -> list[str]:
         self._consume_directive("#macro")
@@ -1108,6 +1144,37 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     )
 
 
+def _source_macro_values(tokens: list[_Token], macro_configuration: str | None) -> dict[str, str]:
+    # The #macro definitions in these tokens; one for the active
+    # configuration replaces the plain one.
+    values: dict[str, str] = {}
+    configured: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        if tokens[index].kind != "DIRECTIVE" or tokens[index].value != "#macro":
+            index += 1
+            continue
+        end = index + 1
+        while end < len(tokens) and tokens[end].kind not in ("NEWLINE", "EOF"):
+            end += 1
+        definition = tokens[index + 1:end]
+        index = end
+        if len(definition) >= 3 and definition[1].value == ":":
+            configuration, name, value_tokens = definition[0].value, definition[2].value, definition[3:]
+            if not macro_configuration_matches(configuration, macro_configuration):
+                continue
+            configured.add(name)
+        elif definition and definition[0].kind == "IDENT":
+            name, value_tokens = definition[0].value, definition[1:]
+            if name in configured:
+                continue
+        else:
+            continue
+        if value_tokens:
+            values[name] = tokens_to_source(value_tokens)
+    return values
+
+
 def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
     names: list[str] = []
     seen: set[str] = set()
@@ -1118,6 +1185,11 @@ def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
         token = tokens[index]
         if token.kind == "EOF":
             break
+        if token.kind == "DIRECTIVE" and token.value == "#macro":
+            # A macro's value declares its locals where the macro is used.
+            while index < len(tokens) and tokens[index].kind not in ("NEWLINE", "EOF"):
+                index += 1
+            continue
         if token.kind == "IDENT" and token.value == "function":
             index = _skip_function_literal(tokens, index)
             continue

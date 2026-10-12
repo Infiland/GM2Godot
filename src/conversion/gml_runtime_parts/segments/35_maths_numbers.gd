@@ -284,11 +284,140 @@ static func gml_lengthdir_y(length, direction):
 	return -_to_real(length) * sin(deg_to_rad(_to_real(direction)))
 
 
+# GameMaker colours are 0xBBGGRR integers. The colour functions follow the
+# runner (Function_Graphics.js): integer arguments are truncated toward zero
+# and wrapped to 32 bits like its yyGetInt32 and ~~, and channels are packed
+# without clamping, so a channel outside 0..255 spills into its neighbours.
 static func gml_make_color_rgb(red, green, blue):
-	var r = clamp(int(round(_to_real(red))), 0, 255)
-	var g = clamp(int(round(_to_real(green))), 0, 255)
-	var b = clamp(int(round(_to_real(blue))), 0, 255)
-	return r | (g << 8) | (b << 16)
+	return _gml_colour_int32(_gml_colour_int32(red) | (_gml_colour_int32(green) << 8) | (_gml_colour_int32(blue) << 16))
+
+
+static func gml_color_get_red(colour):
+	return _gml_colour_int32(colour) & 0xff
+
+
+static func gml_color_get_green(colour):
+	return (_gml_colour_int32(colour) >> 8) & 0xff
+
+
+static func gml_color_get_blue(colour):
+	return (_gml_colour_int32(colour) >> 16) & 0xff
+
+
+# Hue, saturation and value are reals on a 0..255 scale (Color_RGBtoHSV).
+static func gml_color_get_hue(colour):
+	return _gml_colour_to_hsv(colour)[0]
+
+
+static func gml_color_get_saturation(colour):
+	return _gml_colour_to_hsv(colour)[1]
+
+
+static func gml_color_get_value(colour):
+	return _gml_colour_to_hsv(colour)[2]
+
+
+# Each channel moves from col1 towards col2 by amount, which is not clamped,
+# and is truncated toward zero.
+static func gml_merge_color(col1, col2, amount):
+	var first = _gml_colour_int32(col1)
+	var second = _gml_colour_int32(col2)
+	var factor = _to_real(amount)
+	if typeof(factor) != TYPE_FLOAT:
+		factor = 0.0
+	var keep = 1.0 - factor
+	var merged = 0
+	for shift in [16, 8, 0]:
+		var start = (first >> shift) & 0xff
+		var finish = (second >> shift) & 0xff
+		merged |= (_gml_colour_int32(start * keep + finish * factor) << shift) & (0xff << shift)
+	return merged
+
+
+# Hue, saturation and value are on a 0..255 scale; each channel is rounded and
+# clamped to 0..255.
+static func gml_make_color_hsv(hue, saturation, value):
+	var hh = _gml_colour_real(hue) * 360.0 / 255.0
+	if hh == 360.0:
+		hh = 0.0
+	var ss = _gml_colour_real(saturation) / 255.0
+	var vv = _gml_colour_real(value) / 255.0
+	var channels = [vv, vv, vv]
+	if ss != 0.0:
+		hh = hh / 60.0
+		var sector = floor(hh)
+		var f = hh - sector
+		var p = vv * (1.0 - ss)
+		var q = vv * (1.0 - ss * f)
+		var t = vv * (1.0 - ss * (1.0 - f))
+		match int(sector):
+			0:
+				channels = [vv, t, p]
+			1:
+				channels = [q, vv, p]
+			2:
+				channels = [p, vv, t]
+			3:
+				channels = [p, q, vv]
+			4:
+				channels = [t, p, vv]
+			_:
+				channels = [vv, p, q]
+	var packed = 0
+	for index in range(3):
+		var level = floor(channels[index] * 255.0 + 0.5)
+		if not is_nan(level):
+			packed |= int(clamp(level, 0.0, 255.0)) << (8 * index)
+	return packed
+
+
+static func _gml_colour_to_hsv(colour):
+	var packed = _gml_colour_int32(colour)
+	var rr = float(packed & 0xff) / 255.0
+	var gg = float((packed >> 8) & 0xff) / 255.0
+	var bb = float((packed >> 16) & 0xff) / 255.0
+	var low = min(min(rr, gg), bb)
+	var vv = max(max(rr, gg), bb)
+	var d = vv - low
+	var ss = 0.0 if vv == 0.0 else d / vv
+	var hh = 0.0
+	if ss != 0.0:
+		if rr == vv:
+			hh = 60.0 * (gg - bb) / d
+		elif gg == vv:
+			hh = 120.0 + 60.0 * (bb - rr) / d
+		else:
+			hh = 240.0 + 60.0 * (rr - gg) / d
+	if hh < 0.0:
+		hh += 360.0
+	return [
+		clamp(hh * 255.0 / 360.0, 0.0, 255.0),
+		clamp(ss * 255.0, 0.0, 255.0),
+		clamp(vv * 255.0, 0.0, 255.0),
+	]
+
+
+# yyGetReal for a colour argument; a value that is not a number has already
+# raised its GML error and counts as 0.
+static func _gml_colour_real(value):
+	var real_value = _to_real(value)
+	if typeof(real_value) != TYPE_FLOAT:
+		return 0.0
+	return real_value
+
+
+# yyGetInt32 / JavaScript ~~: truncate toward zero and wrap into a signed
+# 32-bit integer; NaN and infinities give 0.
+static func _gml_colour_int32(value):
+	var real_value = _gml_colour_real(value)
+	if is_nan(real_value) or is_inf(real_value):
+		return 0
+	var wrapped = int(fmod(real_value - fmod(real_value, 1.0), 4294967296.0))
+	if wrapped >= 2147483648:
+		return wrapped - 4294967296
+	if wrapped < -2147483648:
+		return wrapped + 4294967296
+	return wrapped
 
 
 # GameMaker's LookAtLH view matrix (row vectors, left-handed): right = up x

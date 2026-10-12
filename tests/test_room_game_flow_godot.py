@@ -234,12 +234,14 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     \tvar layer = room.get_node("Backgrounds")
                     \tif not _check(abs(camera.position.x - 260.0) < 0.01, "Camera2D did not follow target on x"):
                     \t\treturn
-                    \t# Each step scrolls the layer by its speed.
-                    \tvar before = layer.position
+                    \t# Each step scrolls the layer offset by its speed; the
+                    \t# background is drawn at the offset, the layer node stays.
+                    \tvar visual = layer.get_node("BackgroundVisual")
+                    \tvar before = visual.position
                     \tGMRuntime.gml_event_scheduler_frame(0.0, 1)
-                    \tif not _check(layer.position - before == Vector2(2, 0), "Background layer did not scroll: " + str(layer.position)):
+                    \tif not _check(visual.position - before == Vector2(2, 0) and layer.position == Vector2.ZERO, "Background layer did not scroll: " + str(visual.position) + " layer at " + str(layer.position)):
                     \t\treturn
-                    \tif not _check(GMRuntime.gml_layer_get_x("Backgrounds") == layer.position.x, "layer_get_x does not follow the scroll"):
+                    \tif not _check(GMRuntime.gml_layer_get_x("Backgrounds") == visual.position.x, "layer_get_x does not follow the scroll"):
                     \t\treturn
                     \tprint("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK")
                     \tget_tree().quit(0)

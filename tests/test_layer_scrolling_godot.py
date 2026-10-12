@@ -6,7 +6,9 @@ GameMaker_DoAStep calls LayerManager.UpdateLayers, Function_Layers.js
 `layer.m_xoffset += layer.m_hspeed`). layer_hspeed/layer_vspeed set that
 speed, which starts as the Room Editor's for a background layer, and
 layer_get_x/layer_get_y return the offset. Backgrounds, tilemaps, sprites
-and sequences are drawn at the offset; instances are not moved by it.
+and sequences are drawn at the offset; instances are not moved by it, also
+when they are created on a layer that has already moved (yyRoom.js
+DrawLayerInstanceElement draws an instance at its own x/y).
 """
 from __future__ import annotations
 
@@ -43,6 +45,8 @@ if (steps == 3) {
     layer_hspeed("Still", 3);
     layer_hspeed("Instances", 4);
     global.marker = instance_create_layer(40, 50, "Still", o_marker);
+    // Clouds is at its Room Editor offset plus two steps of scrolling.
+    global.cloud_marker = instance_create_layer(30, 20, "Clouds", o_marker);
 }
 if (steps == 6) {
     layer_hspeed("Still", 0);
@@ -111,6 +115,7 @@ func _process(_delta):
 		"still": _point(scene.get_node("Still/s_cloud").global_position),
 		"probe": _point(probe.global_position),
 		"marker": _point(marker.global_position),
+		"cloud_marker": _point(GMRuntime.gml_handle_resolve(scope["cloud_marker"]).global_position),
 	}
 	print("LAYER_RESULTS " + JSON.stringify(result))
 	get_tree().quit(0)
@@ -163,6 +168,7 @@ class TestLayerScrollingGodot(unittest.TestCase):
         # ... and instances stay where they are, whatever their layer's offset.
         self.assertEqual(results["probe"], [100, 60])
         self.assertEqual(results["marker"], [40, 50])
+        self.assertEqual(results["cloud_marker"], [30, 20])
 
 
 if __name__ == "__main__":

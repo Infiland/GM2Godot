@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, TypeAlias
 
 from src.conversion.architecture_policy import (
     gamemaker_depth_to_z_index,
@@ -53,6 +53,12 @@ GODOT_TILE_TRANSFORM_FLIP_V = 1 << 13
 GODOT_TILE_TRANSFORM_TRANSPOSE = 1 << 14
 # CanvasItem.TEXTURE_REPEAT_ENABLED
 _GODOT_TEXTURE_REPEAT_ENABLED = 2
+
+# A layer's x/y offset (see _layer_offset) and the element types drawn at it,
+# as the runtime's GML_LAYER_OFFSET_ELEMENT_TYPES.
+LayerOffset: TypeAlias = tuple[float, float]
+_NO_OFFSET: LayerOffset = (0.0, 0.0)
+_LAYER_OFFSET_ELEMENT_TYPES = frozenset({"background", "sprite", "tilemap", "sequence"})
 
 
 class GameMakerTile(NamedTuple):
@@ -285,21 +291,22 @@ def _serialize_layer(
             )
         )
 
+    offset = _layer_offset(layer)
     lines.extend(_layer_node_lines(layer, node_name, parent_path, original_name, resource_type))
 
     child_parent_path = node_name if parent_path == "." else f"{parent_path}/{node_name}"
 
     if resource_type == "GMRBackgroundLayer":
-        lines.extend(_background_visual_lines(layer, child_parent_path, original_name, context))
+        lines.extend(_background_visual_lines(layer, child_parent_path, original_name, context, offset))
 
     if resource_type == "GMRInstanceLayer":
         lines.extend(_instance_node_lines(layer, child_parent_path, original_name, context))
 
     if resource_type == "GMRTileLayer":
-        lines.extend(_tile_map_layer_lines(layer, child_parent_path, original_name, context))
+        lines.extend(_tile_map_layer_lines(layer, child_parent_path, original_name, context, offset))
 
     if resource_type == "GMRAssetLayer":
-        lines.extend(_asset_node_lines(layer, child_parent_path, original_name, context))
+        lines.extend(_asset_node_lines(layer, child_parent_path, original_name, context, offset))
 
     child_names: dict[str, int] = {}
     for child_layer in _child_layers(layer):
@@ -324,13 +331,11 @@ def _layer_node_lines(
     depth = _coerce_int(layer_fields.depth)
     z_index = gamemaker_depth_to_z_index(depth)
 
+    # The node stays at the room origin: the elements that follow the layer
+    # offset carry it (see _layer_offset).
     lines = [
         f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(visible)}",
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(layer_fields.x),
-            y=_format_number(layer_fields.y),
-        ),
         f"z_index = {z_index}",
         # Layers nest in the scene tree but GameMaker depth is absolute.
         "z_as_relative = false",
@@ -512,6 +517,7 @@ def _tile_map_layer_lines(
     parent_path: str,
     layer_name: str,
     context: RoomLayerSerializationContext,
+    offset: LayerOffset,
 ) -> list[str]:
     layer_fields = RoomLayerFields(layer, "")
     tileset_name = RoomLayerFields(layer, context.room.yy_path).tileset_name
@@ -573,7 +579,7 @@ def _tile_map_layer_lines(
     lines = [
         f'[node name="TileMap" type="TileMapLayer" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(layer_fields.visible)}",
-        "position = Vector2(0, 0)",
+        _position_line(0, 0, offset),
         f'tile_set = ExtResource("{ext_resource_id}")',
     ]
     if tile_map_data:
@@ -689,6 +695,7 @@ def _asset_node_lines(
     parent_path: str,
     layer_name: str,
     context: RoomLayerSerializationContext,
+    offset: LayerOffset,
 ) -> list[str]:
     layer_fields = RoomLayerFields(layer, "")
     lines: list[str] = []
@@ -708,8 +715,9 @@ def _asset_node_lines(
 
         node_name = _unique_name(_sanitize_node_name(asset_name), sibling_names)
         asset_type = _asset_resource_type(asset)
+        element_offset = _element_offset(_layer_element_type_for_asset_type(asset_type), offset)
         if asset_type == "GMRSpriteGraphic":
-            lines.extend(_sprite_asset_lines(asset, node_name, parent_path, layer_name, context))
+            lines.extend(_sprite_asset_lines(asset, node_name, parent_path, layer_name, context, element_offset))
         elif asset_type == "GMRParticleSystem":
             lines.extend(_particle_system_asset_lines(asset, node_name, parent_path))
         else:
@@ -724,7 +732,7 @@ def _asset_node_lines(
                     element_type=_layer_element_type_for_asset_type(asset_type),
                 )
             )
-            lines.extend(_unsupported_asset_lines(asset, node_name, parent_path, asset_type))
+            lines.extend(_unsupported_asset_lines(asset, node_name, parent_path, asset_type, element_offset))
     return lines
 
 
@@ -734,6 +742,7 @@ def _sprite_asset_lines(
     parent_path: str,
     layer_name: str,
     context: RoomLayerSerializationContext,
+    offset: LayerOffset,
 ) -> list[str]:
     asset_fields = RoomAssetFields(asset, "")
     sprite_name = RoomAssetFields(asset, context.room.yy_path).sprite_name
@@ -758,7 +767,7 @@ def _sprite_asset_lines(
             )
         ]
 
-    lines.extend(_asset_transform_lines(asset))
+    lines.extend(_asset_transform_lines(asset, offset))
     lines.extend([
         'metadata/gamemaker_layer_element_type = "sprite"',
         f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
@@ -809,10 +818,10 @@ def _particle_system_asset_lines(
 
 
 def _unsupported_asset_lines(
-    asset: JsonObject, node_name: str, parent_path: str, asset_type: str
+    asset: JsonObject, node_name: str, parent_path: str, asset_type: str, offset: LayerOffset
 ) -> list[str]:
     lines = [f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]']
-    lines.extend(_asset_transform_lines(asset))
+    lines.extend(_asset_transform_lines(asset, offset))
     lines.extend([
         f"metadata/gamemaker_layer_element_type = {godot_value(_layer_element_type_for_asset_type(asset_type))}",
         f"metadata/gamemaker_asset_name = {godot_value(_asset_name(asset))}",
@@ -826,13 +835,10 @@ def _unsupported_asset_lines(
     return lines
 
 
-def _asset_transform_lines(asset: JsonObject) -> list[str]:
+def _asset_transform_lines(asset: JsonObject, offset: LayerOffset = _NO_OFFSET) -> list[str]:
     asset_fields = RoomAssetFields(asset, "")
     return [
-        "position = Vector2({x}, {y})".format(
-            x=_format_number(asset_fields.x),
-            y=_format_number(asset_fields.y),
-        ),
+        _position_line(asset_fields.x, asset_fields.y, offset),
         f"rotation_degrees = {_godot_rotation_degrees(asset_fields.rotation)}",
         "scale = Vector2({scale_x}, {scale_y})".format(
             scale_x=_format_number(asset_fields.scale_x),
@@ -901,6 +907,7 @@ def _background_visual_lines(
     parent_path: str,
     layer_name: str,
     context: RoomLayerSerializationContext,
+    offset: LayerOffset,
 ) -> list[str]:
     sprite_name = _background_sprite_name(layer)
     if sprite_name:
@@ -915,7 +922,7 @@ def _background_visual_lines(
                 )
             )
             return []
-        return _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id)
+        return _background_sprite_lines(layer, parent_path, sprite_name, ext_resource_id, offset)
 
     return _background_color_lines(layer, parent_path, context)
 
@@ -949,6 +956,7 @@ def _background_sprite_lines(
     parent_path: str,
     sprite_name: str,
     ext_resource_id: str,
+    offset: LayerOffset,
 ) -> list[str]:
     """Emit a sprite background element.
 
@@ -966,6 +974,7 @@ def _background_sprite_lines(
     lines = [
         f'[node name={godot_string(node_name)} type="Node2D" parent={godot_string(parent_path)}]',
         f"visible = {godot_value(layer_fields.visible)}",
+        _position_line(0, 0, offset),
         "modulate = {color}".format(color=_godot_color(layer_fields.sprite_colour)),
     ]
     lines.extend(_background_metadata_lines(layer, "sprite"))
@@ -1307,14 +1316,45 @@ def _coerce_float(value: JsonValue) -> float:
         return 0.0
 
 
-def _format_number(value: JsonValue) -> str:
+def _number(value: JsonValue) -> float:
     try:
-        number = float(value) if isinstance(value, (str, int, float)) else 0.0
+        return float(value) if isinstance(value, (str, int, float)) else 0.0
     except (TypeError, ValueError):
-        number = 0.0
+        return 0.0
+
+
+def _format_number(value: JsonValue) -> str:
+    number = _number(value)
     if number.is_integer():
         return str(int(number))
     return str(number)
+
+
+def _position_line(x: JsonValue, y: JsonValue, offset: LayerOffset) -> str:
+    return "position = Vector2({x}, {y})".format(
+        x=_format_number(_number(x) + offset[0]),
+        y=_format_number(_number(y) + offset[1]),
+    )
+
+
+def _layer_offset(layer: JsonObject) -> LayerOffset:
+    """The layer's Room Editor offset, which layer_get_x/layer_get_y return.
+
+    GameMaker draws a layer's backgrounds, sprites, tilemaps and sequences at
+    their own position plus the layer offset (HTML5 runner: yyRoom.js
+    DrawLayer*Element add m_xoffset/m_yoffset), but its instances at their own
+    x/y and its particle systems at their own position (yyParticle.js
+    ParticleSystem_Update). The layer node stays at the room origin, so an
+    instance created on the layer later is not moved by it; the elements that
+    follow the offset carry it, and the runtime moves them when the offset
+    changes (_gml_layer_set_node_offset).
+    """
+    layer_fields = RoomLayerFields(layer, "")
+    return (_number(layer_fields.x), _number(layer_fields.y))
+
+
+def _element_offset(element_type: str, offset: LayerOffset) -> LayerOffset:
+    return offset if element_type in _LAYER_OFFSET_ELEMENT_TYPES else _NO_OFFSET
 
 
 def _godot_rotation_degrees(value: JsonValue) -> str:

@@ -275,7 +275,7 @@ static func gml_layer_tilemap_create(layer, x, y, tileset, width, height):
 		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
 	var node = TileMapLayer.new()
 	node.name = "TileMap"
-	node.position = Vector2(_to_real(x), _to_real(y))
+	node.position = Vector2(_to_real(x), _to_real(y)) + _gml_layer_node_offset(layer_node)
 	node.tile_set = tile_set
 	node.set_meta("gamemaker_layer_element_type", "tilemap")
 	node.set_meta("gamemaker_tile_layer", true)
@@ -370,12 +370,18 @@ static func gml_layer_element_move(element, layer):
 		return false
 	if not (element_node is Node) or not (layer_node is Node):
 		return false
-	if element_node.get_parent() == layer_node:
+	var old_layer = element_node.get_parent()
+	if old_layer == layer_node:
 		return true
-	if element_node.get_parent() != null:
+	# The element keeps its own position and is drawn at the new layer's
+	# offset instead of the old one.
+	var shift = _gml_layer_element_offset(layer_node, element_node) - _gml_layer_element_offset(old_layer, element_node)
+	if old_layer != null:
 		element_node.reparent(layer_node, true)
 	else:
 		layer_node.add_child(element_node)
+	if element_node is Node2D:
+		element_node.position += shift
 	_gml_layer_element_register(element_node)
 	return true
 
@@ -384,6 +390,10 @@ static func gml_layer_get_element_type(element):
 	var node = _gml_layer_element_resolve_node(element)
 	if node == null:
 		return "undefined"
+	return _gml_layer_node_element_type(node)
+
+
+static func _gml_layer_node_element_type(node):
 	if node.has_meta("gamemaker_layer_element_type"):
 		return str(node.get_meta("gamemaker_layer_element_type"))
 	if (
@@ -578,37 +588,42 @@ static func _gml_layer_node_offset(node):
 	return Vector2(_gml_layer_node_axis(node, "x"), _gml_layer_node_axis(node, "y"))
 
 
+# GameMaker draws a layer's backgrounds, sprites, tilemaps and sequences at
+# their own position plus the layer offset (yyRoom.js DrawLayer*Element add
+# m_xoffset/m_yoffset), but instances at their own x/y
+# (DrawLayerInstanceElement) and particle systems at their own position
+# (yyParticle.js ParticleSystem_Update). A layer node therefore stays at the
+# room origin, so whatever joins it later keeps its position, and each
+# element that follows the offset is placed at its own position plus the
+# offset.
+const GML_LAYER_OFFSET_ELEMENT_TYPES = ["background", "sprite", "tilemap", "sequence"]
+
+
 static func _gml_layer_set_node_offset(node, offset):
 	var delta = offset - _gml_layer_node_offset(node)
 	node.set_meta("gamemaker_layer_x", offset.x)
 	node.set_meta("gamemaker_layer_y", offset.y)
-	if not (node is Node2D) or delta == Vector2.ZERO:
-		return
-	# GameMaker draws a layer's backgrounds, tilemaps, sprites and sequences
-	# at the layer offset (yyRoom.js DrawLayer*Element add m_xoffset), but an
-	# instance stays at its own x/y. A layer node that holds no instances
-	# carries the offset itself; on one that does, the offset moves the
-	# layer's other elements instead.
-	if _gml_layer_offset_moves_node(node):
-		node.position += delta
+	if delta == Vector2.ZERO:
 		return
 	for child in node.get_children():
-		if child is Node2D and not _gml_layer_offset_keeps_child(child):
+		if _gml_layer_element_follows_offset(child):
 			child.position += delta
 
 
-static func _gml_layer_offset_moves_node(node):
-	if str(node.get_meta("gamemaker_layer_type", "")) == "GMRInstanceLayer":
-		return false
-	for child in node.get_children():
-		if _gml_layer_offset_keeps_child(child):
-			return false
-	return true
+static func _gml_layer_element_follows_offset(element):
+	# Nested layers have offsets of their own.
+	return (
+		element is Node2D
+		and not _gml_layer_node_has_metadata(element)
+		and GML_LAYER_OFFSET_ELEMENT_TYPES.has(_gml_layer_node_element_type(element))
+	)
 
 
-static func _gml_layer_offset_keeps_child(child):
-	# Instances, and nested layers with offsets of their own.
-	return _gml_layer_node_has_metadata(child) or gml_handle_is_valid(_gml_instance_handle_for_node(child))
+# How far `element` on `layer_node` is drawn from its own position.
+static func _gml_layer_element_offset(layer_node, element):
+	if _gml_layer_node_has_metadata(layer_node) and _gml_layer_element_follows_offset(element):
+		return _gml_layer_node_offset(layer_node)
+	return Vector2.ZERO
 
 
 static func _gml_layer_step_scroll():

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Literal, TypeAlias
 
+from .constants import DATE_RUNTIME_FUNCTIONS
+
 GMLAPISupportStatus: TypeAlias = Literal[
     "implemented",
     "partial",
@@ -1173,6 +1175,29 @@ def _advanced_audio_entries() -> tuple[GMLAPIEntry, ...]:
             notes,
         )
         for name, status, runtime_support, smoke_coverage, docs_path, notes in _AUDIO_ADVANCED_RUNTIME_APIS
+    )
+
+
+_DATE_DOCS_DIR = "GameMaker_Language/GML_Reference/Maths_And_Numbers/Date_And_Time"
+_DATE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.56_dates"
+
+
+def _date_entries() -> tuple[GMLAPIEntry, ...]:
+    return tuple(
+        _entry(
+            name,
+            "Time",
+            "implemented",
+            _DATE_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "yes",
+            "yes",
+            f"{_DATE_DOCS_DIR}/{name}.htm",
+            "Computed as the HTML5 runner's Function_Date.js does, with JavaScript Date semantics and "
+            "the local time zone's rules (TZ or /etc/localtime; the current system offset where no zone data exists).",
+        )
+        for name in DATE_RUNTIME_FUNCTIONS
     )
 
 
@@ -8936,6 +8961,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     *_os_debug_gc_entries(),
     *_os_device_media_entries(),
     *_platform_service_entries(),
+    *_date_entries(),
     _entry(
         "external_define",
         "Extensions",

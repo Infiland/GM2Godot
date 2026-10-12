@@ -48,6 +48,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "54_audio_runtime.gd",
     "55_room_game_flow.gd",
     "56_time_alarms.gd",
+    "56_dates.gd",
     "57_ds_lists_stacks_queues.gd",
     "58_ds_maps.gd",
     "59_ds_grids.gd",

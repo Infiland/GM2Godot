@@ -1003,6 +1003,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_string_format(score, 6, 2)",
         )
 
+    def test_transpiles_date_functions_and_time_zone_constants(self):
+        self.assertEqual(
+            transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),
+            "GMRuntime.gml_date_create_datetime(2024, 2, 29, 23, 59, 59)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("date_day_span(date_current_datetime(), d)"),
+            "GMRuntime.gml_date_day_span(GMRuntime.gml_date_current_datetime(), d)",
+        )
+        self.assertEqual(transpile_gml_expression("date_set_timezone(timezone_utc)"), "GMRuntime.gml_date_set_timezone(1)")
+        self.assertEqual(transpile_gml_expression("timezone_local"), "0")
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression("date_inc_day(d)")
+
     def test_transpiles_chr(self):
         self.assertEqual(
             transpile_gml_expression('chr(65)'),

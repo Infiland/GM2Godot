@@ -535,6 +535,8 @@ NAME_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "tm_countvsyncs": "1",
     "tm_countvsyncs_winalt": "2",
     "tm_systemtiming": "3",
+    "timezone_local": "0",
+    "timezone_utc": "1",
     "video_status_closed": "0",
     "video_status_preparing": "1",
     "video_status_playing": "2",
@@ -764,10 +766,12 @@ BUILTIN_VARIABLE_REGISTRY: Final[Mapping[str, _BuiltinVariableMetadata]] = Mappi
     "browser_height": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
     "browser_width": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
     "current_day": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "current_hour": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_minute": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_month": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_second": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "current_weekday": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_year": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "debug_mode": _BuiltinVariableMetadata("global", "false", False, False, "debug"),
     "display_aa": _BuiltinVariableMetadata("global", "0", False, False, "display"),
@@ -2011,6 +2015,57 @@ DRAW_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 # reports the function once and returns undefined (see the emitter).
 UNSUPPORTED_CALL_RUNTIME_FUNCTION: Final[str] = "gml_unsupported_call"
 
+# GameMaker's date functions (Maths_And_Numbers/Date_And_Time), each lowered
+# to gml_<name>.
+DATE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
+    name: f"gml_{name}"
+    for name in (
+        "date_current_datetime",
+        "date_create_datetime",
+        "date_valid_datetime",
+        "date_get_year",
+        "date_get_month",
+        "date_get_week",
+        "date_get_day",
+        "date_get_weekday",
+        "date_get_hour",
+        "date_get_minute",
+        "date_get_second",
+        "date_get_day_of_year",
+        "date_get_hour_of_year",
+        "date_get_minute_of_year",
+        "date_get_second_of_year",
+        "date_inc_year",
+        "date_inc_month",
+        "date_inc_week",
+        "date_inc_day",
+        "date_inc_hour",
+        "date_inc_minute",
+        "date_inc_second",
+        "date_year_span",
+        "date_month_span",
+        "date_week_span",
+        "date_day_span",
+        "date_hour_span",
+        "date_minute_span",
+        "date_second_span",
+        "date_compare_datetime",
+        "date_compare_date",
+        "date_compare_time",
+        "date_date_of",
+        "date_time_of",
+        "date_datetime_string",
+        "date_date_string",
+        "date_time_string",
+        "date_days_in_month",
+        "date_days_in_year",
+        "date_leap_year",
+        "date_is_today",
+        "date_set_timezone",
+        "date_get_timezone",
+    )
+})
+
 __all__: Final[tuple[str, ...]] = (
     "EOF",
     "MULTI_CHAR_OPERATORS",
@@ -2077,4 +2132,5 @@ __all__: Final[tuple[str, ...]] = (
     "PLATFORM_SERVICE_RUNTIME_FUNCTIONS",
     "DRAW_RUNTIME_FUNCTIONS",
     "UNSUPPORTED_CALL_RUNTIME_FUNCTION",
+    "DATE_RUNTIME_FUNCTIONS",
 )

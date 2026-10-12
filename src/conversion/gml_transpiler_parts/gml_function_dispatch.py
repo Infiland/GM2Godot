@@ -10,6 +10,7 @@ from .constants import (
     AUDIO_RUNTIME_FUNCTIONS,
     BUFFER_RUNTIME_FUNCTIONS,
     COLLISION_RUNTIME_FUNCTIONS,
+    DATE_RUNTIME_FUNCTIONS,
     DRAW_RUNTIME_FUNCTIONS,
     DS_COLLECTIONS_FUNCTIONS,
     DS_GRID_FUNCTIONS,
@@ -1423,6 +1424,27 @@ def _descriptor(
     )
 
 
+# Argument counts of the date functions (manual, Date_And_Time).
+_DATE_ARITY: dict[str, tuple[int, int | None]] = {
+    "date_current_datetime": (0, 0),
+    "date_create_datetime": (6, 6),
+    "date_valid_datetime": (6, 6),
+    "date_compare_datetime": (2, 2),
+    "date_compare_date": (2, 2),
+    "date_compare_time": (2, 2),
+    "date_get_timezone": (0, 0),
+    **{f"date_inc_{unit}": (2, 2) for unit in ("year", "month", "week", "day", "hour", "minute", "second")},
+    **{f"date_{unit}_span": (2, 2) for unit in ("year", "month", "week", "day", "hour", "minute", "second")},
+}
+
+
+def _date_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
+    return {
+        name: _descriptor(name, *_DATE_ARITY.get(name, (1, 1)), "runtime", target)
+        for name, target in DATE_RUNTIME_FUNCTIONS.items()
+    }
+
+
 def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     descriptors: dict[str, GMLFunctionDescriptor] = {}
 
@@ -1650,6 +1672,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             current.lowering_target,
         )
 
+    descriptors.update(_date_function_descriptors())
     return descriptors
 
 

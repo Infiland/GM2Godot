@@ -231,6 +231,12 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_time_alarms_godot.py",),
     ),
     _segment(
+        "56_dates.gd",
+        "Date functions, the local time zone's rules, and date_set_timezone.",
+        depends_on=("00_prelude.gd", "35_maths_numbers.gd"),
+        tests=("tests/test_dates_godot.py",),
+    ),
+    _segment(
         "57_ds_lists_stacks_queues.gd",
         "List, stack, queue, and priority data structure handles with destroyed-handle guards.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd"),

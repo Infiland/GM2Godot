@@ -282,16 +282,20 @@ static func _gml_step_add_entry(entry):
 
 static func _gml_step_join_created_instances():
 	# Adds the instances created (or activated again) since the list was
-	# last updated, like GameMaker's active list between phases.
+	# last updated, like GameMaker's active list between phases. The live
+	# list is in creation order, so they are at its end.
 	if _gml_instance_creation_counter == _gml_step_creation_mark:
 		return null
 	var created = []
-	for entry in _gml_instance_entries.values():
-		if int(entry["creation_order"]) < _gml_step_creation_mark or entry["step_order"] >= 0 or entry["deactivated"]:
-			continue
-		if not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
+	var index = _gml_instance_live_order.size() - 1
+	while index >= 0:
+		var entry = _gml_instance_live_order[index]
+		index -= 1
+		if int(entry["creation_order"]) < _gml_step_creation_mark:
+			break
+		if entry["step_order"] < 0 and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
 			created.append(entry)
-	created.sort_custom(_gml_instance_entry_order_less)
+	created.reverse()
 	for entry in created:
 		_gml_step_add_entry(entry)
 	_gml_step_creation_mark = _gml_instance_creation_counter

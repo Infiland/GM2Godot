@@ -6,6 +6,10 @@ const GML_TILEMAP_ROTATE = 0x40000000
 const GML_TILEMAP_GODOT_FLIP_H = 1 << 12
 const GML_TILEMAP_GODOT_FLIP_V = 1 << 13
 const GML_TILEMAP_GODOT_TRANSPOSE = 1 << 14
+# A managed layer node holds the instances and particle systems GameMaker puts
+# on its managed layer at one depth; the room root lists them by depth.
+const GML_MANAGED_LAYER_DEPTH_META = &"_gm2godot_managed_layer_depth"
+const GML_MANAGED_LAYERS_META = &"_gm2godot_managed_layers"
 
 
 static func gml_layer_register_scene(scene, clear_existing = true):
@@ -96,8 +100,13 @@ static func gml_layer_depth(layer, depth):
 	if not (node is CanvasItem):
 		return false
 	var resolved_depth = gml_depth_truncate(depth)
+	# GameMaker leaves a layer already at that depth where it is; at another
+	# depth the layer goes behind the layers there (ChangeLayerDepth).
+	if node.has_meta("gamemaker_layer_depth") and gml_depth_truncate(node.get_meta("gamemaker_layer_depth")) == resolved_depth:
+		return true
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
 	_gml_depth_track(node, resolved_depth)
+	_gml_room_place_layer_node(node.get_parent(), node)
 	return true
 
 
@@ -175,7 +184,7 @@ static func gml_layer_create(depth, layer_name = ""):
 	node.set_meta("gamemaker_layer_hspeed", 0)
 	node.set_meta("gamemaker_layer_vspeed", 0)
 	node.set_meta("gamemaker_placeholder", true)
-	parent.add_child(node)
+	_gml_room_add_layer_node(parent, node)
 	return _gml_layer_register_node(node)
 
 
@@ -232,6 +241,138 @@ static func gml_layer_add_instance(layer, instance):
 			instance_node.z_as_relative = true
 			instance_node.z_index = 0
 	return true
+
+
+# --- Layer order at one depth and managed layers --------------------------------
+#
+# GameMaker keeps a room's layers in one list sorted by depth. A layer it adds
+# goes after every layer of the same depth (yyOList.Add, used by layer_create,
+# AddDynamicLayer and ChangeLayerDepth), and DrawRoomLayers and
+# ExecuteDrawEvent (yyRoom.js) walk that list from its end, so of the layers
+# that share a depth the one added last draws first, behind the others. Godot
+# draws canvas items that share a z_index in tree order, so a layer node added
+# at a depth goes before every room child at that depth.
+#
+# An instance or particle system that leaves its layer for a depth goes to the
+# room's managed layer at that depth (LayerManager.AddInstance and
+# AddNewElementAtDepth: GetLayerWithDepth looks at managed layers only, then
+# AddDynamicLayer). GameMaker keeps a managed layer, even empty, until the room
+# ends, so a later move to that depth joins it where it is. Here a managed layer
+# is a Node2D under the room root; what it holds draws at its depth's z_index.
+
+# The room's managed layer at a truncated depth, added when there is none.
+static func _gml_managed_layer(room_root, depth):
+	var layers = room_root.get_meta(GML_MANAGED_LAYERS_META, {})
+	var layer = layers.get(depth, null)
+	if is_instance_valid(layer):
+		return layer
+	layer = Node2D.new()
+	# Its depth can change (ChangeLayerDepth), so its name does not give one.
+	layer.name = "GMManagedLayer"
+	layer.set_meta(GML_MANAGED_LAYER_DEPTH_META, depth)
+	layers[depth] = layer
+	room_root.set_meta(GML_MANAGED_LAYERS_META, layers)
+	_gml_room_add_layer_node(room_root, layer)
+	return layer
+
+
+# Puts an instance or particle system on the room's managed layer at a
+# truncated depth, after what is already there. With alone_moves_layer, an
+# instance alone on its managed layer takes that layer to the new depth
+# instead (yyRoom.js ProcessDepthList2): ChangeLayerDepth puts the layer behind
+# every layer of that depth and merges the managed layer there into it.
+static func _gml_managed_layer_add(room_root, node, depth, alone_moves_layer = false):
+	var current = node.get_parent()
+	if alone_moves_layer and current != null and current.get_parent() == room_root and current.has_meta(GML_MANAGED_LAYER_DEPTH_META) and _gml_managed_layer_holds_only(current, node):
+		_gml_managed_layer_set_depth(room_root, current, depth)
+		return
+	var layer = _gml_managed_layer(room_root, depth)
+	if current != layer:
+		_gml_instance_move_to_parent(node, layer)
+
+
+static func _gml_managed_layer_holds_only(layer, node):
+	for child in layer.get_children():
+		if child != node and not child.is_queued_for_deletion():
+			return false
+	return true
+
+
+static func _gml_managed_layer_set_depth(room_root, layer, depth):
+	var layers = room_root.get_meta(GML_MANAGED_LAYERS_META, {})
+	var old_depth = int(layer.get_meta(GML_MANAGED_LAYER_DEPTH_META))
+	if old_depth == depth:
+		return
+	if layers.get(old_depth, null) == layer:
+		layers.erase(old_depth)
+	var merged = layers.get(depth, null)
+	layer.set_meta(GML_MANAGED_LAYER_DEPTH_META, depth)
+	layers[depth] = layer
+	room_root.set_meta(GML_MANAGED_LAYERS_META, layers)
+	_gml_room_place_layer_node(room_root, layer)
+	if is_instance_valid(merged) and merged != layer:
+		# The merged layer's nodes follow this layer's own, in their order.
+		for child in merged.get_children():
+			_gml_instance_move_to_parent(child, layer)
+		if merged.get_child_count() == 0:
+			merged.queue_free()
+
+
+# Adds a layer node to a room behind every room child at its depth. A room
+# still adding its own children takes it at the end of the frame.
+static func _gml_room_add_layer_node(room_root, node):
+	if room_root.is_node_ready():
+		room_root.add_child(node, true)
+		_gml_room_place_layer_node(room_root, node)
+		return
+	room_root.add_child.call_deferred(node, true)
+	(func(): _gml_room_place_layer_node(room_root, node, false)).call_deferred()
+
+
+# Moves a room's layer node before every other room child at its depth; a
+# room still adding its own children is reordered at the end of the frame.
+# Nested layers stay in their parent layer.
+static func _gml_room_place_layer_node(room_root, node, may_wait = true):
+	if not is_instance_valid(room_root) or not is_instance_valid(node) or node.get_parent() != room_root:
+		return
+	if room_root.has_meta(&"gamemaker_layer_depth"):
+		return
+	if not room_root.is_node_ready():
+		if may_wait:
+			(func(): _gml_room_place_layer_node(room_root, node, false)).call_deferred()
+		return
+	var depth = _gml_room_layer_node_depth(node)
+	if depth == null:
+		return
+	for child in room_root.get_children():
+		if child == node:
+			return
+		if _gml_room_child_has_depth(child, depth):
+			room_root.move_child(node, child.get_index())
+			return
+
+
+static func _gml_room_layer_node_depth(node):
+	if node.has_meta(GML_MANAGED_LAYER_DEPTH_META):
+		return int(node.get_meta(GML_MANAGED_LAYER_DEPTH_META))
+	if node.has_meta(&"gamemaker_layer_depth"):
+		return gml_depth_truncate(node.get_meta(&"gamemaker_layer_depth"))
+	return null
+
+
+# Whether a room child is, or nests, a layer at the depth.
+static func _gml_room_child_has_depth(node, depth):
+	var node_depth = _gml_room_layer_node_depth(node)
+	if node_depth == null:
+		return false
+	if node_depth == depth:
+		return true
+	if node.has_meta(GML_MANAGED_LAYER_DEPTH_META):
+		return false
+	for child in node.get_children():
+		if child.has_meta(&"gamemaker_layer_depth") and _gml_room_child_has_depth(child, depth):
+			return true
+	return false
 
 
 static func gml_layer_get_all_elements(layer):

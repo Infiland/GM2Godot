@@ -282,6 +282,9 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	var parent = _gml_instance_creation_parent(current_self, layer)
 	if parent == null:
 		return gml_instance_noone()
+	if layer == null and depth_value != null and parent == _gml_layer_current_scene():
+		# GameMaker puts it on the room's managed layer at its depth.
+		parent = _gml_managed_layer(parent, gml_depth_truncate(depth_value))
 	parent.add_child(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):

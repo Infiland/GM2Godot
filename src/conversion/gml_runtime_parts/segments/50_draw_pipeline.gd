@@ -714,20 +714,25 @@ static func gml_instance_depth_assign(instance, value, current = null):
 
 
 # GameMaker moves an instance whose depth no longer truncates to its layer's
-# depth off that layer onto a managed layer at the new depth (yyRoom.js
+# depth off that layer onto the managed layer at the new depth (yyRoom.js
 # ProcessDepthList2, LayerManager.AddInstance): the room layer's visibility,
-# position and layer_destroy no longer affect it. Here it moves to the room
-# root, keeping x and y, and draws at its depth's own z_index.
+# position and layer_destroy no longer affect it. Here it moves to the room's
+# managed layer node, keeping x and y, and draws at its depth's own z_index.
 # An instance a sequence plays stays in the sequence.
 static func _gml_instance_apply_depth_z(instance, depth):
 	var truncated = gml_depth_truncate(depth)
-	var layer_depth = _gml_instance_layer_depth(instance)
-	if layer_depth != null and not bool(instance.get_meta("gamemaker_in_sequence", false)):
-		if gml_depth_truncate(layer_depth) == truncated:
-			return
-		var room_root = _gml_instance_layer_room_root(instance)
-		if room_root != null:
-			_gml_instance_move_to_parent(instance, room_root)
+	if not bool(instance.get_meta("gamemaker_in_sequence", false)):
+		var parent = instance.get_parent()
+		if parent != null and parent.has_meta(GML_MANAGED_LAYER_DEPTH_META):
+			if int(parent.get_meta(GML_MANAGED_LAYER_DEPTH_META)) != truncated and parent.get_parent() != null:
+				_gml_managed_layer_add(parent.get_parent(), instance, truncated, true)
+		else:
+			var layer_depth = _gml_instance_layer_depth(instance)
+			if layer_depth != null and gml_depth_truncate(layer_depth) == truncated:
+				return
+			var room_root = _gml_instance_layer_room_root(instance)
+			if room_root != null:
+				_gml_managed_layer_add(room_root, instance, truncated)
 	_gml_depth_track(instance, truncated)
 
 
@@ -738,7 +743,7 @@ static func _gml_instance_layer_room_root(instance):
 	while node != null:
 		if node.has_meta(&"gm2godot_room_root_policy"):
 			return node
-		if node.has_meta(&"gamemaker_layer_depth"):
+		if node.has_meta(&"gamemaker_layer_depth") or node.has_meta(GML_MANAGED_LAYER_DEPTH_META):
 			room_root = node.get_parent()
 		node = node.get_parent()
 	return room_root
@@ -751,15 +756,20 @@ static func _gml_instance_move_to_parent(instance, parent, keep_global_transform
 	var current_parent = instance.get_parent()
 	if current_parent == parent:
 		return
-	instance.set_meta(GML_LAYER_MOVE_META, true)
 	var busy = (current_parent != null and not current_parent.is_node_ready()) or not parent.is_node_ready()
 	if busy:
-		if current_parent != null:
-			instance.reparent.call_deferred(parent, keep_global_transform)
-		else:
-			parent.add_child.call_deferred(instance)
-		instance.remove_meta.call_deferred(GML_LAYER_MOVE_META)
+		(func(): _gml_instance_move_now(instance, parent, keep_global_transform)).call_deferred()
 		return
+	_gml_instance_move_now(instance, parent, keep_global_transform)
+
+
+static func _gml_instance_move_now(instance, parent, keep_global_transform):
+	if not is_instance_valid(instance) or not is_instance_valid(parent) or instance.is_queued_for_deletion():
+		return
+	var current_parent = instance.get_parent()
+	if current_parent == parent:
+		return
+	instance.set_meta(GML_LAYER_MOVE_META, true)
 	if current_parent != null:
 		instance.reparent(parent, keep_global_transform)
 	else:

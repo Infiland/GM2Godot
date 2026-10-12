@@ -94,8 +94,8 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # The 178 source conversion gaps remain. The asset-registry
-                # step now also skips its 104 object/room rows whose required
+                # The 39 source conversion gaps remain. The asset-registry
+                # step now also skips its 5 object rows whose required
                 # generated outputs are absent, plus the authored sequence whose
                 # embedded animation curve is intentionally diagnosed by #707.
                 # Rooms whose creation-code sidecars are missing convert as
@@ -103,8 +103,8 @@ class TestTCCConversion(unittest.TestCase):
                 # closed for custom vertex data, reserved Godot globals, or
                 # unsupported scalar matrix constructors and are omitted once
                 # more from the registry.
-                completed=5081,
-                skipped=294,
+                completed=5319,
+                skipped=56,
                 failed=11,
             ),
         )
@@ -291,13 +291,13 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 191)
-        self.assertEqual(len(script_transpile_diagnostics), 74)
-        self.assertEqual(len(script_transpile_resources), 74)
-        self.assertEqual(len(object_transpile_diagnostics), 115)
-        self.assertEqual(len(object_transpile_resources), 100)
-        self.assertEqual(len(room_transpile_diagnostics), 2)
-        self.assertEqual(room_transpile_resources, {"r_donolvl1", "r_lvl1"})
+        self.assertEqual(len(all_transpile_diagnostics), 37)
+        self.assertEqual(len(script_transpile_diagnostics), 34)
+        self.assertEqual(len(script_transpile_resources), 34)
+        self.assertEqual(len(object_transpile_diagnostics), 3)
+        self.assertEqual(len(object_transpile_resources), 3)
+        self.assertEqual(len(room_transpile_diagnostics), 0)
+        self.assertEqual(room_transpile_resources, set())
 
         object_event_source_missing = [
             (

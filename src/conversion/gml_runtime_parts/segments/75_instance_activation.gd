@@ -25,6 +25,11 @@ const GML_INSTANCE_DEACTIVATED_META = &"_gm2godot_deactivated_node_state"
 static var _gml_instance_deactivated = {}
 # Entries whose node state is updated at the end of the frame, by node id.
 static var _gml_instance_activation_pending = {}
+# The deactivated instances of the persistent rooms that were left, by node
+# id: each room keeps its own deactivated list, out of reach of
+# instance_activate_* in other rooms, and an id that names one of them
+# still names a deactivated instance.
+static var _gml_instance_parked_deactivated = {}
 # Counts the calls that deactivated or activated instances; the step list
 # drops such instances when it changed (_gml_step_collect_instances).
 static var _gml_instance_activation_changes = 0
@@ -291,18 +296,22 @@ static func _gml_instance_forget_deactivated(entry):
 		_gml_instance_deactivated.erase(entry["node_id"])
 
 
-# Whether a node is a deactivated instance.
+# Whether a node is a deactivated instance (of the current room or of a
+# persistent room that was left).
 static func _gml_instance_node_deactivated(node):
-	if _gml_instance_deactivated.is_empty() or typeof(node) != TYPE_OBJECT or not is_instance_valid(node):
+	if _gml_instance_deactivated.is_empty() and _gml_instance_parked_deactivated.is_empty():
 		return false
-	return _gml_instance_deactivated.has(node.get_instance_id())
+	if typeof(node) != TYPE_OBJECT or not is_instance_valid(node):
+		return false
+	var node_id = node.get_instance_id()
+	return _gml_instance_deactivated.has(node_id) or _gml_instance_parked_deactivated.has(node_id)
 
 
 # with and the instance functions do not see a deactivated instance, even
 # one given by its id: the targets without it. Object and all targets come
 # from the live lists, which only hold active instances.
 static func _gml_instance_targets_active(targets):
-	if _gml_instance_deactivated.is_empty() or targets.size() != 1:
+	if targets.size() != 1 or (_gml_instance_deactivated.is_empty() and _gml_instance_parked_deactivated.is_empty()):
 		return targets
 	if _gml_instance_node_deactivated(targets[0]):
 		return []
@@ -337,11 +346,45 @@ static func _gml_instance_deactivated_targets(target, current_self = null, curre
 # (yyVariable.js passes over instances that are not active), while o.x still
 # reads a deactivated one. An instance node given as it is is read as it is.
 static func _gml_variable_instance_names_deactivated(instance_value):
-	if _gml_instance_deactivated.is_empty():
+	if _gml_instance_deactivated.is_empty() and _gml_instance_parked_deactivated.is_empty():
 		return false
 	if typeof(instance_value) == TYPE_OBJECT and instance_value is Node:
 		return false
-	return not _gml_instance_deactivated_targets(instance_value).is_empty()
+	if not _gml_instance_deactivated_targets(instance_value).is_empty():
+		return true
+	# One deactivated in a persistent room that was left.
+	return _gml_instance_node_deactivated(_gml_selector_direct_target(instance_value))
+
+
+# Leaving a persistent room: its deactivated instances leave the current
+# room's list and stay deactivated with the room. Returns them in
+# deactivation order.
+static func _gml_instance_park_deactivated(scene):
+	var parked = []
+	for entry in _gml_instance_deactivated.values():
+		var node = entry["instance"]
+		if typeof(node) == TYPE_OBJECT and is_instance_valid(node) and _gml_room_scene_holds(scene, node):
+			parked.append(entry)
+	for entry in parked:
+		_gml_instance_deactivated.erase(entry["node_id"])
+		_gml_instance_parked_deactivated[entry["node_id"]] = entry
+	return parked
+
+
+# Entering the room again: its deactivated instances, registered again, are
+# the current room's deactivated list once more, in their order.
+static func _gml_instance_resume_deactivated(entries):
+	for entry in entries:
+		_gml_instance_parked_deactivated.erase(entry["node_id"])
+		if is_same(_gml_instance_entries.get(entry["handle"].index), entry):
+			_gml_instance_deactivated[entry["node_id"]] = entry
+
+
+# A parked room dropped (game_restart, program exit): its deactivated
+# instances go with it.
+static func _gml_instance_drop_parked_deactivated(entries):
+	for entry in entries:
+		_gml_instance_parked_deactivated.erase(entry["node_id"])
 
 
 # A room's deactivated instances, persistent ones too, are deleted without

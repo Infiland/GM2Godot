@@ -686,6 +686,137 @@ func _process(_delta):
 """
 
 
+# --- A persistent room keeps its deactivated instances -----------------------------
+#
+# Only a room that is not persistent deletes its deactivated instances when it
+# ends (yyRoom.js ClearInstances, which _GameMaker.js StartRoom runs only for
+# such a room); persistent instances move on from the active list only. A
+# persistent room keeps its deactivated list, persistent instances in it too,
+# and instance_activate_* in another room does not reach it (they look at the
+# current room's list). Back in the room, the instances are still deactivated
+# (no Room Start); activated, they run their events again, an alarm that
+# stopped counting down while they were deactivated included.
+
+_PARKED_RUN_STEP = """\
+var _t = global.t;
+if (_t == 1) {
+    instance_deactivate_object(global.sleeper);
+    instance_deactivate_object(global.pkeep);
+    room_goto(r_away);
+}
+if (_t == 2) {
+    instance_activate_all();
+    trace("away:" + string(instance_number(o_sleeper)) + yn(instance_exists(global.sleeper))
+        + ":" + string(instance_number(o_pkeep)) + yn(instance_exists(global.pkeep))
+        + ":" + string(instance_number(all)));
+}
+if (_t == 3) {
+    room_goto(r_hub);
+}
+if (_t == 4) {
+    trace("hub:" + string(instance_number(o_sleeper)) + yn(instance_exists(global.sleeper))
+        + ":" + string(instance_number(o_pkeep)) + yn(instance_exists(global.pkeep)));
+    instance_activate_object(global.sleeper);
+    instance_activate_object(o_pkeep);
+    trace("hub activated:" + string(instance_number(o_sleeper)) + yn(instance_exists(global.sleeper))
+        + ":" + string(instance_number(o_pkeep)) + yn(instance_exists(global.pkeep))
+        + ":" + string(instance_number(all)));
+}
+"""
+
+_PARKED_PROJECT = GameMakerProject(
+    name="DeactivationPersistentRoom",
+    scripts={"scr_trace": _SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_run",
+            {
+                EVENT_CREATE: "global.t = 0;\n",
+                EVENT_BEGIN_STEP: "global.t += 1;\n",
+                EVENT_STEP: _PARKED_RUN_STEP,
+                EVENT_END_STEP: "if (global.t == 6) global.done = true;\n",
+            },
+            persistent=True,
+        ),
+        GameMakerObject(
+            "o_sleeper",
+            {
+                EVENT_CREATE: "alarm[0] = 2;\n",
+                EVENT_ROOM_START: 'trace("room start:" + tag + "@" + string(global.t));\n',
+                EVENT_ALARM_0: 'trace("alarm:" + tag + "@" + string(global.t));\n',
+                EVENT_STEP: 'trace("step:" + tag + "@" + string(global.t));\n',
+            },
+        ),
+        GameMakerObject(
+            "o_pkeep",
+            {
+                EVENT_ROOM_START: 'trace("room start:" + tag + "@" + string(global.t));\n',
+                EVENT_STEP: 'trace("step:" + tag + "@" + string(global.t));\n',
+            },
+            persistent=True,
+        ),
+        GameMakerObject("o_mark", {}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_hub",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_run", "o_run", 0, 0, creation_code=_tag("run")),
+                        RoomInstance("inst_sleeper", "o_sleeper", 0, 0, creation_code=_tag("sleeper")),
+                        RoomInstance("inst_pkeep", "o_pkeep", 0, 0, creation_code=_tag("pkeep")),
+                    ),
+                ),
+            ),
+            creation_order=("inst_run", "inst_sleeper", "inst_pkeep"),
+            persistent=True,
+        ),
+        GameMakerRoom(
+            "r_away",
+            layers=(
+                InstanceLayer("Instances", 0, (RoomInstance("inst_mark", "o_mark", 0, 0, creation_code=_tag("mark")),)),
+            ),
+            creation_order=("inst_mark",),
+        ),
+    ),
+)
+
+_PARKED_EXPECTED = [
+    "room start:sleeper@0",
+    "room start:pkeep@0",
+    "away:0n:0n:2",
+    "hub:0n:0n",
+    "hub activated:1y:1y:3",
+    # Activated during the Step, they join the step after it.
+    "alarm:sleeper@5",
+    "step:sleeper@5",
+    "step:pkeep@5",
+    "step:sleeper@6",
+    "step:pkeep@6",
+]
+
+_PARKED_PROBE = """extends Node
+
+const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+var _frames = 0
+
+
+func _process(_delta):
+	_frames += 1
+	if _frames > 120:
+		print("DEACTIVATION_TIMEOUT")
+		get_tree().quit(1)
+		return
+	if GMRuntime.gml_global_scope().has("done"):
+		print("DEACTIVATION_TRACE " + JSON.stringify(GMRuntime.gml_global_scope().get("trace", [])))
+		get_tree().quit(0)
+"""
+
+
 # --- Layers and what is drawn ------------------------------------------------------
 
 _LAYERS_RUN_STEP = """\
@@ -842,6 +973,17 @@ class TestInstanceDeactivationGodot(unittest.TestCase):
         traces = _trace_lines(output, "DEACTIVATION_TRACE ")
         self.assertEqual(len(traces), 1, output)
         self.assertEqual(json.loads(traces[0]), _ROOMS_EXPECTED)
+
+    def test_persistent_room_keeps_its_deactivated_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            write_gamemaker_project(root / "gamemaker", _PARKED_PROJECT)
+            convert_gamemaker_project(root / "gamemaker", root / "godot")
+            output = self._run(root / "godot", _PARKED_PROBE)
+
+        traces = _trace_lines(output, "DEACTIVATION_TRACE ")
+        self.assertEqual(len(traces), 1, output)
+        self.assertEqual(json.loads(traces[0]), _PARKED_EXPECTED)
 
     def test_step_list_built_afresh_takes_in_every_live_instance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

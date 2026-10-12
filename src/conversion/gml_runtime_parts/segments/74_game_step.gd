@@ -381,7 +381,9 @@ static func _gml_step_update_images(frame):
 		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if info.tracks_previous:
-			var position = inst.global_position if inst is Node2D else _gml_instance_position(inst)
+			# In the space of x and y, which the motion step and solid
+			# rollback use too: an offset layer node does not move them.
+			var position = _gml_collision_instance_xy(inst) if inst is Node2D else _gml_instance_position(inst)
 			inst.xprevious = position.x
 			inst.yprevious = position.y
 		if info.animates:

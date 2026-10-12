@@ -170,6 +170,9 @@ class TestGameStepGodotSmoke(unittest.TestCase):
             """\
 
             func _ready():
+            \t# The probe's parent is offset, as an instance layer moved by
+            \t# layer_x is: xprevious must stay in the space of x.
+            \tposition = Vector2(40, 25)
             \tprobe = Probe.new()
             \tprobe.name = "Probe"
             \tadd_child(probe)

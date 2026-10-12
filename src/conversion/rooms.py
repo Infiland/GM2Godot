@@ -746,12 +746,15 @@ class RoomConverter(BaseConverter):
                 source,
                 asset_names=asset_names,
                 top_level_global_scope=top_level_global_scope,
+                macro_configuration=self.macro_configuration,
                 source_path=source_path,
                 event=label,
                 preserve_source_comments=True,
                 self_expression=self_expression,
                 other_expression=other_expression,
                 instance_target=instance_target,
+                enum_values=self._project_enum_values(),
+                macro_values=self._project_macro_values(),
             )
         except GMLTranspileError as exc:
             message = (

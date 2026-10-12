@@ -387,9 +387,10 @@ static func _gml_instance_drop_parked_deactivated(entries):
 		_gml_instance_parked_deactivated.erase(entry["node_id"])
 
 
-# A room's deactivated instances, persistent ones too, are deleted without
-# any event when the room ends (yyRoom.js ClearInstances; persistent
-# instances are only carried over from the active list).
+# The deactivated instances of a room that is not persistent, persistent
+# ones too, are deleted without any event when the room ends (yyRoom.js
+# ClearInstances; persistent instances are only carried over from the active
+# list). A persistent room keeps them (see _gml_instance_park_deactivated).
 static func _gml_instance_discard_deactivated(scene):
 	if _gml_instance_deactivated.is_empty() or not (scene is Node):
 		return

@@ -15,7 +15,8 @@ their bounding box (or by x/y without a sprite or mask) against a region
 whose right and bottom edges are left + width - 1 and top + height - 1; notme
 spares the calling instance. A deactivated instance cannot be destroyed, gets
 no Room End event, is not carried to the next room even when persistent, and
-is discarded with its room.
+is discarded with its room unless the room is persistent: a persistent room
+keeps its deactivated instances until it is entered again.
 
 The Godot node of a deactivated instance stops processing (which also takes
 its Area2D out of the physics space) and is not rendered.

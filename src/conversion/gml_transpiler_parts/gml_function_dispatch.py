@@ -467,6 +467,8 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
     "asset_get_index_from_id": (1, 1),
     "asset_has_any_tag": (2, 2),
     "sprite_get_name": (1, 1),
+    "sprite_exists": (1, 1),
+    "object_get_name": (1, 1),
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {

@@ -1284,6 +1284,8 @@ ASSET_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "asset_get_index_from_id": "gml_asset_get_index_from_id",
     "asset_has_any_tag": "gml_asset_has_any_tag",
     "sprite_get_name": "gml_sprite_get_name",
+    "sprite_exists": "gml_sprite_exists",
+    "object_get_name": "gml_object_get_name",
 })
 
 INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

@@ -1025,6 +1025,13 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(transpile_gml_expression("mouse_wheel_up()"), "GMRuntime.gml_mouse_wheel_up()")
         self.assertEqual(transpile_gml_expression("mouse_wheel_down()"), "GMRuntime.gml_mouse_wheel_down()")
 
+    def test_transpiles_object_get_name_and_sprite_exists(self):
+        self.assertEqual(
+            transpile_gml_expression("object_get_name(object_index)"),
+            "GMRuntime.gml_object_get_name(object_index)",
+        )
+        self.assertEqual(transpile_gml_expression("sprite_exists(spr)"), "GMRuntime.gml_sprite_exists(spr)")
+
     def test_transpiles_date_functions_and_time_zone_constants(self):
         self.assertEqual(
             transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),

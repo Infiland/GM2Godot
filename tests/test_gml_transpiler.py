@@ -1042,6 +1042,17 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_room_set_height(level_room, 768)",
         )
 
+    def test_transpiles_layer_draw_depth_forcing(self):
+        self.assertEqual(
+            transpile_gml_expression("layer_force_draw_depth(true, 0)"),
+            "GMRuntime.gml_layer_force_draw_depth(true, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("layer_is_draw_depth_forced()"),
+            "GMRuntime.gml_layer_is_draw_depth_forced()",
+        )
+        self.assertEqual(transpile_gml_expression("layer_get_forced_depth()"), "GMRuntime.gml_layer_get_forced_depth()")
+
     def test_transpiles_date_functions_and_time_zone_constants(self):
         self.assertEqual(
             transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),

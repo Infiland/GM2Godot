@@ -287,6 +287,7 @@ BOOLEAN_RESULT_FUNCTIONS: Final[AbstractSet[str]] = frozenset({
     "part_emitter_exists",
     "part_system_exists",
     "part_type_exists",
+    "path_exists",
     "room_exists",
     "sound_isplaying",
     "texture_exists",
@@ -1320,7 +1321,19 @@ MOTION_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 PATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "path_start": "gml_path_start",
     "path_end": "gml_path_end",
+    "path_exists": "gml_path_exists",
+    "path_get_name": "gml_path_get_name",
     "path_get_length": "gml_path_get_length",
+    "path_get_kind": "gml_path_get_kind",
+    "path_get_closed": "gml_path_get_closed",
+    "path_get_precision": "gml_path_get_precision",
+    "path_get_number": "gml_path_get_number",
+    "path_get_point_x": "gml_path_get_point_x",
+    "path_get_point_y": "gml_path_get_point_y",
+    "path_get_point_speed": "gml_path_get_point_speed",
+    "path_get_x": "gml_path_get_x",
+    "path_get_y": "gml_path_get_y",
+    "path_get_speed": "gml_path_get_speed",
 })
 
 MP_GRID_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

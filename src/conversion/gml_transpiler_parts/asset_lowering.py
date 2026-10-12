@@ -14,7 +14,19 @@ AssetLoweringDomain = Literal[
 
 
 _PATH_ASSET_ARG_INDICES: dict[str, frozenset[int]] = {
+    "path_exists": frozenset({0}),
+    "path_get_name": frozenset({0}),
     "path_get_length": frozenset({0}),
+    "path_get_kind": frozenset({0}),
+    "path_get_closed": frozenset({0}),
+    "path_get_precision": frozenset({0}),
+    "path_get_number": frozenset({0}),
+    "path_get_point_x": frozenset({0}),
+    "path_get_point_y": frozenset({0}),
+    "path_get_point_speed": frozenset({0}),
+    "path_get_x": frozenset({0}),
+    "path_get_y": frozenset({0}),
+    "path_get_speed": frozenset({0}),
     "path_start": frozenset({0}),
     "mp_grid_path": frozenset({1}),
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -161,6 +162,99 @@ def _write_smoke_scene(project_dir: Path) -> None:
     _write_text(project_dir / "smoke.tscn", smoke_scene)
 
 
+# Synthetic paths and what GameMaker's yyPath.js computes for them (lengths,
+# internal point counts and GetPosition samples [pos, x, y, speed factor]),
+# taken by running the HTML5 runner's yyPath.js under Node.
+_GEOMETRY_PATHS = (
+    PathRegistryEntry(
+        id=301, name="pth_smooth_open", closed=False, kind=1, precision=4, godot_path="",
+        points=(PathPoint(0, 0, 100), PathPoint(64, 0, 50), PathPoint(64, 64, 200), PathPoint(0, 64, 100)),
+    ),
+    PathRegistryEntry(
+        id=302, name="pth_smooth_closed", closed=True, kind=1, precision=3, godot_path="",
+        points=(PathPoint(0, 0, 100), PathPoint(100, 0, 100), PathPoint(100, 100, 100)),
+    ),
+    PathRegistryEntry(
+        id=303, name="pth_straight_closed", closed=True, kind=0, precision=4, godot_path="",
+        points=(PathPoint(0, 0, 100), PathPoint(30, 0, 50), PathPoint(30, 40, 100)),
+    ),
+    PathRegistryEntry(
+        id=304, name="pth_smooth_flat", closed=False, kind=1, precision=0, godot_path="",
+        points=(PathPoint(0, 0, 100), PathPoint(50, 50, 100), PathPoint(100, 0, 100)),
+    ),
+)
+_GEOMETRY_POSITIONS = (0.0, 0.1, 0.25, 0.5, 0.77, 1.0)
+_GEOMETRY_EXPECTED: dict[str, tuple[float, list[tuple[float, float, float]]]] = {
+    "pth_smooth_open": (167.83710758768837, [
+        (0, 0, 100),
+        (16.7836088784623, 0.05847947344411951, 87.02486682958599),
+        (41.89892706354746, 0.9442457525087887, 69.47953921404603),
+        (63.875, 32, 124.951171875),
+        (38.587839814986566, 63.594361398449664, 159.34278423853291),
+        (0, 64, 100),
+    ]),
+    "pth_smooth_closed": (234.3968047304862, [
+        (61.71875, 0.78125, 100),
+        (83.29196747128637, 9.227085811000508, 100),
+        (99.21875, 39.3391007315086, 100),
+        (71.82493351402685, 68.7114873184822, 100),
+        (28.52886466735191, 23.136251890145175, 100),
+        (61.71875, 0.78125, 100),
+    ]),
+    "pth_straight_closed": (120, [
+        (0, 0, 100),
+        (12, 0, 80),
+        (30, 0, 50),
+        (30, 30, 87.5),
+        (16.559999999999995, 22.079999999999995, 100),
+        (0, 0, 100),
+    ]),
+    "pth_smooth_flat": (100, [
+        (0, 0, 100),
+        (10, 0, 100),
+        (25, 0, 100),
+        (50, 0, 100),
+        (77, 0, 100),
+        (100, 0, 100),
+    ]),
+}
+
+_GEOMETRY_SCRIPT = """extends Node2D
+
+const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+func _ready():
+\tvar result = {}
+\tfor name in NAMES:
+\t\tvar path = GMRuntime.gml_asset_get_index(name)
+\t\tvar samples = []
+\t\tfor pos in POSITIONS:
+\t\t\tsamples.append([GMRuntime.gml_path_get_x(path, pos), GMRuntime.gml_path_get_y(path, pos), GMRuntime.gml_path_get_speed(path, pos)])
+\t\tvar points = []
+\t\tfor n in range(-1, GMRuntime.gml_path_get_number(path) + 1):
+\t\t\tpoints.append([GMRuntime.gml_path_get_point_x(path, n), GMRuntime.gml_path_get_point_y(path, n), GMRuntime.gml_path_get_point_speed(path, n)])
+\t\tresult[name] = {
+\t\t\t"exists": GMRuntime.gml_path_exists(path),
+\t\t\t"name": GMRuntime.gml_path_get_name(path),
+\t\t\t"length": GMRuntime.gml_path_get_length(path),
+\t\t\t"kind": GMRuntime.gml_path_get_kind(path),
+\t\t\t"closed": GMRuntime.gml_path_get_closed(path),
+\t\t\t"precision": GMRuntime.gml_path_get_precision(path),
+\t\t\t"samples": samples,
+\t\t\t"points": points,
+\t\t}
+\t# A path that does not exist.
+\tresult["missing"] = [
+\t\tGMRuntime.gml_path_exists(-1), GMRuntime.gml_path_exists(GMRuntime.gml_undefined()), GMRuntime.gml_path_get_name(999),
+\t\tGMRuntime.gml_path_get_length(999), GMRuntime.gml_path_get_kind(999), GMRuntime.gml_path_get_closed(999),
+\t\tGMRuntime.gml_path_get_precision(999), GMRuntime.gml_path_get_number(999), GMRuntime.gml_path_get_point_x(999, 0),
+\t\tGMRuntime.gml_path_get_x(999, 0.5), GMRuntime.gml_path_get_y(999, 0.5), GMRuntime.gml_path_get_speed(999, 0.5),
+\t]
+\tprint("PATH_GEOMETRY " + JSON.stringify(result))
+\tget_tree().quit(0)
+"""
+
+
 class TestPathsMotionGodotSmoke(unittest.TestCase):
     def test_runtime_paths_and_mp_grid_smoke_scene(self) -> None:
         godot_binary = _find_godot_binary()
@@ -203,6 +297,77 @@ class TestPathsMotionGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("PATHS_SMOKE_OK", output)
+
+    def test_paths_are_built_and_sampled_like_gamemaker(self) -> None:
+        # Smooth paths subdivide each corner up to their precision, closed
+        # paths run back to their first point, and positions along a path
+        # interpolate x, y and the speed factor by distance.
+        godot_binary = _find_godot_binary()
+        if godot_binary is None:
+            self.skipTest("Godot binary not available")
+        names = [entry.name for entry in _GEOMETRY_PATHS]
+        script = _GEOMETRY_SCRIPT.replace("NAMES", json.dumps(names)).replace(
+            "POSITIONS", json.dumps(list(_GEOMETRY_POSITIONS))
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = Path(tmpdir)
+            _write_text(
+                project_dir / "project.godot",
+                '[application]\nconfig/name="PathGeometry"\nrun/main_scene="res://geometry.tscn"\n',
+            )
+            write_gml_runtime(str(project_dir))
+            asset_entries = tuple(
+                AssetRegistryEntry(
+                    id=entry.id,
+                    name=entry.name,
+                    kind="paths",
+                    asset_type="path",
+                    type_name="Path",
+                    source_path=f"paths/{entry.name}/{entry.name}.yy",
+                    godot_path="",
+                    legacy_id=f"paths/{entry.name}/{entry.name}.yy",
+                )
+                for entry in _GEOMETRY_PATHS
+            )
+            _write_text(project_dir / "gm2godot" / "gml_asset_registry.gd", render_asset_registry_script(asset_entries))
+            _write_text(project_dir / "gm2godot" / "gml_path_registry.gd", render_path_registry_script(_GEOMETRY_PATHS))
+            _write_text(project_dir / "geometry.gd", script)
+            _write_text(
+                project_dir / "geometry.tscn",
+                '[gd_scene load_steps=2 format=3]\n\n[ext_resource type="Script" path="res://geometry.gd" id="1"]\n\n'
+                '[node name="Geometry" type="Node2D"]\nscript = ExtResource("1")\n',
+            )
+            result = subprocess.run(
+                [godot_binary, "--headless", "--path", str(project_dir), "--scene", "res://geometry.tscn", "--quit-after", "10"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+                env=dict(os.environ, HOME=str(project_dir)),
+            )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("ERROR", output)
+        lines = [line for line in output.splitlines() if line.startswith("PATH_GEOMETRY ")]
+        self.assertEqual(len(lines), 1, output)
+        geometry = json.loads(lines[0].removeprefix("PATH_GEOMETRY "))
+        for entry in _GEOMETRY_PATHS:
+            with self.subTest(path=entry.name):
+                actual = geometry[entry.name]
+                length, samples = _GEOMETRY_EXPECTED[entry.name]
+                self.assertTrue(actual["exists"])
+                self.assertEqual(actual["name"], entry.name)
+                self.assertEqual((actual["kind"], actual["closed"], actual["precision"]), (entry.kind, entry.closed, entry.precision))
+                self.assertAlmostEqual(actual["length"], length, places=9)
+                for position, expected, sample in zip(_GEOMETRY_POSITIONS, samples, actual["samples"], strict=True):
+                    for axis, (want, got) in enumerate(zip(expected, sample, strict=True)):
+                        self.assertAlmostEqual(got, want, places=9, msg=f"pos {position} axis {axis}")
+                # Defining points; 0 for indices outside the path.
+                self.assertEqual(
+                    actual["points"],
+                    [[0, 0, 0]] + [[point.x, point.y, point.speed] for point in entry.points] + [[0, 0, 0]],
+                )
+        self.assertEqual(geometry["missing"], [False, False, "", 0, 0, True, 8, 0, 0, -1, -1, -1])
 
 
 if __name__ == "__main__":

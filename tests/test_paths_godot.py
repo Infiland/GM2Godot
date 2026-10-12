@@ -152,6 +152,40 @@ class TestPathsGodot(unittest.TestCase):
             ["actions:0123", "index:true", "x:0", "x:10", "x:20", "x:30", "end:40", "x:40"],
         )
 
+    def test_instances_follow_the_curve_of_a_smooth_closed_path(self) -> None:
+        # A smooth path rounds each corner (precision 3 here) and a closed
+        # one runs on to its start, which on a closed smooth path is the
+        # middle of the closing leg's curve. Positions are x and y times 100,
+        # as GameMaker's runner computes them (yyPath.js).
+        trace = self._run_trace(
+            {
+                "o_runner": {
+                    EVENT_CREATE: "path_start(pth_loop, 30, path_action_stop, true);\n",
+                    EVENT_STEP: 'trace(string(round(x * 100)) + "," + string(round(y * 100)));\n',
+                    EVENT_PATH_END: 'trace("end:" + string(round(x * 100)) + "," + string(round(y * 100)));\n',
+                },
+            },
+            (("o_runner", 10, 10),),
+            (GameMakerPath("pth_loop", ((0, 0, 100), (100, 0, 100), (100, 100, 100)), closed=True, kind=1, precision=3),),
+            frames=11,
+        )
+        self.assertEqual(
+            trace,
+            [
+                "6172,78",
+                "8825,1347",
+                "9922,4074",
+                "9582,7001",
+                "6960,6700",
+                "4754,4676",
+                "2876,2356",
+                "3740,128",
+                "end:6172,78",
+                "6172,78",
+                "6172,78",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

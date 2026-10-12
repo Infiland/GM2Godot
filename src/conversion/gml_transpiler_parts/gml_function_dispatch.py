@@ -502,7 +502,19 @@ _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
 _PATH_ARITY: dict[str, tuple[int, int | None]] = {
     "path_start": (4, 4),
     "path_end": (0, 0),
+    "path_exists": (1, 1),
+    "path_get_name": (1, 1),
     "path_get_length": (1, 1),
+    "path_get_kind": (1, 1),
+    "path_get_closed": (1, 1),
+    "path_get_precision": (1, 1),
+    "path_get_number": (1, 1),
+    "path_get_point_x": (2, 2),
+    "path_get_point_y": (2, 2),
+    "path_get_point_speed": (2, 2),
+    "path_get_x": (2, 2),
+    "path_get_y": (2, 2),
+    "path_get_speed": (2, 2),
 }
 
 _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
@@ -1503,7 +1515,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("path_start", "path_end"):
             lowering_kind = "runtime_path_api"
-        elif name == "path_get_length":
+        else:
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 

@@ -3485,6 +3485,25 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("path_get_length(path_patrol)", asset_names=asset_names),
             'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',
         )
+        for name, arguments in (
+            ("path_exists", ""),
+            ("path_get_name", ""),
+            ("path_get_kind", ""),
+            ("path_get_closed", ""),
+            ("path_get_precision", ""),
+            ("path_get_number", ""),
+            ("path_get_point_x", ", 1"),
+            ("path_get_point_y", ", 1"),
+            ("path_get_point_speed", ", 1"),
+            ("path_get_x", ", 0.5"),
+            ("path_get_y", ", 0.5"),
+            ("path_get_speed", ", 0.5"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol{arguments})", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"){arguments})',
+                )
         self.assertEqual(
             transpile_gml_expression("mp_grid_create(0, 0, 4, 4, 16, 16)"),
             "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)",

@@ -166,7 +166,8 @@ static func gml_layer_sequence_create(layer, x, y, sequence):
 		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
 	var node = Node2D.new()
 	node.name = "Sequence_" + str(sequence_object.get("name", sequence_object.get("id", "dynamic")))
-	node.position = Vector2(_to_real(x), _to_real(y))
+	# Drawn at the layer offset like every sequence element.
+	node.position = Vector2(_to_real(x), _to_real(y)) + _gml_layer_node_offset(layer_node)
 	node.set_meta("gamemaker_sequence_instance", true)
 	node.set_meta("gamemaker_sequence_asset", sequence_object.get("id", -1))
 	node.set_meta("gamemaker_sequence_name", sequence_object.get("name", ""))

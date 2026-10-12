@@ -277,16 +277,18 @@ def _write_probe(project_dir: Path, room_path: str) -> None:
         \t\treturn
         \tif not _check(layer.z_index == 240, "layer depth was not preserved"):
         \t\treturn
-        \tif not _check(layer.position == Vector2(3, 5), "layer offset was not preserved"):
+        \tif not _check(layer.get_meta("gamemaker_layer_x") == 3 and layer.get_meta("gamemaker_layer_y") == 5, "layer offset was not preserved"):
         \t\treturn
         \tvar host = layer.get_node_or_null("particle_authored")
         \tif not _check(host is Node2D, "particle layer element missing"):
         \t\treturn
-        \tif not _check(host.position == Vector2(32, 48), "element position mismatch"):
+        \t# A particle system is drawn at its own position, not at the layer
+        \t# offset (yyParticle.js ParticleSystem_Update).
+        \tif not _check(host.global_position == Vector2(32, 48), "element position mismatch: " + str(host.global_position)):
         \t\treturn
         \tif not _check(host.scale == Vector2(1.5, 0.75), "element scale mismatch"):
         \t\treturn
-        \tif not _check(abs(host.rotation_degrees - 15.0) < 0.001, "element rotation mismatch"):
+        \tif not _check(abs(host.rotation_degrees + 15.0) < 0.001, "element rotation mismatch (GameMaker turns counter-clockwise)"):
         \t\treturn
         \tvar system = host.get_meta("gamemaker_particle_system_handle", null)
         \tif not _check(GMRuntime.gml_part_system_exists(system), "authored system was not instantiated"):

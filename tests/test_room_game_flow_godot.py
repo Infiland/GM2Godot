@@ -230,6 +230,8 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     """\
                     extends Node
 
+                    const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
                     func _ready():
                     \tcall_deferred("_run")
 
@@ -245,10 +247,17 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     \tawait get_tree().process_frame
                     \tvar room = get_parent()
                     \tvar camera = room.get_node("ViewCamera")
-                    \tvar background = room.get_node("Backgrounds/BackgroundVisual")
+                    \tvar layer = room.get_node("Backgrounds")
                     \tif not _check(abs(camera.position.x - 260.0) < 0.01, "Camera2D did not follow target on x"):
                     \t\treturn
-                    \tif not _check(background.scroll_offset.x > 0.0, "Background Parallax2D did not scroll"):
+                    \t# Each step scrolls the layer offset by its speed; the
+                    \t# background is drawn at the offset, the layer node stays.
+                    \tvar visual = layer.get_node("BackgroundVisual")
+                    \tvar before = visual.position
+                    \tGMRuntime.gml_event_scheduler_frame(0.0, 1)
+                    \tif not _check(visual.position - before == Vector2(2, 0) and layer.position == Vector2.ZERO, "Background layer did not scroll: " + str(visual.position) + " layer at " + str(layer.position)):
+                    \t\treturn
+                    \tif not _check(GMRuntime.gml_layer_get_x("Backgrounds") == visual.position.x, "layer_get_x does not follow the scroll"):
                     \t\treturn
                     \tprint("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK")
                     \tget_tree().quit(0)
@@ -282,16 +291,14 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     [node name="Backgrounds" type="Node2D" parent="."]
                     metadata/gamemaker_layer_name = "Backgrounds"
                     metadata/gamemaker_layer_type = "GMRBackgroundLayer"
+                    metadata/gamemaker_layer_hspeed = 2
 
-                    [node name="BackgroundVisual" type="Parallax2D" parent="Backgrounds"]
-                    repeat_size = Vector2(320, 0)
-                    repeat_times = 3
-                    scroll_offset = Vector2(0, 0)
+                    [node name="BackgroundVisual" type="Node2D" parent="Backgrounds"]
                     metadata/gamemaker_layer_element_type = "background"
                     metadata/gamemaker_background_visual = true
+                    metadata/gamemaker_background_htiled = true
                     metadata/gamemaker_background_hspeed = 2
                     metadata/gamemaker_background_vspeed = 0
-                    metadata/gamemaker_background_runtime_support = true
 
                     [node name="Target" type="Node2D" parent="."]
                     script = ExtResource("target")

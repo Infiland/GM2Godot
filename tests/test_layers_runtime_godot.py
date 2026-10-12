@@ -112,7 +112,8 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_x(layer_id, 8) and GMRuntime.gml_layer_y(layer_id, 16), "layer position setters failed"):
         \t\treturn
-        \tif not _check(instances.position == Vector2(8, 16) and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
+        \t# An instance layer's offset does not move its instances.
+        \tif not _check(instances.position == Vector2.ZERO and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_hspeed(layer_id, 2) and GMRuntime.gml_layer_vspeed(layer_id, -1), "layer speed setters failed"):
         \t\treturn
@@ -310,6 +311,55 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tvar particles = GMRuntime.gml_part_system_create_layer(fx, false)
         \tvar particle_record = GMRuntime.gml_handle_resolve(particles)
         \tif not _check(particle_record["node"].get_parent() == fx_node, "particle layer resolver ignored layer handle"):
+        \t\treturn
+
+        \t# A layer offset places the layer's tilemaps, sprites and sequences,
+        \t# also ones added after the layer moved, but never its instances or
+        \t# particle systems; the layer node itself stays at the origin.
+        \tvar scrolled = GMRuntime.gml_layer_create(30, "Scrolled")
+        \tvar scrolled_node = GMRuntime.gml_handle_resolve(scrolled)
+        \tGMRuntime.gml_layer_x(scrolled, 10)
+        \tGMRuntime.gml_layer_y(scrolled, 20)
+        \tvar late_enemy_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(4, 5, scrolled, enemy_selector, self))
+        \tvar late_tilemap_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_layer_tilemap_create(scrolled, 3, 4, tile_set_id, 1, 1))
+        \tvar late_sequence = GMRuntime.gml_layer_sequence_create(scrolled, 1, 2, GMRuntime.gml_sequence_create())
+        \tvar late_sequence_node = GMRuntime.gml_handle_resolve(late_sequence)
+        \tvar late_particles_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_part_system_create_layer(scrolled, false))["node"]
+        \tvar moved_sprite = Node2D.new()
+        \tmoved_sprite.name = "spr_moved"
+        \tmoved_sprite.set_meta("gamemaker_asset_name", "spr_moved")
+        \tmoved_sprite.set_meta("gamemaker_asset_type", "GMRSpriteGraphic")
+        \tmoved_sprite.position = Vector2(6, 7)
+        \tfx_node.add_child(moved_sprite)
+        \tvar moved_sprite_id = GMRuntime._gml_layer_element_register(moved_sprite)
+        \tif not _check(GMRuntime.gml_layer_element_move(moved_sprite_id, scrolled), "layer_element_move to the moved layer failed"):
+        \t\treturn
+        \tfor step in [[Vector2(10, 20), "after layer_x"], [Vector2(15, 20), "after scrolling"]]:
+        \t\tvar offset = step[0]
+        \t\tvar drawn = [
+        \t\t\tscrolled_node.global_position,
+        \t\t\tlate_enemy_node.global_position,
+        \t\t\tlate_tilemap_node.global_position,
+        \t\t\tlate_sequence_node.global_position,
+        \t\t\tmoved_sprite.global_position,
+        \t\t\tlate_particles_node.global_position,
+        \t\t]
+        \t\tvar expected = [
+        \t\t\tVector2.ZERO,
+        \t\t\tVector2(4, 5),
+        \t\t\tVector2(3, 4) + offset,
+        \t\t\tVector2(1, 2) + offset,
+        \t\t\tVector2(6, 7) + offset,
+        \t\t\tVector2.ZERO,
+        \t\t]
+        \t\tif not _check(drawn == expected, "layer offset placement " + step[1] + ": " + str(drawn) + " != " + str(expected)):
+        \t\t\treturn
+        \t\tGMRuntime.gml_layer_hspeed(scrolled, 5)
+        \t\tGMRuntime._gml_layer_step_scroll()
+        \t\tGMRuntime.gml_layer_hspeed(scrolled, 0)
+        \tif not _check(GMRuntime.gml_layer_element_move(moved_sprite_id, fx) and moved_sprite.global_position == Vector2(6, 7), "layer_element_move kept the old layer offset: " + str(moved_sprite.global_position)):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_destroy(scrolled), "layer_destroy of the moved layer failed"):
         \t\treturn
 
         \tif not _check(GMRuntime.gml_layer_destroy(fx), "layer_destroy returned false"):

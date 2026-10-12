@@ -35,7 +35,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [x] Use deterministic room child hierarchy matching GameMaker layer/depth order.
 - [x] Use `CanvasLayer` for GUI layers and draw GUI behavior.
 - [ ] Use `TileMapLayer` or Godot 4 equivalent for tile layers where compatible.
-- [ ] Use `Parallax2D`/background controllers for scrolling/tiled backgrounds where compatible.
+- [x] Draw scrolling/tiled backgrounds with a runtime background controller (a repeating `Sprite2D` region kept over the visible area every frame); `Parallax2D` repeats a fixed number of copies around the screen and cannot follow GameMaker's per-view tiling.
 - [ ] Use `Path2D`/`Curve2D` for converted paths where compatible.
 - [ ] Use `AnimationPlayer`, `Animation`, and `AnimationLibrary` for sequences where compatible.
 - [ ] Use generated runtime schedulers when native Godot nodes would change GameMaker semantics.

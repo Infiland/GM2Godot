@@ -415,7 +415,7 @@ static func gml_layer_tilemap_create(layer, x, y, tileset, width, height):
 		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
 	var node = TileMapLayer.new()
 	node.name = "TileMap"
-	node.position = Vector2(_to_real(x), _to_real(y))
+	node.position = Vector2(_to_real(x), _to_real(y)) + _gml_layer_node_offset(layer_node)
 	node.tile_set = tile_set
 	node.set_meta("gamemaker_layer_element_type", "tilemap")
 	node.set_meta("gamemaker_tile_layer", true)
@@ -510,12 +510,18 @@ static func gml_layer_element_move(element, layer):
 		return false
 	if not (element_node is Node) or not (layer_node is Node):
 		return false
-	if element_node.get_parent() == layer_node:
+	var old_layer = element_node.get_parent()
+	if old_layer == layer_node:
 		return true
-	if element_node.get_parent() != null:
+	# The element keeps its own position and is drawn at the new layer's
+	# offset instead of the old one.
+	var shift = _gml_layer_element_offset(layer_node, element_node) - _gml_layer_element_offset(old_layer, element_node)
+	if old_layer != null:
 		element_node.reparent(layer_node, true)
 	else:
 		layer_node.add_child(element_node)
+	if element_node is Node2D:
+		element_node.position += shift
 	_gml_layer_element_register(element_node)
 	return true
 
@@ -524,6 +530,10 @@ static func gml_layer_get_element_type(element):
 	var node = _gml_layer_element_resolve_node(element)
 	if node == null:
 		return "undefined"
+	return _gml_layer_node_element_type(node)
+
+
+static func _gml_layer_node_element_type(node):
 	if node.has_meta("gamemaker_layer_element_type"):
 		return str(node.get_meta("gamemaker_layer_element_type"))
 	if (
@@ -708,13 +718,69 @@ static func _gml_layer_node_axis(node, axis):
 
 
 static func _gml_layer_set_node_axis(node, axis, value):
-	var key = "gamemaker_layer_" + str(axis)
-	if node is Node2D:
-		if str(axis) == "x":
-			node.position.x = value
-		else:
-			node.position.y = value
-	node.set_meta(key, value)
+	var offset = _gml_layer_node_offset(node)
+	if str(axis) == "x":
+		offset.x = value
+	else:
+		offset.y = value
+	_gml_layer_set_node_offset(node, offset)
+
+
+static func _gml_layer_node_offset(node):
+	return Vector2(_gml_layer_node_axis(node, "x"), _gml_layer_node_axis(node, "y"))
+
+
+# GameMaker draws a layer's backgrounds, sprites, tilemaps and sequences at
+# their own position plus the layer offset (yyRoom.js DrawLayer*Element add
+# m_xoffset/m_yoffset), but instances at their own x/y
+# (DrawLayerInstanceElement) and particle systems at their own position
+# (yyParticle.js ParticleSystem_Update). A layer node therefore stays at the
+# room origin, so whatever joins it later keeps its position, and each
+# element that follows the offset is placed at its own position plus the
+# offset.
+const GML_LAYER_OFFSET_ELEMENT_TYPES = ["background", "sprite", "tilemap", "sequence"]
+
+
+static func _gml_layer_set_node_offset(node, offset):
+	var delta = offset - _gml_layer_node_offset(node)
+	node.set_meta("gamemaker_layer_x", offset.x)
+	node.set_meta("gamemaker_layer_y", offset.y)
+	if delta == Vector2.ZERO:
+		return
+	for child in node.get_children():
+		if _gml_layer_element_follows_offset(child):
+			child.position += delta
+
+
+static func _gml_layer_element_follows_offset(element):
+	# Nested layers have offsets of their own.
+	return (
+		element is Node2D
+		and not _gml_layer_node_has_metadata(element)
+		and GML_LAYER_OFFSET_ELEMENT_TYPES.has(_gml_layer_node_element_type(element))
+	)
+
+
+# How far `element` on `layer_node` is drawn from its own position.
+static func _gml_layer_element_offset(layer_node, element):
+	if _gml_layer_node_has_metadata(layer_node) and _gml_layer_element_follows_offset(element):
+		return _gml_layer_node_offset(layer_node)
+	return Vector2.ZERO
+
+
+static func _gml_layer_step_scroll():
+	# GameMaker's LayerManager.UpdateLayers (Function_Layers.js), run each
+	# step after the instances' images update and before Begin Step: every
+	# layer's offset moves by its speed (layer_hspeed/layer_vspeed, which
+	# start at the Room Editor's speed of a background layer).
+	for handle in _gml_layer_handles_by_index.values():
+		if not gml_handle_is_valid(handle) or not (handle.reference is Node):
+			continue
+		var node = handle.reference
+		var speed = Vector2(_gml_layer_node_speed(node, "h"), _gml_layer_node_speed(node, "v"))
+		if speed != Vector2.ZERO:
+			_gml_layer_set_node_offset(node, _gml_layer_node_offset(node) + speed)
+	return null
 
 
 static func _gml_layer_node_speed(node, axis):
@@ -1024,3 +1090,202 @@ static func _gml_layer_background_color(color):
 		float((value >> 16) & 0xff) / 255.0,
 		1.0
 	)
+
+
+# --- Drawing background layer elements -----------------------------------
+#
+# GameMaker draws every background element each frame over the part of the
+# room being drawn (yyRoom.js DrawLayerBackgroundElement). A colour fills
+# that area whatever the layer offset. A sprite is drawn from its top-left
+# corner (backgrounds ignore the sprite origin) at the layer offset, scaled
+# by the element's xscale/yscale, or by room size / sprite size when it is
+# stretched, and along each tiled axis it repeats every scaled sprite width
+# or height across the area (yyWebGL.js WebGL_TextureDrawTiled_RELEASE). A
+# converted colour element is a ColorRect kept over the visible area; a
+# sprite element draws the current frame of its hidden sprite scene through
+# the region of a repeating Sprite2D (one quad, however many tiles).
+
+const GML_BACKGROUND_PARTS_META = "_gm2godot_background_parts"
+
+static var _gml_background_scene_id = 0
+static var _gml_background_nodes = []
+
+
+# The background elements of a room scene, found once per scene.
+static func _gml_layer_background_nodes(scene):
+	var scene_id = scene.get_instance_id()
+	if scene_id == _gml_background_scene_id:
+		var valid = true
+		for node in _gml_background_nodes:
+			if not is_instance_valid(node):
+				valid = false
+				break
+		if valid:
+			return _gml_background_nodes
+	_gml_background_scene_id = scene_id
+	_gml_background_nodes = []
+	for node in _gml_layer_tree_nodes(scene):
+		if node != scene and node is CanvasItem and _gml_layer_node_is_background(node):
+			_gml_background_nodes.append(node)
+	return _gml_background_nodes
+
+
+static func _gml_layer_background_draw(node):
+	if not node.is_visible_in_tree():
+		return
+	if node is Control:
+		_gml_layer_background_fill(node)
+		return
+	var parts = _gml_layer_background_parts(node)
+	if not parts.is_empty():
+		_gml_layer_background_tile(node, parts)
+
+
+# The viewport's visible area in `item`'s local coordinates (the bounding box
+# when the view is rotated).
+static func _gml_layer_background_visible_region(item):
+	var viewport = item.get_viewport()
+	if viewport == null:
+		return Rect2()
+	var transform = item.get_global_transform_with_canvas()
+	if absf(transform.determinant()) <= 0.0000001:
+		return Rect2()
+	var rect = viewport.get_visible_rect()
+	var to_local = transform.affine_inverse()
+	var region = Rect2(to_local * rect.position, Vector2.ZERO)
+	region = region.expand(to_local * Vector2(rect.end.x, rect.position.y))
+	region = region.expand(to_local * rect.end)
+	return region.expand(to_local * Vector2(rect.position.x, rect.end.y))
+
+
+static func _gml_layer_background_fill(rect_node):
+	var region = _gml_layer_background_visible_region(rect_node)
+	if not region.has_area():
+		return
+	var start = (rect_node.position + region.position).floor()
+	var size = (rect_node.position + region.end).ceil() - start
+	if rect_node.position != start:
+		rect_node.position = start
+	if rect_node.size != size:
+		rect_node.size = size
+
+
+# [tiles Sprite2D, frame source (Sprite2D or AnimatedSprite2D), sprite scene].
+static func _gml_layer_background_parts(node):
+	if node.has_meta(GML_BACKGROUND_PARTS_META):
+		var cached = node.get_meta(GML_BACKGROUND_PARTS_META)
+		if is_instance_valid(cached[0]) and is_instance_valid(cached[1]) and is_instance_valid(cached[2]):
+			return cached
+	var tiles = null
+	var scene = null
+	for child in node.get_children():
+		if child is Sprite2D and child.has_meta("gamemaker_background_tiles"):
+			tiles = child
+		elif child.has_meta("gamemaker_background_frames"):
+			scene = child
+	if tiles == null or scene == null:
+		return []
+	var source = scene if (scene is Sprite2D or scene is AnimatedSprite2D) else scene.find_child("AnimatedSprite2D", true, false)
+	if source == null:
+		source = scene.find_child("Sprite2D", true, false)
+	if source == null:
+		return []
+	var parts = [tiles, source, scene]
+	node.set_meta(GML_BACKGROUND_PARTS_META, parts)
+	return parts
+
+
+static func _gml_layer_background_tile(node, parts):
+	var tiles = parts[0]
+	var texture = _gml_layer_background_frame_texture(parts[1])
+	var size = Vector2.ZERO
+	if texture != null:
+		var scene = parts[2]
+		size = Vector2(
+			_to_real(scene.get_meta("gamemaker_width", texture.get_width())),
+			_to_real(scene.get_meta("gamemaker_height", texture.get_height()))
+		)
+	var scale = _gml_layer_background_scale(node, size)
+	var region = _gml_layer_background_visible_region(node)
+	var across = _gml_layer_background_axis(bool(node.get_meta("gamemaker_background_htiled", false)), size.x, scale.x, region.position.x, region.end.x)
+	var down = _gml_layer_background_axis(bool(node.get_meta("gamemaker_background_vtiled", false)), size.y, scale.y, region.position.y, region.end.y)
+	if texture == null or across.is_empty() or down.is_empty() or not region.has_area():
+		tiles.visible = false
+		return
+	if tiles.texture != texture:
+		tiles.texture = texture
+	var source = Rect2(Vector2.ZERO, size * Vector2(across[1], down[1]))
+	if tiles.region_rect != source:
+		tiles.region_rect = source
+	var position = Vector2(across[0], down[0])
+	if tiles.position != position:
+		tiles.position = position
+	if tiles.scale != scale:
+		tiles.scale = scale
+	tiles.visible = true
+
+
+static func _gml_layer_background_frame_texture(source):
+	if source is AnimatedSprite2D:
+		var frames = source.sprite_frames
+		if frames == null or not frames.has_animation(source.animation):
+			return null
+		if frames.get_frame_count(source.animation) <= 0:
+			return null
+		return frames.get_frame_texture(source.animation, source.frame)
+	if source is Sprite2D:
+		return source.texture
+	return null
+
+
+static func _gml_layer_background_scale(node, size):
+	if bool(node.get_meta("gamemaker_background_stretch", false)) and size.x > 0.0 and size.y > 0.0:
+		var room_size = Vector2(
+			_to_real(_gml_builtin_globals.get("room_width", 0)),
+			_to_real(_gml_builtin_globals.get("room_height", 0))
+		)
+		if room_size.x > 0.0 and room_size.y > 0.0:
+			return room_size / size
+	return Vector2(
+		_to_real(node.get_meta("gamemaker_background_xscale", 1.0)),
+		_to_real(node.get_meta("gamemaker_background_yscale", 1.0))
+	)
+
+
+# [position, copies] of the strip along one axis: the sprite once from the
+# element's origin, or, when tiled, the copies on the grid anchored at the
+# origin that cover [low, high]. A negative scale mirrors each copy towards
+# lower coordinates, so the strip then starts from its far end.
+static func _gml_layer_background_axis(tiled, size, scale, low, high):
+	var step = absf(size * scale)
+	if step <= 0.0:
+		return []
+	if not tiled:
+		return [0.0, 1]
+	var start = floor(low / step) * step
+	var copies = maxi(int(ceil((high - start) / step)), 1)
+	return [start + copies * step if scale < 0.0 else start, copies]
+
+
+# --- Sprite elements on asset layers -------------------------------------
+
+static func _gml_layer_is_sprite_element(node):
+	return node.has_meta("gamemaker_layer_element_type") and str(node.get_meta("gamemaker_layer_element_type")) == "sprite"
+
+
+static func _gml_layer_sprite_element_start(node):
+	# A sprite placed in the Room Editor starts at its initial frame
+	# (headPosition) and plays at its animation speed times the sprite's
+	# (Function_Layers.js: NewSprite.m_imageIndex = sImageIndex,
+	# m_imageSpeed = sImageSpeed). The head wraps into the sprite's frames
+	# like a looping sprite sequence (yySequence.js HandleSequenceWrapping),
+	# so -1 is the last frame.
+	var visual = node.get_node_or_null("AnimatedSprite2D")
+	if not (visual is AnimatedSprite2D) or visual.sprite_frames == null:
+		return
+	var count = visual.sprite_frames.get_frame_count(visual.animation)
+	if count <= 0:
+		return
+	var head = _to_real(node.get_meta("gamemaker_asset_head_position", 0))
+	visual.frame = posmod(int(floor(head)), count)
+	visual.speed_scale = _to_real(node.get_meta("gamemaker_asset_animation_speed", 1))

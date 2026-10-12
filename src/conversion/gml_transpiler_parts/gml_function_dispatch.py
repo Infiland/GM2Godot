@@ -1235,6 +1235,7 @@ _DRAW_ARITY: dict[str, tuple[int, int | None]] = {
     "surface_reset_target": (0, 0),
     "surface_get_width": (1, 1),
     "surface_get_height": (1, 1),
+    "surface_resize": (3, 3),
     "draw_surface": (3, 3),
     "draw_surface_ext": (8, 8),
     "surface_copy": (4, 4),

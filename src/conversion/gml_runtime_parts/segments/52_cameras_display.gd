@@ -6,6 +6,8 @@ const GML_VIEW_CAMERA_NODE_PATH = ^"ViewCamera"
 const GML_VIEW_PRESENTER_READY_META = "_gm2godot_view_presenter"
 const GML_VIEW_CAMERA_NODE_META = "gamemaker_view_camera"
 const GML_VIEW_STATE_META = "_gm2godot_view_state"
+# Hides the room's own canvas while views are enabled and none is visible.
+const GML_VIEW_ROOM_HIDER_NAME = "_GM2GodotRoomHidden"
 const GML_VIEW_GUI_LAYER_NAME = "GMGUI"
 const GML_VIEW_GUI_LAYER_PATH = ^"GMGUI"
 const GML_VIEW_GUI_LAYER_POLICY_META = "gm2godot_gui_layer_policy"
@@ -41,6 +43,9 @@ const GML_VIEW_LEGACY_RECT_FIELDS = {"x": true, "y": true, "width": true, "heigh
 
 # The active room's view state: {"scene", "enabled", "room_size", "persistent", "arrays", "room_cameras"}.
 static var _gml_view_state = null
+# The view state of each persistent room visited, by room scene: its views
+# and cameras live on while the room is away.
+static var _gml_view_persistent_states = {}
 static var _gml_view_follow_frame = -1
 static var _gml_view_legacy_active = false
 static var _gml_view_legacy_shadow = {}
@@ -145,7 +150,9 @@ static func gml_camera_copy_transforms(dest, source):
 	var source_camera = _gml_camera_resolve(source)
 	if destination_camera == null or source_camera == null or is_same(destination_camera, source_camera):
 		return null
-	for key in ["x", "y", "width", "height", "angle", "object", "hborder", "vborder", "hspeed", "vspeed", "matrices_custom"]:
+	# CameraManager.js camera_copy_transforms: the view, speeds, borders,
+	# angle and matrices; the destination keeps its own target.
+	for key in ["x", "y", "width", "height", "angle", "hborder", "vborder", "hspeed", "vspeed", "matrices_custom"]:
 		destination_camera[key] = source_camera[key]
 	destination_camera["view_matrix"] = _gml_clone_value(source_camera["view_matrix"], 0)
 	destination_camera["projection_matrix"] = _gml_clone_value(source_camera["projection_matrix"], 0)
@@ -895,12 +902,29 @@ static func _gml_display_gui_effective_scale():
 
 
 static func _gml_display_apply_gui_layer(scene):
+	_gml_display_apply_window_layers(scene)
 	var layer = _gml_display_gui_layer(scene)
 	if layer == null:
 		return
 	var transform = _gml_display_gui_to_viewport_transform()
 	if layer.transform != transform:
 		layer.transform = transform
+
+
+# Pre Draw and Post Draw draw on the window in window pixels (yyRoom.js
+# PostDraw sets the viewport and view area to the window size), so their
+# layers map window pixels onto the stretched root viewport. They are still
+# rasterised at the application surface's resolution.
+static func _gml_display_apply_window_layers(scene):
+	if not (scene is Node) or not is_instance_valid(scene):
+		return
+	var transform = _gml_display_window_to_viewport_transform()
+	for spec in GML_DRAW_SPACE_LAYER_SPECS.values():
+		if bool(spec["room_space"]):
+			continue
+		var layer = scene.get_node_or_null(NodePath(str(spec["name"])))
+		if layer is CanvasLayer and layer.transform != transform:
+			layer.transform = transform
 
 
 # The room's Draw GUI CanvasLayer: the converter's GMGUI node, or a layer the
@@ -1046,9 +1070,42 @@ static func _gml_view_activate_scene(scene):
 		return
 	var state = scene.get_meta(GML_VIEW_STATE_META) if scene.has_meta(GML_VIEW_STATE_META) else null
 	if not (state is Dictionary):
-		state = _gml_view_state_create(scene)
+		state = _gml_view_persistent_state(scene)
 		scene.set_meta(GML_VIEW_STATE_META, state)
 	_gml_view_activate_state(state)
+
+
+# A persistent room comes back with the views and cameras it had when it was
+# left (_GameMaker.js StartRoom keeps the cameras of a persistent room's
+# views); the converted room scene is new, so the kept state moves to it.
+static func _gml_view_persistent_state(scene):
+	var key = _gml_view_room_key(scene)
+	var kept = _gml_view_persistent_states.get(key, null)
+	if kept is Dictionary:
+		kept["scene"] = scene
+		return kept
+	var state = _gml_view_state_create(scene)
+	if bool(state["persistent"]) and key != "":
+		_gml_view_persistent_states[key] = state
+	return state
+
+
+static func _gml_view_room_key(scene):
+	if not (scene is Node):
+		return ""
+	return scene.scene_file_path if scene.scene_file_path != "" else str(scene.name)
+
+
+# game_restart starts every room afresh, persistent ones included.
+static func _gml_view_forget_persistent_rooms():
+	for state in _gml_view_persistent_states.values():
+		if is_same(state, _gml_view_state):
+			state["persistent"] = false
+			continue
+		for handle in state["room_cameras"]:
+			if gml_handle_is_valid(handle) and not _gml_camera_handles_match(handle, _gml_default_camera_handle):
+				gml_handle_invalidate(handle)
+	_gml_view_persistent_states.clear()
 
 
 static func _gml_view_activate_state(state):
@@ -1369,6 +1426,7 @@ static func _gml_camera_target_is_set(target):
 static func _gml_view_present(state):
 	if not (state is Dictionary):
 		return
+	_gml_view_show_room(state["scene"], _gml_view_room_drawn(state))
 	var camera_node = _gml_view_presenter(state["scene"])
 	if camera_node == null:
 		return
@@ -1413,6 +1471,36 @@ static func _gml_view_present(state):
 			changed = true
 		if changed:
 			camera_node.force_update_scroll()
+
+
+# GameMaker draws the room once per visible view, or once as a whole when
+# views are disabled; with views enabled and none visible nothing of the room
+# is drawn and the window colour shows (yyRoom.js DrawViews).
+static func _gml_view_room_drawn(state):
+	if not bool(state["enabled"]):
+		return true
+	for visible in state["arrays"]["view_visible"]:
+		if _gml_view_flag(visible):
+			return true
+	return false
+
+
+# The room's nodes all render on the viewport's own canvas; a transparent
+# CanvasModulate on it hides them, leaving the window-space Pre Draw, Post
+# Draw and GUI layers.
+static func _gml_view_show_room(scene, shown):
+	if not (scene is Node) or not is_instance_valid(scene):
+		return
+	var hider = scene.get_node_or_null(NodePath(GML_VIEW_ROOM_HIDER_NAME))
+	if hider == null:
+		if shown:
+			return
+		hider = CanvasModulate.new()
+		hider.name = GML_VIEW_ROOM_HIDER_NAME
+		hider.color = Color(0, 0, 0, 0)
+		scene.add_child(hider, false, Node.INTERNAL_MODE_BACK)
+	if hider.visible == shown:
+		hider.visible = not shown
 
 
 # One-time Camera2D setup: GameMaker views have no limits, smoothing or drag,

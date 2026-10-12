@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,7 @@ _EVENT_FILE_PREFIXES = {0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 7: "Ot
 EVENT_CREATE = (0, 0)
 EVENT_DESTROY = (1, 0)
 EVENT_STEP = (3, 0)
+EVENT_BEGIN_STEP = (3, 1)
 EVENT_GAME_START = (7, 2)
 EVENT_ROOM_START = (7, 4)
 
@@ -54,13 +56,83 @@ class InstanceLayer:
 
 
 @dataclass(frozen=True)
+class BackgroundLayer:
+    """A GMRBackgroundLayer: a sprite (or only a colour) with its tiling and scrolling."""
+
+    name: str
+    depth: int
+    sprite: str | None = None
+    colour: int = 0xFFFFFFFF
+    x: float = 0
+    y: float = 0
+    htiled: bool = False
+    vtiled: bool = False
+    stretch: bool = False
+    hspeed: float = 0
+    vspeed: float = 0
+
+
+@dataclass(frozen=True)
+class SpriteAsset:
+    """A GMRSpriteGraphic on an asset layer."""
+
+    name: str
+    sprite: str
+    x: float
+    y: float
+    rotation: float = 0.0
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    head_position: float = 0.0
+    animation_speed: float = 1.0
+    colour: int = 0xFFFFFFFF
+
+
+@dataclass(frozen=True)
+class AssetLayer:
+    name: str
+    depth: int
+    assets: Sequence[SpriteAsset]
+
+
+@dataclass(frozen=True)
+class RoomView:
+    """One view of a room: what it shows (view) and where (port)."""
+
+    xview: int
+    yview: int
+    wview: int
+    hview: int
+    xport: int
+    yport: int
+    wport: int
+    hport: int
+    visible: bool = True
+
+
+@dataclass(frozen=True)
 class GameMakerRoom:
     name: str
-    layers: Sequence[InstanceLayer]
+    layers: Sequence[InstanceLayer | BackgroundLayer | AssetLayer]
     creation_order: Sequence[str]
     creation_code: str | None = None
     width: int = 320
     height: int = 240
+    views: Sequence[RoomView] = ()
+    persistent: bool = False
+
+
+@dataclass(frozen=True)
+class GameMakerSprite:
+    """A sprite whose frames are RGBA images (rows of (r, g, b, a) pixels)."""
+
+    name: str
+    width: int
+    height: int
+    frames: Sequence[Sequence[Sequence[tuple[int, int, int, int]]]]
+    xorigin: int = 0
+    yorigin: int = 0
+    playback_speed: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +141,7 @@ class GameMakerProject:
     objects: Sequence[GameMakerObject]
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
+    sprites: Sequence[GameMakerSprite] = ()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -144,6 +217,106 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
     }
 
 
+_LAYER_COMMON: dict[str, object] = {
+    "effectEnabled": True,
+    "effectType": None,
+    "gridX": 32,
+    "gridY": 32,
+    "hierarchyFrozen": False,
+    "inheritLayerDepth": False,
+    "inheritLayerSettings": False,
+    "inheritSubLayers": True,
+    "inheritVisibility": True,
+    "layers": [],
+    "properties": [],
+    "resourceVersion": "2.0",
+    "userdefinedDepth": False,
+    "visible": True,
+}
+
+
+def _asset_ref(kind: str, name: str | None) -> dict[str, str] | None:
+    return None if name is None else {"name": name, "path": f"{kind}/{name}/{name}.yy"}
+
+
+def _sprite_asset_yy(asset: SpriteAsset) -> dict[str, object]:
+    return {
+        "$GMRSpriteGraphic": "",
+        "%Name": asset.name,
+        "animationSpeed": asset.animation_speed,
+        "colour": asset.colour,
+        "frozen": False,
+        "headPosition": asset.head_position,
+        "ignore": False,
+        "inheritedItemId": None,
+        "inheritItemSettings": False,
+        "name": asset.name,
+        "resourceType": "GMRSpriteGraphic",
+        "resourceVersion": "2.0",
+        "rotation": asset.rotation,
+        "scaleX": asset.scale_x,
+        "scaleY": asset.scale_y,
+        "spriteId": _asset_ref("sprites", asset.sprite),
+        "x": asset.x,
+        "y": asset.y,
+    }
+
+
+def _room_layer_yy(layer: InstanceLayer | BackgroundLayer | AssetLayer) -> dict[str, object]:
+    common = {**_LAYER_COMMON, "%Name": layer.name, "name": layer.name, "depth": layer.depth}
+    if isinstance(layer, BackgroundLayer):
+        return {
+            **common,
+            "$GMRBackgroundLayer": "",
+            "animationFPS": 15.0,
+            "animationSpeedType": 0,
+            "colour": layer.colour,
+            "hspeed": layer.hspeed,
+            "htiled": layer.htiled,
+            "resourceType": "GMRBackgroundLayer",
+            "spriteId": _asset_ref("sprites", layer.sprite),
+            "stretch": layer.stretch,
+            "userdefinedAnimFPS": False,
+            "vspeed": layer.vspeed,
+            "vtiled": layer.vtiled,
+            "x": layer.x,
+            "y": layer.y,
+        }
+    if isinstance(layer, AssetLayer):
+        return {
+            **common,
+            "$GMRAssetLayer": "",
+            "assets": [_sprite_asset_yy(asset) for asset in layer.assets],
+            "resourceType": "GMRAssetLayer",
+        }
+    return {
+        **common,
+        "$GMRInstanceLayer": "",
+        "instances": [_room_instance_yy(instance) for instance in layer.instances],
+        "resourceType": "GMRInstanceLayer",
+    }
+
+
+def _room_view_yy(view: RoomView) -> dict[str, object]:
+    return {
+        "hborder": 32,
+        "hport": view.hport,
+        "hspeed": -1,
+        "hview": view.hview,
+        "inherit": False,
+        "objectId": None,
+        "vborder": 32,
+        "visible": view.visible,
+        "vspeed": -1,
+        "wport": view.wport,
+        "wview": view.wview,
+        "xport": view.xport,
+        "xview": view.xview,
+        "yport": view.yport,
+        "yview": view.yview,
+    }
+
+
 def _room_yy(room: GameMakerRoom) -> dict[str, object]:
     return {
         "$GMRoom": "v1",
@@ -158,31 +331,7 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
             {"name": name, "path": f"rooms/{room.name}/{room.name}.yy"} for name in room.creation_order
         ],
         "isDnd": False,
-        "layers": [
-            {
-                "$GMRInstanceLayer": "",
-                "%Name": layer.name,
-                "depth": layer.depth,
-                "effectEnabled": True,
-                "effectType": None,
-                "gridX": 32,
-                "gridY": 32,
-                "hierarchyFrozen": False,
-                "inheritLayerDepth": False,
-                "inheritLayerSettings": False,
-                "inheritSubLayers": True,
-                "inheritVisibility": True,
-                "instances": [_room_instance_yy(instance) for instance in layer.instances],
-                "layers": [],
-                "name": layer.name,
-                "properties": [],
-                "resourceType": "GMRInstanceLayer",
-                "resourceVersion": "2.0",
-                "userdefinedDepth": False,
-                "visible": True,
-            }
-            for layer in room.layers
-        ],
+        "layers": [_room_layer_yy(layer) for layer in room.layers],
         "name": room.name,
         "parent": {"name": "Rooms", "path": "folders/Rooms.yy"},
         "parentRoom": None,
@@ -198,24 +347,111 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
         "roomSettings": {
             "Height": room.height,
             "inheritRoomSettings": False,
-            "persistent": False,
+            "persistent": room.persistent,
             "Width": room.width,
         },
         "sequenceId": None,
-        "views": [],
+        "views": [_room_view_yy(view) for view in room.views],
         "viewSettings": {
             "clearDisplayBuffer": True,
             "clearViewBackground": False,
-            "enableViews": False,
+            "enableViews": bool(room.views),
             "inheritViewSettings": False,
         },
         "volume": 1.0,
     }
 
 
+def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
+    frame_names = [f"frame_{index}" for index in range(len(sprite.frames))]
+    return {
+        "$GMSprite": "",
+        "%Name": sprite.name,
+        "bboxMode": 0,
+        "bbox_bottom": sprite.height - 1,
+        "bbox_left": 0,
+        "bbox_right": sprite.width - 1,
+        "bbox_top": 0,
+        "collisionKind": 1,
+        "collisionTolerance": 0,
+        "frames": [
+            {"$GMSpriteFrame": "", "%Name": name, "name": name, "resourceType": "GMSpriteFrame", "resourceVersion": "2.0"}
+            for name in frame_names
+        ],
+        "height": sprite.height,
+        "layers": [
+            {
+                "$GMImageLayer": "",
+                "%Name": "layer_0",
+                "blendMode": 0,
+                "displayName": "default",
+                "isLocked": False,
+                "name": "layer_0",
+                "opacity": 100.0,
+                "resourceType": "GMImageLayer",
+                "resourceVersion": "2.0",
+                "visible": True,
+            }
+        ],
+        "name": sprite.name,
+        "origin": 9,
+        "parent": {"name": "Sprites", "path": "folders/Sprites.yy"},
+        "resourceType": "GMSprite",
+        "resourceVersion": "2.0",
+        "sequence": {
+            "$GMSequence": "",
+            "%Name": sprite.name,
+            "length": float(len(sprite.frames)),
+            "name": sprite.name,
+            "playback": 1,
+            "playbackSpeed": sprite.playback_speed,
+            "playbackSpeedType": 0,
+            "resourceType": "GMSequence",
+            "resourceVersion": "2.0",
+            "tracks": [
+                {
+                    "$GMSpriteFramesTrack": "",
+                    "keyframes": {
+                        "Keyframes": [
+                            {
+                                "Channels": {"0": {"Id": {"name": name, "path": f"sprites/{sprite.name}/{sprite.name}.yy"}}},
+                                "Key": float(index),
+                                "Length": 1.0,
+                            }
+                            for index, name in enumerate(frame_names)
+                        ]
+                    },
+                    "name": "frames",
+                    "resourceType": "GMSpriteFramesTrack",
+                }
+            ],
+            "xorigin": sprite.xorigin,
+            "yorigin": sprite.yorigin,
+        },
+        "type": 0,
+        "width": sprite.width,
+    }
+
+
+def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
+    from PIL import Image
+
+    sprite_dir = project_dir / "sprites" / sprite.name
+    _write_json(sprite_dir / f"{sprite.name}.yy", _sprite_yy(sprite))
+    for index, rows in enumerate(sprite.frames):
+        data = bytes(channel for row in rows for pixel in row for channel in pixel)
+        image = Image.frombytes("RGBA", (sprite.width, sprite.height), data)
+        for path in (sprite_dir / f"frame_{index}.png", sprite_dir / "layers" / f"frame_{index}" / "layer_0.png"):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            image.save(path)
+
+
 def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> None:
-    """Write the project's .yyp, objects, rooms and scripts."""
+    """Write the project's .yyp, sprites, objects, rooms and scripts."""
     resources: list[dict[str, object]] = []
+    for sprite in project.sprites:
+        _write_sprite(project_dir, sprite)
+        resources.append({"id": {"name": sprite.name, "path": f"sprites/{sprite.name}/{sprite.name}.yy"}})
     for script_name, source in project.scripts.items():
         script_dir = project_dir / "scripts" / script_name
         _write_json(
@@ -248,6 +484,8 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
         if room.creation_code is not None:
             write_fixture_text(room_dir / "RoomCreationCode.gml", room.creation_code)
         for layer in room.layers:
+            if not isinstance(layer, InstanceLayer):
+                continue
             for instance in layer.instances:
                 if instance.creation_code is not None:
                     write_fixture_text(
@@ -325,6 +563,52 @@ def run_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float 
     environment["HOME"] = str(godot_dir)
     return subprocess.run(
         [godot_binary, "--headless", "--log-file", str(godot_dir / "godot.log"), "--path", str(godot_dir)],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
+
+
+def run_converted_project_rendered(
+    godot_binary: str, godot_dir: Path, *, timeout: float = 180
+) -> subprocess.CompletedProcess[str] | None:
+    """Run the converted project with an OpenGL renderer under xvfb-run, so a
+    probe can read rendered pixels back; None when xvfb-run is missing."""
+    if shutil.which("xvfb-run") is None:
+        return None
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [
+            "xvfb-run",
+            "-a",
+            "-s",
+            "-screen 0 1024x768x24",
+            godot_binary,
+            "--log-file",
+            str(godot_dir / "godot.log"),
+            "--path",
+            str(godot_dir),
+            "--rendering-driver",
+            "opengl3",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
+
+
+def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    """Import the converted project's resources (sprite images), which a
+    project needs before it runs."""
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
         capture_output=True,
         text=True,
         timeout=timeout,

@@ -187,6 +187,19 @@ def _make_sprite_yy(name: str, parent_path: str = "folders/Sprites.yy") -> str:
     ).format(name=name, parent_path=parent_path)
 
 
+def _node_block(scene: str, node_name: str) -> list[str]:
+    """The property lines of the scene node named `node_name`."""
+    lines = scene.splitlines()
+    header = f'[node name="{node_name}" '
+    start = next(index for index, line in enumerate(lines) if line.startswith(header))
+    block: list[str] = []
+    for line in lines[start + 1:]:
+        if not line or line.startswith("["):
+            break
+        block.append(line)
+    return block
+
+
 class TestRoomConverter(unittest.TestCase):
     def setUp(self) -> None:
         self.gm_dir = tempfile.mkdtemp()
@@ -683,16 +696,37 @@ class TestRoomConverter(unittest.TestCase):
             '[ext_resource type="PackedScene" path="res://sprites/s_background/s_background.tscn" id="1"]',
             content,
         )
+        # The element sits at the layer offset and holds the blend and alpha,
+        # its sprite scene only supplies frames, and the runtime draws them
+        # through the Tiles region from the sprite's top-left corner
+        # (backgrounds ignore the sprite origin).
+        self.assertNotIn("position", _node_block(content, "Backgrounds"))
         self.assertIn(
-            '[node name="s_background" parent="Backgrounds" instance=ExtResource("1")]',
+            '[node name="s_background" type="Node2D" parent="Backgrounds"]\n'
+            "visible = true\n"
+            "position = Vector2(16, 32)\n",
             content,
         )
-        self.assertIn('position = Vector2(16, 32)', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "background"', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
+        self.assertIn(
+            '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]\n'
+            "visible = false\n"
+            "metadata/gamemaker_background_frames = true\n",
+            content,
+        )
+        self.assertIn(
+            '[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]\n'
+            "texture_repeat = 2\n"
+            "centered = false\n"
+            "region_enabled = true\n"
+            "metadata/gamemaker_background_tiles = true\n",
+            content,
+        )
+        self.assertNotIn("Parallax2D", content)
 
-    def test_sprite_background_layer_with_scrolling_uses_parallax_runtime(self):
+    def test_tiled_scrolling_sprite_background_is_drawn_by_the_runtime(self):
         self._write_yyp(["r_background"], extra_resources=[("sprites", "s_background")])
         self._write_sprite("s_background")
         self._write_sprite_scene("s_background")
@@ -711,14 +745,21 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_background")
 
-        self.assertIn('[node name="s_background" type="Parallax2D" parent="Backgrounds"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 768)', content)
-        self.assertIn('scroll_offset = Vector2(0, 0)', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
+        # Tiling repeats the sprite at its own size over whatever the view
+        # shows, which the runtime works out every frame; nothing in the
+        # scene repeats at the room size.
+        self.assertIn('[node name="s_background" type="Node2D" parent="Backgrounds"]', content)
+        self.assertIn('metadata/gamemaker_background_htiled = true', content)
+        self.assertIn('metadata/gamemaker_background_vtiled = true', content)
+        self.assertIn('metadata/gamemaker_background_hspeed = 1', content)
+        self.assertIn('metadata/gamemaker_background_vspeed = -2', content)
         self.assertIn(
             '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]',
             content,
         )
+        self.assertIn('[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]', content)
+        self.assertNotIn("Parallax2D", content)
+        self.assertNotIn("repeat_size", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_background_layer_preserves_scrolling_tiling_runtime_metadata(self):
@@ -748,11 +789,9 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_background_stretch = true', content)
         self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
-        self.assertIn('[node name="BackgroundVisual" type="Parallax2D" parent="MovingBackground"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 0)', content)
-        self.assertIn('repeat_times = 3', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
-        self.assertIn('[node name="BackgroundColor" type="ColorRect" parent="MovingBackground/BackgroundVisual"]', content)
+        # A colour fills whatever is drawn, whatever the layer offset.
+        self.assertIn('[node name="BackgroundVisual" type="ColorRect" parent="MovingBackground"]', content)
+        self.assertNotIn("Parallax2D", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_layer_depth_maps_to_inverse_z_index(self):
@@ -889,8 +928,11 @@ class TestRoomConverter(unittest.TestCase):
         content = self._read_scene("r_tiles")
 
         self.assertIn('[ext_resource type="TileSet" path="res://tilesets/ts_ground/ts_ground.tres" id="1"]', content)
-        self.assertIn('[node name="TileMap" type="TileMapLayer" parent="Tiles"]', content)
-        self.assertIn('position = Vector2(8, 16)', content)
+        self.assertNotIn("position", _node_block(content, "Tiles"))
+        self.assertIn(
+            '[node name="TileMap" type="TileMapLayer" parent="Tiles"]\nvisible = true\nposition = Vector2(8, 16)\n',
+            content,
+        )
         self.assertIn('tile_set = ExtResource("1")', content)
         self.assertIn('tile_map_data = PackedByteArray(0, 0', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "tilemap"', content)
@@ -1094,7 +1136,8 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('position = Vector2(100, 200)', content)
-        self.assertIn('rotation_degrees = 90', content)
+        # GameMaker turns counter-clockwise on screen, Godot clockwise.
+        self.assertIn('rotation_degrees = -90\n', content)
         self.assertIn('scale = Vector2(2, 0.5)', content)
         self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "instance"', content)
@@ -1191,7 +1234,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[ext_resource type="PackedScene" path="res://sprites/s_decor/s_decor.tscn" id="1"]', content)
         self.assertIn('[node name="spr_decor_1" parent="Assets" instance=ExtResource("1")]', content)
         self.assertIn('position = Vector2(24, 48)', content)
-        self.assertIn('rotation_degrees = 15', content)
+        self.assertIn('rotation_degrees = -15\n', content)
         self.assertIn('scale = Vector2(2, 3)', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "sprite"', content)
@@ -1246,6 +1289,61 @@ class TestRoomConverter(unittest.TestCase):
             "GMRTextGraphic" in log and "layer element type undefined" in log
             for log in self.logs
         ))
+
+    def test_layer_offset_places_only_the_elements_gamemaker_draws_at_it(self):
+        # GameMaker draws backgrounds, sprites, tilemaps and sequences at the
+        # layer offset (yyRoom.js DrawLayer*Element add m_xoffset), instances,
+        # particle systems, legacy tiles and text at their own position. The
+        # layer node stays at the origin, so an instance created on the layer
+        # later is not moved by the offset either.
+        self._write_yyp(["r_offset"], extra_resources=[("sprites", "s_decor")])
+        self._write_sprite("s_decor")
+        self._write_sprite_scene("s_decor")
+        self._write_room("r_offset", layers=[
+            {
+                "%Name": "Assets",
+                "resourceType": "GMRAssetLayer",
+                "x": 10,
+                "y": 20,
+                "assets": [
+                    {
+                        "%Name": "spr_decor",
+                        "resourceType": "GMRSpriteGraphic",
+                        "spriteId": {"name": "s_decor", "path": "sprites/s_decor/s_decor.yy"},
+                        "x": 24,
+                        "y": 48,
+                    },
+                    {"%Name": "seq_intro", "resourceType": "GMRSequenceGraphic", "x": 1, "y": 2},
+                    {"%Name": "particle_fx", "resourceType": "GMRParticleSystem", "x": 3, "y": 4},
+                    {"%Name": "legacy_tile", "resourceType": "GMRTileGraphic", "x": 5, "y": 6},
+                    {"%Name": "label", "resourceType": "GMRTextGraphic", "x": 7, "y": 8},
+                ],
+            },
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "x": 30,
+                "y": 40,
+                "instances": [{"name": "inst_a", "x": 100, "y": 200}],
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_offset")
+
+        def position(node_name: str) -> list[str]:
+            return [line for line in _node_block(content, node_name) if line.startswith("position = ")]
+
+        self.assertEqual(position("Assets"), [])
+        self.assertIn("metadata/gamemaker_layer_x = 10", _node_block(content, "Assets"))
+        self.assertEqual(position("spr_decor"), ["position = Vector2(34, 68)"])
+        self.assertEqual(position("seq_intro"), ["position = Vector2(11, 22)"])
+        self.assertEqual(position("particle_fx"), ["position = Vector2(3, 4)"])
+        self.assertEqual(position("legacy_tile"), ["position = Vector2(5, 6)"])
+        self.assertEqual(position("label"), ["position = Vector2(7, 8)"])
+        self.assertEqual(position("Instances"), [])
+        self.assertIn("metadata/gamemaker_layer_x = 30", _node_block(content, "Instances"))
+        self.assertEqual(position("inst_a"), ["position = Vector2(100, 200)"])
 
     def test_ignored_asset_is_skipped_with_warning(self):
         self._write_yyp(["r_assets"], extra_resources=[("sprites", "s_decor")])
@@ -2961,7 +3059,6 @@ class TestTypedRoomConsumerStages(unittest.TestCase):
             layer["x"] = 42
         result = serialize_room_layers(room, warn_callback=warn)
         self.assertEqual(len(messages), 1)
-        self.assertIn("position = Vector2(42, 0)", result.node_lines)
         self.assertIn("metadata/gamemaker_layer_x = 42", result.node_lines)
 
     def test_truthy_malformed_resource_type_fails_at_membership_after_name(self) -> None:
@@ -3021,8 +3118,10 @@ class TestTypedRoomConsumerStages(unittest.TestCase):
         self.assertIn("metadata/gamemaker_layer_depth = -10000", lines)
 
     def test_coordinate_nonfinite_and_huge_int_policies_remain_distinct(self) -> None:
-        room = self.room(layers=[{"resourceType": "GMRInstanceLayer", "x": float("nan"), "y": -0.0}])
+        sprite: JsonObject = {"name": "a", "resourceType": "GMRSpriteGraphic"}
+        room = self.room(layers=[{"resourceType": "GMRAssetLayer", "x": float("nan"), "y": -0.0, "assets": [sprite]}])
         result = serialize_room_layers(room)
+        # The sprite element is drawn at the layer offset.
         self.assertIn("position = Vector2(nan, 0)", result.node_lines)
         with self.assertRaises(OverflowError):
             serialize_room_layers(self.room(layers=[{"x": 10 ** 5000}]))

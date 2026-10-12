@@ -3155,6 +3155,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Returns stored surface height or 0 for invalid surfaces.",
     ),
     _entry(
+        "surface_resize",
+        "Drawing Surfaces",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.49_drawing_surfaces",
+        "yes",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Drawing/Surfaces/surface_resize.htm",
+        "Recreates a surface at the new size; the application surface (the root viewport's base size) changes when the next frame starts drawing.",
+    ),
+    _entry(
         "draw_surface",
         "Drawing Surfaces",
         "partial",

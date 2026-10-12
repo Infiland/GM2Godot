@@ -18,6 +18,7 @@ const GML_TIME_SOURCE_HANDLE_KIND = "time_source"
 # Draw is skipped for that step.
 const GML_EVENT_PHASE_ORDER = [
 	"animation",
+	"layers",
 	"begin_step",
 	"async",
 	"timelines",
@@ -129,6 +130,8 @@ static func _gml_event_scheduler_run_phase(phase, seconds, frames, frame):
 	match phase:
 		"animation":
 			_gml_step_update_images(frame)
+		"layers":
+			_gml_layer_step_scroll()
 		"begin_step":
 			_gml_step_dispatch_method("begin_step", &"_on_begin_step", frame)
 		"async":

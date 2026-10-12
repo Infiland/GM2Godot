@@ -342,7 +342,7 @@ def _emit_sprite_runtime_prelude(
         "\n\tif has_meta(\"gamemaker_image_angle\"):"
         "\n\t\timage_angle = get_meta(\"gamemaker_image_angle\")"
         "\n\telse:"
-        "\n\t\timage_angle = rotation_degrees"
+        "\n\t\timage_angle = 0.0 - rotation_degrees"
         "\n\tif has_meta(\"gamemaker_image_xscale\"):"
         "\n\t\timage_xscale = get_meta(\"gamemaker_image_xscale\")"
         "\n\telse:"
@@ -427,7 +427,9 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t\treturn"
         "\n\t\tcurrent = current.get_parent()"
         "\n\nfunc _gm_apply_image_transform():"
-        "\n\trotation_degrees = float(image_angle)"
+        # GameMaker angles turn counter-clockwise on screen; a positive Godot
+        # rotation turns clockwise (y points down).
+        "\n\trotation_degrees = -float(image_angle)"
         "\n\tscale = Vector2(float(image_xscale), float(image_yscale))"
         "\n\tvar sprite_node = _gm_sprite_visual_node()"
         "\n\tif sprite_node is CanvasItem:"

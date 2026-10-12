@@ -144,6 +144,7 @@ static func _gml_game_restart_now():
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
+	_gml_view_forget_persistent_rooms()
 	return _gml_room_change_to_entry(entries[0], true)
 
 
@@ -209,11 +210,11 @@ static func gml_room_transition_log():
 	return _gml_clone_value(records, 4)
 
 
-static func _gml_room_process_scene(scene, delta):
+static func _gml_room_process_scene(scene, _delta):
 	if not (scene is Node):
 		return false
 	_gml_camera_update_visible_views()
-	_gml_room_update_background_layers(scene, delta)
+	_gml_room_update_background_layers(scene)
 	return true
 
 
@@ -271,46 +272,15 @@ static func _gml_room_update_current(entry, scene):
 	_gml_builtin_globals["room_height"] = height
 
 
-static func _gml_room_update_background_layers(scene, delta):
+static func _gml_room_update_background_layers(scene):
+	# Layer offsets scroll once per step (_gml_layer_step_scroll); every
+	# frame the background elements are laid out for the current view, by
+	# the draw frame and again by the room scene's _process, which also sees
+	# what changed after the draw.
 	if not (scene is Node):
 		return
-	var step_scale = _gml_room_step_scale(delta)
-	for node in _gml_layer_tree_nodes(scene):
-		if node == scene:
-			continue
-		if node is Object and node.has_meta("gamemaker_background_visual"):
-			_gml_room_update_background_node(node, step_scale)
-
-
-static func _gml_room_update_background_node(node, step_scale):
-	var hspeed = _gml_room_background_speed(node, "h")
-	var vspeed = _gml_room_background_speed(node, "v")
-	if abs(hspeed) < 0.0001 and abs(vspeed) < 0.0001:
-		return
-	var motion = Vector2(hspeed * step_scale, vspeed * step_scale)
-	if node is Parallax2D:
-		node.scroll_offset += motion
-	elif node is Node2D:
-		node.position += motion
-
-
-static func _gml_room_background_speed(node, axis):
-	var background_key = "gamemaker_background_hspeed" if axis == "h" else "gamemaker_background_vspeed"
-	var layer_key = "gamemaker_layer_hspeed" if axis == "h" else "gamemaker_layer_vspeed"
-	if node is Object and node.has_meta(background_key):
-		return _to_real(node.get_meta(background_key))
-	if node is Object and node.has_meta(layer_key):
-		return _to_real(node.get_meta(layer_key))
-	return 0.0
-
-
-static func _gml_room_step_scale(delta):
-	var room_speed = _to_real(_gml_builtin_globals.get("room_speed", 0))
-	if room_speed <= 0.0:
-		room_speed = float(Engine.max_fps)
-	if room_speed <= 0.0:
-		room_speed = 60.0
-	return max(_to_real(delta), 0.0) * room_speed
+	for node in _gml_layer_background_nodes(scene):
+		_gml_layer_background_draw(node)
 
 
 static func _gml_room_dispatch_lifecycle(root_node, method_name):
@@ -350,7 +320,12 @@ static func gml_room_prepare_scene(scene):
 	var parents = {}
 	var traversal_order = 0
 	for node in _gml_room_tree_nodes(scene):
-		if node == scene or not _gml_room_node_is_placed_instance(node):
+		if node == scene:
+			continue
+		if _gml_layer_is_sprite_element(node):
+			_gml_layer_sprite_element_start(node)
+			continue
+		if not _gml_room_node_is_placed_instance(node):
 			continue
 		var parent = node.get_parent()
 		if not parents.has(parent.get_instance_id()):

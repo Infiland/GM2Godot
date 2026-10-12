@@ -395,12 +395,19 @@ static func _gml_collision_dispatch_pair(first, first_chain, second, second_chai
 	var dispatched = 0
 	dispatched += _gml_collision_perform_event(first, second, second_chain, frame)
 	dispatched += _gml_collision_perform_event(second, first, first_chain, frame)
-	if solid and _gml_collision_compatibility():
-		# Compatibility mode lets both instances try their motion again and
-		# moves them back only when they still overlap.
+	if not _gml_collision_compatibility():
+		return dispatched
+	# Compatibility mode lets both instances try their motion again when one
+	# of them is solid after the events, and moves them back only when they
+	# still overlap; an instance an event destroyed overlaps nothing.
+	if _gml_collision_instance_solid(first) or _gml_collision_instance_solid(second):
 		_gml_collision_step_by_speed(first)
 		_gml_collision_step_by_speed(second)
-		if _gml_collision_states_collide(_gml_collision_state(first), _gml_collision_state(second), true):
+		if (
+			_gml_collision_instance_live(first)
+			and _gml_collision_instance_live(second)
+			and _gml_collision_states_collide(_gml_collision_state(first), _gml_collision_state(second), true)
+		):
 			_gml_collision_restore_previous_position(first, second)
 			_gml_collision_restore_previous_position(second, first)
 	return dispatched

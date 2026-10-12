@@ -62,6 +62,7 @@ func _run():
 	_case_same_object()
 	_case_solid(true)
 	_case_solid(false)
+	_case_solid_changed_by_event()
 	_case_destroyed()
 	_case_spawned()
 	_case_spriteless()
@@ -124,6 +125,29 @@ func _case_solid(compat):
 	mover.hspeed = -20.0
 	_dispatch()
 	_expect(mode + " mover moved back again when the retry still collides", mover.position.x, 330.0)
+	_clear()
+	GMRuntime._gml_collision_set_compatibility_mode(null)
+
+
+# In compatibility mode the retry after both events reads solid again, and an
+# instance destroyed by an event no longer collides (HTML5 runner,
+# Events.js HandleCollision and yyInstance.js Collision_Instance).
+func _case_solid_changed_by_event():
+	GMRuntime._gml_collision_set_compatibility_mode(true)
+	spawn("o_wall", "vanishing", 1200, 0)
+	var mover = spawn("o_a", "mover", 1210, 0)
+	mover.xprevious = 1230.0
+	mover.hspeed = -20.0
+	_expect("vanishing wall runs its event", _dispatch(), ["wall:a:vanishing<-mover@1230"])
+	_expect("retry keeps the move once the solid instance is destroyed", mover.position.x, 1210.0)
+	_clear()
+	var door = spawn("o_wall", "opening", 1300, 0)
+	mover = spawn("o_a", "mover", 1310, 0)
+	mover.xprevious = 1330.0
+	mover.hspeed = -5.0
+	_expect("opening door runs its event", _dispatch(), ["wall:a:opening<-mover@1330"])
+	_expect("the event made the door non-solid", door.solid, false)
+	_expect("no retry once neither instance is solid", mover.position.x, 1330.0)
 	_clear()
 	GMRuntime._gml_collision_set_compatibility_mode(null)
 

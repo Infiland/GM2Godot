@@ -239,7 +239,7 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_letters": (1, 1),
     "string_lettersdigits": (1, 1),
     "string_split": (2, 2),
-    "string_join": (2, 2),
+    "string_join": (1, None),
     "chr": (1, 1),
     "ord": (1, 1),
     "ansi_char": (1, 1),
@@ -922,6 +922,9 @@ _OS_DEBUG_GC_ARITY: dict[str, tuple[int, int | None]] = {
     "os_lock_orientation": (1, 1),
 }
 
+# string_join(delimiter, value1, ...) takes the values after the delimiter.
+_STRING_LOWERING: dict[str, GMLFunctionLoweringKind] = {"string_join": "runtime_variadic_1"}
+
 # gml_pragma takes any number of arguments.
 _OS_DEBUG_GC_LOWERING: dict[str, GMLFunctionLoweringKind] = {"gml_pragma": "runtime_variadic_all"}
 
@@ -1468,7 +1471,8 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in STRING_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRING_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind = _STRING_LOWERING.get(name, "runtime")
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in MATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MATH_ARITY[name]

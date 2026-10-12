@@ -986,9 +986,15 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_transpiles_string_join(self):
+        # string_join(delimiter, value1, ...) joins the values after the
+        # delimiter (Function_String.js string_join).
         self.assertEqual(
-            transpile_gml_expression('string_join(arr, ",")'),
-            'GMRuntime.gml_string_join(arr, ",")',
+            transpile_gml_expression('string_join(",", a, 1, "b")'),
+            'GMRuntime.gml_string_join_values(",", [a, 1, "b"])',
+        )
+        self.assertEqual(
+            transpile_gml_expression('string_join(",", a)'),
+            'GMRuntime.gml_string_join_values(",", [a])',
         )
 
     def test_transpiles_chr(self):

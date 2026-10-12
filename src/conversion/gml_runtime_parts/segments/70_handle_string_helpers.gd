@@ -611,6 +611,15 @@ static func gml_string_join(array_value, delimiter):
 	return delim.join(parts)
 
 
+# string_join(delimiter, value1, ...): each value as string() gives it,
+# joined by the delimiter (Function_String.js string_join).
+static func gml_string_join_values(delimiter, values):
+	var parts = []
+	for value in values:
+		parts.append(gml_string(value))
+	return gml_string(delimiter).join(parts)
+
+
 static func gml_chr(code):
 	var n = int(_to_real(code))
 	if n < 0 or n > 0x10FFFF:

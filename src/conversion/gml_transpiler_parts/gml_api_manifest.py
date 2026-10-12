@@ -7212,7 +7212,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Strings/Strings.htm",
-        "Joins array elements with delimiter into a string.",
+        "Joins string() of each value after the delimiter with the delimiter.",
     ),
     _entry(
         "chr",

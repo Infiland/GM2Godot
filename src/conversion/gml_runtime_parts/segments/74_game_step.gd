@@ -35,6 +35,9 @@ static var _gml_step_redraws = 0
 static var _gml_step_entries = []
 static var _gml_step_infos = []
 static var _gml_step_creation_mark = 0
+# Counts the times the list was built afresh; an entry's step_order only
+# counts for the build it was taken in by (its step_list).
+static var _gml_step_list_serial = 0
 static var _gml_step_running = false
 # GMLStepScriptInfo by script, or by class name for nodes without a script.
 static var _gml_step_script_infos = {}
@@ -276,6 +279,7 @@ static func _gml_step_add_entry(entry):
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
 	entry["step_order"] = entry["creation_order"]
+	entry["step_list"] = _gml_step_list_serial
 	_gml_step_entries.append(entry)
 	_gml_step_infos.append(_gml_step_script_info(inst))
 
@@ -283,9 +287,15 @@ static func _gml_step_add_entry(entry):
 static func _gml_step_join_created_instances():
 	# Adds the instances created (or activated again) since the list was
 	# last updated, like GameMaker's active list between phases. The live
-	# list is in creation order, so they are at its end.
+	# list is in creation order, so they are at its end. An empty list is
+	# built afresh: other parts of the runtime empty it and set the creation
+	# mark to 0 between steps to have it take in every live instance again
+	# (a persistent room left or entered again), so the step_order entries
+	# kept from earlier builds, deactivated ones included, no longer count.
 	if _gml_instance_creation_counter == _gml_step_creation_mark:
 		return null
+	if _gml_step_entries.is_empty():
+		_gml_step_list_serial += 1
 	var created = []
 	var index = _gml_instance_live_order.size() - 1
 	while index >= 0:
@@ -293,7 +303,8 @@ static func _gml_step_join_created_instances():
 		index -= 1
 		if int(entry["creation_order"]) < _gml_step_creation_mark:
 			break
-		if entry["step_order"] < 0 and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
+		var listed = entry["step_order"] >= 0 and entry["step_list"] == _gml_step_list_serial
+		if not listed and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
 			created.append(entry)
 	created.reverse()
 	for entry in created:

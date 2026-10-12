@@ -592,6 +592,100 @@ func _process(_delta):
 """
 
 
+# --- A step list built afresh ----------------------------------------------------
+#
+# Other parts of the runtime may empty the step list and set its creation mark
+# back to 0 between steps (a persistent room left or entered again), expecting
+# the next step to take in every live instance again. Instances that were in
+# the list before keep stepping, and an instance that was deactivated while it
+# was still in the list joins the list again once it is activated (at the end,
+# like a new instance).
+
+EVENT_END_STEP = (3, 2)
+
+_RESET_PROJECT = GameMakerProject(
+    name="DeactivationStepReset",
+    scripts={"scr_trace": _SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_run",
+            {
+                EVENT_CREATE: "global.t = 0;\n",
+                EVENT_BEGIN_STEP: "global.t += 1;\n",
+                EVENT_STEP: (
+                    'trace("run:" + string(global.t));\n'
+                    "if (global.t == 2) instance_deactivate_object(global.b);\n"
+                ),
+                EVENT_END_STEP: "if (global.t == 3) instance_activate_object(global.b);\n",
+            },
+        ),
+        GameMakerObject("o_cnt", {EVENT_STEP: 'trace(tag + ":" + string(global.t));\n'}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_run", "o_run", 0, 0, creation_code=_tag("run")),
+                        RoomInstance("inst_a", "o_cnt", 0, 0, creation_code=_tag("a")),
+                        RoomInstance("inst_b", "o_cnt", 0, 0, creation_code=_tag("b")),
+                        RoomInstance("inst_c", "o_cnt", 0, 0, creation_code=_tag("c")),
+                    ),
+                ),
+            ),
+            creation_order=("inst_run", "inst_a", "inst_b", "inst_c"),
+        ),
+    ),
+)
+
+_RESET_EXPECTED = [
+    "run:1",
+    "a:1",
+    "b:1",
+    "c:1",
+    "run:2",
+    "a:2",
+    "c:2",
+    # The step list is emptied here.
+    "run:3",
+    "a:3",
+    "c:3",
+    "run:4",
+    "a:4",
+    "c:4",
+    "b:4",
+    "run:5",
+    "a:5",
+    "c:5",
+    "b:5",
+]
+
+_RESET_PROBE = """extends Node
+
+const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+var _frames = 0
+var _reset = false
+
+
+func _process(_delta):
+	_frames += 1
+	var t = int(GMRuntime.gml_global_scope().get("t", 0))
+	if not _reset and t >= 2:
+		_reset = true
+		print("DEACTIVATION_RESET " + str(t) + ":" + str(GMRuntime._gml_step_running))
+		GMRuntime._gml_step_entries = []
+		GMRuntime._gml_step_infos = []
+		GMRuntime._gml_step_creation_mark = 0
+	if t >= 5 or _frames > 60:
+		print("DEACTIVATION_TRACE " + JSON.stringify(GMRuntime.gml_global_scope().get("trace", [])))
+		get_tree().quit(0)
+"""
+
+
 # --- Layers and what is drawn ------------------------------------------------------
 
 _LAYERS_RUN_STEP = """\
@@ -748,6 +842,18 @@ class TestInstanceDeactivationGodot(unittest.TestCase):
         traces = _trace_lines(output, "DEACTIVATION_TRACE ")
         self.assertEqual(len(traces), 1, output)
         self.assertEqual(json.loads(traces[0]), _ROOMS_EXPECTED)
+
+    def test_step_list_built_afresh_takes_in_every_live_instance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            write_gamemaker_project(root / "gamemaker", _RESET_PROJECT)
+            convert_gamemaker_project(root / "gamemaker", root / "godot")
+            output = self._run(root / "godot", _RESET_PROBE)
+
+        self.assertEqual(_trace_lines(output, "DEACTIVATION_RESET "), ["2:false"], output)
+        traces = _trace_lines(output, "DEACTIVATION_TRACE ")
+        self.assertEqual(len(traces), 1, output)
+        self.assertEqual(json.loads(traces[0]), _RESET_EXPECTED)
 
     def test_layers_deactivate_and_hide_their_instances(self) -> None:
         godot_binary = find_smoke_godot_binary()

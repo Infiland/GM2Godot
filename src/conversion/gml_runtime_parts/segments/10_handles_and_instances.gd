@@ -77,8 +77,10 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		"deactivated": false,
 		"creation_order": _gml_instance_creation_counter,
 		# The creation order the step list took the instance in, or -1 while
-		# it is not in the step list (see _gml_step_collect_instances).
+		# it is not in the step list, and the build of the list that took it
+		# (see _gml_step_join_created_instances).
 		"step_order": -1,
+		"step_list": -1,
 		# Whether the instance keeps its own collision state (see
 		# _gml_collision_tracked_state).
 		"collision_tracked": instance is Object and _gml_collision_tracks(instance)

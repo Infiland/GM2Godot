@@ -74,6 +74,8 @@ class TestAsyncHttpGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Delivered async events are logged only while tracing is on.
+            \tGMRuntime.gml_event_scheduler_set_tracing(true)
             \tvar get_id = GMRuntime.gml_http_get("http://127.0.0.1:__PORT__/hello")
             \texpected[get_id] = "GET:/hello"
             \tvar post_id = GMRuntime.gml_http_post_string("http://127.0.0.1:__PORT__/post", "x=1")

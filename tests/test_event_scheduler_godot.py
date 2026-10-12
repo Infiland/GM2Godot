@@ -217,8 +217,8 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             func _exit_tree():
             \tGMRuntime.gml_instance_unregister(id)
 
-            func _spawn(child_label):
-            \tvar child = load("res://listed_instance.gd").new()
+            func _spawn(child_label, script_path = "res://listed_instance.gd"):
+            \tvar child = load(script_path).new()
             \tchild.configure(child_label, log)
             \tget_parent().add_child(child)
 
@@ -230,6 +230,8 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
 
             func _on_step():
             \tlog.append(label + ":step")
+            \tif label == "A" and steps == 1:
+            \t\t_spawn("L", "res://late_instance.gd")
 
             func _on_end_step():
             \tlog.append(label + ":end")
@@ -243,6 +245,36 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
 
             func _on_no_key():
             \tpass
+            """
+        )
+
+        # An object with Begin Step and End Step but no Step event, first
+        # created during a Step event.
+        late_instance_script = textwrap.dedent(
+            """\
+            extends Node2D
+
+            const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+            var label = ""
+            var log = []
+            var id = GMRuntime.gml_instance_noone()
+
+            func configure(label_value, log_ref):
+            \tlabel = str(label_value)
+            \tlog = log_ref
+
+            func _ready():
+            \tid = GMRuntime.gml_instance_register(self, label, [])
+
+            func _exit_tree():
+            \tGMRuntime.gml_instance_unregister(id)
+
+            func _on_begin_step():
+            \tlog.append(label + ":begin")
+
+            func _on_end_step():
+            \tlog.append(label + ":end")
             """
         )
 
@@ -317,13 +349,17 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \t\treturn
             \tvar a = _add(ListedInstance, "A")
             \t# Created in Begin Step: no Begin Step of its own, but Step and End
-            \t# Step in the same step. Created in End Step: first events next step.
+            \t# Step in the same step. Created in Step: End Step in the same step.
+            \t# Created in End Step: first events next step.
             \t_frame()
-            \tif not _check(log == ["A:begin", "A:step", "B:step", "A:end", "B:end"], "first step: " + str(log)):
+            \tif not _check(log == ["A:begin", "A:step", "B:step", "A:end", "B:end", "L:end"], "first step: " + str(log)):
             \t\treturn
             \tlog.clear()
             \t_frame()
-            \tif not _check(log == ["A:begin", "C:begin", "A:step", "C:step", "A:end", "C:end"], "second step: " + str(log)):
+            \tif not _check(log == ["A:begin", "L:begin", "C:begin", "A:step", "C:step", "A:end", "L:end", "C:end"], "second step: " + str(log)):
+            \t\treturn
+            \t# A phase only goes through the instances that have its event.
+            \tif not _check(GMRuntime._gml_step_method_positions[&"_on_step"] == [0, 2], "Step positions " + str(GMRuntime._gml_step_method_positions)):
             \t\treturn
             \tif not _check(GMRuntime.gml_event_scheduler_trace().is_empty() and GMRuntime.gml_input_dispatch_trace().is_empty(), "events were recorded with tracing off"):
             \t\treturn
@@ -331,12 +367,12 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \t# and drops the instances that went away.
             \tvar kept_list = GMRuntime._gml_step_entries
             \t_frame()
-            \tif not _check(is_same(GMRuntime._gml_step_entries, kept_list) and kept_list.size() == 2, "the step list was rebuilt without a removal"):
+            \tif not _check(is_same(GMRuntime._gml_step_entries, kept_list) and kept_list.size() == 3, "the step list was rebuilt without a removal"):
             \t\treturn
             \tGMRuntime.gml_instance_destroy(a.id)
             \tlog.clear()
             \t_frame()
-            \tif not _check(GMRuntime._gml_step_entries.size() == 1 and log == ["C:begin", "C:step", "C:end"], "after a destroy: " + str(log)):
+            \tif not _check(GMRuntime._gml_step_entries.size() == 2 and log == ["L:begin", "C:begin", "C:step", "L:end", "C:end"], "after a destroy: " + str(log)):
             \t\treturn
 
             \t# Tracing keeps only the latest records.
@@ -410,6 +446,7 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             _write_text(project_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(project_dir))
             _write_text(project_dir / "listed_instance.gd", listed_instance_script)
+            _write_text(project_dir / "late_instance.gd", late_instance_script)
             _write_text(project_dir / "moving_instance.gd", moving_instance_script)
             _write_text(project_dir / "smoke.gd", smoke_script)
             _write_text(project_dir / "smoke.tscn", smoke_scene)

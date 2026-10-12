@@ -38,6 +38,11 @@ static var _gml_step_entries = []
 static var _gml_step_infos = []
 static var _gml_step_creation_mark = 0
 static var _gml_step_removal_mark = 0
+# The list positions of the instances whose script has an event method, by
+# method name, for the methods _gml_step_dispatch_method runs. Each is
+# worked out on the method's first dispatch and kept up to date as the list
+# changes.
+static var _gml_step_method_positions = {}
 static var _gml_step_running = false
 # GMLStepScriptInfo by script, or by class name for nodes without a script.
 static var _gml_step_script_infos = {}
@@ -249,14 +254,15 @@ static func _gml_step_collect_instances():
 
 
 static func _gml_step_drop_inactive():
-	var entries = []
-	var infos = []
-	for i in range(_gml_step_entries.size()):
-		if _gml_step_entry_active(_gml_step_entries[i]):
-			entries.append(_gml_step_entries[i])
-			infos.append(_gml_step_infos[i])
-	_gml_step_entries = entries
-	_gml_step_infos = infos
+	var entries = _gml_step_entries
+	var infos = _gml_step_infos
+	_gml_step_entries = []
+	_gml_step_infos = []
+	for method_name in _gml_step_method_positions.keys():
+		_gml_step_method_positions[method_name] = []
+	for i in range(entries.size()):
+		if _gml_step_entry_active(entries[i]):
+			_gml_step_append(entries[i], infos[i])
 	return null
 
 
@@ -269,8 +275,16 @@ static func _gml_step_add_entry(entry):
 	var inst = entry["instance"]
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
+	_gml_step_append(entry, _gml_step_script_info(inst))
+
+
+static func _gml_step_append(entry, info):
+	var position = _gml_step_entries.size()
 	_gml_step_entries.append(entry)
-	_gml_step_infos.append(_gml_step_script_info(inst))
+	_gml_step_infos.append(info)
+	for method_name in _gml_step_method_positions:
+		if _gml_step_has_method(info, entry["instance"], method_name):
+			_gml_step_method_positions[method_name].append(position)
 
 
 static func _gml_step_join_created_instances():
@@ -315,22 +329,35 @@ static func _gml_step_timeline_instances():
 
 
 static func _gml_step_dispatch_method(phase, method_name, frame):
-	# Runs one event method for every instance of the step that has it.
-	for i in range(_gml_step_entries.size()):
+	# Runs one event method for every instance of the step that has it, in
+	# list order; instances that join the list during the phase wait for
+	# the next phase.
+	var positions = _gml_step_method_positions.get(method_name)
+	if positions == null:
+		positions = _gml_step_find_method_positions(method_name)
+	for k in range(positions.size()):
 		if _gml_room_requested_change != null:
 			break
-		var entry = _gml_step_entries[i]
+		var entry = _gml_step_entries[positions[k]]
 		if bool(entry["destroyed"]):
 			continue
 		var inst = entry["instance"]
-		if not is_instance_valid(inst) or not _gml_step_has_method(_gml_step_infos[i], inst, method_name):
-			continue
-		if inst.is_queued_for_deletion():
+		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if _gml_event_scheduler_tracing:
 			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
 		inst.call(method_name)
 	return null
+
+
+static func _gml_step_find_method_positions(method_name):
+	var positions = []
+	for i in range(_gml_step_entries.size()):
+		var entry = _gml_step_entries[i]
+		if _gml_step_entry_active(entry) and _gml_step_has_method(_gml_step_infos[i], entry["instance"], method_name):
+			positions.append(i)
+	_gml_step_method_positions[method_name] = positions
+	return positions
 
 
 static func _gml_step_tick_alarms(frames, frame):

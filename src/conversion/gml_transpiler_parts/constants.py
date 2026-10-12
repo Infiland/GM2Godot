@@ -1657,6 +1657,16 @@ OS_DEBUG_GC_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "weak_ref_create": "gml_weak_ref_create",
     "weak_ref_alive": "gml_weak_ref_alive",
     "weak_ref_any_alive": "gml_weak_ref_any_alive",
+    "gml_pragma": "gml_pragma",
+    "show_debug_overlay": "gml_show_debug_overlay",
+    "is_debug_overlay_open": "gml_is_debug_overlay_open",
+    "is_mouse_over_debug_overlay": "gml_is_mouse_over_debug_overlay",
+    "is_keyboard_used_debug_overlay": "gml_is_keyboard_used_debug_overlay",
+    "debug_event": "gml_debug_event",
+    "scheduler_resolution_set": "gml_scheduler_resolution_set",
+    "scheduler_resolution_get": "gml_scheduler_resolution_get",
+    "os_powersave_enable": "gml_os_powersave_enable",
+    "os_lock_orientation": "gml_os_lock_orientation",
 })
 
 PLATFORM_SERVICE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({

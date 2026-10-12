@@ -5260,6 +5260,40 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'alive = GMRuntime.gml_weak_ref_alive(GMRuntime.gml_weak_ref_create(GMRuntime.gml_struct({"a": 1})))',
         )
 
+    def test_compile_time_and_runner_debug_calls_lower_to_runtime_no_ops(self):
+        # The HTML5 runner does nothing for these (Function_Debug.js,
+        # Function_Game.js); gml_pragma is compile-time and takes any number
+        # of arguments.
+        self.assertEqual(
+            transpile_gml_code(
+                'gml_pragma("global", "init();");'
+                'gml_pragma("MarkTagAsUsed", "a", "b", "c");'
+                "show_debug_overlay(true);"
+                "show_debug_overlay(true, false, 2, 0.5, true, -1);"
+                "open = is_debug_overlay_open();"
+                "mouse = is_mouse_over_debug_overlay();"
+                "keyboard = is_keyboard_used_debug_overlay();"
+                'debug_event("DumpMemory", true);'
+                "scheduler_resolution_set(2);"
+                "resolution = scheduler_resolution_get();"
+                "os_powersave_enable(false);"
+                "os_lock_orientation(true);",
+                indent="",
+            ),
+            'GMRuntime.gml_pragma(["global", "init();"])\n'
+            'GMRuntime.gml_pragma(["MarkTagAsUsed", "a", "b", "c"])\n'
+            "GMRuntime.gml_show_debug_overlay(true)\n"
+            "GMRuntime.gml_show_debug_overlay(true, false, 2, 0.5, true, -1)\n"
+            "open = GMRuntime.gml_is_debug_overlay_open()\n"
+            "mouse = GMRuntime.gml_is_mouse_over_debug_overlay()\n"
+            "keyboard = GMRuntime.gml_is_keyboard_used_debug_overlay()\n"
+            'GMRuntime.gml_debug_event("DumpMemory", true)\n'
+            "GMRuntime.gml_scheduler_resolution_set(2)\n"
+            "resolution = GMRuntime.gml_scheduler_resolution_get()\n"
+            "GMRuntime.gml_os_powersave_enable(false)\n"
+            "GMRuntime.gml_os_lock_orientation(true)",
+        )
+
     def test_os_debug_gc_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "environment_get_variable.*expects 1.*got 0"):
             transpile_gml_code("environment_get_variable();", indent="")

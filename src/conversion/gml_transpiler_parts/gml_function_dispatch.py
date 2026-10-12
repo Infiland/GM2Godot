@@ -910,7 +910,20 @@ _OS_DEBUG_GC_ARITY: dict[str, tuple[int, int | None]] = {
     "weak_ref_create": (1, 1),
     "weak_ref_alive": (1, 1),
     "weak_ref_any_alive": (1, 3),
+    "gml_pragma": (1, None),
+    "show_debug_overlay": (1, 6),
+    "is_debug_overlay_open": (0, 0),
+    "is_mouse_over_debug_overlay": (0, 0),
+    "is_keyboard_used_debug_overlay": (0, 0),
+    "debug_event": (1, 2),
+    "scheduler_resolution_set": (1, 1),
+    "scheduler_resolution_get": (0, 0),
+    "os_powersave_enable": (1, 1),
+    "os_lock_orientation": (1, 1),
 }
+
+# gml_pragma takes any number of arguments.
+_OS_DEBUG_GC_LOWERING: dict[str, GMLFunctionLoweringKind] = {"gml_pragma": "runtime_variadic_all"}
 
 _PLATFORM_SERVICE_ARITY: dict[str, tuple[int, int | None]] = {
     "steam_is_initialized": (0, 0),
@@ -1558,7 +1571,8 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _OS_DEBUG_GC_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind = _OS_DEBUG_GC_LOWERING.get(name, "runtime")
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in PLATFORM_SERVICE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _PLATFORM_SERVICE_ARITY[name]

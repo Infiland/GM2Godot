@@ -434,7 +434,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         gml_pragma = get_gml_api_entry("gml_pragma")
         self.assertIsNotNone(gml_pragma)
         assert gml_pragma is not None
-        self.assertEqual(gml_pragma.status, "unsupported")
+        # A compile-time pragma does nothing when the code runs.
+        self.assertEqual(gml_pragma.status, "implemented")
         self.assertEqual(gml_pragma.issue_number, 515)
         steam_is_initialized = get_gml_api_entry("steam_is_initialized")
         self.assertIsNotNone(steam_is_initialized)

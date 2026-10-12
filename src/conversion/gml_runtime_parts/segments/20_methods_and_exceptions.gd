@@ -258,6 +258,7 @@ static func gml_script_registry_set(entries):
 	if typeof(entries) != TYPE_ARRAY:
 		return null
 	var initializers = []
+	var global_pragmas = []
 	for entry in entries:
 		if typeof(entry) != TYPE_DICTIONARY or not entry.has("callable"):
 			continue
@@ -271,9 +272,15 @@ static func gml_script_registry_set(entries):
 		var initializer: Variant = entry.get("initializer", null)
 		if is_method(initializer) and not initializers.has(initializer):
 			initializers.append(initializer)
+		var global_pragma: Variant = entry.get("global_pragma_initializer", null)
+		if is_method(global_pragma) and not global_pragmas.has(global_pragma):
+			global_pragmas.append(global_pragma)
 	if _gml_script_registry_initializers_complete:
 		return null
 	_gml_script_registry_initializers_running = true
+	# gml_pragma("global", code) runs its code before the first room, once
+	# every script's own top-level code has run.
+	initializers.append_array(global_pragmas)
 	for initializer in initializers:
 		if initializer is GMLMethod:
 			initializer.gml_callv([])

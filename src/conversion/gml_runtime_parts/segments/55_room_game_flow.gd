@@ -138,11 +138,9 @@ static func _gml_game_restart_now():
 	var tree = _gml_room_tree()
 	if tree != null and tree.current_scene != null:
 		_gml_room_dispatch_lifecycle(tree.current_scene, "_on_game_end")
-	# Every instance leaves the game, persistent ones too.
-	_gml_instances_clean_up(null)
 	_gml_room_game_started = false
 	_gml_room_game_ended = false
-	return _gml_room_change_to_entry(entries[0], true)
+	return _gml_room_change_to_entry(entries[0], true, true)
 
 
 static func gml_game_end():
@@ -219,7 +217,9 @@ static func _gml_room_process_scene(scene, delta):
 	return true
 
 
-static func _gml_room_change_to_entry(entry, restarting):
+# game_restarting: the game restarts, so every instance leaves the game, the
+# persistent ones too.
+static func _gml_room_change_to_entry(entry, restarting, game_restarting = false):
 	var tree = _gml_room_tree()
 	if tree == null:
 		return false
@@ -236,9 +236,12 @@ static func _gml_room_change_to_entry(entry, restarting):
 	if old_scene != null:
 		_gml_room_dispatch_lifecycle(old_scene, "_on_room_end")
 		_gml_room_capture_persistent_instances(old_scene)
-		# The instances left in a room that is not persistent leave the game
-		# (the persistent ones have just moved out).
-		if not _gml_room_current_is_persistent():
+		# Clean Up comes after Room End. The instances left in a room that is
+		# not persistent leave the game (the persistent ones have just moved
+		# out); on a game restart every instance does.
+		if game_restarting:
+			_gml_instances_clean_up(null)
+		elif not _gml_room_current_is_persistent():
 			_gml_instances_clean_up(old_scene)
 		root.remove_child(old_scene)
 		old_scene.queue_free()

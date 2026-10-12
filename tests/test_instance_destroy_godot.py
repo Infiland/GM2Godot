@@ -14,6 +14,7 @@ from tests.gamemaker_project_support import (
     EVENT_CLEAN_UP,
     EVENT_CREATE,
     EVENT_DESTROY,
+    EVENT_GAME_END,
     EVENT_ROOM_END,
     EVENT_STEP,
     GameMakerObject,
@@ -127,7 +128,10 @@ _CLEAN_UP_TRACE = [
 ]
 
 # game_restart() ends the game, so every instance runs its Clean Up event
-# (once) before the game starts again; closing the window ends it too.
+# (once) before the game starts again; closing the window ends it too. Clean
+# Up is the last event an instance runs: the events of the restart (Game End,
+# Room End) come first and still see what Clean Up frees (manual, Object
+# Events: Clean Up "will be called after any event that removes an instance").
 _GAME_EXIT_PROJECT = GameMakerProject(
     name="CleanUpGameExit",
     scripts={"scr_trace": _TRACE_SCRIPT},
@@ -135,8 +139,18 @@ _GAME_EXIT_PROJECT = GameMakerProject(
         GameMakerObject(
             "o_res",
             {
-                EVENT_CREATE: 'trace("create_res");\n',
-                EVENT_CLEAN_UP: 'trace("clean_up_res:" + global.phase);\n',
+                EVENT_CREATE: 'global.res = ds_list_create();\ntrace("create_res");\n',
+                EVENT_GAME_END: (
+                    'if (global.phase == "restart") {\n'
+                    '    trace("game_end_res:list=" + (ds_exists(global.res, ds_type_list) ? "yes" : "no"));\n'
+                    "}\n"
+                ),
+                EVENT_ROOM_END: (
+                    'if (global.phase == "restart") {\n'
+                    '    trace("room_end_res:list=" + (ds_exists(global.res, ds_type_list) ? "yes" : "no"));\n'
+                    "}\n"
+                ),
+                EVENT_CLEAN_UP: 'trace("clean_up_res:" + global.phase);\nds_list_destroy(global.res);\n',
             },
         ),
         GameMakerObject(
@@ -167,7 +181,14 @@ _GAME_EXIT_PROJECT = GameMakerProject(
         ),
     ),
 )
-_GAME_EXIT_TRACE = ["create_res", "clean_up_res:restart", "create_res", "clean_up_res:close"]
+_GAME_EXIT_TRACE = [
+    "create_res",
+    "game_end_res:list=yes",
+    "room_end_res:list=yes",
+    "clean_up_res:restart",
+    "create_res",
+    "clean_up_res:close",
+]
 
 # instance_destroy only marks an instance: it stops existing for instance
 # lookups at once (instance_exists, instance_number, with, also through self,

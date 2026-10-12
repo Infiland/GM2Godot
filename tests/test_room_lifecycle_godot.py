@@ -373,6 +373,93 @@ _LAYERS_TRACE = [
 ]
 
 
+# A persistent room is built once: coming back to it, or restarting it, finds
+# it as it was left, with no Create event, instance creation code or room
+# creation code run again, and only Room Start runs. Its instances take no
+# part in the other rooms (they are not in their object's instance lists and
+# get no events), and the ids of its instances and layers are the same when
+# it is entered again (runner StartRoom: a persistent room that was
+# initialised is not created from storage again). game_restart() resets it.
+_PERSISTENT_ROOM_PROJECT = GameMakerProject(
+    name="PersistentRoom",
+    scripts={"scr_trace": _TRACE_SCRIPT},
+    objects=(
+        GameMakerObject(
+            "o_ctrl",
+            {
+                EVENT_CREATE: 'if (!variable_global_exists("t")) global.t = 0;\n',
+                EVENT_STEP: (
+                    "global.t += 1;\n"
+                    "if (global.t == 3) room_goto(r_away);\n"
+                    "if (global.t == 5) room_goto(r_hub);\n"
+                    "if (global.t == 7) room_restart();\n"
+                    'if (global.t == 9) { trace("restart_game"); game_restart(); }\n'
+                ),
+            },
+            persistent=True,
+        ),
+        GameMakerObject(
+            "o_counter",
+            {
+                EVENT_CREATE: (
+                    'n = 0;\ntrace("create_counter");\nglobal.counter_id = id;\n'
+                    'global.layer_id = layer_get_id("Things");\n'
+                    'instance_create_layer(0, 0, "Things", o_made);\n'
+                ),
+                EVENT_STEP: "n += 1;\n",
+                EVENT_ROOM_START: (
+                    'trace("hub_start:n=" + string(n) + ":made=" + string(instance_number(o_made))\n'
+                    '    + ":layer=" + (layer_exists(global.layer_id) ? "yes" : "no")\n'
+                    '    + ":id=" + (instance_exists(global.counter_id) ? "yes" : "no"));\n'
+                ),
+            },
+        ),
+        GameMakerObject("o_made", {}),
+        GameMakerObject(
+            "o_probe",
+            {
+                EVENT_CREATE: (
+                    'trace("away:counters=" + string(instance_number(o_counter)) + ":made=" + string(instance_number(o_made))\n'
+                    '    + ":hub_layer=" + (layer_exists(global.layer_id) ? "yes" : "no"));\n'
+                ),
+            },
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_hub",
+            layers=(
+                InstanceLayer(
+                    "Things",
+                    0,
+                    (
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                        RoomInstance("inst_counter", "o_counter", 0, 0, creation_code='trace("code_counter");\n'),
+                    ),
+                ),
+            ),
+            creation_order=("inst_ctrl", "inst_counter"),
+            creation_code='trace("room_code_hub");\n',
+            persistent=True,
+        ),
+        GameMakerRoom(
+            "r_away",
+            layers=(InstanceLayer("Instances", 0, (RoomInstance("inst_probe", "o_probe", 0, 0),)),),
+            creation_order=("inst_probe",),
+        ),
+    ),
+)
+_PERSISTENT_ROOM_FIRST_VISIT = ["create_counter", "code_counter", "room_code_hub", "hub_start:n=0:made=1:layer=yes:id=yes"]
+_PERSISTENT_ROOM_TRACE = [
+    *_PERSISTENT_ROOM_FIRST_VISIT,
+    "away:counters=0:made=0:hub_layer=no",
+    "hub_start:n=2:made=1:layer=yes:id=yes",
+    "hub_start:n=3:made=1:layer=yes:id=yes",
+    "restart_game",
+    *_PERSISTENT_ROOM_FIRST_VISIT,
+]
+
+
 class TestRoomLifecycleGodot(unittest.TestCase):
     def test_room_change_in_create_skips_later_create_and_creation_code(self) -> None:
         self.assertEqual(self._run_trace(_REDIRECT_PROJECT), _REDIRECT_TRACE)
@@ -388,6 +475,9 @@ class TestRoomLifecycleGodot(unittest.TestCase):
 
     def test_persistent_instances_move_to_the_layer_of_the_same_name(self) -> None:
         self.assertEqual(self._run_trace(_LAYERS_PROJECT), _LAYERS_TRACE)
+
+    def test_persistent_room_keeps_its_state_until_game_restart(self) -> None:
+        self.assertEqual(self._run_trace(_PERSISTENT_ROOM_PROJECT), _PERSISTENT_ROOM_TRACE)
 
     def _run_trace(self, project: GameMakerProject) -> list[str]:
         godot_binary = find_smoke_godot_binary()

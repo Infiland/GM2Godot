@@ -106,7 +106,7 @@ REQUIRED_PATHS = {
         "tests/windows_receipt_native_support.py", "constraints/requirements-windows-py312.lock",
     ),
 }
-R01_PRESERVED_SHA256 = "caf3fc0123ea3fdfc70385394674539fb9b3a7f7737aa598f78720d0989866a1"
+R01_PRESERVED_SHA256 = "a67c028d52b41a24e0780d8672947e4f0c6bf49f3c2939ef50f64468e9302d51"
 UPLOAD_ACTION = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
 TEST_JOBS = (
     ("test", "linux", "ubuntu-24.04", "x64", 30),

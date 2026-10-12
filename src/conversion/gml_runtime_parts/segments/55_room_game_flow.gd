@@ -11,6 +11,11 @@ static var _gml_room_game_started = false
 static var _gml_room_game_ended = false
 static var _gml_room_suppress_auto_enter = false
 static var _gml_room_pending_entry = null
+# The persistent rooms that were left, by room id (see _gml_room_park_scene),
+# and the one being entered again.
+static var _gml_room_parked = {}
+static var _gml_room_pending_resume = null
+static var _gml_room_step_list_stale = false
 static var _gml_room_transition_log = []
 # GameMaker only records room_goto/room_goto_next/room_goto_previous/
 # room_restart/game_restart/game_end requests; the current event finishes,
@@ -36,6 +41,8 @@ static func gml_room_apply_pending_change():
 	# Performs the requested change and returns what happened: "room" for a
 	# room switch (including room_restart), "game_restart", "game_end", or ""
 	# when nothing was requested.
+	if _gml_room_step_list_stale:
+		_gml_room_reset_step_list()
 	var request = _gml_room_requested_change
 	if request == null:
 		return ""
@@ -71,17 +78,28 @@ static func gml_room_enter_scene(scene, force = false):
 		_gml_room_create_instances(scene)
 		return false
 	_gml_room_pending_entry = null
-	gml_layer_register_scene(scene)
+	var resumed = _gml_room_pending_resume
+	_gml_room_pending_resume = null
+	if resumed != null:
+		_gml_room_resume_layers(scene, resumed)
+	else:
+		gml_layer_register_scene(scene)
 	_gml_view_register_scene(scene)
 	_gml_particle_room_enter_scene(scene)
 	_gml_room_update_current(entry, scene)
-	_gml_room_warn_persistent_room(scene)
-	_gml_room_create_instances(scene)
+	# A persistent room entered again is as it was left: like the runner's
+	# StartRoom, its instances join their objects' lists again and neither
+	# Create events nor creation code run; Room Start does.
+	if resumed != null:
+		_gml_room_resume_instances(scene, resumed)
+	else:
+		_gml_room_create_instances(scene)
 	_gml_room_restore_persistent_instances(scene)
 	if not _gml_room_game_started:
 		_gml_room_game_started = true
 		_gml_room_dispatch_lifecycle(scene, "_on_game_start")
-	_gml_room_run_room_creation_code(scene)
+	if resumed == null:
+		_gml_room_run_room_creation_code(scene)
 	_gml_room_dispatch_lifecycle(scene, "_on_room_start")
 	return true
 
@@ -162,6 +180,7 @@ static func _gml_game_restart_end_game(tree):
 		gml_instance_unregister(entry["handle"])
 		if node is Node and is_instance_valid(node) and not node.is_queued_for_deletion():
 			node.queue_free()
+	_gml_room_drop_parked_rooms()
 	_gml_time_source_destroy_call_later()
 	gml_audio_stop_all()
 
@@ -246,12 +265,22 @@ static func _gml_room_change_to_entry(entry, restarting):
 	if packed_scene == null or not packed_scene.has_method("instantiate"):
 		return false
 	var old_scene = tree.current_scene
+	var kept_old_scene = false
 	if old_scene != null:
 		_gml_room_dispatch_lifecycle(old_scene, "_on_room_end")
 		_gml_room_capture_persistent_instances(old_scene)
+		kept_old_scene = _gml_room_scene_is_persistent(old_scene) and _gml_room_current_id >= 0
+		if kept_old_scene:
+			_gml_room_park_scene(old_scene)
 		root.remove_child(old_scene)
-		old_scene.queue_free()
-	var new_scene = packed_scene.instantiate()
+		if not kept_old_scene:
+			old_scene.queue_free()
+	var parked = _gml_room_parked.get(int(entry["id"]))
+	_gml_room_parked.erase(int(entry["id"]))
+	var new_scene = packed_scene.instantiate() if parked == null else parked["scene"]
+	_gml_room_pending_resume = parked
+	if kept_old_scene or parked != null:
+		_gml_room_reset_step_list()
 	_gml_room_pending_entry = entry
 	_gml_room_suppress_auto_enter = true
 	root.add_child(new_scene)
@@ -342,7 +371,10 @@ static func _gml_room_current_is_persistent():
 	var tree = _gml_room_tree()
 	if tree == null or tree.current_scene == null:
 		return false
-	var scene = tree.current_scene
+	return _gml_room_scene_is_persistent(tree.current_scene)
+
+
+static func _gml_room_scene_is_persistent(scene):
 	return scene.has_meta("gamemaker_room_persistent") and bool(scene.get_meta("gamemaker_room_persistent"))
 
 
@@ -651,15 +683,133 @@ static func _gml_room_node_was_restored_persistent(node):
 	)
 
 
-static func _gml_room_warn_persistent_room(scene):
-	if scene == null:
+# Leaving a persistent room keeps it as it is (runner StartRoom: its
+# instances stay in the room, only out of their objects' instance lists, and
+# the room is not created from storage again when it is entered again). Its
+# instances leave the instance lists, so no event, with, instance_number or
+# collision meets them, while an id still names its instance as in the
+# runner; its layers keep their ids but do not exist meanwhile; its scene
+# leaves the tree, its room particle systems kept.
+static func _gml_room_park_scene(scene):
+	var record = {"scene": scene, "instances": [], "layers": [], "elements": []}
+	for node in _gml_room_tree_nodes(scene):
+		var entry: Variant = null if node == scene else _gml_instance_entry(node)
+		if entry == null or bool(entry["destroyed"]):
+			continue
+		_gml_room_park_instance(entry)
+		record["instances"].append(entry)
+	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
+	for handle in _gml_layer_handles_by_index.values():
+		if gml_handle_is_valid(handle) and _gml_room_scene_holds(scene, handle.reference):
+			record["layers"].append(handle)
+	for handle in _gml_layer_element_handles_by_index.values():
+		if gml_handle_is_valid(handle) and _gml_room_scene_holds(scene, handle.reference):
+			record["elements"].append(handle)
+	for handle in record["layers"]:
+		_gml_layer_unregister_handle(handle, false)
+		handle.valid = false
+	for handle in record["elements"]:
+		_gml_layer_element_unregister_handle(handle, false)
+		handle.valid = false
+	for node in _gml_room_particle_layer_nodes(scene):
+		var cleanup = _gml_particle_room_layer_exiting.bind(node)
+		if node.tree_exiting.is_connected(cleanup):
+			node.tree_exiting.disconnect(cleanup)
+	_gml_room_parked[_gml_room_current_id] = record
+
+
+static func _gml_room_scene_holds(scene, node):
+	return node is Node and (node == scene or scene.is_ancestor_of(node))
+
+
+static func _gml_room_park_instance(entry):
+	_gml_instance_entries.erase(entry["handle"].index)
+	_gml_instance_handles_by_node_id.erase(entry["node_id"])
+	_gml_collision_forget_box_lists(entry)
+	_gml_instance_order_erase(_gml_instance_live_order, entry)
+	for selector_id in entry["selector_ids"]:
+		_gml_instance_index_remove(_gml_instance_live_by_object, selector_id, entry)
+	for selector_name in entry["selector_names"]:
+		_gml_instance_index_remove(_gml_instance_live_by_object_name, selector_name, entry)
+
+
+static func _gml_room_resume_instances(scene, record):
+	for entry in record["instances"]:
+		if not is_instance_valid(entry["instance"]) or not gml_handle_is_valid(entry["handle"]):
+			continue
+		_gml_instance_entries[entry["handle"].index] = entry
+		_gml_instance_handles_by_node_id[entry["node_id"]] = entry["handle"]
+		_gml_collision_forget_box_lists(entry)
+		_gml_instance_live_order.append(entry)
+		for selector_id in entry["selector_ids"]:
+			_gml_instance_index_add(_gml_instance_live_by_object, selector_id, entry)
+		for selector_name in entry["selector_names"]:
+			_gml_instance_index_add(_gml_instance_live_by_object_name, selector_name, entry)
+	# The lists are kept in creation order.
+	_gml_instance_live_order.sort_custom(_gml_instance_entry_order_less)
+	for index_map in [_gml_instance_live_by_object, _gml_instance_live_by_object_name]:
+		for entries in index_map.values():
+			entries.sort_custom(_gml_instance_entry_order_less)
+	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
+	for node in _gml_room_particle_layer_nodes(scene):
+		var cleanup = _gml_particle_room_layer_exiting.bind(node)
+		if not node.tree_exiting.is_connected(cleanup):
+			node.tree_exiting.connect(cleanup)
+
+
+static func _gml_room_resume_layers(scene, record):
+	_gml_layer_clear_registry()
+	for handle in record["layers"]:
+		if is_instance_valid(handle.reference):
+			handle.valid = true
+			_gml_layer_store_handle(handle)
+	for handle in record["elements"]:
+		if is_instance_valid(handle.reference):
+			handle.valid = true
+			_gml_layer_element_handles_by_index[handle.index] = handle
+			_gml_layer_element_handles_by_node_id[handle.reference.get_instance_id()] = handle
+	gml_layer_register_scene(scene, false)
+
+
+static func _gml_room_particle_layer_nodes(scene):
+	var nodes = []
+	var candidates = [scene]
+	candidates.append_array(scene.find_children("*", "", true, false))
+	for node in candidates:
+		if node.has_meta("gamemaker_particle_system_handle"):
+			nodes.append(node)
+	return nodes
+
+
+# game_restart() starts every room afresh: the persistent rooms that were
+# left go, with their instances, layers and room particle systems.
+static func _gml_room_drop_parked_rooms():
+	for record in _gml_room_parked.values():
+		for entry in record["instances"]:
+			gml_handle_invalidate(entry["handle"])
+		for handle in record["layers"] + record["elements"]:
+			gml_handle_invalidate(handle)
+		var scene = record["scene"]
+		if is_instance_valid(scene):
+			for node in _gml_room_particle_layer_nodes(scene):
+				_gml_particle_room_layer_exiting(node)
+			scene.queue_free()
+	_gml_room_parked.clear()
+	_gml_room_pending_resume = null
+
+
+# The next step builds its instance list afresh, in creation order, when a
+# persistent room was left or entered again (its instances leave or join the
+# list with their creation order). Inside a running step (room changes
+# without the frame pump) that waits until the step is over.
+static func _gml_room_reset_step_list():
+	if _gml_step_running:
+		_gml_room_step_list_stale = true
 		return
-	if not scene.has_meta("gamemaker_room_persistent") or not bool(scene.get_meta("gamemaker_room_persistent")):
-		return
-	if scene.has_meta("_gm2godot_persistent_room_warning_emitted") and bool(scene.get_meta("_gm2godot_persistent_room_warning_emitted")):
-		return
-	scene.set_meta("_gm2godot_persistent_room_warning_emitted", true)
-	push_warning("GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.")
+	_gml_room_step_list_stale = false
+	_gml_step_entries = []
+	_gml_step_infos = []
+	_gml_step_creation_mark = 0
 
 
 static func _gml_room_persistent_root():

@@ -211,6 +211,13 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
             "\tGMRuntimeFacade.gm2godot_runtime_shutdown()",
             "",
             "",
+            # Closing the window ends the game (unless a Close Button event
+            # keeps it open): every instance runs its Clean Up event first.
+            "func _notification(what):",
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST and get_tree().auto_accept_quit:",
+            "\t\tGMRuntimeFacade.gml_game_window_close()",
+            "",
+            "",
         ])
     if definition.frame_pump:
         lines.extend([

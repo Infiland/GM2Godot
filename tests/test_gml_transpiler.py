@@ -3242,8 +3242,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_asset_get_index("o_enemy"), self)',
         )
         self.assertEqual(
+            transpile_gml_expression("instance_create_depth(0, 0, -1, o_enemy, { hp: 3 })", asset_names=asset_names),
+            'GMRuntime.gml_instance_create_depth(0, 0, -1, GMRuntime.gml_asset_get_index("o_enemy"), self, '
+            'GMRuntime.gml_struct({"hp": 3}))',
+        )
+        self.assertEqual(
             transpile_gml_expression("instance_destroy()"),
             "GMRuntime.gml_instance_destroy(self)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_destroy(o_enemy, false)", asset_names=asset_names),
+            'GMRuntime.gml_instance_destroy(GMRuntime.gml_asset_get_index("o_enemy"), false)',
         )
         self.assertEqual(
             transpile_gml_code("with (o_enemy) hp = 0;", indent="", asset_names=asset_names),

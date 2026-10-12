@@ -2762,7 +2762,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _on_draw():", content)
 
     def test_script_with_cleanup_event(self):
-        """eventType 12 should produce func _exit_tree()."""
+        """eventType 12 should produce func _on_clean_up(); _exit_tree only unregisters."""
         self._setup_object("o_test", event_list=[{"eventType": 12, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2770,7 +2770,11 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _exit_tree():", content)
+        self.assertIn("func _on_clean_up():", content)
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()\n',
+            content,
+        )
 
     def test_script_with_alarm_event(self):
         """eventType 2 should produce func _on_alarm_N()."""

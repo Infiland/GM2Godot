@@ -51,7 +51,10 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("var id = GMRuntime.gml_instance_noone()", content)
         self.assertIn("var other = self", content)
         self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
-        self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
+        self.assertIn(
+            'func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id) or has_meta("_gm2godot_instance_destroyed"):',
+            content,
+        )
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn("var solid = false", content)
         self.assertIn(
@@ -149,7 +152,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -166,8 +168,7 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             content,
         )
         self.assertIn(
-            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n'
-            "\tsuper._exit_tree()\n\t_gm_unregister_instance()",
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()\n',
             content,
         )
 
@@ -185,7 +186,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -291,7 +291,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
     def test_cleanup_event(self):
         content = generate_script_content([{"eventType": 12, "eventNum": 0}])
-        self.assertIn("func _exit_tree():", content)
+        self.assertIn("func _on_clean_up():", content)
 
     def test_destroy_event(self):
         content = generate_script_content([{"eventType": 1, "eventNum": 0}])

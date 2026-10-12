@@ -72,14 +72,14 @@ _OBJECTS: dict[str, dict[str, str]] = {
     "o_painter": {"_on_draw": "draw_rectangle(0, 0, 1, 1, false);"},
     "o_mover": {
         "_on_draw": "draw_rectangle(0, 0, 1, 1, false);",
-        "_exit_tree": 'show_debug_message("CLEANUP");',
+        "_on_clean_up": 'show_debug_message("CLEANUP");',
     },
     "o_draw_depth": {"_on_draw": "draw_rectangle(0, 0, 1, 1, false); depth = -70;"},
-    "o_create_depth": {"_ready": "depth = -80;", "_exit_tree": 'show_debug_message("CLEANUP");'},
+    "o_create_depth": {"_ready": "depth = -80;", "_on_clean_up": 'show_debug_message("CLEANUP");'},
     "o_early_depth": {"_ready": "depth = 100;", "_on_draw": "draw_rectangle(0, 0, 1, 1, false);"},
 }
 # GameMaker event (type, number) of each generated method.
-_EVENTS = {"_ready": (0, 0), "_on_draw": (8, 0), "_exit_tree": (12, 0)}
+_EVENTS = {"_ready": (0, 0), "_on_draw": (8, 0), "_on_clean_up": (12, 0)}
 
 
 def _object_scene(name: str) -> str:

@@ -465,9 +465,9 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
-    "instance_create_layer": (4, 4),
-    "instance_create_depth": (4, 4),
-    "instance_destroy": (0, 1),
+    "instance_create_layer": (4, 5),
+    "instance_create_depth": (4, 5),
+    "instance_destroy": (0, 2),
     "instance_exists": (1, 1),
     "instance_find": (2, 2),
     "instance_number": (1, 1),
@@ -1600,6 +1600,9 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     descriptors["method"] = _descriptor("method", 2, 2, "method", "gml_method")
+    # Events run at once with the caller's self and other.
+    descriptors["event_user"] = _descriptor("event_user", 1, 1, "runtime_call_scope", "gml_event_user")
+    descriptors["event_perform"] = _descriptor("event_perform", 2, 2, "runtime_call_scope", "gml_event_perform")
     descriptors["with_targets"] = _descriptor(
         "with_targets",
         1,

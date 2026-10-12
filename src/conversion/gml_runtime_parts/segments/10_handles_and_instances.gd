@@ -72,6 +72,7 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		"selector_ids": selector_ids,
 		"selector_names": selector_names,
 		"destroyed": false,
+		"cleaned_up": false,
 		"creation_order": _gml_instance_creation_counter,
 		# Whether the instance keeps its own collision state (see
 		# _gml_collision_tracked_state).
@@ -122,21 +123,203 @@ static func gml_instance_unregister(instance_or_handle):
 	return true
 
 
-static func gml_instance_destroy(target = null):
+# With execute_event false the Destroy event is skipped; Clean Up still runs.
+static func gml_instance_destroy(target = null, execute_event = true):
 	var destroy_target = target if target != null else gml_instance_noone()
+	var run_destroy_event = gml_bool(execute_event)
 	for instance in gml_with_targets(destroy_target):
 		var entry = _gml_instance_entry(instance)
 		if entry == null or entry["destroyed"]:
 			continue
 		entry["destroyed"] = true
+		# A destroyed instance is never registered again, not even by the rest
+		# of its Create event (event_inherited) or by instance_create_*.
+		_gml_instance_set_meta(instance, "_gm2godot_instance_destroyed", true)
 		# After a room change request GameMaker skips the Destroy event,
 		# unless the instance or the current room is persistent.
-		if instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
-			instance.call("_on_destroy")
+		if run_destroy_event and instance != null and instance.has_method("_on_destroy") and not _gml_event_scheduler_event_blocked(instance, true):
+			_gml_instance_perform_own_event(instance, "_on_destroy")
+		_gml_instance_clean_up(instance, entry)
 		gml_instance_unregister(entry["handle"])
 		if instance is Node and instance.is_inside_tree():
 			instance.queue_free()
 	return null
+
+
+# GameMaker runs an instance's Clean Up event once, as the instance leaves the
+# game: right after its Destroy event (before instance_destroy returns), when
+# a room that is not persistent ends, and when the game ends or restarts;
+# never when a persistent instance moves on to the next room. A pending room
+# change does not hold it back.
+static func _gml_instance_clean_up(instance, entry):
+	if entry["cleaned_up"]:
+		return
+	entry["cleaned_up"] = true
+	if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance) and instance.has_method("_on_clean_up"):
+		_gml_instance_perform_own_event(instance, "_on_clean_up")
+
+
+# Moves a node to another parent, such as an instance to another layer. The
+# node leaves the tree and comes back, which must not count as the instance
+# leaving the game (its _exit_tree unregisters it otherwise).
+static func _gml_instance_reparent(node, new_parent):
+	var preserving = node.get_meta("_gm2godot_room_preserving_persistent", false)
+	node.set_meta("_gm2godot_room_preserving_persistent", true)
+	node.reparent(new_parent, true)
+	node.set_meta("_gm2godot_room_preserving_persistent", preserving)
+
+
+# Runs an event that GameMaker performs on an instance by itself (Destroy,
+# Clean Up) with other being the instance, also when a collision event (where
+# other is the instance collided with) set it off; the caller's other comes
+# back afterwards.
+static func _gml_instance_perform_own_event(instance, method_name):
+	_gml_instance_call_event(instance, method_name, instance)
+
+
+# Calls an event method of an instance with other_value as its other, then
+# gives the instance its own other back.
+static func _gml_instance_call_event(instance, method_name, other_value):
+	var has_other = "other" in instance
+	var previous_other = instance.get("other") if has_other else null
+	if has_other:
+		instance.set("other", other_value)
+	instance.call(method_name)
+	if has_other and is_instance_valid(instance):
+		instance.set("other", previous_other)
+
+
+# The generated methods of the events event_perform can name, by event type
+# and number (src/conversion/events/mappings names them).
+const GML_EVENT_STEP_METHODS = {0: "_on_step", 1: "_on_begin_step", 2: "_on_end_step"}
+const GML_EVENT_OTHER_METHODS = {
+	0: "_on_outside_room",
+	1: "_on_intersect_boundary",
+	2: "_on_game_start",
+	3: "_on_game_end",
+	4: "_on_room_start",
+	5: "_on_room_end",
+	6: "_on_no_more_lives",
+	7: "_on_animation_end",
+	8: "_on_path_ended",
+	9: "_on_no_more_health",
+	58: "_on_animation_update",
+	59: "_on_animation_event",
+	76: "_on_broadcast_message",
+}
+const GML_EVENT_DRAW_METHODS = {
+	0: "_on_draw",
+	64: "_on_draw_gui",
+	65: "_on_resize",
+	72: "_on_draw_begin",
+	73: "_on_draw_end",
+	74: "_on_draw_gui_begin",
+	75: "_on_draw_gui_end",
+	76: "_on_pre_draw",
+	77: "_on_post_draw",
+}
+const GML_EVENT_INPUT_METHOD_PREFIXES = {
+	5: "_gm_input_keyboard_",
+	6: "_gm_input_mouse_",
+	9: "_gm_input_key_press_",
+	10: "_gm_input_key_release_",
+	13: "_gm_input_gesture_",
+}
+
+
+# event_user(number) runs the instance's User Event number (0 to 15), as
+# event_perform(ev_other, ev_user0 + number) does.
+static func gml_event_user(number, current_self = null, current_other = null):
+	var user_number = int(_to_real(number))
+	if user_number < 0 or user_number > 15:
+		return null
+	return gml_event_perform(7, 10 + user_number, current_self, current_other)
+
+
+# event_perform(type, number) runs the code of one of the instance's events
+# (an inherited one too) at once, with the caller's self and other, and does
+# nothing else: performing the Destroy event destroys nothing. Nothing runs
+# for an event the object does not have, nor for one GameMaker holds back
+# once a room change is pending (HTML5 runner: event_perform in
+# Function_Game.js calls PerformEvent(event, index, self, other)).
+static func gml_event_perform(event_type, event_number, current_self = null, current_other = null):
+	var type_value = int(_to_real(event_type))
+	var method_name = _gml_event_method_name(type_value, event_number)
+	if method_name == "" or not (current_self is Node) or not is_instance_valid(current_self):
+		return null
+	if not current_self.has_method(method_name):
+		return null
+	# Clean Up always runs; Create, Pre-Create, Destroy, Alarm and Other events
+	# still run for persistent instances.
+	if type_value != 12 and _gml_event_scheduler_event_blocked(current_self, type_value in [0, 1, 2, 7, 14]):
+		return null
+	_gml_instance_call_event(current_self, method_name, current_other if current_other != null else current_self)
+	return null
+
+
+static func _gml_event_method_name(type_value, event_number):
+	if type_value == 4:
+		# The number is the object collided with.
+		var object_name = _gml_object_selector_name(event_number)
+		return GML_COLLISION_EVENT_PREFIX + object_name if object_name != "" else ""
+	var number = int(_to_real(event_number))
+	if GML_EVENT_INPUT_METHOD_PREFIXES.has(type_value):
+		return GML_EVENT_INPUT_METHOD_PREFIXES[type_value] + str(number)
+	match type_value:
+		0:
+			# The Create event; the generated _ready also sets xstart, ystart,
+			# xprevious and yprevious to the current position again.
+			return "_ready"
+		1:
+			return "_on_destroy"
+		2:
+			return "_on_alarm_" + str(number)
+		3:
+			return GML_EVENT_STEP_METHODS.get(number, "")
+		7:
+			if number >= 10 and number <= 25:
+				return "_user_event_" + str(number - 10)
+			if number >= 40 and number <= 47:
+				return "_on_outside_view_" + str(number - 40)
+			if number >= 50 and number <= 57:
+				return "_on_intersect_view_" + str(number - 50) + "_boundary"
+			return GML_EVENT_OTHER_METHODS.get(number, "_on_other_" + str(number))
+		8:
+			return GML_EVENT_DRAW_METHODS.get(number, "_on_draw_" + str(number))
+		12:
+			return "_on_clean_up"
+	return ""
+
+
+# Runs the Clean Up event of the instances under root_node (every instance
+# when root_node is null), in instance order.
+static func _gml_instances_clean_up(root_node):
+	for entry in _gml_instance_live_order.slice(0):
+		var instance = entry["instance"]
+		if entry["destroyed"] or typeof(instance) != TYPE_OBJECT or not is_instance_valid(instance):
+			continue
+		if root_node != null and not (instance is Node and root_node.is_ancestor_of(instance)):
+			continue
+		_gml_instance_clean_up(instance, entry)
+
+
+# Destroys the instances under root_node (a layer or a sequence that is
+# destroyed), in tree order: each one runs its Destroy and then its Clean Up
+# event, and so does an instance that those events create under root_node
+# (the runner removes a layer's elements until none is left).
+static func _gml_instances_destroy_under(root_node):
+	var visited = {}
+	var found = true
+	while found:
+		found = false
+		for node in _gml_layer_tree_nodes(root_node):
+			if visited.has(node):
+				continue
+			visited[node] = true
+			found = true
+			var handle = _gml_instance_handle_for_node(node)
+			if gml_handle_is_valid(handle):
+				gml_instance_destroy(handle)
 
 
 static func gml_instance_exists(target):
@@ -195,12 +378,12 @@ static func gml_instance_furthest(x, y, target):
 	return _gml_instance_distance_extreme(x, y, target, false)
 
 
-static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):
-	return _gml_instance_create_at(x, y, layer, null, object_selector, current_self)
+static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null, var_struct = null):
+	return _gml_instance_create_at(x, y, layer, null, object_selector, current_self, var_struct)
 
 
-static func gml_instance_create_depth(x, y, depth_value, object_selector, current_self = null):
-	return _gml_instance_create_at(x, y, null, depth_value, object_selector, current_self)
+static func gml_instance_create_depth(x, y, depth_value, object_selector, current_self = null, var_struct = null):
+	return _gml_instance_create_at(x, y, null, depth_value, object_selector, current_self, var_struct)
 
 
 static func gml_with_targets(target, current_self = null, current_other = null):
@@ -212,7 +395,10 @@ static func gml_with_targets(target, current_self = null, current_other = null):
 			# An instance whose node was freed no longer exists.
 			return []
 		if target is Node:
-			# The instance itself (self, other, a stored instance).
+			# The instance itself (self, other, a stored instance), unless it
+			# was destroyed: it was registered once and no longer is.
+			if target.has_meta("_gm2godot_instance_id") and not _gml_instance_handles_by_node_id.has(target.get_instance_id()):
+				return []
 			return [target]
 	if is_undefined(target):
 		return []
@@ -300,10 +486,16 @@ static func gml_handle_invalidate(handle):
 	if handle is GMLHandle:
 		var old_key = _gml_handle_key(handle.kind, handle.index)
 		handle.valid = false
+		_gml_handle_registry.erase(old_key)
+		if handle.kind == GML_INSTANCE_HANDLE_KIND:
+			# A destroyed instance keeps its id: stored references never turn
+			# into noone, and they still reach the instance's variables until
+			# its node is freed at the end of the step (GameMaker only marks
+			# the instance; instance lookups skip it).
+			return handle
 		handle.reference = null
 		handle.index = _gml_invalid_handle_index(handle.kind)
 		handle.value = _gml_encode_handle_value(handle.type_id, handle.index)
-		_gml_handle_registry.erase(old_key)
 	return handle
 
 

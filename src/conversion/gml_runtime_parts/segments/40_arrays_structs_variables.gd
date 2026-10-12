@@ -537,16 +537,23 @@ static func gml_call_named(function_name, args = [], caller_self = null, caller_
 	return gml_error("GML function '" + name + "' is not available")
 
 
-# A struct (the global scope too) or a live instance node, which selector
-# reads and writes use as is; null for everything that needs resolving
-# (objects, ids, handles, keywords, methods and script functions). A struct
-# is itself whatever members it has, id and handle included.
+# A struct (the global scope too), a live instance node, or the node of an
+# instance id, which selector reads and writes use as is; null for everything
+# that needs resolving (objects, numbers, keywords, methods and script
+# functions). A struct is itself whatever members it has, id and handle
+# included. Like GameMaker, an id reaches a destroyed instance's variables
+# until the instance is removed at the end of the step (its node is freed).
 static func _gml_selector_direct_target(target):
 	var target_type = typeof(target)
 	if target_type == TYPE_DICTIONARY:
 		return target
-	if target_type == TYPE_OBJECT and is_instance_valid(target) and target is Node:
-		return target
+	if target_type == TYPE_OBJECT and is_instance_valid(target):
+		if target is Node:
+			return target
+		if target is GMLHandle and target.kind == GML_INSTANCE_HANDLE_KIND:
+			var instance = target.reference
+			if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance) and instance is Node:
+				return instance
 	return null
 
 

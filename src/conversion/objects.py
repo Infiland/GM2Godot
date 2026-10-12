@@ -1819,7 +1819,6 @@ class ObjectConverter(BaseConverter):
                 persistent=persistent,
                 mask_sprite_name=parsed["mask_sprite_name"],
                 inherit_ready="_ready" in inherited_event_functions and "_ready" not in local_event_functions,
-                inherit_exit_tree="_exit_tree" in inherited_event_functions and "_exit_tree" not in local_event_functions,
                 inherited_input_functions=self._inherited_input_functions(
                     parent_object_name,
                     parent_object_source_path,

@@ -2112,8 +2112,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn(
             "if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:\n"
-            "\t\t# Most often an instance (or noone) from a query.\n"
-            "\t\treturn gml_handle_is_valid(value)",
+            "\t\t# Most often an instance (or noone) from a query. A destroyed\n"
+            "\t\t# instance's id is still a positive number, so true.\n"
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)",
             GML_RUNTIME_SCRIPT,
         )
 
@@ -2128,9 +2129,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_instance_selector_targets(selector):", GML_RUNTIME_SCRIPT)
         self.assertIn("var object_entries: Variant = _gml_instance_object_entries(selector)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_instance_entry_targets(object_entries)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null, var_struct = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("static func gml_instance_destroy(target = null, execute_event = true):", GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_instance_perform_own_event(instance, "_on_destroy")', GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 
     def test_runtime_collision_queries_use_gamemaker_masks(self):
@@ -2410,7 +2414,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n",
             GML_RUNTIME_SCRIPT,
         )
-        self.assertIn("\t\treturn gml_handle_is_valid(value)\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)\n"
+            "\tif is_undefined(value):\n\t\treturn false",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_helpers_keep_variant_backed_parameters(self):

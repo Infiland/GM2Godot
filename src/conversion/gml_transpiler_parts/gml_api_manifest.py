@@ -1292,7 +1292,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Instantiates generated object scenes and registers live instances through GMRuntime.",
+        "Instantiates generated object scenes and registers live instances through GMRuntime; "
+        "the optional var_struct's variables are set before the Create event.",
     ),
     _entry(
         "instance_create_depth",
@@ -1304,7 +1305,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Instantiates generated object scenes with depth metadata and registry handles.",
+        "Instantiates generated object scenes with depth metadata and registry handles; "
+        "the optional var_struct's variables are set before the Create event.",
     ),
     _entry(
         "instance_destroy",
@@ -1316,7 +1318,8 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
-        "Runs destroy callbacks, unregisters instances, and queues Godot nodes for deletion.",
+        "Runs the Destroy event (unless execute_event_flag is false) and the Clean Up event, "
+        "unregisters instances, and queues Godot nodes for deletion.",
     ),
     _entry(
         "instance_exists",
@@ -1389,6 +1392,31 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Instances.htm",
         "Returns creation-ordered live instance handles from the runtime registry.",
+    ),
+    _entry(
+        "event_user",
+        "Instances",
+        "implemented",
+        "src.conversion.gml_runtime_parts",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Objects/Object_Events/event_user.htm",
+        "Runs the instance's generated User Event method at once with the caller's self and other.",
+    ),
+    _entry(
+        "event_perform",
+        "Instances",
+        "partial",
+        "src.conversion.gml_runtime_parts",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Objects/Object_Events/event_perform.htm",
+        "Runs the instance's generated event method for the type and number at once with the caller's "
+        "self and other; performing the Create event also resets xstart, ystart, xprevious and yprevious.",
     ),
     _entry(
         "with",

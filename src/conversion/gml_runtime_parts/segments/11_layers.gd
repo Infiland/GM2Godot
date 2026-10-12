@@ -196,11 +196,11 @@ static func gml_layer_destroy(layer):
 	if not (node is Node):
 		_gml_layer_unregister_handle(handle)
 		return false
+	# The instances on the layer are destroyed, as with instance_destroy (the
+	# runner's RemoveLayer calls RemoveInstanceElement for each one).
+	_gml_instances_destroy_under(node)
 	for child in _gml_layer_tree_nodes(node):
 		_gml_depth_forget(child.get_instance_id())
-		var instance_handle = _gml_instance_handle_for_node(child)
-		if gml_handle_is_valid(instance_handle):
-			gml_instance_unregister(instance_handle)
 		var element_handle = _gml_layer_element_handle_for_node(child)
 		if gml_handle_is_valid(element_handle):
 			_gml_layer_element_unregister_handle(element_handle)
@@ -517,7 +517,7 @@ static func gml_layer_element_move(element, layer):
 	# offset instead of the old one.
 	var shift = _gml_layer_element_offset(layer_node, element_node) - _gml_layer_element_offset(old_layer, element_node)
 	if old_layer != null:
-		element_node.reparent(layer_node, true)
+		_gml_instance_reparent(element_node, layer_node)
 	else:
 		layer_node.add_child(element_node)
 	if element_node is Node2D:

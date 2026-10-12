@@ -154,7 +154,6 @@ class ObjectRuntimeConfig:
     solid: bool = False
     persistent: bool = False
     inherit_ready: bool = False
-    inherit_exit_tree: bool = False
     # Input event methods (``_gm_input_*``) that ancestor objects define. An
     # object with input events of its own lists them in its binding table
     # too, because GameMaker runs inherited events the object does not
@@ -552,7 +551,8 @@ def _emit_object_runtime_prelude(
     lines.append(
         member_lines
         + "\n\nfunc _gm_register_instance():"
-        "\n\tif GMRuntime.gml_handle_is_valid(id):"
+        # Registered already, or destroyed (never registered again).
+        "\n\tif GMRuntime.gml_handle_is_valid(id) or has_meta(\"_gm2godot_instance_destroyed\"):"
         "\n\t\treturn"
         f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
@@ -628,18 +628,6 @@ def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConf
     if should_call_parent_ready:
         wrapped_body += "\n\tsuper._ready()"
     return wrapped_body
-
-
-def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    # An instance moving to another layer node stays the same live instance:
-    # no CleanUp event, and it stays registered.
-    cleanup_lines: list[str] = [_LAYER_MOVE_EXIT_GUARD]
-    if object_runtime.inherit_exit_tree and body.strip() == "pass":
-        cleanup_lines.append("\tsuper._exit_tree()")
-    elif body.strip() != "pass":
-        cleanup_lines.append(body)
-    cleanup_lines.append("\t_gm_unregister_instance()")
-    return "\n".join(cleanup_lines)
 
 
 def _wrap_collision_notification_body(func: EventMapping, body: str, reports_collision_changes: bool) -> str:
@@ -876,7 +864,11 @@ def generate_script_content(
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
-            body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
+            # A node leaving the tree (freed, or moved as persistent
+            # instances are between rooms) only unregisters its instance; the
+            # runtime runs the Clean Up event (_on_clean_up) itself. An
+            # instance moving to another layer node stays registered.
+            body = f"{_LAYER_MOVE_EXIT_GUARD}\n\t_gm_unregister_instance()"
         if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
         body = _wrap_collision_notification_body(func, body, reports_collision_changes)

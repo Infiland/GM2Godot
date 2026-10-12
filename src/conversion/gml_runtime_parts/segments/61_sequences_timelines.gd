@@ -186,6 +186,10 @@ static func gml_layer_sequence_destroy(sequence_element_id):
 		return false
 	var element = instance.get("elementID", null)
 	var node = _gml_layer_element_resolve_node(element)
+	# The instances the sequence created are destroyed, as with
+	# instance_destroy (CleanupInstances calls Command_Destroy in the runner).
+	if node is Node:
+		_gml_instances_destroy_under(node)
 	_gml_sequence_cleanup_instance(instance)
 	if element is GMLHandle:
 		_gml_sequence_elements_by_index.erase(element.index)

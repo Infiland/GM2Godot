@@ -1692,7 +1692,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "GameMaker bounding boxes and masks: collision compatibility mode, pixel-centre rules, precise, ellipse, diamond and rotated masks, mask_index and per-frame masks. Tilemap targets are not supported.",
+        "GameMaker bounding boxes and masks: collision compatibility mode, pixel-centre rules, precise, ellipse, diamond and rotated masks, mask_index and per-frame masks. Tilemap elements test their tiles through the tileset sprite's mask (first tile frame).",
     ),
     _entry(
         "position_meeting",
@@ -1716,7 +1716,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Returns the first matching instance handle using GameMaker bounding boxes and masks.",
+        "Returns the first matching instance handle (or tilemap element) using GameMaker bounding boxes and masks.",
     ),
     _entry(
         "instance_position",
@@ -1740,7 +1740,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, arrays and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
+        "Supports selectors, arrays, tilemap elements and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
     ),
     _entry(
         "collision_rectangle",
@@ -1752,7 +1752,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, arrays and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
+        "Supports selectors, arrays, tilemap elements and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
     ),
     _entry(
         "collision_line",
@@ -1764,7 +1764,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, arrays and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
+        "Supports selectors, arrays, tilemap elements and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
     ),
     _entry(
         "collision_circle",
@@ -1776,7 +1776,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, arrays and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
+        "Supports selectors, arrays, tilemap elements and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
     ),
     _entry(
         "collision_point_list",
@@ -1836,7 +1836,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "partial",
         "yes",
         "GameMaker_Language/GML_Reference/Movement_And_Collisions/Movement_And_Collisions.htm",
-        "Supports selectors, arrays and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
+        "Supports selectors, arrays, tilemap elements and notme; prec=true tests mask pixels and prec=false the bounding box, with GameMaker edge rules.",
     ),
     _entry(
         "collision_ellipse_list",

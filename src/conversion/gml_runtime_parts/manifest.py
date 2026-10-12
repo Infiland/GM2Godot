@@ -140,6 +140,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         ),
     ),
     _segment(
+        "45_collision_tilemaps.gd",
+        "GameMaker collision queries against tilemap elements and their tiles.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+        ),
+        tests=("tests/test_tilemap_collisions_godot.py",),
+    ),
+    _segment(
         "46_motion_helpers.gd",
         "Motion, direction, friction, and wrapping helpers.",
         depends_on=(

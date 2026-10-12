@@ -273,7 +273,7 @@ latch input (pressed/released edges since the previous step)
 → authored sequences
 → Step
 → motion/path update
-→ Outside Room, Intersect Boundary, Outside View and view boundary events
+→ Outside Room, Intersect Boundary, and, while views are enabled, Outside View and view boundary events
 → collision dispatch
 → End Step
 → Draw phases (GMDraw)

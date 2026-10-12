@@ -472,11 +472,13 @@ static func _gml_step_dispatch_other_event(inst, phase, method_name, frame):
 
 static func _gml_step_handle_other(frame):
 	# GameMaker's HandleOther, run after instances moved: Outside Room (once
-	# when the instance leaves the room), Intersect Boundary, and the Outside
-	# View / Intersect View Boundary events of visible views. Instances with a
-	# collision mask are tested by their bounding box, others by x/y.
+	# when the instance leaves the room), Intersect Boundary, and, while the
+	# room has views enabled, the Outside View / Intersect View Boundary
+	# events of visible views. Instances with a collision mask are tested by
+	# their bounding box, others by x/y.
 	_gml_event_scheduler_record_phase("other", "", null, frame)
 	var room_size = null
+	var views_enabled = false
 	for i in range(_gml_step_entries.size()):
 		var handlers = _gml_step_infos[i].other_handlers
 		if handlers.is_empty() or not _gml_step_entry_active(_gml_step_entries[i]):
@@ -486,11 +488,13 @@ static func _gml_step_handle_other(frame):
 				_to_real(_gml_builtin_globals.get("room_width", 0)),
 				_to_real(_gml_builtin_globals.get("room_height", 0))
 			)
-		_gml_step_handle_other_instance(_gml_step_entries[i]["instance"], handlers, room_size, frame)
+			# Read once per step, like the runner's m_enableviews.
+			views_enabled = gml_view_get_enabled()
+		_gml_step_handle_other_instance(_gml_step_entries[i]["instance"], handlers, room_size, views_enabled, frame)
 	return null
 
 
-static func _gml_step_handle_other_instance(inst, handlers, room_size, frame):
+static func _gml_step_handle_other_instance(inst, handlers, room_size, views_enabled, frame):
 	var bounds = _gml_step_instance_bounds(inst)
 	if handlers.has("outside_room"):
 		var outside = _gml_step_outside_area(bounds, inst, Rect2(Vector2.ZERO, room_size))
@@ -502,7 +506,7 @@ static func _gml_step_handle_other_instance(inst, handlers, room_size, frame):
 	# earlier one destroyed it.
 	if handlers.has("boundary") and is_instance_valid(inst) and _gml_step_bounds_cross_room_edge(bounds, inst, room_size):
 		_gml_step_dispatch_other_event(inst, "other", &"_on_intersect_boundary", frame)
-	if handlers.has("views"):
+	if views_enabled and handlers.has("views"):
 		_gml_step_handle_view_events(inst, bounds, handlers["views"], frame)
 
 

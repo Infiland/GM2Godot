@@ -327,6 +327,17 @@ class TestEventSchedulerGodotSmoke(unittest.TestCase):
             \t\treturn
             \tif not _check(GMRuntime.gml_event_scheduler_trace().is_empty() and GMRuntime.gml_input_dispatch_trace().is_empty(), "events were recorded with tracing off"):
             \t\treturn
+            \t# The list is kept from step to step while no instance goes away,
+            \t# and drops the instances that went away.
+            \tvar kept_list = GMRuntime._gml_step_entries
+            \t_frame()
+            \tif not _check(is_same(GMRuntime._gml_step_entries, kept_list) and kept_list.size() == 2, "the step list was rebuilt without a removal"):
+            \t\treturn
+            \tGMRuntime.gml_instance_destroy(a.id)
+            \tlog.clear()
+            \t_frame()
+            \tif not _check(GMRuntime._gml_step_entries.size() == 1 and log == ["C:begin", "C:step", "C:end"], "after a destroy: " + str(log)):
+            \t\treturn
 
             \t# Tracing keeps only the latest records.
             \tGMRuntime.gml_event_scheduler_set_tracing(true)

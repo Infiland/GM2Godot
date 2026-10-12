@@ -31,10 +31,13 @@ static var _gml_step_redraw_frame = -1
 static var _gml_step_redraws = 0
 # The step's instances (instance registry entries, in creation order) and
 # the GMLStepScriptInfo of each; _gml_step_creation_mark is the creation
-# counter when the list last took in new instances.
+# counter when the list last took in new instances, and
+# _gml_step_removal_mark the number of instances unregistered when it last
+# dropped the ones that are gone.
 static var _gml_step_entries = []
 static var _gml_step_infos = []
 static var _gml_step_creation_mark = 0
+static var _gml_step_removal_mark = 0
 static var _gml_step_running = false
 # GMLStepScriptInfo by script, or by class name for nodes without a script.
 static var _gml_step_script_infos = {}
@@ -231,7 +234,21 @@ static func _gml_step_has_method(info, inst, method_name):
 static func _gml_step_collect_instances():
 	# The instance list of a new step: the last step's instances that still
 	# exist, then the instances created since. Creation order only grows, so
-	# this is every live instance in creation order.
+	# this is every live instance in creation order. Every phase passes over
+	# instances that are gone, so the list only drops them after instances
+	# were unregistered (registering counts up the creation counter and
+	# unregistering shrinks the registry, so their difference grows with
+	# every instance unregistered).
+	var removal_mark = _gml_instance_creation_counter - _gml_instance_entries.size()
+	if removal_mark != _gml_step_removal_mark:
+		_gml_step_removal_mark = removal_mark
+		_gml_step_drop_inactive()
+	_gml_step_join_created_instances()
+	_gml_step_running = true
+	return null
+
+
+static func _gml_step_drop_inactive():
 	var entries = []
 	var infos = []
 	for i in range(_gml_step_entries.size()):
@@ -240,8 +257,6 @@ static func _gml_step_collect_instances():
 			infos.append(_gml_step_infos[i])
 	_gml_step_entries = entries
 	_gml_step_infos = infos
-	_gml_step_join_created_instances()
-	_gml_step_running = true
 	return null
 
 

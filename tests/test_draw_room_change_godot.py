@@ -6,6 +6,11 @@ events are not among the events persistent instances still get (HTML5
 runner: yyObject.js PerformEvent). So after a Draw event calls room_goto,
 no later Draw, Draw End, Post Draw or Draw GUI event runs in that frame,
 for any instance.
+
+The runner then switches rooms and runs a whole step of the new room in the
+same tick (_GameMaker.js GameMaker_Tick), and that step's draw updates the
+views first (yyRoom.js DrawViews calls UpdateViews): the new room's first
+frame is already drawn with its views following their objects.
 """
 from __future__ import annotations
 
@@ -175,6 +180,12 @@ class TestDrawRoomChangeGodot(unittest.TestCase):
         self.assertEqual([entry for entry in after if entry.endswith(":r_first")], [])
         # ... and the next draw is the new room's.
         self.assertEqual(after[:2], ["o_keeper:draw:r_second", "o_keeper:draw_gui:r_second"])
+
+    def test_the_new_room_is_first_drawn_with_its_views_following(self) -> None:
+        # o_player at (600, 400) in a 1000x1000 room: the 320x240 view with
+        # 32 pixel borders moves to (600 + 32 - 320, 400 + 32 - 240) before
+        # the first draw of the room.
+        self.assertEqual(self.results["views"], ["312,192", "312,192", "312,192"])
 
 
 if __name__ == "__main__":

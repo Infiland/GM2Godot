@@ -165,16 +165,40 @@ func _case_other_restored():
 	_clear()
 
 
+# GameMaker keeps no record of the collision events it runs: the trace is
+# filled only while tracing is on, and keeps only the latest records.
 func _case_trace():
+	_expect("tracing is off by default", GMRuntime.gml_event_scheduler_tracing(), false)
 	GMRuntime.gml_collision_event_trace_clear()
 	spawn("o_wall", "wall", 800, 0)
 	var mover = spawn("o_a", "mover", 805, 0)
 	mover.xprevious = 820.0
 	_expect("dispatch reports the events it ran", GMRuntime.gml_collision_event_dispatch_frame(), 1)
+	_expect("nothing is recorded with tracing off", GMRuntime.gml_collision_event_trace().size(), 0)
+	_clear()
+
+	GMRuntime.gml_event_scheduler_set_tracing(true)
+	spawn("o_wall", "wall", 800, 0)
+	mover = spawn("o_a", "mover", 805, 0)
+	mover.xprevious = 820.0
+	_expect("dispatch reports the traced events", GMRuntime.gml_collision_event_dispatch_frame(), 1)
 	var trace = GMRuntime.gml_collision_event_trace()
 	_expect("trace starts with the solid move back", str(trace[0].get("event", "")), "solid_rollback")
 	_expect("trace names the collision event", str(trace[-1].get("method", "")), "_on_collision_o_a")
 	_clear()
+
+	# A pair that keeps colliding records two events every step.
+	spawn("o_a", "a", 850, 0)
+	spawn("o_b", "b", 850, 0)
+	for _step in range(GMRuntime.GML_COLLISION_TRACE_LIMIT):
+		GMRuntime.gml_collision_event_dispatch_frame()
+	_expect("trace returns the latest records", GMRuntime.gml_collision_event_trace().size(), GMRuntime.GML_COLLISION_TRACE_LIMIT)
+	_expect("trace stays bounded", GMRuntime._gml_collision_event_trace.size() < 2 * GMRuntime.GML_COLLISION_TRACE_LIMIT, true)
+	_clear()
+	GMRuntime.gml_event_scheduler_set_tracing(false)
+	GMRuntime.gml_event_scheduler_trace_clear()
+	GMRuntime.gml_collision_event_trace_clear()
+	entries.clear()
 
 
 # The collision table follows the object order of the asset registry, also

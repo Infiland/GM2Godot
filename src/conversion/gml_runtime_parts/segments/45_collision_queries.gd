@@ -16,6 +16,7 @@ const GML_COLLISION_CHECK_AXIS_ALIGNED = 0
 const GML_COLLISION_CHECK_PRECISE = 1
 const GML_COLLISION_CHECK_ROTATED = 2
 const GML_COLLISION_NO_INSTANCE_DISTANCE = 10000000000.0
+# gml_collision_event_trace() returns at most this many of the latest records.
 const GML_COLLISION_TRACE_LIMIT = 256
 const GML_COLLISION_COMPATIBILITY_SETTING = "application/config/gm2godot_collision_compatibility"
 const GML_COLLISION_UNKNOWN_OBJECT_ORDER = 1000000000
@@ -233,7 +234,12 @@ static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precis
 
 
 static func gml_collision_event_trace():
-	return _gml_clone_value(_gml_collision_event_trace, 16)
+	# The latest records, oldest first. Collision events are recorded only
+	# while tracing is on (gml_event_scheduler_set_tracing).
+	var trace = _gml_collision_event_trace
+	if trace.size() > GML_COLLISION_TRACE_LIMIT:
+		trace = trace.slice(trace.size() - GML_COLLISION_TRACE_LIMIT)
+	return _gml_clone_value(trace, 16)
 
 
 static func gml_collision_event_trace_clear():
@@ -425,15 +431,16 @@ static func _gml_collision_perform_event(inst, other_inst, other_chain, frame):
 		var previous_other = inst.get("other") if has_other else null
 		if has_other:
 			inst.set("other", other_inst)
-		_gml_collision_trace_append({
-			"event": "collision",
-			"frame": frame,
-			"instance": str(inst.name) if inst is Node else "",
-			"other": str(other_inst.name) if other_inst is Node else "",
-			"method": method_name,
-			"target_object": str(object_name),
-		})
-		_gml_event_scheduler_record_phase("collision", method_name, inst, frame)
+		if _gml_event_scheduler_tracing:
+			_gml_collision_trace_append({
+				"event": "collision",
+				"frame": frame,
+				"instance": str(inst.name) if inst is Node else "",
+				"other": str(other_inst.name) if other_inst is Node else "",
+				"method": method_name,
+				"target_object": str(object_name),
+			})
+			_gml_event_scheduler_record_phase("collision", method_name, inst, frame)
 		inst.call(method_name)
 		if has_other and _gml_collision_instance_valid(inst):
 			inst.set("other", previous_other)
@@ -454,13 +461,14 @@ static func _gml_collision_restore_previous_position(inst, other_inst):
 	_gml_collision_set_instance_xy(inst, previous)
 	if "path_positionprevious" in inst and "path_position" in inst:
 		inst.set("path_position", inst.get("path_positionprevious"))
-	_gml_collision_trace_append({
-		"event": "solid_rollback",
-		"instance": str(inst.name),
-		"other": str(other_inst.name) if other_inst is Node else "",
-		"x": previous.x,
-		"y": previous.y,
-	})
+	if _gml_event_scheduler_tracing:
+		_gml_collision_trace_append({
+			"event": "solid_rollback",
+			"instance": str(inst.name),
+			"other": str(other_inst.name) if other_inst is Node else "",
+			"x": previous.x,
+			"y": previous.y,
+		})
 
 
 static func _gml_collision_step_by_speed(inst):
@@ -476,8 +484,9 @@ static func _gml_collision_step_by_speed(inst):
 
 static func _gml_collision_trace_append(record):
 	_gml_collision_event_trace.append(record)
-	if _gml_collision_event_trace.size() > GML_COLLISION_TRACE_LIMIT:
-		_gml_collision_event_trace.remove_at(0)
+	# Trimmed in batches, so recording stays cheap.
+	if _gml_collision_event_trace.size() >= GML_COLLISION_TRACE_LIMIT * 2:
+		_gml_collision_event_trace = _gml_collision_event_trace.slice(-GML_COLLISION_TRACE_LIMIT)
 
 
 static func _gml_collision_instance_valid(inst):

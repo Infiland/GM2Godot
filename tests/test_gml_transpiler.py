@@ -3469,6 +3469,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("path_end()"),
             "GMRuntime.gml_path_end(self)",
         )
+        # The Path End Action constants are GameMaker's 0..3.
+        self.assertEqual(
+            transpile_gml_expression("path_start(path_patrol, 4, path_action_reverse, false)", asset_names=asset_names),
+            'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 3, false)',
+        )
+        self.assertEqual(
+            [
+                transpile_gml_expression(name)
+                for name in ("path_action_stop", "path_action_restart", "path_action_continue", "path_action_reverse")
+            ],
+            ["0", "1", "2", "3"],
+        )
         self.assertEqual(
             transpile_gml_expression("path_get_length(path_patrol)", asset_names=asset_names),
             'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',

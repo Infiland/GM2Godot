@@ -62,6 +62,10 @@ from .utils import (
 )
 
 _MOTION_SYNCHRONIZED_BUILTINS = frozenset({"direction", "hspeed", "speed", "vspeed"})
+# What a bare return (or an exit) inside a function gives: undefined, like
+# a function whose body ends without a return. A bare GDScript return would
+# give null, which is not a GML value.
+_UNDEFINED_RETURN = "return GMRuntime.gml_undefined()"
 
 
 def _is_alarm_array_access(
@@ -131,7 +135,7 @@ def transpile_statement(
             raise GMLTranspileError("return used outside a function or method")
         if control_flow_capture is not None and control_flow_capture.capture_return:
             return _captured_control_flow_lines(control_flow_capture, "return")
-        return ["return"]
+        return [_UNDEFINED_RETURN]
     if statement.startswith("return "):
         _reject_finally_control_flow(finally_depth)
         if return_depth <= 0:
@@ -186,7 +190,8 @@ def transpile_statement(
         _reject_finally_control_flow(finally_depth)
         if control_flow_capture is not None and control_flow_capture.capture_exit:
             return _captured_control_flow_lines(control_flow_capture, "exit")
-        return ["return"]
+        # A function that exits gives undefined, like one that returns no value.
+        return [_UNDEFINED_RETURN if return_depth > 0 else "return"]
     event_inherited_lines = _transpile_event_inherited_statement(statement, inherited_event_call)
     if event_inherited_lines is not None:
         return event_inherited_lines
@@ -1354,7 +1359,7 @@ def control_flow_dispatch_lines(
                 else "\treturn"
             )
         elif kind == "exit":
-            lines.append("\treturn")
+            lines.append(f"\t{_UNDEFINED_RETURN}" if return_value_allowed else "\treturn")
         elif kind == "break":
             lines.append("\tbreak")
         elif kind == "continue":

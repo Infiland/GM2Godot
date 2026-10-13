@@ -9,6 +9,7 @@ if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.conversion.gml_transpiler import (
     GMLTranspileError,
+    analyze_gml_instance_change_reads,
     analyze_gml_source_identifiers,
     transpile_gml_code,
     transpile_gml_code_with_source_map,
@@ -72,6 +73,192 @@ class TestGMLSourceMaps(unittest.TestCase):
         self.assertEqual(reserved[0].suggested_name, "class_")
         self.assertGreaterEqual(len(case_collisions), 2)
         self.assertTrue(all(diagnostic.line in (2, 3) for diagnostic in case_collisions))
+
+    def test_instance_change_followed_by_code_that_meets_the_instance(self) -> None:
+        # Where the converted game changes the instance once the event returns,
+        # code after the call that reads the instance sees the old object, and
+        # an assignment is put back only if it changed the variable. Globals,
+        # assets, locals, constants and other instances are not the instance.
+        known = {"o_b", "o_wall", "s_c", "r_editor", "scr_score"}
+
+        def uses(source: str, **options: object) -> list[tuple[int, str]]:
+            return [
+                (diagnostic.line, diagnostic.identifier)
+                for diagnostic in analyze_gml_instance_change_reads(source, known_names=known, **options)  # type: ignore[arg-type]
+            ]
+
+        quiet = (
+            "if global.mode = 1 { instance_change(o_b, true) }\nif global.mode = 2 { instance_change(o_b, false) }",
+            "var n = 2; instance_change(o_b, true); n = n + 1; show_debug_message(n); global.total += n;",
+            "instance_change(o_b, true); o_wall.x += 1; if instance_exists(o_wall) { audio_stop_all(); }",
+            "instance_change(o_b, true); // hp = hp + 1\n/* if (hp) */ instance_destroy();",
+            "if hp > 0 { x += 1; } instance_change(o_b, true);",
+            # Assignments inside a with statement belong to the instances it visits.
+            "instance_change(o_b, true); with (o_wall) { hp = 1; } with (o_wall) hp = 2;",
+        )
+        for source in quiet:
+            with self.subTest(source=source):
+                self.assertEqual(uses(source), [])
+
+        self.assertEqual(uses("instance_change(o_b, true);\nhp += 1;"), [(1, "hp")])
+        self.assertEqual(uses("instance_change(o_b, true)\nif hp = 1 { }"), [(1, "hp")])
+        self.assertEqual(uses("instance_change(o_b, true); show_debug_message(object_index);"), [(1, "object_index")])
+        self.assertEqual(uses("instance_change(o_b, true); if place_meeting(0, 0, o_wall) {}"), [(1, "place_meeting")])
+        self.assertEqual(uses("instance_change(o_b, true); scr_score();"), [(1, "scr_score")])
+        self.assertEqual(uses("instance_change(o_b, true); with (o_wall) other_id = self;"), [(1, "self")])
+        self.assertEqual(uses("with (o_wall) { instance_change(o_b, true); hp = 3 }"), [(1, "hp")])
+        self.assertEqual(
+            uses("if a { instance_change(o_b, true) }\nif global.b { instance_change(o_wall, true) }\nshow_debug_message(y);"),
+            [(1, "y"), (2, "y")],
+        )
+        diagnostic = analyze_gml_instance_change_reads("instance_change(o_b, true)\nhp -= 1", known_names=known)[0]
+        self.assertEqual(diagnostic.code, "GM2GD-GML-INSTANCE-CHANGE-DEFERRED")
+        self.assertEqual(diagnostic.severity, "warning")
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 1))
+        self.assertIn("('hp' at line 2)", diagnostic.message)
+
+    def test_instance_change_followed_by_an_assignment_to_the_instance(self) -> None:
+        # The converted game puts an assignment back after the change only if
+        # the value differs from the one at the call: "keep the sprite"
+        # (sprite_index = saved) is lost, so it is reported.
+        known = {"o_b", "s_c"}
+        for source, identifier in (
+            ("instance_change(o_b, true)\nsprite_index = s_c\nhp = 99; image_speed = 0.5", "sprite_index"),
+            ("var s = sprite_index; instance_change(o_b, false); sprite_index = s;", "sprite_index"),
+            ("if a { instance_change(o_b, 1) hp = 3 }", "hp"),
+        ):
+            with self.subTest(source=source):
+                diagnostics = analyze_gml_instance_change_reads(source, known_names=known)
+                self.assertEqual([diagnostic.identifier for diagnostic in diagnostics], [identifier])
+                self.assertIn(f"an assignment to the instance's variable '{identifier}'", diagnostics[0].message)
+                self.assertIn("lost", diagnostics[0].message)
+
+    def test_instance_change_with_a_continuation_is_not_reported(self) -> None:
+        # The transpiler runs the rest of the event after the change for the
+        # call it reports as continued, so only the other call is reported.
+        source = "if a { instance_change(o_b, true) }\nhp += 1;\nwith (x) { instance_change(o_b, true); hp = 1 }"
+        self.assertEqual(
+            [(d.line, d.column) for d in analyze_gml_instance_change_reads(source, known_names={"o_b"})],
+            [(1, 8), (3, 12)],
+        )
+        self.assertEqual(
+            [
+                (d.line, d.column)
+                for d in analyze_gml_instance_change_reads(source, known_names={"o_b"}, continued_calls={0})
+            ],
+            [(3, 12)],
+        )
+
+    def test_the_analyser_and_the_transpiler_agree_on_the_continued_calls(self) -> None:
+        # The calls are told apart by how many instance_change names come
+        # before them, which comments and removed code do not change.
+        source = (
+            "/* a comment\nover two lines */ with (o_wall) { instance_change(o_b, true); }\n"
+            "// a note\n  /* another */ instance_change(o_b, true); hp += 1;\n"
+            "while hp { instance_change(o_b, true); hp -= 1 }\n"
+        )
+        result = transpile_gml_code_with_source_map(
+            source,
+            indent="",
+            asset_names={"o_b", "o_wall"},
+            instance_target="self",
+            direct_instance_names={"hp"},
+            dynamic_instance_names=set(),
+            instance_change_continuations=True,
+        )
+        self.assertEqual(result.continued_instance_changes, (1,))
+        # (The while loop sits in the continuation, whose calls do not continue.)
+        self.assertEqual(result.code.count("gml_instance_change_then("), 1)
+        reported = analyze_gml_instance_change_reads(
+            source,
+            known_names={"o_b", "o_wall"},
+            continued_calls=result.continued_instance_changes,
+        )
+        # The calls of the with statement (line 2) and of the loop (line 5) stay
+        # deferred and meet the instance after them; the one on line 4, whose
+        # position the comments shifted in the transpiler's code, is skipped.
+        self.assertEqual([(d.line, d.identifier) for d in reported], [(2, "hp"), (5, "hp")])
+
+    def test_calls_of_functions_and_macros_that_change_the_object_are_sites(self) -> None:
+        # A project script function or macro that runs instance_change is
+        # deferred like the call itself, and reported where code after it
+        # meets the instance.
+        known = {"o_b", "BECOME"}
+
+        def reported(source: str, **options: object) -> list[tuple[int, int, str]]:
+            return [
+                (d.line, d.column, d.identifier)
+                for d in analyze_gml_instance_change_reads(
+                    source,
+                    known_names=known,
+                    change_functions={"scr_become"},
+                    change_macros={"BECOME"},
+                    **options,  # type: ignore[arg-type]
+                )
+            ]
+
+        self.assertEqual(reported("scr_become(o_b);\nhp += 1;"), [(1, 1, "hp")])
+        self.assertEqual(reported("BECOME;\nhp += 1;"), [(1, 1, "hp")])
+        self.assertEqual(reported("if a { BECOME } else { scr_become(o_b) }\nshow_debug_message(y);"), [(1, 8, "scr_become"), (1, 24, "y")])
+        # A macro that is continued by the transpiler, a name that is not a
+        # call, a member of something else and code that does not meet the
+        # instance are quiet.
+        self.assertEqual(reported("BECOME;\nhp += 1;", continued_calls={0}), [])
+        self.assertEqual(reported("var f = scr_become;\nhp += 1;"), [])
+        self.assertEqual(reported("other_object.scr_become(o_b);\nhp += 1;"), [])
+        self.assertEqual(reported("scr_become(o_b); global.n += 1;"), [])
+        # (The sites are numbered together, in the order of the source.)
+        self.assertEqual(
+            reported("BECOME;\nscr_become(o_b);\ninstance_change(o_b, true);\nhp += 1;", continued_calls={0, 2}),
+            [(2, 1, "hp")],
+        )
+        message = analyze_gml_instance_change_reads(
+            "scr_become(o_b);\nhp += 1;", known_names=known, change_functions={"scr_become"}
+        )[0].message
+        self.assertTrue(message.startswith("The call of the script function scr_become, which runs instance_change, at line 1"))
+        # A macro definition is not a use of the macro, also over several lines.
+        self.assertEqual(
+            reported("#macro WRAP BECOME; \\\n    BECOME; \\\n    hp = 1\nBECOME;\nhp += 1;"),
+            [(4, 1, "hp")],
+        )
+
+    def test_the_analyser_and_the_transpiler_agree_on_the_continued_macro_calls(self) -> None:
+        # A macro used as a statement is a site in the order of the source,
+        # also when it is spliced in front of other sites, and a macro
+        # definition or a comment is not.
+        source = (
+            "#macro LOCAL_BECOME instance_change(o_b, true); \\\n"
+            "    hp = 2\n"
+            "// BECOME in a note\n"
+            "scr_become(o_b);\n"
+            "if a { BECOME; }\n"
+            "while b { BECOME; hp -= 1 }\n"
+            "instance_change(o_b, true);\n"
+            "hp += 1;\n"
+        )
+        options = dict(
+            asset_names={"o_b"},
+            instance_target="self",
+            direct_instance_names={"hp"},
+            dynamic_instance_names=set(),
+            macro_values={"BECOME": "instance_change(o_b, true)"},
+            instance_change_names={"BECOME", "scr_become"},
+        )
+        result = transpile_gml_code_with_source_map(
+            source, indent="", instance_change_continuations=True, **options  # type: ignore[arg-type]
+        )
+        # The macro in the if statement continues, and so does the last call,
+        # which the code runs when the if statement does not (the function
+        # call before them and the loop's macro stay calls).
+        self.assertEqual(result.continued_instance_changes, (1, 3))
+        reported = analyze_gml_instance_change_reads(
+            source,
+            known_names={"o_b", "BECOME", "LOCAL_BECOME"},
+            continued_calls=result.continued_instance_changes,
+            change_functions={"scr_become"},
+            change_macros={"BECOME"},
+        )
+        self.assertEqual([(d.line, d.identifier) for d in reported], [(4, "a"), (6, "hp")])
 
     def test_initializer_values_are_not_reported_as_declared_identifiers(self) -> None:
         diagnostics = analyze_gml_source_identifiers(

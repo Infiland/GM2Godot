@@ -1119,6 +1119,8 @@ NAME_REPLACEMENTS: Final[Mapping[str, str]] = MappingProxyType({
     "tm_countvsyncs": "1",
     "tm_countvsyncs_winalt": "2",
     "tm_systemtiming": "3",
+    "timezone_local": "0",
+    "timezone_utc": "1",
     "video_status_closed": "0",
     "video_status_preparing": "1",
     "video_status_playing": "2",
@@ -1503,10 +1505,12 @@ BUILTIN_VARIABLE_REGISTRY: Final[Mapping[str, _BuiltinVariableMetadata]] = Mappi
     "browser_height": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
     "browser_width": _BuiltinVariableMetadata("global", "0", False, False, "platform"),
     "current_day": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "current_hour": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_minute": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_month": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_second": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
+    "current_weekday": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "current_year": _BuiltinVariableMetadata("global", "0", False, False, "time"),
     "debug_mode": _BuiltinVariableMetadata("global", "false", False, False, "debug"),
     "delta_time": _BuiltinVariableMetadata("global", "0", False, False, "time"),
@@ -1693,6 +1697,7 @@ MATH_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "math_set_epsilon": "gml_math_set_epsilon",
     "math_get_epsilon": "gml_math_get_epsilon",
     "point_distance": "gml_point_distance",
+    "point_in_rectangle": "gml_point_in_rectangle",
     "point_direction": "gml_point_direction",
     "lengthdir_x": "gml_lengthdir_x",
     "lengthdir_y": "gml_lengthdir_y",
@@ -1973,6 +1978,7 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "string_ord_at": "gml_string_ord_at",
     "string_copy": "gml_string_copy",
     "string_pos": "gml_string_pos",
+    "string_count": "gml_string_count",
     "string_replace": "gml_string_replace",
     "string_replace_all": "gml_string_replace_all",
     "string_hash_to_newline": "gml_string_hash_to_newline",
@@ -1986,7 +1992,8 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "string_letters": "gml_string_letters",
     "string_lettersdigits": "gml_string_lettersdigits",
     "string_split": "gml_string_split",
-    "string_join": "gml_string_join",
+    "string_join": "gml_string_join_values",
+    "string_format": "gml_string_format",
     "chr": "gml_chr",
     "ord": "gml_ord",
     "ansi_char": "gml_ansi_char",
@@ -1995,6 +2002,7 @@ STRING_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 ARRAY_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "array_equals": "gml_array_equals",
     "array_push": "gml_array_push",
+    "array_set": "gml_array_set_function",
     "array_push_back": "gml_array_push_back",
     "array_create": "gml_array_create",
     "array_length_1d": "gml_array_length_1d",
@@ -2024,6 +2032,8 @@ ASSET_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "asset_get_index_from_id": "gml_asset_get_index_from_id",
     "asset_has_any_tag": "gml_asset_has_any_tag",
     "sprite_get_name": "gml_sprite_get_name",
+    "sprite_exists": "gml_sprite_exists",
+    "object_get_name": "gml_object_get_name",
 })
 
 INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -2036,6 +2046,7 @@ INSTANCE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "instance_nearest": "gml_instance_nearest",
     "instance_furthest": "gml_instance_furthest",
     "instance_id_get": "gml_instance_id_get",
+    "instance_change": "gml_instance_change",
     "instance_deactivate_all": "gml_instance_deactivate_all",
     "instance_deactivate_object": "gml_instance_deactivate_object",
     "instance_deactivate_region": "gml_instance_deactivate_region",
@@ -2161,6 +2172,11 @@ INPUT_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "device_mouse_raw_y": "gml_device_mouse_raw_y",
     "device_mouse_x_to_gui": "gml_device_mouse_x_to_gui",
     "device_mouse_y_to_gui": "gml_device_mouse_y_to_gui",
+    "device_mouse_check_button": "gml_device_mouse_check_button",
+    "device_mouse_check_button_pressed": "gml_device_mouse_check_button_pressed",
+    "device_mouse_check_button_released": "gml_device_mouse_check_button_released",
+    "mouse_wheel_up": "gml_mouse_wheel_up",
+    "mouse_wheel_down": "gml_mouse_wheel_down",
     "gamepad_is_connected": "gml_gamepad_is_connected",
     "gamepad_button_check": "gml_gamepad_button_check",
     "gamepad_button_check_pressed": "gml_gamepad_button_check_pressed",
@@ -2299,6 +2315,8 @@ ROOM_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "room_exists": "gml_room_exists",
     "room_get_name": "gml_room_get_name",
     "room_get_info": "gml_room_get_info",
+    "room_set_width": "gml_room_set_width",
+    "room_set_height": "gml_room_set_height",
 })
 
 LAYER_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -2308,6 +2326,9 @@ LAYER_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "layer_get_name": "gml_layer_get_name",
     "layer_get_all": "gml_layer_get_all",
     "layer_get_depth": "gml_layer_get_depth",
+    "layer_force_draw_depth": "gml_layer_force_draw_depth",
+    "layer_is_draw_depth_forced": "gml_layer_is_draw_depth_forced",
+    "layer_get_forced_depth": "gml_layer_get_forced_depth",
     "layer_get_x": "gml_layer_get_x",
     "layer_get_y": "gml_layer_get_y",
     "layer_get_hspeed": "gml_layer_get_hspeed",
@@ -2463,6 +2484,16 @@ OS_DEBUG_GC_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
     "weak_ref_create": "gml_weak_ref_create",
     "weak_ref_alive": "gml_weak_ref_alive",
     "weak_ref_any_alive": "gml_weak_ref_any_alive",
+    "gml_pragma": "gml_pragma",
+    "show_debug_overlay": "gml_show_debug_overlay",
+    "is_debug_overlay_open": "gml_is_debug_overlay_open",
+    "is_mouse_over_debug_overlay": "gml_is_mouse_over_debug_overlay",
+    "is_keyboard_used_debug_overlay": "gml_is_keyboard_used_debug_overlay",
+    "debug_event": "gml_debug_event",
+    "scheduler_resolution_set": "gml_scheduler_resolution_set",
+    "scheduler_resolution_get": "gml_scheduler_resolution_get",
+    "os_powersave_enable": "gml_os_powersave_enable",
+    "os_lock_orientation": "gml_os_lock_orientation",
 })
 
 PLATFORM_SERVICE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
@@ -2802,6 +2833,58 @@ DRAW_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
 
 # fmt: on
 
+# The runtime function a call the converted game cannot run is emitted as: it
+# reports the function once and returns undefined (see the emitter).
+UNSUPPORTED_CALL_RUNTIME_FUNCTION: Final[str] = "gml_unsupported_call"
+
+# GameMaker's date functions (Maths_And_Numbers/Date_And_Time), each lowered
+# to gml_<name>.
+DATE_RUNTIME_FUNCTIONS: Final[Mapping[str, str]] = MappingProxyType({
+    "date_current_datetime": "gml_date_current_datetime",
+    "date_create_datetime": "gml_date_create_datetime",
+    "date_valid_datetime": "gml_date_valid_datetime",
+    "date_get_year": "gml_date_get_year",
+    "date_get_month": "gml_date_get_month",
+    "date_get_week": "gml_date_get_week",
+    "date_get_day": "gml_date_get_day",
+    "date_get_weekday": "gml_date_get_weekday",
+    "date_get_hour": "gml_date_get_hour",
+    "date_get_minute": "gml_date_get_minute",
+    "date_get_second": "gml_date_get_second",
+    "date_get_day_of_year": "gml_date_get_day_of_year",
+    "date_get_hour_of_year": "gml_date_get_hour_of_year",
+    "date_get_minute_of_year": "gml_date_get_minute_of_year",
+    "date_get_second_of_year": "gml_date_get_second_of_year",
+    "date_inc_year": "gml_date_inc_year",
+    "date_inc_month": "gml_date_inc_month",
+    "date_inc_week": "gml_date_inc_week",
+    "date_inc_day": "gml_date_inc_day",
+    "date_inc_hour": "gml_date_inc_hour",
+    "date_inc_minute": "gml_date_inc_minute",
+    "date_inc_second": "gml_date_inc_second",
+    "date_year_span": "gml_date_year_span",
+    "date_month_span": "gml_date_month_span",
+    "date_week_span": "gml_date_week_span",
+    "date_day_span": "gml_date_day_span",
+    "date_hour_span": "gml_date_hour_span",
+    "date_minute_span": "gml_date_minute_span",
+    "date_second_span": "gml_date_second_span",
+    "date_compare_datetime": "gml_date_compare_datetime",
+    "date_compare_date": "gml_date_compare_date",
+    "date_compare_time": "gml_date_compare_time",
+    "date_date_of": "gml_date_date_of",
+    "date_time_of": "gml_date_time_of",
+    "date_datetime_string": "gml_date_datetime_string",
+    "date_date_string": "gml_date_date_string",
+    "date_time_string": "gml_date_time_string",
+    "date_days_in_month": "gml_date_days_in_month",
+    "date_days_in_year": "gml_date_days_in_year",
+    "date_leap_year": "gml_date_leap_year",
+    "date_is_today": "gml_date_is_today",
+    "date_set_timezone": "gml_date_set_timezone",
+    "date_get_timezone": "gml_date_get_timezone",
+})
+
 __all__: Final[tuple[str, ...]] = (
     "EOF",
     "MULTI_CHAR_OPERATORS",
@@ -2868,4 +2951,6 @@ __all__: Final[tuple[str, ...]] = (
     "OS_DEBUG_GC_RUNTIME_FUNCTIONS",
     "PLATFORM_SERVICE_RUNTIME_FUNCTIONS",
     "DRAW_RUNTIME_FUNCTIONS",
+    "UNSUPPORTED_CALL_RUNTIME_FUNCTION",
+    "DATE_RUNTIME_FUNCTIONS",
 )

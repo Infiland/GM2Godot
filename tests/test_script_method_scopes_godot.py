@@ -391,6 +391,47 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn('Failed to load script "res://gm2godot/gml_script_registry.gd"', output)
         self.assertEqual(trace, ["ok:7", "thing:6:true"])
 
+    def test_increments_of_instance_variables_inside_methods_run_when_the_method_runs(self) -> None:
+        # A function literal assigned to a variable keeps the ++ written in its
+        # body there: declaring it changes nothing, and each call adds one.
+        scripts = {
+            "scr_counter": (
+                "function Counter() constructor {\n"
+                "    v = 0;\n"
+                "    meth = function() { v++; };\n"
+                "    meth_add = function() { v += 1; };\n"
+                "}\n"
+            ),
+        }
+        create_code = (
+            "cnt = 0;\n"
+            "inc = function() { cnt++; };\n"
+            'trace("declared:" + string(cnt));\n'
+            "inc();\n"
+            "inc();\n"
+            'trace("called:" + string(cnt));\n'
+            "var _c = new Counter();\n"
+            'trace("constructed:" + string(_c.v));\n'
+            "_c.meth();\n"
+            "_c.meth();\n"
+            "_c.meth_add();\n"
+            'trace("methods:" + string(_c.v));\n'
+            "var _s = { n: 0, bump: function() { n++; } };\n"
+            "_s.bump();\n"
+            "_s.bump();\n"
+            'trace("struct:" + string(_s.n));\n'
+            "var _post = function() { return cnt++; };\n"
+            'trace("post:" + string(_post()) + string(cnt));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(
+            trace,
+            ["declared:0", "called:2", "constructed:0", "methods:3", "struct:2", "post:23"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

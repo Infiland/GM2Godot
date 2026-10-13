@@ -223,7 +223,7 @@ class TestCaptureConversionParity(unittest.TestCase):
             facade_module="src.conversion.gml_transpiler",
             environment=dict(os.environ),
         )
-        self.assertEqual(len(cast(list[object], snapshot["public_exports"])), 44)
+        self.assertEqual(len(cast(list[object], snapshot["public_exports"])), 45)
         self.assertEqual(snapshot["private_export_count"], 0)
         bindings = cast(list[dict[str, object]], snapshot["bindings"])
         self.assertTrue(all(binding["identity"] is True for binding in bindings))

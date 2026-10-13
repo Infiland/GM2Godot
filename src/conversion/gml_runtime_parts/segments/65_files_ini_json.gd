@@ -405,7 +405,37 @@ static func gml_json_stringify(value):
 
 
 static func gml_json_parse(text):
-	return gml_json_decode(text)
+	var decoded = gml_json_decode(text)
+	# A decoded null needs the text to contain "null" (inside a string too,
+	# which only costs the walk), so most documents are not walked at all.
+	if not str(text).contains("null"):
+		return decoded
+	return _gml_json_nulls_to_undefined(decoded)
+
+
+# json_parse turns every JSON null into undefined (the runner's reviver makes
+# it pointer_null and json_convert_pointer_null then replaces those with
+# undefined, top-level value and nested members and elements alike), since a
+# GML value is never a raw null.
+static func _gml_json_nulls_to_undefined(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_NIL:
+		return gml_undefined()
+	if value_type == TYPE_ARRAY:
+		for index in range(value.size()):
+			var item = value[index]
+			if typeof(item) == TYPE_NIL:
+				value[index] = gml_undefined()
+			elif typeof(item) == TYPE_ARRAY or typeof(item) == TYPE_DICTIONARY:
+				_gml_json_nulls_to_undefined(item)
+	elif value_type == TYPE_DICTIONARY:
+		for key in value.keys():
+			var item = value[key]
+			if typeof(item) == TYPE_NIL:
+				value[key] = gml_undefined()
+			elif typeof(item) == TYPE_ARRAY or typeof(item) == TYPE_DICTIONARY:
+				_gml_json_nulls_to_undefined(item)
+	return value
 
 
 static func _gml_file_text_file(file_id):
@@ -986,7 +1016,7 @@ static func _gml_json_compatible(value):
 		return arr
 	if value_type == TYPE_DICTIONARY:
 		var result = {}
-		for key in value.keys():
+		for key in _gml_struct_visible_keys(value):
 			result[gml_string(key)] = _gml_json_compatible(value[key])
 		return result
 	if value_type == TYPE_OBJECT:

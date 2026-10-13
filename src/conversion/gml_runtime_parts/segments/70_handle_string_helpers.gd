@@ -291,6 +291,8 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	parent.add_child(instance)
 	# An object without a Create event takes them now.
 	_gml_instance_apply_create_variables(instance)
+	# An instance_change in its Create event happens before the creator goes on.
+	_gml_instance_change_flush_instance(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
 		if instance.has_meta("_gm2godot_instance_destroyed"):
@@ -519,6 +521,21 @@ static func gml_string_pos(subvalue, value):
 	return found + 1
 
 
+# GameMaker's string_count (Function_String.js): how many times substr occurs
+# in str, overlapping occurrences included; 0 for an empty substr.
+static func gml_string_count(subvalue, value):
+	var s = gml_string(value)
+	var sub = gml_string(subvalue)
+	if sub == "":
+		return 0
+	var count = 0
+	var found = s.find(sub)
+	while found != -1:
+		count += 1
+		found = s.find(sub, found + 1)
+	return count
+
+
 static func gml_string_replace(value, old_char, new_str):
 	var s = gml_string(value)
 	var old = gml_string(old_char)
@@ -649,6 +666,126 @@ static func gml_string_join(array_value, delimiter):
 	for i in range(array_value.size()):
 		parts.append(gml_string(array_value[i]))
 	return delim.join(parts)
+
+
+# string_join(delimiter, value1, ...): each value as string() gives it,
+# joined by the delimiter (Function_String.js string_join).
+static func gml_string_join_values(delimiter, values):
+	var parts = []
+	for value in values:
+		parts.append(gml_string(value))
+	return gml_string(delimiter).join(parts)
+
+
+# string_format(val, total, dec) as the HTML5 runner computes it
+# (Function_String.js): JavaScript's val.toFixed(dec), then the integer part
+# (with its sign) padded on the left with spaces to total characters.
+static func gml_string_format(value, total, decimals):
+	if is_undefined(value) or value == null:
+		return "undefined"
+	var real_value = _gml_colour_real(value)
+	var places = _gml_colour_int32(decimals)
+	if places < 0 or places > 100:
+		# toFixed throws a RangeError for these.
+		return gml_error("string_format: decimal places must be between 0 and 100, got " + str(places))
+	var parts = _gml_js_to_fixed(real_value, places).split(".")
+	var integer_part = parts[0]
+	var width = _gml_colour_int32(total)
+	while integer_part.length() < width:
+		integer_part = " " + integer_part
+	if parts.size() < 2:
+		return integer_part
+	var fraction = parts[1]
+	while fraction.length() < places:
+		fraction += "0"
+	return integer_part + "." + fraction
+
+
+# JavaScript Number.prototype.toFixed(places): the exact value rounded to
+# places decimals, a tie going to the larger magnitude; NaN, infinities and
+# magnitudes from 1e21 up give the number's ordinary string.
+static func _gml_js_to_fixed(value, places):
+	if is_nan(value):
+		return "NaN"
+	if is_inf(value):
+		return "Infinity" if value > 0.0 else "-Infinity"
+	if absf(value) >= 1e21:
+		return String.num_scientific(value)
+	var digits = _gml_exact_decimal_digits(absf(value))
+	var fraction: String = digits[1]
+	while fraction.length() <= places:
+		fraction += "0"
+	var kept: String = digits[0] + fraction.substr(0, places)
+	if fraction.unicode_at(places) >= 0x35:
+		kept = _gml_decimal_string_increment(kept)
+	var integer_part = kept.substr(0, kept.length() - places).lstrip("0")
+	if integer_part.is_empty():
+		integer_part = "0"
+	var text = integer_part
+	if places > 0:
+		text += "." + kept.substr(kept.length() - places)
+	return ("-" + text) if value < 0.0 else text
+
+
+# The exact decimal expansion of a finite, non-negative double as
+# [integer digits, fraction digits]; a double is m * 2^e, so for e < 0 its
+# digits are those of m * 5^-e with the point -e places from the right.
+@warning_ignore("integer_division")
+static func _gml_exact_decimal_digits(value):
+	if value == 0.0:
+		return ["0", ""]
+	var bytes = PackedByteArray()
+	bytes.resize(8)
+	bytes.encode_double(0, value)
+	var bits = bytes.decode_u64(0)
+	var exponent_bits = (bits >> 52) & 0x7FF
+	var mantissa = bits & 0xFFFFFFFFFFFFF
+	var exponent = -1074
+	if exponent_bits != 0:
+		mantissa |= 0x10000000000000
+		exponent = exponent_bits - 1075
+	# Base 10^7 limbs, least significant first; each step multiplies by at
+	# most 2^30 or 5^13, so a limb times it stays within 64 bits.
+	var limbs = [mantissa % 10000000, (mantissa / 10000000) % 10000000, mantissa / 100000000000000]
+	var factor = 2 if exponent >= 0 else 5
+	var step_size = 30 if exponent >= 0 else 13
+	var remaining = absi(exponent)
+	while remaining > 0:
+		var step = mini(remaining, step_size)
+		remaining -= step
+		var multiplier = 1
+		for _power in range(step):
+			multiplier *= factor
+		var carry = 0
+		for index in range(limbs.size()):
+			var product = limbs[index] * multiplier + carry
+			limbs[index] = product % 10000000
+			carry = product / 10000000
+		while carry > 0:
+			limbs.append(carry % 10000000)
+			carry = carry / 10000000
+	var text = ""
+	for index in range(limbs.size() - 1, -1, -1):
+		text += str(limbs[index]).pad_zeros(7)
+	text = text.lstrip("0")
+	if exponent >= 0:
+		return [text, ""]
+	var point = -exponent
+	text = text.pad_zeros(point + 1)
+	return [text.substr(0, text.length() - point), text.substr(text.length() - point)]
+
+
+# Adds one to a string of decimal digits.
+static func _gml_decimal_string_increment(digits):
+	var characters = digits.to_utf8_buffer()
+	var index = characters.size() - 1
+	while index >= 0:
+		if characters[index] < 0x39:
+			characters[index] += 1
+			return characters.get_string_from_utf8()
+		characters[index] = 0x30
+		index -= 1
+	return "1" + characters.get_string_from_utf8()
 
 
 static func gml_chr(code):

@@ -67,6 +67,7 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     GMLTranspileError as owner_gml_transpile_error,
 )
 from src.conversion.gml_transpiler_parts.source_map import (
+    analyze_gml_instance_change_reads as owner_analyze_gml_instance_change_reads,
     analyze_gml_source_identifiers as owner_analyze_gml_source_identifiers,
     gml_source_map_path as owner_gml_source_map_path,
     merge_gml_source_maps as owner_merge_gml_source_maps,
@@ -392,6 +393,7 @@ EXPECTED_FACADE_BINDINGS = (
     ("normalize_extension_function_mappings", f"{PARTS_PACKAGE}.extension_functions"),
     ("normalize_extension_functions", f"{PARTS_PACKAGE}.extension_functions"),
     ("analyze_gml_source_identifiers", f"{PARTS_PACKAGE}.source_map"),
+    ("analyze_gml_instance_change_reads", f"{PARTS_PACKAGE}.source_map"),
     ("gml_source_map_path", f"{PARTS_PACKAGE}.source_map"),
     ("merge_gml_source_maps", f"{PARTS_PACKAGE}.source_map"),
     ("preprocess_gml_source", f"{PARTS_PACKAGE}.lexical_api"),
@@ -446,6 +448,7 @@ EXPECTED_FACADE_VALUES: dict[str, object] = dict(
             owner_normalize_extension_function_mappings,
             owner_normalize_extension_functions,
             owner_analyze_gml_source_identifiers,
+            owner_analyze_gml_instance_change_reads,
             owner_gml_source_map_path,
             owner_merge_gml_source_maps,
             owner_preprocess_gml_source,
@@ -510,7 +513,10 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "(generated_line: 'int', source_line: 'int', source_column: 'int', generated_text: 'str', "
         "source_text: 'str', source_path: 'str | None' = None, event: 'str | None' = None) -> None"
     ),
-    "GMLTranspileResult": "(code: 'str', source_map: 'GMLSourceMap', static_scope_id: 'str | None' = None) -> None",
+    "GMLTranspileResult": (
+        "(code: 'str', source_map: 'GMLSourceMap', static_scope_id: 'str | None' = None, "
+        "continued_instance_changes: 'tuple[int, ...]' = ()) -> None"
+    ),
     "category_issue_numbers": "() -> 'dict[str, int]'",
     "EXTENSION_FUNCTION_MAPPING_FILENAME": None,
     "diagnostic_for_unimplemented_gml_api": "(name: 'str') -> 'str | None'",
@@ -529,6 +535,11 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
     "normalize_extension_function_mappings": "(value: 'object') -> 'dict[str, GMLExtensionFunctionMapping]'",
     "normalize_extension_functions": "(value: 'object') -> 'dict[str, GMLExtensionFunction]'",
     "analyze_gml_source_identifiers": "(source: 'str') -> 'tuple[GMLSourceDiagnostic, ...]'",
+    "analyze_gml_instance_change_reads": (
+        "(source: 'str', *, known_names: 'Iterable[str]' = (), "
+        "continued_calls: 'Collection[int]' = (), change_functions: 'Collection[str]' = (), "
+        "change_macros: 'Collection[str]' = ()) -> 'tuple[GMLSourceDiagnostic, ...]'"
+    ),
     "gml_source_map_path": "(gdscript_path: 'str') -> 'str'",
     "merge_gml_source_maps": (
         "(maps: 'Iterable[GMLSourceMap]', *, source_path: 'str | None' = None, "
@@ -572,7 +583,9 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "dynamic_instance_names: 'Iterable[str] | None' = None, "
         "enum_values: 'Mapping[str, Mapping[str, int]] | None' = None, "
         "macro_values: 'Mapping[str, str] | None' = None, "
-        "event_functions: 'EventFunctionSplit | None' = None) -> 'GMLTranspileResult'"
+        "event_functions: 'EventFunctionSplit | None' = None, "
+        "instance_change_continuations: 'bool' = False, inherited_event_continuation: 'bool' = False, "
+        "instance_change_names: 'Iterable[str]' = ()) -> 'GMLTranspileResult'"
     ),
     "transpile_gml_condition": (
         "(source: 'str', local_names: 'Iterable[str] | None' = None, "
@@ -1337,7 +1350,7 @@ def helper(value: local_token) -> None:
             ),
             EXPECTED_FACADE_IMPORTS,
         )
-        self.assertEqual(len(EXPECTED_PUBLIC_FACADE_EXPORTS), 44)
+        self.assertEqual(len(EXPECTED_PUBLIC_FACADE_EXPORTS), 45)
         self.assertEqual(set(EXPECTED_PUBLIC_FACADE_SIGNATURES), set(EXPECTED_PUBLIC_FACADE_EXPORTS))
         self.assertEqual(
             [name for name in vars(gml_transpiler) if name.startswith("_") and not name.startswith("__")],

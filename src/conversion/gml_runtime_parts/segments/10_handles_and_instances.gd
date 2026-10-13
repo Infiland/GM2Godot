@@ -56,6 +56,10 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		return gml_instance_noone()
 	var existing_handle = _gml_instance_handle_for_node(instance)
 	if gml_handle_is_valid(existing_handle):
+		if is_same(instance, _gml_instance_change_registering):
+			# instance_change: the instance takes another object (see
+			# 76_instance_change.gd).
+			_gml_instance_change_reindex(_gml_instance_entry(existing_handle), object_selector, parent_selectors)
 		return existing_handle
 	var object_id = _gml_object_selector_id(object_selector)
 	var object_name = _gml_object_selector_name(object_selector)
@@ -140,6 +144,10 @@ static func gml_instance_destroy(target = null, execute_event = true):
 	for instance in gml_with_targets(destroy_target):
 		var entry = _gml_instance_entry(instance)
 		if entry == null or entry["destroyed"]:
+			continue
+		if _gml_instance_change_defer_destroy(instance):
+			# It waits for the instance's pending instance_change (see
+			# 76_instance_change.gd).
 			continue
 		entry["destroyed"] = true
 		# A destroyed instance is never registered again, not even by the rest
@@ -264,7 +272,11 @@ static func gml_event_perform(event_type, event_number, current_self = null, cur
 	# still run for persistent instances.
 	if type_value != 12 and _gml_event_scheduler_event_blocked(current_self, type_value in [0, 1, 2, 7, 14]):
 		return null
+	# The caller's method goes on using the script's members when this returns:
+	# an instance_change in the event must not replace the script meanwhile.
+	gml_event_nest(current_self)
 	_gml_instance_call_event(current_self, method_name, current_other if current_other != null else current_self)
+	gml_event_unnest(current_self)
 	return null
 
 

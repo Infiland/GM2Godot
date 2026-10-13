@@ -50,6 +50,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "54_audio_runtime.gd",
     "55_room_game_flow.gd",
     "56_time_alarms.gd",
+    "56_dates.gd",
     "56_object_variable_definitions.gd",
     "57_ds_lists_stacks_queues.gd",
     "58_ds_maps.gd",
@@ -69,6 +70,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "73_platform_services.gd",
     "74_game_step.gd",
     "75_instance_activation.gd",
+    "76_instance_change.gd",
     "80_static_hash_clone_error.gd",
 )
 

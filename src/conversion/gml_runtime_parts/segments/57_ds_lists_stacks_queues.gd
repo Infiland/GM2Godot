@@ -53,11 +53,18 @@ static func _gml_resolve_ds_priority(id_value):
 	return id_value
 
 
+# GML equality: values of one type compare with ==, numbers, booleans and
+# 64-bit integers of different types compare as reals (float() cannot read a
+# GMLInt64, _to_real can), and two 64-bit integers compare by value, as
+# the runner's yyCompareVal does for two Longs, not as two objects.
 static func _gml_is_equal(a, b):
-	if typeof(a) == typeof(b):
+	var type_a = typeof(a)
+	if type_a == typeof(b):
+		if type_a == TYPE_OBJECT and is_int64(a) and is_int64(b):
+			return a.value == b.value
 		return a == b
 	if is_numeric(a) and is_numeric(b):
-		return float(a) == float(b)
+		return _to_real(a) == _to_real(b)
 	return false
 
 
@@ -230,7 +237,7 @@ static func _gml_ds_serialize_value(value, seen):
 		return {"type": "array", "items": items}
 	if value is Dictionary:
 		var entries = []
-		for key in value.keys():
+		for key in _gml_struct_visible_keys(value):
 			entries.append({
 				"key": _gml_ds_serialize_value(key, seen),
 				"value": _gml_ds_serialize_value(value[key], seen)
@@ -363,7 +370,8 @@ static func gml_ds_list_set(id_value, pos, value):
 		if idx >= 0:
 			var arr = ds["data"]
 			if idx >= arr.size():
-				arr.resize(idx + 1)
+				# The entries in between hold 0, as in the runner.
+				_gml_array_grow(arr, idx + 1)
 			arr[idx] = value
 			return value
 	return gml_undefined()
@@ -403,13 +411,10 @@ static func gml_ds_list_insert(id_value, pos, val):
 	var ds = _gml_resolve_ds_list(id_value)
 	var idx = _to_int64_value(pos)
 	if ds is Dictionary:
-		if idx >= 0:
-			var arr = ds["data"]
-			if idx >= arr.size():
-				arr.resize(idx)
-				arr.append(val)
-			else:
-				arr.insert(idx, val)
+		# The runner's insert does nothing for a position past the end of the
+		# list (the end itself appends).
+		if idx >= 0 and idx <= ds["data"].size():
+			ds["data"].insert(idx, val)
 			var new_marks = {}
 			for k in ds["marks"].keys():
 				if k < idx:

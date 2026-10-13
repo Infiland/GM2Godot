@@ -390,7 +390,12 @@ class _ExpressionParser:
             reject_asset_identifier_name(parameter_name, self.scope_context)
         scope_context = self.scope_context
         static_scope_id = None
-        static_scope_name = scope_context.static_scope
+        # Statics belong to the function that declares them (manual: Static
+        # Variables, "static variables are scoped to the function you define
+        # them in"). A function written inside another one reaches the
+        # enclosing function's statics through self and the static chain, as
+        # every other member, so a child constructor's override is found.
+        static_scope_name = None
         static_prefix = scope_context.static_prefix
         if static_declarations:
             static_scope_id = build_static_scope_id(static_prefix, name, self.position, body_tokens)
@@ -398,11 +403,7 @@ class _ExpressionParser:
                 f"_gml_static_scope_{hashlib.sha1(static_scope_id.encode('utf-8')).hexdigest()[:12]}"
             )
             static_prefix = static_scope_id
-        static_names = (
-            frozenset(declaration.name for declaration in static_declarations)
-            if static_declarations
-            else scope_context.static_names
-        )
+        static_names = frozenset(declaration.name for declaration in static_declarations)
         if is_constructor:
             scope_context = _ScopeContext(
                 self_expression="_gml_constructor_self",
@@ -452,6 +453,13 @@ class _ExpressionParser:
             )
         )
         body_lines = list(statement_result.lines)
+        # A function whose body ends without a return gives undefined (a GML
+        # value), not the null a GDScript function gives. A constructor's
+        # result is the struct it builds.
+        if not is_constructor and not (
+            body_lines and (body_lines[-1] == "return" or body_lines[-1].startswith("return "))
+        ):
+            body_lines.append("return GMRuntime.gml_undefined()")
         prelude_lines: list[str] = []
         if parent_constructor is not None:
             if not is_constructor:

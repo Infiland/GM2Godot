@@ -4,7 +4,7 @@ import json
 import os
 import posixpath
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
@@ -30,8 +30,14 @@ from src.conversion.gml_transpiler_parts.expression_api import (
     parse_gml_expression,
     transpile_gml_expression,
 )
-from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
-from src.conversion.gml_transpiler_parts.shared_models import ScopeContext
+from src.conversion.gml_transpiler_parts.lexical_api import (
+    decode_gml_string_literal,
+    decode_gml_verbatim_string_literal,
+    preprocess_gml_source,
+    sanitize_gdscript_identifier,
+    tokenize_gml_source,
+)
+from src.conversion.gml_transpiler_parts.shared_models import ScopeContext, Token
 from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_manifest import (
@@ -74,6 +80,8 @@ class ScriptRegistryEntry:
     scoped_callable_method: str = "gm2godot_scoped_callable"
     is_constructor: bool = False
     initializer_method: str | None = None
+    # The method running this script's gml_pragma("global", code) code.
+    global_pragma_method: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,19 @@ def _indent_function_body_line(text: str) -> str:
     return "\n".join(f"\t{line}" if line else "" for line in text.split("\n"))
 
 
+def _script_method_return(callable_expression: str, static_scope_id: str | None) -> str:
+    """The body of a script function's callable accessor.
+
+    A function with static variables is bound to its static struct, so that
+    static_get(fn) and fn.name find the variables the function keeps.
+    """
+    if static_scope_id is not None:
+        callable_expression = (
+            f"GMRuntime.gml_static_bind({callable_expression}, {json.dumps(static_scope_id)})"
+        )
+    return f"\treturn GMRuntime.gml_method(self, {callable_expression})\n\n"
+
+
 def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_method: str) -> str:
     args = [
         "self",
@@ -181,6 +202,59 @@ _SCRIPT_REGISTRY_LOADERS = (
 )
 
 
+_GLOBAL_PRAGMA_METHOD = "gm2godot_initialize_global_pragmas"
+
+
+def _decode_string_token(token: Token, macro_values: Mapping[str, str]) -> str | None:
+    if token.kind == "STRING":
+        return decode_gml_string_literal(token.value)
+    if token.kind == "VERBATIM_STRING":
+        return decode_gml_verbatim_string_literal(token.value)
+    macro_value = macro_values.get(token.value) if token.kind == "IDENT" else None
+    if macro_value is not None:
+        # A macro naming a string literal is a compile-time constant too.
+        macro_tokens = tokenize_gml_source(macro_value.strip())
+        if len(macro_tokens) == 2:
+            return _decode_string_token(macro_tokens[0], {})
+    return None
+
+
+def global_pragma_sources(
+    source: str,
+    *,
+    macro_configuration: str | None = None,
+    macro_values: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
+    """Return the code of each gml_pragma("global", "<code>") call in ``source``.
+
+    GameMaker processes these pragmas at compile time wherever they appear and
+    runs the given code (a compile-time constant string) at global scope
+    before the first room; the call itself does nothing when the code
+    containing it runs.
+    """
+    try:
+        tokens = tokenize_gml_source(
+            preprocess_gml_source(source, macro_configuration=macro_configuration).source
+        )
+    except GMLTranspileError:
+        return ()
+    sources: list[str] = []
+    for index, token in enumerate(tokens[:-5]):
+        if token.kind != "IDENT" or token.value != "gml_pragma":
+            continue
+        opening, command, comma, code, closing = tokens[index + 1 : index + 6]
+        if (opening.value, comma.value, closing.value) != ("(", ",", ")"):
+            continue
+        try:
+            command_value = _decode_string_token(command, macro_values or {})
+            code_value = _decode_string_token(code, macro_values or {})
+        except GMLTranspileError:
+            continue
+        if command_value == "global" and code_value is not None:
+            sources.append(code_value)
+    return tuple(sources)
+
+
 def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str:
     entry_list = list(entries)
     lines = [
@@ -192,7 +266,7 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
     initializer_owner_variables: dict[int, str] = {}
     for index, entry in enumerate(entry_list):
         if not entry.is_constructor:
-            if entry.initializer_method is None:
+            if entry.initializer_method is None and entry.global_pragma_method is None:
                 continue
         if entry.is_constructor:
             variable_name = f"_gm_constructor_{index}"
@@ -201,7 +275,7 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
                 f"\tvar {variable_name} = "
                 f"_gm_script_callable({json.dumps(entry.resource_path)}, {json.dumps(entry.callable_method)})\n"
             )
-        if entry.initializer_method is not None:
+        if entry.initializer_method is not None or entry.global_pragma_method is not None:
             owner_variable_name = f"_gm_initializer_owner_{index}"
             initializer_owner_variables[index] = owner_variable_name
             lines.append(
@@ -239,6 +313,14 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
                 f"\t\t\t\"initializer_owner\": {initializer_owner},\n"
                 f"\t\t\t\"initializer\": _gm_script_method({initializer_owner}, "
                 f"{json.dumps(entry.initializer_method)}),\n"
+            )
+        if entry.global_pragma_method is not None:
+            initializer_owner = initializer_owner_variables[index]
+            if entry.initializer_method is None:
+                lines.append(f"\t\t\t\"initializer_owner\": {initializer_owner},\n")
+            lines.append(
+                f"\t\t\t\"global_pragma_initializer\": _gm_script_method({initializer_owner}, "
+                f"{json.dumps(entry.global_pragma_method)}),\n"
             )
         lines.extend(
             [
@@ -779,7 +861,10 @@ class ScriptConverter(BaseConverter):
                         + f"{body}\n"
                         + "\treturn GMRuntime.gml_undefined()\n\n"
                         + f"func {callable_names.callable_accessor}():\n"
-                        + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
+                        + _script_method_return(
+                            f'Callable(self, "{callable_names.call_method}")',
+                            static_scope_id,
+                        )
                         + f"func {callable_names.scoped_callable_accessor}():\n"
                         + "\treturn GMRuntime.gml_receiver_method(\n"
                         + "\t\tGMRuntime.gml_undefined(),\n"
@@ -872,7 +957,10 @@ class ScriptConverter(BaseConverter):
             + f"{result.code}\n"
             + "\treturn GMRuntime.gml_undefined()\n\n"
             + "func gm2godot_callable():\n"
-            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
+            + _script_method_return(
+                'Callable(self, "_gm_script_call")',
+                result.static_scope_id,
+            )
             + "func gm2godot_scoped_callable():\n"
             + "\treturn GMRuntime.gml_receiver_method(\n"
             + "\t\tGMRuntime.gml_undefined(),\n"
@@ -888,6 +976,66 @@ class ScriptConverter(BaseConverter):
             ),
             (result.source_map,),
         )
+
+    def _render_global_pragmas(
+        self,
+        entry: AssetRegistryEntry,
+        source: str,
+        *,
+        source_path: str,
+        asset_names: set[str],
+        extension_functions: dict[str, GMLExtensionFunction],
+        extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
+        enum_values: Mapping[str, Mapping[str, int]],
+        macro_values: Mapping[str, str],
+    ) -> str | None:
+        """Render the code of the script's gml_pragma("global", ...) calls.
+
+        The code runs at global scope like a script's top-level code, from the
+        method returned here, before the first room.
+        """
+        pragma_sources = global_pragma_sources(
+            source,
+            macro_configuration=self.macro_configuration,
+            macro_values=macro_values,
+        )
+        if not pragma_sources:
+            return None
+        try:
+            code = transpile_gml_code_with_source_map(
+                "\n".join(pragma_sources),
+                indent="\t",
+                top_level_global_scope=True,
+                asset_names=asset_names,
+                static_scope_prefix=f"{entry.name}.global_pragma",
+                enum_values=enum_values,
+                macro_values=macro_values,
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+                macro_configuration=self.macro_configuration,
+                event=f"script:{entry.name}:gml_pragma global",
+                self_expression="self",
+                other_expression="self",
+                instance_target="self",
+            ).code
+        except GMLTranspileError as exc:
+            message = (
+                f"Warning: Could not transpile the gml_pragma(\"global\") code of script "
+                f"{entry.name}; it will not run before the first room: {exc}"
+            )
+            if self.diagnostics is not None:
+                self.diagnostics.add_transpile_failure(
+                    message,
+                    source_path=source_path,
+                    resource=entry.name,
+                    resource_type="script",
+                    event="gml_pragma global",
+                    workaround="Rewrite the gml_pragma(\"global\") code with supported GML.",
+                )
+            self._safe_log(message)
+            return None
+        body = code.rstrip() or "\tpass"
+        return f"\nfunc {_GLOBAL_PRAGMA_METHOD}():\n{body}\n"
 
     def _record_source_diagnostics(
         self, source: str, source_path: str, entry: AssetRegistryEntry
@@ -946,6 +1094,22 @@ class ScriptConverter(BaseConverter):
                 macro_values=macro_values,
                 compatibility=self._script_is_compatibility(entry),
             )
+            global_pragmas = self._render_global_pragmas(
+                entry,
+                source,
+                source_path=source_path,
+                asset_names=asset_names,
+                extension_functions=extension_functions,
+                extension_function_mappings=extension_function_mappings,
+                enum_values=enum_values,
+                macro_values=macro_values,
+            )
+            if global_pragmas is not None and registry_entries:
+                script_content += global_pragmas
+                registry_entries = (
+                    replace(registry_entries[0], global_pragma_method=_GLOBAL_PRAGMA_METHOD),
+                    *registry_entries[1:],
+                )
         except (OSError, GMLTranspileError) as exc:
             message = get_localized("Console_Convertor_Scripts_ParseError").format(
                 script_name=entry.name,
@@ -974,6 +1138,13 @@ class ScriptConverter(BaseConverter):
             self._safe_log(message)
             return ()
 
+        if self.diagnostics is not None:
+            self.diagnostics.add_unsupported_calls(
+                script_content,
+                source_path=source_path,
+                resource=entry.name,
+                resource_type="script",
+            )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as output_file:
             output_file.write(script_content)

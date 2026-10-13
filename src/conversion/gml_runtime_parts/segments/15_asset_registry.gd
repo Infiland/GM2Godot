@@ -144,6 +144,27 @@ static func gml_sprite_get_name(sprite):
 	return str(entry["name"])
 
 
+# GameMaker's sprite_exists (Function_Sprite.js): whether the value is a
+# sprite index, a sprite made while the game runs included until it is
+# deleted; false for undefined.
+static func gml_sprite_exists(sprite):
+	if is_undefined(sprite):
+		return false
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(sprite)
+	return entry != null and str(entry.get("type", "")) == "sprite"
+
+
+# GameMaker's object_get_name (Function_Object.js): the name of the object
+# with that index, or "" when there is none.
+static func gml_object_get_name(object_index):
+	_gml_asset_registry_ensure_loaded()
+	var entry: Variant = _gml_asset_resolve(object_index)
+	if entry == null or str(entry.get("type", "")) != "object":
+		return ""
+	return str(entry["name"])
+
+
 static func gml_asset_get_type(asset):
 	_gml_asset_registry_ensure_loaded()
 	var entry = _gml_asset_resolve(asset)

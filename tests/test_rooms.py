@@ -1275,6 +1275,208 @@ class TestRoomConverter(unittest.TestCase):
             for diagnostic in recorded
         ))
 
+    def test_creation_code_runs_the_rest_of_the_code_after_instance_change(self):
+        # An instance's creation code is called from the room's start-up, so
+        # an instance_change in it (also in an if statement) changes the
+        # instance before the rest of the code runs, as in GameMaker.
+        self._write_yyp(["r_change"], extra_resources=[("objects", "o_player"), ("objects", "o_ghost")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_object("o_ghost")
+        self._write_object_scene("o_ghost")
+        room_dir = os.path.join(self.gm_dir, "rooms", "r_change")
+        _write_file(
+            os.path.join(room_dir, "InstanceCreationCode_inst_kept.gml"),
+            "var s = sprite_index;\nif global.hard { instance_change(o_ghost, true)\nsprite_index = s }\nhp = 2;\n",
+        )
+        self._write_room("r_change", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": "inst_kept",
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 0,
+                        "y": 0,
+                        "hasCreationCode": True,
+                    }
+                ],
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        script = self._read_room_script("r_change")
+
+        method = script[script.index("func _gm2godot_instance_creation_code_inst_kept(_gm_instance):"):]
+        self.assertIn("\tvar s = GMRuntime.gml_variable_instance_get(_gm_instance, \"sprite_index\")\n", method)
+        self.assertIn("\t\tvar _gml_change_self = _gm_instance\n", method)
+        self.assertIn(
+            '\t\tvar _gml_change_continue = func():\n'
+            '\t\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "sprite_index", s)\n'
+            '\t\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 2)\n'
+            '\t\tGMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_ghost"), true, '
+            "_gml_change_continue, _gm_instance)\n"
+            "\t\treturn\n",
+            method,
+        )
+        # (The code after the if statement also runs when the branch is not taken.)
+        self.assertIn('\tGMRuntime.gml_variable_instance_set(_gm_instance, "hp", 2)', method)
+        self.assertEqual(
+            [
+                diagnostic
+                for diagnostic in diagnostics.diagnostics()
+                if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+            ],
+            [],
+        )
+
+    def test_creation_code_meeting_the_instance_after_a_deferred_instance_change_is_reported(self):
+        # Where the code cannot run after the change (a loop, the room's own
+        # creation code) the instance changes once the creation code returns;
+        # a read sees the old object, and an assignment is put back only if it
+        # changed the variable.
+        self._write_yyp(["r_change"], extra_resources=[("objects", "o_player"), ("objects", "o_ghost")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_object("o_ghost")
+        self._write_object_scene("o_ghost")
+        room_dir = os.path.join(self.gm_dir, "rooms", "r_change")
+        _write_file(
+            os.path.join(room_dir, "InstanceCreationCode_inst_kept.gml"),
+            "repeat (2) { instance_change(o_ghost, true) }\nsprite_index = -1\n",
+        )
+        _write_file(
+            os.path.join(room_dir, "InstanceCreationCode_inst_read.gml"),
+            "/* the ghost */ repeat (2) { instance_change(o_ghost, true); }\nshow_debug_message(hp);\n",
+        )
+        self._write_room("r_change", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": name,
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 0,
+                        "y": 0,
+                        "hasCreationCode": True,
+                    }
+                    for name in ("inst_kept", "inst_read")
+                ],
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        recorded = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        ]
+
+        self.assertEqual(len(recorded), 2)
+        by_file = {os.path.basename(str(diagnostic.source_path)): diagnostic for diagnostic in recorded}
+        self.assertEqual(
+            sorted(by_file),
+            ["InstanceCreationCode_inst_kept.gml", "InstanceCreationCode_inst_read.gml"],
+        )
+        for diagnostic in recorded:
+            self.assertEqual(diagnostic.resource, "r_change")
+            self.assertEqual(diagnostic.resource_type, "room")
+        self.assertIn("('hp' at line 2)", by_file["InstanceCreationCode_inst_read.gml"].message)
+        self.assertIn(
+            "assignment to the instance's variable 'sprite_index' (line 2)",
+            by_file["InstanceCreationCode_inst_kept.gml"].message,
+        )
+
+    def test_creation_code_calling_a_function_or_macro_that_changes_the_object_is_reported(self):
+        # instance_change inside a project script function stays deferred, so
+        # the creation code that calls it meets the old object; a macro used
+        # as a statement of the creation code is continued and is not reported.
+        self._write_yyp(
+            ["r_change"],
+            extra_resources=[
+                ("objects", "o_player"),
+                ("objects", "o_ghost"),
+                ("scripts", "scr_become"),
+                ("scripts", "macros"),
+            ],
+        )
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_object("o_ghost")
+        self._write_object_scene("o_ghost")
+        for name, source in (
+            ("scr_become", "function scr_become(_o) { instance_change(_o, true); }\n"),
+            ("macros", "#macro BECOME_GHOST instance_change(o_ghost, true)\n"),
+        ):
+            _write_file(os.path.join(self.gm_dir, "scripts", name, name + ".yy"), json.dumps({"name": name, "resourceType": "GMScript"}))
+            _write_file(os.path.join(self.gm_dir, "scripts", name, name + ".gml"), source)
+        room_dir = os.path.join(self.gm_dir, "rooms", "r_change")
+        _write_file(os.path.join(room_dir, "InstanceCreationCode_inst_call.gml"), "scr_become(o_ghost);\nhp = 2;\n")
+        _write_file(os.path.join(room_dir, "InstanceCreationCode_inst_macro.gml"), "BECOME_GHOST;\nhp = 2;\n")
+        self._write_room("r_change", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": name,
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 0,
+                        "y": 0,
+                        "hasCreationCode": True,
+                    }
+                    for name in ("inst_call", "inst_macro")
+                ],
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        recorded = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        ]
+
+        self.assertEqual(
+            [(os.path.basename(str(d.source_path)), d.line) for d in recorded],
+            [("InstanceCreationCode_inst_call.gml", 1)],
+        )
+        self.assertIn("The call of the script function scr_become, which runs instance_change,", recorded[0].message)
+        script = self._read_room_script("r_change")
+        self.assertEqual(script.count("GMRuntime.gml_instance_change_then("), 1)
+
     def test_unsupported_layer_type_warns_and_emits_placeholder(self):
         self._write_yyp(["r_unknown"])
         self._write_room("r_unknown", layers=[

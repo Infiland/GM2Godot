@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Literal, TypeAlias
 
+from .constants import DATE_RUNTIME_FUNCTIONS
+
 GMLAPISupportStatus: TypeAlias = Literal[
     "implemented",
     "partial",
@@ -657,6 +659,16 @@ _OS_DEBUG_GC_IMPLEMENTED_APIS = (
     ("gc_target_frame_time", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Tracks the requested GameMaker GC target frame time."),
     ("gc_get_target_frame_time", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns the tracked compatibility GC target frame time."),
     ("gc_get_stats", _GC_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns deterministic Godot compatibility GC stats."),
+    ("gml_pragma", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing when run, as the pragma is compile-time; the converter runs \"global\" pragma code from scripts before the first room."),
+    ("show_debug_overlay", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing, as in the HTML5 runner; the runner's debug overlay is a developer tool."),
+    ("is_debug_overlay_open", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns false, as in the HTML5 runner, since the debug overlay never opens."),
+    ("is_mouse_over_debug_overlay", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns false, as in the HTML5 runner, since the debug overlay never opens."),
+    ("is_keyboard_used_debug_overlay", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns false, as in the HTML5 runner, since the debug overlay never opens."),
+    ("debug_event", _OS_DEBUG_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing and returns undefined, as in the HTML5 runner; debugger events are a runner developer tool."),
+    ("scheduler_resolution_set", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing, as in the HTML5 runner; the Windows scheduler resolution does not affect game logic."),
+    ("scheduler_resolution_get", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Returns -1 (the default resolution), as in the HTML5 runner."),
+    ("os_powersave_enable", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing, as in the HTML5 runner."),
+    ("os_lock_orientation", _OS_COMPILER_DOCS_PATH, _OS_DEBUG_GC_OWNER_MODULE, "Does nothing, as in the HTML5 runner."),
 )
 _OS_DEBUG_GC_PARTIAL_APIS = (
     ("debug_get_callstack", _OS_DEBUG_DOCS_PATH, "Uses Godot stack frames where available and appends GameMaker's trailing 0 sentinel."),
@@ -677,17 +689,10 @@ _OS_DEBUG_GC_PLANNED_APIS = (
     ("gml_release_mode", _OS_COMPILER_DOCS_PATH, "Requires generated compile/export mode metadata."),
 )
 _OS_DEBUG_GC_UNSUPPORTED_APIS = (
-    ("gml_pragma", _OS_COMPILER_DOCS_PATH, "GameMaker compile-time pragmas have no runtime equivalent after conversion."),
-    ("os_powersave_enable", _OS_COMPILER_DOCS_PATH, "Godot does not expose GameMaker's platform power-save toggle in portable GDScript."),
-    ("os_lock_orientation", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
     ("os_set_orientation_lock", _OS_COMPILER_DOCS_PATH, "Orientation locking requires platform/export-specific project settings rather than a portable runtime call."),
-    ("scheduler_resolution_get", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
-    ("scheduler_resolution_set", _OS_COMPILER_DOCS_PATH, "Windows scheduler resolution control has no portable Godot equivalent."),
-    ("debug_event", _OS_DEBUG_DOCS_PATH, "GameMaker debugger event injection has no Godot runtime equivalent."),
     ("get_integer", _OS_DEBUG_DOCS_PATH, "Blocking debug input dialogs are unsupported in converted runtime code."),
     ("get_string", _OS_DEBUG_DOCS_PATH, "Blocking debug input dialogs are unsupported in converted runtime code."),
     ("show_question", _OS_DEBUG_DOCS_PATH, "Blocking debug question dialogs are unsupported in converted runtime code."),
-    ("show_debug_overlay", _OS_DEBUG_DOCS_PATH, "GameMaker's debug overlay is runner-specific."),
     ("debug_input_record", _OS_DEBUG_DOCS_PATH, "GameMaker debug input recording is runner-specific."),
     ("debug_input_save", _OS_DEBUG_DOCS_PATH, "GameMaker debug input recording is runner-specific."),
     ("debug_input_playback", _OS_DEBUG_DOCS_PATH, "GameMaker debug input playback is runner-specific."),
@@ -1173,6 +1178,29 @@ def _advanced_audio_entries() -> tuple[GMLAPIEntry, ...]:
     )
 
 
+_DATE_DOCS_DIR = "GameMaker_Language/GML_Reference/Maths_And_Numbers/Date_And_Time"
+_DATE_OWNER_MODULE = "src.conversion.gml_runtime_parts.segments.56_dates"
+
+
+def _date_entries() -> tuple[GMLAPIEntry, ...]:
+    return tuple(
+        _entry(
+            name,
+            "Time",
+            "implemented",
+            _DATE_OWNER_MODULE,
+            "n/a",
+            "yes",
+            "yes",
+            "yes",
+            f"{_DATE_DOCS_DIR}/{name}.htm",
+            "Computed as the HTML5 runner's Function_Date.js does, with JavaScript Date semantics and "
+            "the local time zone's rules (TZ or /etc/localtime; the current system offset where no zone data exists).",
+        )
+        for name in DATE_RUNTIME_FUNCTIONS
+    )
+
+
 _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     _entry(
         "gml_api_compatibility_report",
@@ -1269,6 +1297,30 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Sprites/Sprite_Information/sprite_get_name.htm",
         "Returns the sprite's name from the runtime asset registry, or an empty string when the index is not a sprite.",
+    ),
+    _entry(
+        "sprite_exists",
+        "Asset Management",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.15_asset_registry",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Sprites/Sprite_Manipulation/sprite_exists.htm",
+        "Whether the value is a sprite in the runtime asset registry, sprites added while the game runs included until deleted; false for undefined.",
+    ),
+    _entry(
+        "object_get_name",
+        "Asset Management",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.15_asset_registry",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Objects/object_get_name.htm",
+        "Returns the object's name from the runtime asset registry, or an empty string when the value is not an object.",
     ),
     _entry(
         "asset_has_any_tag",
@@ -1513,6 +1565,25 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "no",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/Deactivating_Instances/instance_activate_layer.htm",
         "Activates every instance on a layer given by name or id.",
+    ),
+    _entry(
+        "instance_change",
+        "Instances",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.76_instance_change",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Instances/instance_change.htm",
+        "Runs Destroy and Clean Up (perf), gives the node the new object's script, identity and sprite while "
+        "keeping its id and variables, then runs Create (perf). A statement of the Create, Step, Alarm, collision, "
+        "input, Game Start, Room Start and Animation End events (also one that a macro stands for, and one in an "
+        "ancestor's event reached through event_inherited()) runs the rest of the event on the new object after the "
+        "change, as in GameMaker. In a loop, with, switch or try statement, in a script function or in the other "
+        "events the switch happens once the calling event returns, with the event's later assignments that change a "
+        "variable made again after it; the converter warns about the code after such a call, also after a call of "
+        "a project script function or macro that runs instance_change.",
     ),
     _entry(
         "with",
@@ -5247,6 +5318,66 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Maps the mouse into GUI coordinates (inverse of the GMGUI layer transform); every device reads the primary pointer.",
     ),
     _entry(
+        "device_mouse_check_button",
+        "Game Input",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.53_game_input",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button.htm",
+        "Device 0 reads the mouse as mouse_check_button does; touch devices are not tracked and report false, as on a device without touch.",
+    ),
+    _entry(
+        "device_mouse_check_button_pressed",
+        "Game Input",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.53_game_input",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button_pressed.htm",
+        "Device 0 reads the mouse as mouse_check_button_pressed does; touch devices are not tracked and report false.",
+    ),
+    _entry(
+        "device_mouse_check_button_released",
+        "Game Input",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.53_game_input",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button_released.htm",
+        "Device 0 reads the mouse as mouse_check_button_released does; touch devices are not tracked and report false.",
+    ),
+    _entry(
+        "mouse_wheel_up",
+        "Game Input",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.53_game_input",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Game_Input/Mouse_Input/mouse_wheel_up.htm",
+        "Whether the wheel turned up since the previous step.",
+    ),
+    _entry(
+        "mouse_wheel_down",
+        "Game Input",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.53_game_input",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Game_Input/Mouse_Input/mouse_wheel_down.htm",
+        "Whether the wheel turned down since the previous step.",
+    ),
+    _entry(
         "device_mouse_x",
         "Game Input",
         "partial",
@@ -5810,6 +5941,66 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Rooms/Rooms.htm",
         "Returns generated room path, order, size, persistence, and volume metadata.",
+    ),
+    _entry(
+        "room_set_width",
+        "General Game Control",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.55_room_game_flow",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Rooms/room_set_width.htm",
+        "Stores the room's width; the room takes it when it next starts afresh, so the running room and a persistent room entered again keep theirs.",
+    ),
+    _entry(
+        "room_set_height",
+        "General Game Control",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.55_room_game_flow",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Rooms/room_set_height.htm",
+        "Stores the room's height; the room takes it when it next starts afresh, so the running room and a persistent room entered again keep theirs.",
+    ),
+    _entry(
+        "layer_force_draw_depth",
+        "Rooms and Layers",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.11_layers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Rooms/General_Layer_Functions/layer_force_draw_depth.htm",
+        "Keeps the forced z depth setting; layers draw in depth order with no depth buffer or z range, so the z value itself changes nothing.",
+    ),
+    _entry(
+        "layer_is_draw_depth_forced",
+        "Rooms and Layers",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.11_layers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Rooms/General_Layer_Functions/layer_is_draw_depth_forced.htm",
+        "Whether layer_force_draw_depth last turned forcing on.",
+    ),
+    _entry(
+        "layer_get_forced_depth",
+        "Rooms and Layers",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.11_layers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Asset_Management/Rooms/General_Layer_Functions/layer_get_forced_depth.htm",
+        "The depth layer_force_draw_depth last set, 0 at the start.",
     ),
     _entry(
         "alarm_set",
@@ -7504,6 +7695,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Implemented as a runtime helper with GML mutation behavior.",
     ),
     _entry(
+        "array_set",
+        "Arrays",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.40_arrays_structs_variables",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Variable_Functions/array_set.htm",
+        "Sets array[index] like an assignment and returns undefined; a value that is not an array is left alone, as in the HTML5 runner.",
+    ),
+    _entry(
         "array_create",
         "Arrays",
         "implemented",
@@ -7816,6 +8019,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "Returns one-based position of substring or 0 if not found.",
     ),
     _entry(
+        "string_count",
+        "Strings",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.70_handle_string_helpers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Strings/string_count.htm",
+        "Counts the occurrences of the substring, overlapping ones included, as the HTML5 runner does; 0 for an empty substring.",
+    ),
+    _entry(
         "string_replace",
         "Strings",
         "implemented",
@@ -7969,7 +8184,19 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "no",
         "GameMaker_Language/GML_Reference/Strings/Strings.htm",
-        "Joins array elements with delimiter into a string.",
+        "Joins string() of each value after the delimiter with the delimiter.",
+    ),
+    _entry(
+        "string_format",
+        "Strings",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.70_handle_string_helpers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Strings/string_format.htm",
+        "Formats the value as the HTML5 runner does: JavaScript toFixed(dec), with the integer part padded with spaces to total.",
     ),
     _entry(
         "chr",
@@ -8438,6 +8665,18 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "GameMaker_Language/GML_Reference/Maths_And_Numbers/Maths_And_Numbers.htm",
         "Distance helper using GameMaker coordinate values.",
+    ),
+    _entry(
+        "point_in_rectangle",
+        "Movement and Collisions",
+        "implemented",
+        "src.conversion.gml_runtime_parts.segments.35_maths_numbers",
+        "n/a",
+        "yes",
+        "yes",
+        "yes",
+        "GameMaker_Language/GML_Reference/Movement_And_Collisions/Collisions/point_in_rectangle.htm",
+        "Whether the point is inside the rectangle, edges included.",
     ),
     _entry(
         "make_color_rgb",
@@ -9681,6 +9920,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
     *_os_debug_gc_entries(),
     *_os_device_media_entries(),
     *_platform_service_entries(),
+    *_date_entries(),
     _entry(
         "external_define",
         "Extensions",

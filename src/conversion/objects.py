@@ -46,6 +46,12 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     tokenize_gml_source,
 )
 from src.conversion.gml_transpiler_parts.shared_models import EventFunctionSplit, Token
+from src.conversion.instance_change_diagnostics import record_instance_change_reads
+from src.conversion.instance_change_events import (
+    event_runs_rest_after_instance_change,
+    source_may_continue_instance_change,
+)
+from src.conversion.instance_change_names import InstanceChangeNames, collect_instance_change_names
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
 from src.conversion.object_variables import (
@@ -140,6 +146,7 @@ class ParsedObject(TypedDict):
     event_list: list[JsonObject]
     solid: bool
     persistent: bool
+    visible: bool
     # The object's Variable Definitions and its overrides of inherited ones.
     variable_definitions: tuple[VariableDefinition, ...]
     variable_overrides: tuple[VariableOverride, ...]
@@ -158,6 +165,7 @@ class ObjectEventSource(TypedDict):
     source_path: str
     source: str
     inherited_event_call: str | None
+    inherited_event_continuation: bool
 
 
 @dataclass(frozen=True)
@@ -374,12 +382,16 @@ class ObjectConverter(BaseConverter):
         self._project_script_instance_variables_cache: set[str] | None = None
         self._project_enum_values_cache: dict[str, dict[str, int]] | None = None
         self._project_macro_values_cache: dict[str, str] | None = None
+        self._project_instance_change_names_cache: InstanceChangeNames | None = None
         self._asset_output_paths: dict[str, dict[str, str]] = {}
         self._object_source_paths: dict[str, str] = {}
         # While a conversion runs: the objects that get no script (skipped,
         # failed or not part of the project). None outside one, when every
         # object counts as having a script.
         self._objects_without_script: set[str] | None = None
+        # The events of each object that may run an instance_change statement
+        # with the rest of the event as a function, by object name.
+        self._continued_event_names: dict[str, frozenset[str]] = {}
         self._project_resource_names_by_path: dict[tuple[str, str], str] | None = None
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
@@ -715,6 +727,18 @@ class ObjectConverter(BaseConverter):
                 macro_configuration=self.macro_configuration,
             )
         return dict(self._project_macro_values_cache)
+
+    def _get_project_instance_change_names(
+        self,
+        macro_values: Mapping[str, str] | None = None,
+    ) -> InstanceChangeNames:
+        if self._project_instance_change_names_cache is None:
+            self._project_instance_change_names_cache = collect_instance_change_names(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+                macro_values=macro_values if macro_values is not None else self._get_project_macro_values(),
+            )
+        return self._project_instance_change_names_cache
 
     def _resolve_object_yy_source(
         self,
@@ -1065,6 +1089,7 @@ class ObjectConverter(BaseConverter):
                 event_list=event_list,
                 solid=bool(data.get("solid", False)),
                 persistent=bool(data.get("persistent", False)),
+                visible=bool(data.get("visible", True)),
                 variable_definitions=parse_variable_definitions(data.get("properties")),
                 variable_overrides=parse_variable_overrides(data.get("overriddenProperties")),
             )
@@ -1173,11 +1198,15 @@ class ObjectConverter(BaseConverter):
         sprite_name: str | None,
         sprite_scene_path: str | None = None,
         script_res_path: str | None = None,
+        visible: bool = True,
     ) -> str:
         """Build the .tscn content string for an object scene.
 
         If sprite_name is not None, the scene instances the sprite's scene as a child.
         If script_res_path is not None, the scene attaches the script to the root node.
+        An object that is not visible gives every instance (the root node) its
+        visible flag, as SetObjectIndex in the HTML5 runner's yyInstance.js
+        does for each new instance.
         """
         has_sprite = sprite_name is not None
         has_script = script_res_path is not None
@@ -1205,10 +1234,12 @@ class ObjectConverter(BaseConverter):
             script_id = str(next_id)
             parts.append(f'\n[ext_resource type="Script" path="{script_res_path}" id="{script_id}"]\n')
 
+        root = f'\n[node name="{object_name}" type="Node2D"]\n'
+        if not visible:
+            root += 'visible = false\n'
         if has_script:
-            parts.append(f'\n[node name="{object_name}" type="Node2D"]\nscript = ExtResource("{script_id}")\n')
-        else:
-            parts.append(f'\n[node name="{object_name}" type="Node2D"]\n')
+            root += f'script = ExtResource("{script_id}")\n'
+        parts.append(root)
 
         if has_sprite:
             parts.append(f'\n[node name="{sprite_name}" parent="." instance=ExtResource("{sprite_id}")]\n')
@@ -1229,14 +1260,17 @@ class ObjectConverter(BaseConverter):
         macro_values: Mapping[str, str] | None = None,
         inherited_member_names: frozenset[str] | None = None,
         variable_definitions: ObjectEventSource | None = None,
+        inherited_continued_functions: set[str] | None = None,
     ) -> tuple[dict[str, str], set[str], dict[str, GMLSourceMap], bool]:
         code_bodies: dict[str, str] = {}
         source_maps: dict[str, GMLSourceMap] = {}
         has_event_blocker = False
         instance_variables: set[str] = set(project_script_instance_variables or set())
         inherited_functions = inherited_event_functions or set()
+        inherited_continued = inherited_continued_functions or set()
         source_entries: list[ObjectEventSource] = []
         asset_name_set = set(asset_names or set())
+        instance_change_names = self._get_project_instance_change_names(macro_values)
 
         for event_index, event in enumerate(event_list or []):
             if event.get("isDnD") is True:
@@ -1304,6 +1338,9 @@ class ObjectConverter(BaseConverter):
                     "source_path": source_path,
                     "source": source,
                     "inherited_event_call": inherited_event_call,
+                    # An ancestor's event of this name may replace the
+                    # instance's script while this one runs.
+                    "inherited_event_continuation": mapping.godot_func in inherited_continued,
                 }
             )
             instance_variables.update(
@@ -1376,12 +1413,12 @@ class ObjectConverter(BaseConverter):
                     object_name,
                     mapping.godot_func,
                 )
-
                 result = self._transpile_event_entry(
                     object_name,
                     entry,
                     scope,
                     EventFunctionSplit(members, "body") if members else None,
+                    instance_change_names,
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
@@ -1391,10 +1428,30 @@ class ObjectConverter(BaseConverter):
                         entry,
                         scope,
                         EventFunctionSplit(members, "declarations"),
+                        instance_change_names,
                     )
                     key = f"{EVENT_FUNCTIONS_KEY_PREFIX}{mapping.godot_func}"
                     code_bodies[key] = declarations.code
                     source_maps[key] = declarations.source_map
+                if self.diagnostics is not None:
+                    self.diagnostics.add_unsupported_calls(
+                        result.code,
+                        source_path=source_path,
+                        resource=object_name,
+                        resource_type="object",
+                        event=mapping.godot_func,
+                    )
+                    record_instance_change_reads(
+                        self.diagnostics,
+                        source,
+                        known_names=asset_name_set | set(enum_values or {}) | set(macro_values or {}),
+                        source_path=source_path,
+                        resource=object_name,
+                        resource_type="object",
+                        event=mapping.godot_func,
+                        continued_calls=result.continued_instance_changes,
+                        names=instance_change_names,
+                    )
             except GMLTranspileError as exc:
                 has_event_blocker = True
                 message = (
@@ -1422,8 +1479,14 @@ class ObjectConverter(BaseConverter):
         entry: ObjectEventSource,
         scope: _EventTranspileScope,
         event_functions: EventFunctionSplit | None,
+        instance_change_names: InstanceChangeNames,
     ) -> GMLTranspileResult:
         mapping = entry["mapping"]
+        # The declarations of a split event are hoisted into a _gm_bind_*
+        # method, which has no instance_change to continue after; only the
+        # body gets the continuation lowering (it calls the hoisted functions
+        # through the instance, so its continuations see them).
+        lowers_instance_change = event_functions is None or event_functions.part == "body"
         return transpile_gml_code_with_source_map(
             entry["source"],
             instance_variables=scope.instance_variables,
@@ -1442,6 +1505,16 @@ class ObjectConverter(BaseConverter):
             enum_values=scope.enum_values,
             macro_values=scope.macro_values,
             event_functions=event_functions,
+            instance_change_continuations=(
+                lowers_instance_change
+                and event_runs_rest_after_instance_change(mapping.godot_func)
+            ),
+            inherited_event_continuation=(
+                lowers_instance_change and entry["inherited_event_continuation"]
+            ),
+            instance_change_names=(
+                instance_change_names.all if lowers_instance_change else ()
+            ),
         )
 
     def _event_function_members(
@@ -1661,13 +1734,65 @@ class ObjectConverter(BaseConverter):
             "inherited_event_call": (
                 f"super.{VARIABLE_DEFINITIONS_FUNCTION}()" if ancestors_define else None
             ),
+            "inherited_event_continuation": False,
         }
         return source, True
 
     def _inherited_event_call(self, mapping: EventMapping) -> str:
-        if not mapping.params:
-            return f"super.{mapping.godot_func}()"
         return f"super.{mapping.godot_func}({mapping.params})"
+
+    def _parent_continued_event_names(
+        self,
+        parent_object_name: str | None,
+        parent_object_source_path: str | None,
+    ) -> set[str]:
+        # The events of the ancestors that may change the instance's script
+        # in the middle of a child's event_inherited().
+        function_names: set[str] = set()
+        seen: set[str] = set()
+        object_name = parent_object_name
+        source_path = parent_object_source_path
+        while object_name is not None and object_name not in seen:
+            seen.add(object_name)
+            parsed = self._parse_object_yy(object_name, source_path)
+            if parsed is None:
+                break
+            if self._object_has_script(object_name):
+                function_names |= self._own_continued_event_names(object_name, parsed)
+            object_name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
+        return function_names
+
+    def _own_continued_event_names(self, object_name: str, parsed: ParsedObject) -> frozenset[str]:
+        cached = self._continued_event_names.get(object_name)
+        if cached is not None:
+            return cached
+        names: set[str] = set()
+        for event in parsed["event_list"]:
+            if event.get("isDnD") is True:
+                continue
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+            if mapping is None or not mapping.gml_filename:
+                continue
+            if not event_runs_rest_after_instance_change(mapping.godot_func):
+                continue
+            source_path = self._event_source_path(parsed["source_path"], object_name, mapping)
+            if source_path is None:
+                continue
+            try:
+                with open(source_path, "r", encoding="utf-8") as source_file:
+                    source = source_file.read()
+            except OSError:
+                continue
+            if source_may_continue_instance_change(
+                mapping.godot_func,
+                source,
+                self._get_project_instance_change_names().macros,
+            ):
+                names.add(mapping.godot_func)
+        result = frozenset(names)
+        self._continued_event_names[object_name] = result
+        return result
 
     def _parent_event_function_names(
         self,
@@ -1988,6 +2113,7 @@ class ObjectConverter(BaseConverter):
         sprite_scene_path: str | None = None
         parent_script_res_path = None
         inherited_event_functions: set[str] = set()
+        inherited_continued_functions: set[str] = set()
 
         if parent_object_name is not None and parent_object_name != object_name:
             parent_subfolder = self._get_object_subfolder(
@@ -1996,6 +2122,10 @@ class ObjectConverter(BaseConverter):
             )
             parent_script_res_path = self._object_script_res_path(parent_object_name, parent_subfolder)
             inherited_event_functions = self._parent_event_function_names(
+                parent_object_name,
+                parent_object_source_path,
+            )
+            inherited_continued_functions = self._parent_continued_event_names(
                 parent_object_name,
                 parent_object_source_path,
             )
@@ -2057,6 +2187,7 @@ class ObjectConverter(BaseConverter):
             parsed["source_path"],
             event_list,
             inherited_event_functions=inherited_event_functions,
+            inherited_continued_functions=inherited_continued_functions,
             asset_names=asset_names,
             project_script_instance_variables=(
                 project_script_instance_variables
@@ -2136,6 +2267,7 @@ class ObjectConverter(BaseConverter):
             sprite_name,
             sprite_scene_path,
             script_res_path,
+            visible=bool(parsed.get("visible", True)),
         )
 
         os.makedirs(object_dir, exist_ok=True)
@@ -2390,6 +2522,8 @@ class ObjectConverter(BaseConverter):
             enum_values=self._get_project_enum_values(),
             macro_values=self._get_project_macro_values(),
         )
+        # (Before the objects convert side by side.)
+        self._get_project_instance_change_names(context.macro_values)
         state = _ObjectRunState(total=total)
 
         # Whether an ancestor gets a script decides what a descendant's script

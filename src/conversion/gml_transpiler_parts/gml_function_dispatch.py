@@ -10,6 +10,7 @@ from .constants import (
     AUDIO_RUNTIME_FUNCTIONS,
     BUFFER_RUNTIME_FUNCTIONS,
     COLLISION_RUNTIME_FUNCTIONS,
+    DATE_RUNTIME_FUNCTIONS,
     DRAW_RUNTIME_FUNCTIONS,
     DS_COLLECTIONS_FUNCTIONS,
     DS_GRID_FUNCTIONS,
@@ -200,6 +201,7 @@ _DS_GRID_ARITY: dict[str, tuple[int, int | None]] = {
 _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_equals": (2, 2),
     "array_push": (2, None),
+    "array_set": (3, 3),
     "array_push_back": (2, 2),
     "array_create": (1, 2),
     "array_length_1d": (1, 1),
@@ -228,6 +230,7 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_ord_at": (2, 2),
     "string_copy": (3, 3),
     "string_pos": (2, 2),
+    "string_count": (2, 2),
     "string_replace": (3, 3),
     "string_replace_all": (3, 3),
     "string_hash_to_newline": (1, 1),
@@ -241,7 +244,8 @@ _STRING_ARITY: dict[str, tuple[int, int | None]] = {
     "string_letters": (1, 1),
     "string_lettersdigits": (1, 1),
     "string_split": (2, 2),
-    "string_join": (2, 2),
+    "string_join": (1, None),
+    "string_format": (3, 3),
     "chr": (1, 1),
     "ord": (1, 1),
     "ansi_char": (1, 1),
@@ -283,6 +287,7 @@ _MATH_ARITY: dict[str, tuple[int, int | None]] = {
     "math_set_epsilon": (1, 1),
     "math_get_epsilon": (0, 0),
     "point_distance": (4, 4),
+    "point_in_rectangle": (6, 6),
     "point_direction": (4, 4),
     "lengthdir_x": (2, 2),
     "lengthdir_y": (2, 2),
@@ -464,6 +469,8 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
     "asset_get_index_from_id": (1, 1),
     "asset_has_any_tag": (2, 2),
     "sprite_get_name": (1, 1),
+    "sprite_exists": (1, 1),
+    "object_get_name": (1, 1),
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
@@ -476,6 +483,7 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
     "instance_nearest": (3, 3),
     "instance_furthest": (3, 3),
     "instance_id_get": (1, 1),
+    "instance_change": (2, 2),
     "instance_deactivate_all": (1, 2),
     "instance_deactivate_object": (1, 2),
     "instance_deactivate_region": (6, 7),
@@ -608,6 +616,11 @@ _INPUT_ARITY: dict[str, tuple[int, int | None]] = {
     "device_mouse_raw_y": (1, 1),
     "device_mouse_x_to_gui": (1, 1),
     "device_mouse_y_to_gui": (1, 1),
+    "device_mouse_check_button": (2, 2),
+    "device_mouse_check_button_pressed": (2, 2),
+    "device_mouse_check_button_released": (2, 2),
+    "mouse_wheel_up": (0, 0),
+    "mouse_wheel_down": (0, 0),
     "gamepad_is_connected": (1, 1),
     "gamepad_button_check": (2, 2),
     "gamepad_button_check_pressed": (2, 2),
@@ -813,6 +826,8 @@ _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
     "room_exists": (1, 1),
     "room_get_name": (1, 1),
     "room_get_info": (1, 1),
+    "room_set_width": (2, 2),
+    "room_set_height": (2, 2),
 }
 
 _LAYER_ARITY: dict[str, tuple[int, int | None]] = {
@@ -822,6 +837,9 @@ _LAYER_ARITY: dict[str, tuple[int, int | None]] = {
     "layer_get_name": (1, 1),
     "layer_get_all": (0, 0),
     "layer_get_depth": (1, 1),
+    "layer_force_draw_depth": (2, 2),
+    "layer_is_draw_depth_forced": (0, 0),
+    "layer_get_forced_depth": (0, 0),
     "layer_get_x": (1, 1),
     "layer_get_y": (1, 1),
     "layer_get_hspeed": (1, 1),
@@ -977,7 +995,23 @@ _OS_DEBUG_GC_ARITY: dict[str, tuple[int, int | None]] = {
     "weak_ref_create": (1, 1),
     "weak_ref_alive": (1, 1),
     "weak_ref_any_alive": (1, 3),
+    "gml_pragma": (1, None),
+    "show_debug_overlay": (1, 6),
+    "is_debug_overlay_open": (0, 0),
+    "is_mouse_over_debug_overlay": (0, 0),
+    "is_keyboard_used_debug_overlay": (0, 0),
+    "debug_event": (1, 2),
+    "scheduler_resolution_set": (1, 1),
+    "scheduler_resolution_get": (0, 0),
+    "os_powersave_enable": (1, 1),
+    "os_lock_orientation": (1, 1),
 }
+
+# string_join(delimiter, value1, ...) takes the values after the delimiter.
+_STRING_LOWERING: dict[str, GMLFunctionLoweringKind] = {"string_join": "runtime_variadic_1"}
+
+# gml_pragma takes any number of arguments.
+_OS_DEBUG_GC_LOWERING: dict[str, GMLFunctionLoweringKind] = {"gml_pragma": "runtime_variadic_all"}
 
 _PLATFORM_SERVICE_ARITY: dict[str, tuple[int, int | None]] = {
     "steam_is_initialized": (0, 0),
@@ -1473,6 +1507,27 @@ def _descriptor(
     )
 
 
+# Argument counts of the date functions (manual, Date_And_Time).
+_DATE_ARITY: dict[str, tuple[int, int | None]] = {
+    "date_current_datetime": (0, 0),
+    "date_create_datetime": (6, 6),
+    "date_valid_datetime": (6, 6),
+    "date_compare_datetime": (2, 2),
+    "date_compare_date": (2, 2),
+    "date_compare_time": (2, 2),
+    "date_get_timezone": (0, 0),
+    **{f"date_inc_{unit}": (2, 2) for unit in ("year", "month", "week", "day", "hour", "minute", "second")},
+    **{f"date_{unit}_span": (2, 2) for unit in ("year", "month", "week", "day", "hour", "minute", "second")},
+}
+
+
+def _date_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
+    return {
+        name: _descriptor(name, *_DATE_ARITY.get(name, (1, 1)), "runtime", target)
+        for name, target in DATE_RUNTIME_FUNCTIONS.items()
+    }
+
+
 def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     descriptors: dict[str, GMLFunctionDescriptor] = {}
 
@@ -1522,7 +1577,8 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in STRING_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _STRING_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind = _STRING_LOWERING.get(name, "runtime")
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in MATH_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _MATH_ARITY[name]
@@ -1569,7 +1625,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
     for name, target in INSTANCE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INSTANCE_ARITY[name]
         lowering_kind: GMLFunctionLoweringKind = _INSTANCE_LOWERING_KINDS.get(name, "runtime_instance_api")
-        if name in ("instance_create_layer", "instance_create_depth"):
+        if name in ("instance_create_layer", "instance_create_depth", "instance_change"):
             lowering_kind = "runtime_append_self"
         elif name == "instance_destroy":
             lowering_kind = "runtime_self_default"
@@ -1625,7 +1681,8 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in OS_DEBUG_GC_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _OS_DEBUG_GC_ARITY[name]
-        descriptors[name] = _descriptor(name, min_args, max_args, "runtime", target)
+        lowering_kind = _OS_DEBUG_GC_LOWERING.get(name, "runtime")
+        descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     for name, target in PLATFORM_SERVICE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _PLATFORM_SERVICE_ARITY[name]
@@ -1701,6 +1758,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
             current.lowering_target,
         )
 
+    descriptors.update(_date_function_descriptors())
     return descriptors
 
 

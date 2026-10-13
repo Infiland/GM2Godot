@@ -250,6 +250,46 @@ class DiagnosticCollector:
             workaround=workaround,
         )
 
+    def add_unsupported_calls(
+        self,
+        generated_code: str,
+        *,
+        source_path: str | None = None,
+        resource: str | None = None,
+        resource_type: str | None = None,
+        event: str | None = None,
+    ) -> tuple[ConversionDiagnostic, ...]:
+        """Report each function the generated code calls but cannot run.
+
+        The transpiler emits such a call (a GameMaker function GM2Godot does not
+        support, or an extension function without a mapping) as a runtime call
+        that fails on its own, so the script or event still converts.
+        """
+        recorded: list[ConversionDiagnostic] = []
+        for function_name, reason in _unsupported_calls(generated_code):
+            api_name = _extract_gml_api_name(reason)
+            recorded.append(
+                self.add(
+                    "warning",
+                    "GM2GD-GML-UNSUPPORTED-CALL",
+                    f"GML function '{function_name}' cannot run in the converted game: "
+                    "each call returns undefined and the first one reports a runtime error, "
+                    f"while the rest of the code runs. {reason}",
+                    source_path=source_path,
+                    resource=resource,
+                    resource_type=resource_type,
+                    event=event,
+                    api=function_name,
+                    manifest_entry=api_name,
+                    issue_number=_extract_issue_number(reason),
+                    workaround=(
+                        "Add the missing runtime/API support tracked by the linked issue, "
+                        "or map the extension function to a Godot addon."
+                    ),
+                )
+            )
+        return tuple(recorded)
+
     def wrap_log_callback(
         self,
         log_callback: Callable[[str], None],
@@ -727,6 +767,20 @@ def _severity_from_log_message(message: str) -> DiagnosticSeverity | None:
     if normalized.startswith("error:"):
         return "error"
     return None
+
+
+# GMRuntime.gml_unsupported_call("name", "reason", [args]) as the emitter
+# writes it (UNSUPPORTED_CALL_RUNTIME_FUNCTION).
+_UNSUPPORTED_CALL_RE = re.compile(
+    r'GMRuntime\.gml_unsupported_call\(("(?:[^"\\]|\\.)*"), ("(?:[^"\\]|\\.)*")'
+)
+
+
+def _unsupported_calls(generated_code: str) -> tuple[tuple[str, str], ...]:
+    calls: dict[tuple[str, str], None] = {}
+    for match in _UNSUPPORTED_CALL_RE.finditer(generated_code):
+        calls[(str(json.loads(match.group(1))), str(json.loads(match.group(2))))] = None
+    return tuple(calls)
 
 
 def _extract_gml_api_name(message: str) -> str | None:

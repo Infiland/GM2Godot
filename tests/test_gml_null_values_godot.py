@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from src.conversion.gml_runtime import GML_RUNTIME_SCRIPT
 from tests.gamemaker_project_support import (
     EVENT_CREATE,
     GameMakerObject,
@@ -95,6 +96,13 @@ _CREATE = (
     "var _parsed = json_parse(\"[1, null, {\\\"a\\\": null, \\\"b\\\": 2}]\");\n"
     'record("json_nested", flag(is_undefined(_parsed[1])) + flag(is_undefined(_parsed[2].a))'
     ' + string(_parsed[2].b) + flag(variable_struct_exists(_parsed[2], "a")));\n'
+    # Text that mentions null inside a string is still walked and keeps its words;
+    # text without a null is returned as decoded.
+    'var _worded = json_parse("{\\"note\\": \\"nullable\\", \\"gap\\": null, \\"list\\": [null, \\"null\\", 3]}");\n'
+    'record("json_null_word", string(_worded.note) + flag(is_undefined(_worded.gap)) + flag(is_undefined(_worded.list[0]))'
+    " + string(_worded.list[1]) + string(_worded.list[2]));\n"
+    'var _plain = json_parse("{\\"a\\": [1, {\\"b\\": 2}], \\"c\\": \\"x\\"}");\n'
+    'record("json_plain", string(_plain.a[0]) + string(_plain.a[1].b) + _plain.c);\n'
 )
 
 _PROJECT = GameMakerProject(
@@ -124,10 +132,21 @@ _EXPECTED = {
     "return_values": "55",
     "json_null": "T",
     "json_nested": "TT2T",
+    "json_null_word": "nullableTTnull3",
+    "json_plain": "12x",
 }
 
 
 class TestGmlNullValuesGodot(unittest.TestCase):
+    def test_json_parse_walks_only_text_that_contains_null(self) -> None:
+        # A decoded null needs "null" in the text, so a document without it is
+        # not walked (the runner counts the nulls its reviver sees for the same
+        # reason).
+        start = GML_RUNTIME_SCRIPT.index("static func gml_json_parse(")
+        body = GML_RUNTIME_SCRIPT[start : GML_RUNTIME_SCRIPT.index("\nstatic func", start)]
+        self.assertIn('if not str(text).contains("null"):', body)
+        self.assertLess(body.index('contains("null")'), body.index("_gml_json_nulls_to_undefined(decoded)"))
+
     def test_gml_values_are_never_a_raw_null(self) -> None:
         godot_binary = find_smoke_godot_binary()
         if godot_binary is None:

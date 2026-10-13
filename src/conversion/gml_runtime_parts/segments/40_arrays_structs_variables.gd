@@ -416,12 +416,15 @@ static func gml_array_filter(
 	var result = []
 	for i in range(array_value.size()):
 		var element = array_value[i]
-		if gml_call_value(
+		# The runner keeps an element when yyGetBool(result) holds: a
+		# predicate that gives undefined (it falls off its end) or 0.3 drops
+		# it, where a GDScript truth test would keep either.
+		if gml_bool(gml_call_value(
 			resolved_callback,
 			[element, i, array_value],
 			caller_self,
 			caller_other
-		):
+		)):
 			result.append(element)
 	return result
 
@@ -977,9 +980,8 @@ static func _gml_instance_script_variables(instance):
 # Whether an instance has a variable: GameMaker creates one when code first
 # assigns it. A converted object declares its variables up front holding
 # null, which a GML assignment does not store (undefined is its own value),
-# so a declared variable exists once it holds something else. (A function
-# that returns nothing gives null as well, so a variable set to such a result
-# reads as not set.)
+# so a declared variable exists once it holds something else (a function that
+# returns nothing gives undefined, which is something else).
 static func _gml_instance_variable_exists(instance, key):
 	if GML_INSTANCE_BUILTIN_VARIABLES.has(key) or _gml_object_dynamic_fields(instance).has(key):
 		return true

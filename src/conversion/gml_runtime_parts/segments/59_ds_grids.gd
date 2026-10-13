@@ -28,10 +28,9 @@ static func gml_ds_grid_clear(id_value, val = null):
 		var data = grid["data"]
 		for i in range(data.size()):
 			for j in range(data[i].size()):
-				if val == null:
-					data[i][j] = 0
-				else:
-					data[i][j] = val
+				# Cells hold 0, not null, unless a value is given (typeof, not
+				# == null: a destroyed instance compares equal to null).
+				data[i][j] = 0 if typeof(val) == TYPE_NIL else val
 
 static func gml_ds_grid_resize(id_value, w, h, val = 0):
 	var grid = _gml_resolve_ds_grid(id_value)
@@ -92,7 +91,7 @@ static func gml_ds_grid_add(id_value, x, y, val):
 		if yi >= 0 and yi < data.size():
 			var row = data[yi]
 			if xi >= 0 and xi < row.size():
-				row[xi] = row[xi] + val
+				row[xi] = _gml_ds_grid_added(row[xi], val)
 				return row[xi]
 	return gml_undefined()
 
@@ -105,7 +104,7 @@ static func gml_ds_grid_multiply(id_value, x, y, val):
 		if yi >= 0 and yi < data.size():
 			var row = data[yi]
 			if xi >= 0 and xi < row.size():
-				row[xi] = row[xi] * val
+				row[xi] = _gml_ds_grid_multiplied(row[xi], val)
 				return row[xi]
 	return gml_undefined()
 
@@ -164,7 +163,7 @@ static func gml_ds_grid_add_region(id_value, x1, y1, x2, y2, val):
 		for y in range(yi1, yi2 + 1):
 			var row = data[y]
 			for x in range(xi1, xi2 + 1):
-				row[x] = row[x] + val
+				row[x] = _gml_ds_grid_added(row[x], val)
 
 static func gml_ds_grid_multiply_region(id_value, x1, y1, x2, y2, val):
 	var grid = _gml_resolve_ds_grid(id_value)
@@ -177,52 +176,69 @@ static func gml_ds_grid_multiply_region(id_value, x1, y1, x2, y2, val):
 		for y in range(yi1, yi2 + 1):
 			var row = data[y]
 			for x in range(xi1, xi2 + 1):
-				row[x] = row[x] * val
+				row[x] = _gml_ds_grid_multiplied(row[x], val)
 
 static func gml_ds_grid_value_exists(id_value, x1, y1, x2, y2, val):
-	var grid = _gml_resolve_ds_grid(id_value)
-	if grid is Dictionary:
-		var xi1 = max(0, _to_int64_value(x1))
-		var yi1 = max(0, _to_int64_value(y1))
-		var xi2 = min(grid["width"] - 1, _to_int64_value(x2))
-		var yi2 = min(grid["height"] - 1, _to_int64_value(y2))
-		var data = grid["data"]
-		for y in range(yi1, yi2 + 1):
-			var row = data[y]
-			for x in range(xi1, xi2 + 1):
-				if row[x] == val:
-					return true
-	return false
+	return _gml_ds_grid_value_find(id_value, x1, y1, x2, y2, val).x >= 0
 
 static func gml_ds_grid_value_x(id_value, x1, y1, x2, y2, val):
-	var grid = _gml_resolve_ds_grid(id_value)
-	if grid is Dictionary:
-		var xi1 = max(0, _to_int64_value(x1))
-		var yi1 = max(0, _to_int64_value(y1))
-		var xi2 = min(grid["width"] - 1, _to_int64_value(x2))
-		var yi2 = min(grid["height"] - 1, _to_int64_value(y2))
-		var data = grid["data"]
-		for y in range(yi1, yi2 + 1):
-			var row = data[y]
-			for x in range(xi1, xi2 + 1):
-				if row[x] == val:
-					return GMLInt64.new(x)
-	return gml_undefined()
+	return GMLInt64.new(_gml_ds_grid_value_find(id_value, x1, y1, x2, y2, val).x)
 
 static func gml_ds_grid_value_y(id_value, x1, y1, x2, y2, val):
+	return GMLInt64.new(_gml_ds_grid_value_find(id_value, x1, y1, x2, y2, val).y)
+
+# The first cell of the region (row by row, as in the runner's
+# ds_grid_value_common) that holds val, or (-1, -1): the corners may come in
+# either order and the region is cut to the grid. Two numbers match within
+# the runner's precision (1e-7), anything else by GML equality, which
+# also compares values of different types without failing.
+static func _gml_ds_grid_value_find(id_value, x1, y1, x2, y2, val):
 	var grid = _gml_resolve_ds_grid(id_value)
-	if grid is Dictionary:
-		var xi1 = max(0, _to_int64_value(x1))
-		var yi1 = max(0, _to_int64_value(y1))
-		var xi2 = min(grid["width"] - 1, _to_int64_value(x2))
-		var yi2 = min(grid["height"] - 1, _to_int64_value(y2))
+	if grid is Dictionary and grid["width"] > 0 and grid["height"] > 0:
+		var xa = _to_int64_value(x1)
+		var xb = _to_int64_value(x2)
+		var ya = _to_int64_value(y1)
+		var yb = _to_int64_value(y2)
+		var xi1 = clampi(mini(xa, xb), 0, grid["width"] - 1)
+		var xi2 = clampi(maxi(xa, xb), 0, grid["width"] - 1)
+		var yi1 = clampi(mini(ya, yb), 0, grid["height"] - 1)
+		var yi2 = clampi(maxi(ya, yb), 0, grid["height"] - 1)
 		var data = grid["data"]
+		var val_is_number = is_number(val)
 		for y in range(yi1, yi2 + 1):
 			var row = data[y]
 			for x in range(xi1, xi2 + 1):
-				if row[x] == val:
-					return GMLInt64.new(y)
-	return gml_undefined()
+				var cell = row[x]
+				if val_is_number and is_number(cell):
+					if absf(float(cell) - float(val)) < GML_DS_GRID_VALUE_PRECISION:
+						return Vector2i(x, y)
+				elif _gml_is_equal(cell, val):
+					return Vector2i(x, y)
+	return Vector2i(-1, -1)
+
+const GML_DS_GRID_VALUE_PRECISION = 0.0000001
+
+# What a cell holds after ds_grid_add and the add_region variants add val to
+# it, as in the runner: two numbers add, two strings join, two other values
+# that are numeric (64-bit integers) add as reals and anything else is
+# replaced by val.
+static func _gml_ds_grid_added(cell, val):
+	if is_number(cell) and is_number(val):
+		return cell + val
+	if is_string(cell) and is_string(val):
+		return str(cell) + str(val)
+	if typeof(cell) == TYPE_OBJECT and typeof(val) == TYPE_OBJECT and is_numeric(cell) and is_numeric(val):
+		return _to_real(cell) + _to_real(val)
+	return val
+
+# ds_grid_multiply and the multiply_region variants leave a cell alone when
+# it or the factor is a string and multiply anything else as reals.
+static func _gml_ds_grid_multiplied(cell, val):
+	if is_number(cell) and is_number(val):
+		return cell * val
+	if is_string(cell) or is_string(val):
+		return cell
+	return _to_real(cell) * _to_real(val)
 
 static func gml_ds_grid_copy(id_dest, id_src):
 	var dest = _gml_resolve_ds_grid(id_dest)

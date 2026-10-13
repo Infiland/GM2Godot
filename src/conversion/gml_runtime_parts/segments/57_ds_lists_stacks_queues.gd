@@ -404,13 +404,10 @@ static func gml_ds_list_insert(id_value, pos, val):
 	var ds = _gml_resolve_ds_list(id_value)
 	var idx = _to_int64_value(pos)
 	if ds is Dictionary:
-		if idx >= 0:
-			var arr = ds["data"]
-			if idx >= arr.size():
-				arr.resize(idx)
-				arr.append(val)
-			else:
-				arr.insert(idx, val)
+		# The runner's insert does nothing for a position past the end of the
+		# list (the end itself appends).
+		if idx >= 0 and idx <= ds["data"].size():
+			ds["data"].insert(idx, val)
 			var new_marks = {}
 			for k in ds["marks"].keys():
 				if k < idx:

@@ -3194,8 +3194,10 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_static_named_scopes = {}", GML_RUNTIME_SCRIPT)
         self.assertNotIn("_gml_static_registry", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_static_get(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if value is GMLMethod:\n\t\treturn gml_static_get(value.function_value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_method(value):\n\t\treturn _gml_static_ensure(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_function_key(value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value is GMLMethod:\n\t\treturn value.function_value", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_numeric(value) and _gml_script_entry(value) != null:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_static_ensure(function_key)", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_type_error("GML static_get", value)', GML_RUNTIME_SCRIPT)
         self.assertIn("if is_same(value, _gml_static_root):\n\t\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn("var static_struct = value.get(GML_STATIC_LINK_KEY)", GML_RUNTIME_SCRIPT)
@@ -3245,13 +3247,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_constructor_identity_uses_static_chain(self):
         self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)
         self.assertIn("if typeof(struct_value) != TYPE_DICTIONARY:\n\t\treturn false", GML_RUNTIME_SCRIPT)
-        self.assertIn("if not is_method(constructor):\n\t\treturn false", GML_RUNTIME_SCRIPT)
-        self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var function_key = _gml_static_function_key(constructor)", GML_RUNTIME_SCRIPT)
+        self.assertIn("var constructor_static = _gml_static_functions.get(function_key)", GML_RUNTIME_SCRIPT)
         self.assertIn("var current_static = struct_value.get(GML_STATIC_LINK_KEY)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_same(current_static, constructor_static):\n\t\t\treturn true", GML_RUNTIME_SCRIPT)
         self.assertIn("current_static = current_static.get(GML_STATIC_LINK_KEY)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instanceof(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn('if typeof(struct_value) == TYPE_OBJECT:\n\t\treturn "instance"', GML_RUNTIME_SCRIPT)
+        self.assertIn('if struct_value.has(GML_WEAK_REF_MARKER):\n\t\treturn "weakref"', GML_RUNTIME_SCRIPT)
+        self.assertIn("var type_name = struct_value.get(GML_STATIC_TYPE_KEY)", GML_RUNTIME_SCRIPT)
         self.assertIn('return "struct"', GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_name = _gml_static_name(static_struct)", GML_RUNTIME_SCRIPT)
         self.assertIn("if constructor_name != \"\":\n\t\treturn constructor_name", GML_RUNTIME_SCRIPT)
@@ -3260,6 +3264,18 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_constructor_chain_joins_the_running_constructor_to_its_parent(self):
+        # Square : Rect : Shape: Rect's static struct is the child of Shape's,
+        # not the static struct of the struct being built.
+        self.assertIn("static var _gml_constructor_stack = []", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "_gml_constructor_stack.append(constructor.function_value)\n"
+            "\tvar result = constructor.function_value.callv(call_args)\n"
+            "\t_gml_constructor_stack.pop_back()",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("child_static = _gml_static_ensure(_gml_constructor_stack[-1])", GML_RUNTIME_SCRIPT)
 
     def test_runtime_hashes_struct_member_names_with_documented_vectors(self):
         self.assertEqual(fnv1a32(""), 2166136261)

@@ -1,13 +1,31 @@
-static func gml_static_get(value):
+# The Callable a function's static struct is kept under, or null when the value
+# is not a function: a method or a function value, or a script asset (a script's
+# name gives its index, which is how GML code names a constructor).
+static func _gml_static_function_key(value):
 	if value is GMLMethod:
-		return gml_static_get(value.function_value)
-	if is_method(value):
-		return _gml_static_ensure(value)
+		return value.function_value
+	if typeof(value) == TYPE_CALLABLE:
+		return value
+	if is_numeric(value) and _gml_script_entry(value) != null:
+		var descriptor: Variant = _gml_script_resolve(value)
+		if typeof(descriptor) == TYPE_DICTIONARY:
+			var callable: Variant = descriptor.get("callable", null)
+			if callable is GMLMethod:
+				return callable.function_value
+			if typeof(callable) == TYPE_CALLABLE:
+				return callable
+	return null
+
+
+static func gml_static_get(value):
 	if typeof(value) == TYPE_DICTIONARY:
 		if is_same(value, _gml_static_root):
 			return gml_undefined()
 		var static_struct = value.get(GML_STATIC_LINK_KEY)
 		return _gml_static_root if static_struct == null else static_struct
+	var function_key = _gml_static_function_key(value)
+	if function_key != null:
+		return _gml_static_ensure(function_key)
 	if not is_struct(value):
 		return gml_unsupported_type_error("GML static_get", value)
 	# An instance of an object has no static struct of its own.
@@ -24,12 +42,10 @@ static func gml_static_bind(value, scope_id, constructor_name = ""):
 	var static_struct = gml_static_scope(scope_id)
 	if constructor_name != "":
 		static_struct[GML_STATIC_NAME_KEY] = constructor_name
-	if value is GMLMethod:
-		_gml_static_functions[value.function_value] = static_struct
-	elif is_method(value):
-		_gml_static_functions[value] = static_struct
-	else:
+	var function_key = _gml_static_function_key(value)
+	if function_key == null:
 		return gml_unsupported_type_error("GML static bind", value)
+	_gml_static_functions[function_key] = static_struct
 	return value
 
 
@@ -56,17 +72,25 @@ static func gml_static_set(struct_value, static_struct):
 	if typeof(static_struct) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML static_set static struct", static_struct)
 	if typeof(struct_value) == TYPE_DICTIONARY and not is_same(struct_value, _gml_static_root):
+		# instanceof reports the type the struct was made as (the runner's
+		# __type), which the new static struct does not change.
+		if not struct_value.has(GML_STATIC_TYPE_KEY) and not struct_value.has(GML_STATIC_NAME_KEY):
+			struct_value[GML_STATIC_TYPE_KEY] = gml_instanceof(struct_value)
 		struct_value[GML_STATIC_LINK_KEY] = static_struct
 	return null
 
 
+# Whether a struct has the constructor's static struct anywhere in its static
+# chain (the runner's YYIsInstanceof walks the struct's prototypes). The
+# constructor is a script asset, or a function or method value.
 static func gml_is_instanceof(struct_value, constructor):
 	if typeof(struct_value) != TYPE_DICTIONARY:
 		return false
-	if not is_method(constructor):
+	var function_key = _gml_static_function_key(constructor)
+	if function_key == null:
 		return false
-	var constructor_static = gml_static_get(constructor)
-	if is_undefined(constructor_static):
+	var constructor_static = _gml_static_functions.get(function_key)
+	if constructor_static == null:
 		return false
 	var current_static = struct_value.get(GML_STATIC_LINK_KEY)
 	var links = 0
@@ -78,11 +102,19 @@ static func gml_is_instanceof(struct_value, constructor):
 	return false
 
 
+# The name of the constructor a struct was made by: "struct" for a struct
+# literal, "instance" for an instance, "weakref" for a weak reference, and
+# undefined for anything else (the runner's YYInstanceof reads __type).
 static func gml_instanceof(struct_value):
 	if not is_struct(struct_value):
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
 		return "instance"
+	if struct_value.has(GML_WEAK_REF_MARKER):
+		return "weakref"
+	var type_name = struct_value.get(GML_STATIC_TYPE_KEY)
+	if type_name != null:
+		return type_name
 	var static_struct = struct_value.get(GML_STATIC_LINK_KEY)
 	if static_struct == null or is_same(static_struct, _gml_static_root):
 		return "struct"

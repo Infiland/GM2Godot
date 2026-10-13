@@ -116,6 +116,7 @@ static func gm2godot_runtime_shutdown():
 		_gml_script_registry,
 		_gml_script_argument_stack,
 		_gml_static_functions,
+		_gml_constructor_stack,
 		_gml_static_named_scopes,
 		_gml_static_root,
 		_gml_global_scope,
@@ -129,6 +130,7 @@ static func gm2godot_runtime_shutdown():
 	_gml_script_registry_initializers_running = false
 	_gml_script_registry_initializers_complete = false
 	_gml_static_functions.clear()
+	_gml_constructor_stack.clear()
 	_gml_static_named_scopes.clear()
 	_gml_static_root.clear()
 	_gml_global_scope.clear()
@@ -441,7 +443,12 @@ static func _gml_constructor_invoke(constructor, instance, args, constructor_oth
 		call_args.append_array(args)
 	else:
 		call_args.append(args)
-	return constructor.function_value.callv(call_args)
+	# The constructor that is running, for the constructor it inherits from to
+	# join its static struct to.
+	_gml_constructor_stack.append(constructor.function_value)
+	var result = constructor.function_value.callv(call_args)
+	_gml_constructor_stack.pop_back()
+	return result
 
 
 static func gml_new(constructor, args = [], caller_self = null, caller_other = null):

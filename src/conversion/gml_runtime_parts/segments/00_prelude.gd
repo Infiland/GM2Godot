@@ -207,6 +207,8 @@ static var _gml_static_root = {}
 # The static struct of each function (a constructor, a function with static
 # variables), by the function's Callable.
 static var _gml_static_functions = {}
+# The constructors new and an inheriting constructor are running, innermost last.
+static var _gml_constructor_stack = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {

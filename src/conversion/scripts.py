@@ -128,6 +128,19 @@ def _indent_function_body_line(text: str) -> str:
     return "\n".join(f"\t{line}" if line else "" for line in text.split("\n"))
 
 
+def _script_method_return(callable_expression: str, static_scope_id: str | None) -> str:
+    """The body of a script function's callable accessor.
+
+    A function with static variables is bound to its static struct, so that
+    static_get(fn) and fn.name find the variables the function keeps.
+    """
+    if static_scope_id is not None:
+        callable_expression = (
+            f"GMRuntime.gml_static_bind({callable_expression}, {json.dumps(static_scope_id)})"
+        )
+    return f"\treturn GMRuntime.gml_method(self, {callable_expression})\n\n"
+
+
 def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_method: str) -> str:
     args = [
         "self",
@@ -759,7 +772,10 @@ class ScriptConverter(BaseConverter):
                         + f"{body}\n"
                         + "\treturn GMRuntime.gml_undefined()\n\n"
                         + f"func {callable_names.callable_accessor}():\n"
-                        + f'\treturn GMRuntime.gml_method(self, Callable(self, "{callable_names.call_method}"))\n\n'
+                        + _script_method_return(
+                            f'Callable(self, "{callable_names.call_method}")',
+                            static_scope_id,
+                        )
                         + f"func {callable_names.scoped_callable_accessor}():\n"
                         + "\treturn GMRuntime.gml_receiver_method(\n"
                         + "\t\tGMRuntime.gml_undefined(),\n"
@@ -852,7 +868,10 @@ class ScriptConverter(BaseConverter):
             + f"{result.code}\n"
             + "\treturn GMRuntime.gml_undefined()\n\n"
             + "func gm2godot_callable():\n"
-            + '\treturn GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))\n\n'
+            + _script_method_return(
+                'Callable(self, "_gm_script_call")',
+                result.static_scope_id,
+            )
             + "func gm2godot_scoped_callable():\n"
             + "\treturn GMRuntime.gml_receiver_method(\n"
             + "\t\tGMRuntime.gml_undefined(),\n"

@@ -22,12 +22,16 @@ static func _gml_static_new_struct(constructor_name = ""):
 	return static_struct
 
 
-# The constructor of a struct being built joins the static struct of the
-# constructor it inherits from to its own.
+# The constructor that is running joins the static struct of the constructor
+# it inherits from to its own. That is the innermost constructor on the stack,
+# not the struct's own static struct: a constructor between the struct's and
+# the root one (Square : Rect : Shape) is the child of the next one up.
 static func _gml_static_join_parent(instance, parent_function):
-	if typeof(instance) != TYPE_DICTIONARY:
-		return
-	var child_static = instance.get(GML_STATIC_LINK_KEY)
+	var child_static = null
+	if not _gml_constructor_stack.is_empty():
+		child_static = _gml_static_ensure(_gml_constructor_stack[-1])
+	elif typeof(instance) == TYPE_DICTIONARY:
+		child_static = instance.get(GML_STATIC_LINK_KEY)
 	if child_static == null:
 		return
 	var parent_static = _gml_static_ensure(parent_function)

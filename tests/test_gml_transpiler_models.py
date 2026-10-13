@@ -89,6 +89,7 @@ EXPECTED_SHARED_MODEL_EXPORTS = (
     "AssignmentOperator",
     "BuiltinVariableMetadata",
     "DEFAULT_SCOPE_CONTEXT",
+    "EventFunctionSplit",
     "GMLExtensionFunction",
     "GMLExtensionFunctionMapping",
     "GMLTranspileError",

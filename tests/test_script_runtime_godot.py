@@ -61,6 +61,8 @@ def _write_gm_project(gm_dir: Path) -> None:
             gm_dir / "scripts" / script_name / f"{script_name}.yy",
             {
                 "%Name": script_name,
+                # scr_add is a pre-2.3 script whose code is a callable body.
+                "isCompatibility": script_name == "scr_add",
                 "name": script_name,
                 "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
                 "resourceType": "GMScript",

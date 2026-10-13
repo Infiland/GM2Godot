@@ -10,6 +10,7 @@ from typing import Iterable, Mapping
 from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
+from src.conversion.gamemaker_json import read_gamemaker_json
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     EXTENSION_FUNCTION_MAPPING_FILENAME,
@@ -520,6 +521,23 @@ class ScriptConverter(BaseConverter):
             return None
         return resolved
 
+    def _script_is_compatibility(self, entry: AssetRegistryEntry) -> bool:
+        """Whether the script is saved with "isCompatibility": true.
+
+        Only a compatibility script (one imported from before GameMaker 2.3)
+        is a callable body; the code of any other script runs once at game
+        start, with its functions declared globally.
+        """
+        yy_source = self._script_yy_source(entry)
+        if yy_source is None:
+            return False
+        try:
+            document = read_gamemaker_json(yy_source.filesystem_path)
+        except (OSError, ValueError):
+            return False
+        value = document.value
+        return isinstance(value, dict) and value.get("isCompatibility") is True
+
     def _source_gml_path(self, entry: AssetRegistryEntry) -> str | None:
         yy_source = self._script_yy_source(entry)
         if yy_source is None:
@@ -736,6 +754,7 @@ class ScriptConverter(BaseConverter):
         extension_function_mappings: dict[str, GMLExtensionFunctionMapping],
         enum_values: Mapping[str, Mapping[str, int]],
         macro_values: Mapping[str, str],
+        compatibility: bool = False,
     ) -> tuple[str, tuple[ScriptRegistryEntry, ...], tuple[GMLSourceMap, ...]]:
         header = render_gml_source_header(
             source_path=source_path,
@@ -745,6 +764,7 @@ class ScriptConverter(BaseConverter):
         modern_structure = modern_script_structure(
             source,
             macro_configuration=self.macro_configuration,
+            legacy_callable=compatibility,
         )
         if modern_structure is not None:
             modern_declarations = modern_structure.declarations
@@ -1072,6 +1092,7 @@ class ScriptConverter(BaseConverter):
                 extension_function_mappings=extension_function_mappings,
                 enum_values=enum_values,
                 macro_values=macro_values,
+                compatibility=self._script_is_compatibility(entry),
             )
             global_pragmas = self._render_global_pragmas(
                 entry,

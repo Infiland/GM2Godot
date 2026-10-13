@@ -3053,6 +3053,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
 
+    def test_a_catch_variable_named_like_one_already_declared_is_not_declared_again(self):
+        # GDScript refuses a second variable of the same name in the function.
+        nested = transpile_gml_code(
+            'try { throw "a"; } catch (e) { try { throw "b"; } catch (e) { x = e; } }',
+            indent="",
+        )
+        self.assertEqual(nested.count("var e = "), 1, nested)
+        self.assertIn('\te = GMRuntime.gml_exception_struct(_gml_try_control_1["value"])', nested)
+
+        outer_local = transpile_gml_code(
+            'var e = 0;\ntry { throw "a"; } catch (e) { x = e; }',
+            indent="",
+        )
+        self.assertEqual(outer_local.count("var e = "), 1, outer_local)
+
+        # Separate catch blocks each declare their own variable.
+        siblings = transpile_gml_code(
+            'try { throw "a"; } catch (e) { x = e; }\ntry { throw "b"; } catch (e) { y = e; }',
+            indent="",
+        )
+        self.assertEqual(siblings.count("var e = "), 2, siblings)
+
     def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
         output = transpile_gml_code(
             "try { value = real(text); } catch (_) {}",

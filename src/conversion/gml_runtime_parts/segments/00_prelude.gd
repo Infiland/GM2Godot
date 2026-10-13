@@ -4,7 +4,6 @@ const GML_TYPE_UNDEFINED = "undefined"
 const GML_TYPE_NULL = "null"
 const GML_TYPE_BOOL = "bool"
 const GML_TYPE_NUMBER = "number"
-const GML_TYPE_INT32 = "int32"
 const GML_TYPE_INT64 = "int64"
 const GML_TYPE_POINTER = "ptr"
 const GML_TYPE_STRING = "string"
@@ -358,8 +357,23 @@ static func is_real(value):
 	return is_number(value)
 
 
+# The runner's is_int32 (`~~x === x`): any number that is whole and fits 32
+# bits, whether Godot holds it as an int or a float (7 div 2 and 7 / 2 * 2 are
+# the same GML number, and typeof says "number" for both).
 static func is_int32(value):
-	return typeof(value) == TYPE_INT and int(value) >= -2147483648 and int(value) <= 2147483647
+	var value_type = typeof(value)
+	if value_type == TYPE_INT:
+		return value >= -2147483648 and value <= 2147483647
+	if value_type == TYPE_FLOAT:
+		return value >= -2147483648.0 and value <= 2147483647.0 and value == floor(value)
+	return false
+
+
+# Whether Godot holds the value as an int in the int32 range: the operand
+# check of the int32 and int64 arithmetic helpers, which keeps their results
+# whole numbers.
+static func _is_godot_int32(value):
+	return typeof(value) == TYPE_INT and value >= -2147483648 and value <= 2147483647
 
 
 static func is_int64(value):

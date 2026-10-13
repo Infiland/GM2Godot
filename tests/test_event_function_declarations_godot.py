@@ -4,7 +4,13 @@ A function declared in an event is available only in the context of its
 instance, throughout the instance's lifetime (manual: GML Overview > Method
 Variables, "Defining a function in an Object's event"). The instance's other
 events call it by name, a call can come before the declaration in the same
-event, and another object's function of the same name is a separate one.
+event, and another object's function of the same name is a separate one. A
+function declared in the Alarm 0 event can be called in the Create event,
+"regardless of when that alarm event runs (or whether it runs at all)". A call
+to a function by name goes straight to the function declared in the same
+event, so a parent's talk() still reaches the parent's say_hello() when the
+child declares its own (manual: GML Overview > Script Functions vs. Methods,
+"Overridden Script Functions").
 """
 from __future__ import annotations
 
@@ -12,6 +18,9 @@ import unittest
 
 from tests.gamemaker_project_support import EVENT_CREATE, EVENT_STEP, GameMakerObject
 from tests.gml_trace_support import run_gml_trace
+
+EVENT_ALARM_0 = (2, 0)
+EVENT_USER_0 = (7, 10)
 
 _SCRIPTS = {
     "scr_counter": (
@@ -79,6 +88,130 @@ class TestEventFunctionDeclarationsGodot(unittest.TestCase):
             ],
         )
 
+    def test_function_declared_in_an_event_that_has_not_run_is_available_from_creation(self) -> None:
+        create = (
+            'trace("create:" + string(from_alarm(2)) + " " + string(from_user(3)));\n'
+            "function in_create(_q) { return from_alarm(_q) + 1; }\n"
+            'trace("nested:" + string(in_create(5)));\n'
+        )
+        step = (
+            'if (!variable_global_exists("stepped")) {\n'
+            "    global.stepped = true;\n"
+            '    trace("step:" + string(from_alarm(4)));\n'
+            "}\n"
+        )
+        # Alarm 0 is never set, and no user event 0 is ever performed.
+        alarm = "function from_alarm(_q) { return _q * 10; }\ntrace(\"alarm ran\");\n"
+        user = "function from_user(_q) { return _q + 100; }\n"
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: create, EVENT_STEP: step, EVENT_ALARM_0: alarm, EVENT_USER_0: user},
+        )
+
+        self.assertEqual(trace, ["create:20 103", "nested:51", "step:40"])
+
+    def test_call_goes_to_the_function_declared_in_the_same_event_not_to_the_variable(self) -> None:
+        # The manual's example: talk() runs in the child, yet reaches the
+        # parent's say_hello(), because the parent declared both with the
+        # script function syntax. self.say_hello() calls the variable, which
+        # the child's declaration assigned after the parent's.
+        parent_create = (
+            "function talk() { say_hello(); }\n"
+            'function say_hello() { trace("I am the parent!"); }\n'
+        )
+        child_create = (
+            "event_inherited();\n"
+            'function say_hello() { trace("I am the child!"); }\n'
+            'trace("talk");\n'
+            "talk();\n"
+            'trace("direct");\n'
+            "say_hello();\n"
+            'trace("self");\n'
+            "self.say_hello();\n"
+        )
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: 'instance_create_layer(0, 0, "Instances", o_child);\n'},
+            objects=(
+                GameMakerObject("o_parent", {EVENT_CREATE: parent_create}),
+                GameMakerObject("o_child", {EVENT_CREATE: child_create}, parent="o_parent"),
+            ),
+        )
+
+        self.assertEqual(
+            trace,
+            [
+                "talk",
+                "I am the parent!",
+                "direct",
+                "I am the child!",
+                "self",
+                "I am the child!",
+            ],
+        )
+
+    def test_method_variables_are_called_through_the_variable_so_the_child_overrides(self) -> None:
+        # The manual's fix for the example above: method variable syntax makes
+        # every call go through the variable.
+        parent_create = (
+            "talk = function() { say_hello(); };\n"
+            'say_hello = function() { trace("I am the parent!"); };\n'
+        )
+        child_create = (
+            "event_inherited();\n"
+            'say_hello = function() { trace("I am the child!"); };\n'
+            "talk();\n"
+            "say_hello();\n"
+        )
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: 'instance_create_layer(0, 0, "Instances", o_child);\n'},
+            objects=(
+                GameMakerObject("o_parent", {EVENT_CREATE: parent_create}),
+                GameMakerObject("o_child", {EVENT_CREATE: child_create}, parent="o_parent"),
+            ),
+        )
+
+        self.assertEqual(trace, ["I am the child!", "I am the child!"])
+
+    def test_function_named_like_a_node_member_loads_and_returns_its_value(self) -> None:
+        # ready, add_child and get_children are Node members a script cannot
+        # redeclare; GML has no such limit, so the script still has to load.
+        create = (
+            "function ready() { return 1; }\n"
+            "function add_child(_q) { return _q + 2; }\n"
+            "function get_children() { return 3; }\n"
+            "plain_count = ready() + add_child(10) + get_children();\n"
+            'trace("members:" + string(ready()) + " " + string(add_child(5)) + " " + string(get_children()));\n'
+            'trace("sum:" + string(plain_count));\n'
+            "hidden = 7;\n"
+            'trace("variable:" + string(hidden));\n'
+        )
+        trace = run_gml_trace(self, {}, {EVENT_CREATE: create})
+        self.assertEqual(trace, ["members:1 7 3", "sum:16", "variable:7"])
+
+
+    def test_function_declared_in_an_event_survives_instance_change_in_that_event(self) -> None:
+        # The function is an instance variable in GameMaker, so the rest of
+        # the event, which runs on the new object, can still call it.
+        step = (
+            'if (variable_global_exists("changed")) exit;\n'
+            "global.changed = true;\n"
+            'function f() { return "f:" + object_get_name(object_index) + ":" + string(hp); }\n'
+            "instance_change(o_t, true);\n"
+            'trace("after " + f());\n'
+            "hp += 1;\n"
+            'trace("end " + f());\n'
+        )
+        target = GameMakerObject("o_t", {EVENT_CREATE: "hp = 100;\n"})
+        trace = run_gml_trace(self, {}, {EVENT_CREATE: "hp = 1;\n", EVENT_STEP: step}, objects=(target,))
+        self.assertEqual(trace, ["after f:o_t:100", "end f:o_t:101"])
 
 if __name__ == "__main__":
     unittest.main()

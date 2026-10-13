@@ -112,6 +112,7 @@ static func gm2godot_runtime_shutdown():
 	gm2godot_draw_runtime_shutdown()
 	gml_sequence_runtime_cleanup_all()
 	_gml_time_source_shutdown()
+	_gml_unhandled_exception_handler_shutdown()
 	_gml_shutdown_detach_methods([
 		_gml_script_registry,
 		_gml_script_argument_stack,

@@ -106,6 +106,9 @@ class TestScriptConverter(unittest.TestCase):
                 self.gm_dir / "scripts" / script_name / f"{script_name}.yy",
                 {
                     "%Name": script_name,
+                    # scr_add is a pre-2.3 script whose code is the body of
+                    # a callable; scr_modern is a 2.3+ script.
+                    "isCompatibility": script_name == "scr_add",
                     "name": script_name,
                     "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
                     "resourceType": "GMScript",
@@ -855,6 +858,18 @@ class TestScriptConverter(unittest.TestCase):
 
     def test_legacy_script_body_with_statics_is_bound_to_its_static_struct(self) -> None:
         self._write_project()
+        # Only a compatibility script is a callable body (the other scripts
+        # run their top-level code at game start).
+        _write_json(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.yy",
+            {
+                "%Name": "scr_modern",
+                "isCompatibility": True,
+                "name": "scr_modern",
+                "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
+                "resourceType": "GMScript",
+            },
+        )
         _write_text(
             self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
             "static total = 0;\ntotal += 1;\nreturn total;\n",
@@ -1290,6 +1305,50 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIsNone(
             modern_script_structure("var _f = function named() { return 1; };\nreturn _f();\n")
         )
+
+    def test_script_without_functions_is_global_initialization_unless_legacy_callable(self) -> None:
+        source = 'global.boot = "ran";\nif (os_type != os_android) { global.desktop = true; }\n'
+
+        legacy = modern_script_structure(source)
+        initialization = modern_script_structure(source, legacy_callable=False)
+
+        self.assertIsNone(legacy)
+        assert initialization is not None
+        self.assertEqual(initialization.declarations, ())
+        self.assertEqual(len(initialization.top_level_statements), 1)
+        self.assertIn('global.boot = "ran";', initialization.top_level_statements[0].source)
+        # Nothing to run at start: only enums and macros, or comments.
+        self.assertIsNone(modern_script_structure("enum Kind { A, B }\n#macro LIMIT 3\n", legacy_callable=False))
+        self.assertIsNone(modern_script_structure("// nothing yet\n", legacy_callable=False))
+
+    def test_converts_script_without_functions_by_compatibility_flag(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            'global.boot = "ran";\n',
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertIn("func gm2godot_initialize_top_level():", script)
+        self.assertIn('"boot", "ran"', script)
+        self.assertIn('"initializer": _gm_script_method(', registry)
+        # scr_add (isCompatibility true) is still a callable body that
+        # runs when called, with argument0 and so on.
+        legacy = (self.godot_dir / "scripts" / "game" / "scr_add.gd").read_text(encoding="utf-8")
+        self.assertNotIn("gm2godot_initialize_top_level", legacy)
+        self.assertIn('"legacy_arguments": true', registry)
 
     def test_converts_function_script_with_global_initialization(self) -> None:
         self._write_project()

@@ -583,6 +583,7 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "dynamic_instance_names: 'Iterable[str] | None' = None, "
         "enum_values: 'Mapping[str, Mapping[str, int]] | None' = None, "
         "macro_values: 'Mapping[str, str] | None' = None, "
+        "event_functions: 'EventFunctionSplit | None' = None, "
         "instance_change_continuations: 'bool' = False, inherited_event_continuation: 'bool' = False, "
         "instance_change_names: 'Iterable[str]' = ()) -> 'GMLTranspileResult'"
     ),

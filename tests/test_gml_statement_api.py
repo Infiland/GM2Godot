@@ -22,6 +22,7 @@ from typing import (
 
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
+    EventFunctionSplit,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
@@ -101,6 +102,7 @@ STATEMENT_REQUEST_FIELDS = (
     "static_scope_prefix",
     "extension_functions",
     "extension_function_mappings",
+    "event_functions",
     "instance_change_continuations",
     "inherited_event_continuation",
     "instance_change_names",
@@ -140,6 +142,7 @@ EXPECTED_MODEL_SIGNATURES = {
         "extension_functions: 'Mapping[str, GMLExtensionFunction] | None' = None, "
         "extension_function_mappings: "
         "'Mapping[str, GMLExtensionFunctionMapping] | None' = None, "
+        "event_functions: 'EventFunctionSplit | None' = None, "
         "instance_change_continuations: 'bool' = False, "
         "inherited_event_continuation: 'bool' = False, "
         "instance_change_names: 'frozenset[str]' = frozenset()) -> None"
@@ -273,6 +276,7 @@ class GMLStatementAPITests(unittest.TestCase):
                 "extension_function_mappings": (
                     Mapping[str, GMLExtensionFunctionMapping] | None
                 ),
+                "event_functions": EventFunctionSplit | None,
                 "instance_change_continuations": bool,
                 "inherited_event_continuation": bool,
                 "instance_change_names": frozenset[str],

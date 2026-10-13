@@ -10,6 +10,7 @@ from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
 from src.conversion.gml_transpiler_parts.constants import (
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+    GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.json_values import JsonObject
@@ -109,7 +110,9 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | _OBJECT_RUNTIME_MEM
     "_gm_sprite_visual_node",
     "Vector2",
 })
-_NATIVE_NODE2D_MEMBER_VARIABLES = GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+_NATIVE_NODE2D_MEMBER_VARIABLES = (
+    GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS | GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS
+)
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
     "as",
@@ -170,6 +173,59 @@ class ObjectRuntimeConfig:
     # The object or an ancestor has Variable Definitions: its instances run
     # them (and their Room Editor overrides) before the Create event.
     runs_variable_definitions: bool = False
+    # The object or an ancestor declares named functions in its events: the
+    # instance binds them when it is built (see event_function_member_name).
+    binds_event_functions: bool = False
+    # An ancestor does: the object's binding runs the ancestor's first.
+    inherits_event_functions: bool = False
+
+
+# Code bodies under this key prefix are the declared functions of an event,
+# bound when the instance is built rather than when the event runs.
+EVENT_FUNCTIONS_KEY_PREFIX = "event_functions:"
+
+
+def _event_identifier(event_function: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", event_function).strip("_")
+
+
+def event_function_member_name(object_name: str, event_function: str, function_name: str) -> str:
+    """The member holding a function declared in an event of an object.
+
+    Calls to the function in the event that declares it go to this member
+    rather than to the variable of the same name (manual: GML Overview >
+    Script Functions vs. Methods, "Overridden Script Functions"). The object's
+    name keeps a child's member apart from its parent's.
+    """
+    return f"_gm_fn_{object_name}_{_event_identifier(event_function)}_{function_name}"
+
+
+def _event_function_binder_name(object_name: str, event_function: str) -> str:
+    return f"_gm_bind_{object_name}_{_event_identifier(event_function)}"
+
+
+def _emit_event_function_binders(
+    lines: list[str],
+    object_runtime: ObjectRuntimeConfig,
+    code_bodies: Mapping[str, str],
+) -> None:
+    binders = [
+        (key.removeprefix(EVENT_FUNCTIONS_KEY_PREFIX), body)
+        for key, body in code_bodies.items()
+        if key.startswith(EVENT_FUNCTIONS_KEY_PREFIX)
+    ]
+    if not binders:
+        return
+    # One method per event keeps the temporaries of their code apart.
+    binder_calls: list[str] = []
+    for event_function, body in binders:
+        name = _event_function_binder_name(object_runtime.object_name, event_function)
+        lines.append(f"\n\nfunc {name}():\n{body}\n")
+        binder_calls.append(f"\t{name}()")
+    # The ancestors' functions are bound first, so that a child's function of
+    # the same name is the one its instances end up with.
+    parent_call = ["\tsuper._gm_bind_event_functions()"] if object_runtime.inherits_event_functions else []
+    lines.append("\n\nfunc _gm_bind_event_functions():\n" + "\n".join([*parent_call, *binder_calls]) + "\n")
 
 
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
@@ -606,6 +662,10 @@ def _emit_object_runtime_prelude(
         "\n\t_gm_register_instance()"
         "\n\t_gm_initialize_motion_runtime()"
         + "".join(f"\n{line}" for line in sprite_construct_lines)
+        # The functions its events declare exist from the start: before the
+        # events that declare them have run (manual: GML Overview > Method
+        # Variables).
+        + ("\n\t_gm_bind_event_functions()" if object_runtime.binds_event_functions else "")
         + "\n"
     )
 
@@ -910,6 +970,7 @@ def generate_script_content(
             lines,
             declare_members=base_script_path is None,
         )
+        _emit_event_function_binders(lines, object_runtime, effective_code_bodies)
     if uses_motion_runtime:
         _emit_motion_runtime_prelude(
             lines,

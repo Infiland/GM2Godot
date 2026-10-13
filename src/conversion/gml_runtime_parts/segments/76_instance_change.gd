@@ -515,9 +515,11 @@ static func _gml_instance_change_restore(inst, values):
 			continue
 		if declared.has(name):
 			inst.set(name, values[name])
-		elif not str(name).begins_with("_gm_") and values[name] != null:
+		elif (not str(name).begins_with("_gm_") or str(name).begins_with("_gm_fn_")) and values[name] != null:
 			# (A member the old object's code never assigned holds null; the
-			# variable does not exist yet.)
+			# variable does not exist yet. A function an event of the old
+			# object declared is an instance variable in GameMaker, so its
+			# _gm_fn_ member goes on as one.)
 			_gml_object_dynamic_fields(inst, true)[name] = values[name]
 
 

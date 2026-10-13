@@ -35,6 +35,7 @@ from .utils import (
     normalize_local_names as _normalize_local_names,
     tokens_to_source as _tokens_to_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
+    wrap_int64 as _wrap_int64,
 )
 
 
@@ -109,7 +110,9 @@ def _parse_enum_int_literal(expr: _NumberLiteral) -> int | None:
     if expr.is_float_like:
         return None
     try:
-        return int(expr.value, 0)
+        # A hex or binary literal of 2^63 or more is the int64 with that bit
+        # pattern, as it is in the generated code.
+        return _wrap_int64(int(expr.value, 0))
     except ValueError:
         return None
 

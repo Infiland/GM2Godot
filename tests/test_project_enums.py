@@ -80,6 +80,22 @@ class TestProjectEnums(unittest.TestCase):
                 },
             )
 
+    def test_wraps_hex_values_of_two_to_the_63_or_more_to_signed_int64(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            _write_project_resources(project_dir, [("scripts", "Masks")])
+            source_path = project_dir / "scripts" / "Masks" / "Masks.gml"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                "enum Masks { all = 0xFFFFFFFFFFFFFFFF, top = $8000000000000000, low = 0xFF }\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                collect_project_enum_values(project_dir),
+                {"Masks": {"all": -1, "top": -9223372036854775808, "low": 255}},
+            )
+
     def test_ignores_enum_text_in_comments_and_strings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_dir = Path(temp_dir)

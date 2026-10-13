@@ -212,8 +212,10 @@ EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER = {
     ),
     f"{PARTS_PACKAGE}.emitter": frozenset(
         {
+            (EXPRESSION_UTILITY_MODULE, "int64_literal_source"),
             (EXPRESSION_UTILITY_MODULE, "normalize_local_names"),
             (EXPRESSION_UTILITY_MODULE, "normalize_scope_context"),
+            (EXPRESSION_UTILITY_MODULE, "number_literal_source"),
             (EXPRESSION_UTILITY_MODULE, "unwrap_grouped_expression"),
         }
     ),
@@ -223,6 +225,7 @@ EXPRESSION_DIRECT_IMPORTS_BY_CONSUMER = {
             (EXPRESSION_UTILITY_MODULE, "normalize_local_names"),
             (EXPRESSION_UTILITY_MODULE, "tokens_to_source"),
             (EXPRESSION_UTILITY_MODULE, "unwrap_grouped_expression"),
+            (EXPRESSION_UTILITY_MODULE, "wrap_int64"),
         }
     ),
     f"{PARTS_PACKAGE}.expression_parser": frozenset(
@@ -300,6 +303,7 @@ STATEMENT_DIRECT_IMPORTS_BY_CONSUMER = {
             (STATEMENT_UTILITY_MODULE, "indent_lines"),
             (STATEMENT_UTILITY_MODULE, "insert_lines_before_continue"),
             (STATEMENT_UTILITY_MODULE, "insert_until_check_before_continue"),
+            (STATEMENT_UTILITY_MODULE, "int64_literal_source"),
             (STATEMENT_UTILITY_MODULE, "macro_configuration_matches"),
             (STATEMENT_UTILITY_MODULE, "normalize_scope_context"),
             (STATEMENT_UTILITY_MODULE, "scope_context_with_global_names"),

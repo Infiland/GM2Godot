@@ -189,6 +189,59 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_real(0x2c8e)",
         )
 
+    def test_writes_hex_literals_of_two_to_the_63_or_more_as_signed_int64(self):
+        # GDScript clamps an integer literal beyond the int64 range to
+        # INT64_MAX ("Cannot represent ... as a 64-bit signed integer"). In
+        # GML a hex literal is an int64 with that bit pattern, so
+        # 0xFFFFFFFFFFFFFFFF == -1.
+        smallest = "(-9223372036854775807 - 1)"
+        cases = (
+            ("0x8000000000000000", smallest),
+            ("$8000000000000000", smallest),
+            ("0xFFFFFFFFFFFFFFFF", "(-1)"),
+            ("$FFFFFFFFFFFFFFFF", "(-1)"),
+            ("0xffff_ffff_ffff_ffff", "(-1)"),
+            ("0x8000000000000001", "(-9223372036854775807)"),
+            ("0xCBF29CE484222325", "(-3750763034362895579)"),
+            ("0b" + "1" * 64, "(-1)"),
+            ("0b1" + "0" * 63, smallest),
+            ("0x7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("$7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("0xFFFFFFFF", "0xFFFFFFFF"),
+            ("0b" + "1" * 63, "0b" + "1" * 63),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
+        self.assertEqual(
+            transpile_gml_expression("x & $FFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_and(position.x, (-1))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("~0xFFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_not((-1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("var mask = 0x8000000000000000;", indent=""),
+            f"var mask = {smallest}",
+        )
+
+    def test_writes_decimal_integer_literals_beyond_int64_as_reals(self):
+        # GML reads a decimal literal beyond the int64 range as a real; as an
+        # integer literal GDScript would clamp it to INT64_MAX.
+        cases = (
+            ("9223372036854775807", "9223372036854775807"),
+            ("9223372036854775808", "9223372036854775808.0"),
+            ("18446744073709551615", "18446744073709551615.0"),
+            ("9_223_372_036_854_775_808", "9223372036854775808.0"),
+            ("9223372036854775808.5", "9223372036854775808.5"),
+            ("12345", "12345"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_hash_color_literal_parity_examples(self):
         cases = (
             ("#dd8e2c == $2c8edd", "0x2c8edd == 0x2c8edd"),
@@ -1334,6 +1387,27 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 indent="",
             ),
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
+        )
+
+    def test_wraps_hex_enum_values_of_two_to_the_63_or_more_to_signed_int64(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "enum MASK { ALL = 0xFFFFFFFFFFFFFFFF, TOP = $8000000000000000, LOW = 0xFF }\n"
+                "a = MASK.ALL;\n"
+                "b = MASK.TOP;",
+                indent="",
+            ),
+            'var MASK = GMRuntime.gml_enum({"ALL": -1, "TOP": (-9223372036854775807 - 1), "LOW": 255})\n'
+            "a = -1\n"
+            "b = (-9223372036854775807 - 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "result = MASK.TOP;",
+                indent="",
+                enum_values={"MASK": {"TOP": -9223372036854775808}},
+            ),
+            "result = (-9223372036854775807 - 1)",
         )
 
     def test_lowers_project_global_enum_members_to_integer_constants(self):

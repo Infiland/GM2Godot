@@ -67,6 +67,34 @@ _CREATE = (
     "var _copied = [];\n"
     "array_copy(_copied, 2, [7], 0, 1);\n"
     'record("array_copy", string(_copied[0] + 1) + string(_copied[1]) + string(_copied[2]));\n'
+    # The runner's array_copy works out how much of the source there is first
+    # and copies from the last element to the first, so an array copied
+    # onto itself moves right as a whole; array_resize and array_copy zero
+    # the gap however long it is.
+    "var _shift = [1, 2, 3];\n"
+    "array_copy(_shift, 1, _shift, 0, 3);\n"
+    'record("array_copy_self", string(_shift[0]) + string(_shift[1]) + string(_shift[2]) + string(_shift[3])'
+    " + string(array_length(_shift)));\n"
+    "var _wide = [1];\n"
+    "array_copy(_wide, 1, [5, 6, 7], 0, 9);\n"
+    'record("array_copy_grow", string(_wide[0]) + string(_wide[1]) + string(_wide[2]) + string(_wide[3])'
+    " + string(array_length(_wide)));\n"
+    "var _far = [];\n"
+    "array_copy(_far, 30, [1, 2, 3], 0, 3);\n"
+    'record("array_copy_far", string(_far[29] + 1) + string(_far[30]) + string(_far[32]) + string(array_length(_far)));\n'
+    "var _long = [3];\n"
+    "array_resize(_long, 40);\n"
+    'record("array_resize_long", string(_long[0]) + string(_long[39] + 1) + flag(is_real(_long[20]))'
+    " + string(array_length(_long)));\n"
+    # array_insert past the end fills the gap with 0 and inserts there.
+    "var _inserted = [1, 2];\n"
+    "array_insert(_inserted, 5, 9);\n"
+    'record("array_insert_far", string(_inserted[2] + 1) + string(_inserted[4] + 1) + string(_inserted[5])'
+    " + string(array_length(_inserted)));\n"
+    # array_push and struct_foreach give no value.
+    "var _pushed = [1];\n"
+    'record("array_push", flag(is_undefined(array_push(_pushed, 2))) + string(array_length(_pushed)));\n'
+    'record("struct_foreach", flag(is_undefined(struct_foreach({ a: 1 }, function(_name, _value) {}))));\n'
     # Fresh and gained ds_grid cells hold 0, and resizing keeps the old ones.
     "var _grid = ds_grid_create(2, 2);\n"
     "ds_grid_set(_grid, 1, 1, 5);\n"
@@ -125,6 +153,13 @@ _EXPECTED = {
     "array_gap": "0114",
     "array_resize": "1T6",
     "array_copy": "107",
+    "array_copy_self": "11234",
+    "array_copy_grow": "15674",
+    "array_copy_far": "11333",
+    "array_resize_long": "31T40",
+    "array_insert_far": "1196",
+    "array_push": "T2",
+    "struct_foreach": "T",
     "grid_create": "1T",
     "grid_resize": "51TT",
     "list_set": "193",

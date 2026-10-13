@@ -53,11 +53,18 @@ static func _gml_resolve_ds_priority(id_value):
 	return id_value
 
 
+# GML equality: values of one type compare with ==, numbers, booleans and
+# 64-bit integers of different types compare as reals (float() cannot read a
+# GMLInt64, _to_real can), and two 64-bit integers compare by value, as
+# the runner's yyCompareVal does for two Longs, not as two objects.
 static func _gml_is_equal(a, b):
-	if typeof(a) == typeof(b):
+	var type_a = typeof(a)
+	if type_a == typeof(b):
+		if type_a == TYPE_OBJECT and is_int64(a) and is_int64(b):
+			return a.value == b.value
 		return a == b
 	if is_numeric(a) and is_numeric(b):
-		return float(a) == float(b)
+		return _to_real(a) == _to_real(b)
 	return false
 
 

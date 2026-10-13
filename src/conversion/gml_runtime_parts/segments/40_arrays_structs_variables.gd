@@ -33,6 +33,18 @@ static func gml_array_set(array_value, index, value):
 # array_create does the same unless it is given a value.
 static func _gml_array_grow(array_value, size):
 	var old_size = array_value.size()
+	if old_size == 0:
+		array_value.resize(size)
+		array_value.fill(0)
+		return
+	if size - old_size > 16:
+		# Many elements: one array of zeros appended natively beats setting
+		# them one by one (about five times for a hundred).
+		var padding = []
+		padding.resize(size - old_size)
+		padding.fill(0)
+		array_value.append_array(padding)
+		return
 	array_value.resize(size)
 	for index in range(old_size, size):
 		array_value[index] = 0
@@ -47,7 +59,8 @@ static func gml_array_push(array_value, values):
 		return gml_error("GML array_push requires at least one value")
 	for value in values:
 		array_value.append(value)
-	return null
+	# No value, as in the runner; read directly, this is a hot function.
+	return _gml_undefined
 
 
 static func gml_array_equals(left, right):
@@ -114,6 +127,10 @@ static func gml_array_insert(array_value, index, value):
 	var resolved_index = int(_to_real(index))
 	if resolved_index < 0:
 		resolved_index = max(0, array_value.size() + resolved_index)
+	elif resolved_index > array_value.size():
+		# The runner fills the gap up to a position past the end with 0 and
+		# inserts there (array_insert, yyVariable.js).
+		_gml_array_grow(array_value, resolved_index)
 	array_value.insert(resolved_index, value)
 	return value
 
@@ -230,14 +247,19 @@ static func gml_array_copy(dest, dest_index, src, src_index, length):
 		resolved_dest_index = max(0, dest.size() + resolved_dest_index)
 	if resolved_src_index < 0:
 		resolved_src_index = max(0, src.size() + resolved_src_index)
-	for i in range(resolved_length):
-		var src_idx = resolved_src_index + i
-		var dest_idx = resolved_dest_index + i
-		if src_idx >= src.size():
-			break
-		if dest_idx >= dest.size():
-			_gml_array_grow(dest, dest_idx + 1)
-		dest[dest_idx] = src[src_idx]
+	# As in the runner's array_copy, the number of elements the source has to
+	# give is worked out first, the destination grows once to hold them (the
+	# gap before them holds 0), and they are copied from the last to the
+	# first, so that an array copied onto itself is not read after it was
+	# written.
+	var count = mini(resolved_length, src.size() - resolved_src_index)
+	if count <= 0:
+		return dest
+	var end_index = resolved_dest_index + count
+	if end_index > dest.size():
+		_gml_array_grow(dest, end_index)
+	for i in range(count - 1, -1, -1):
+		dest[resolved_dest_index + i] = src[resolved_src_index + i]
 	return dest
 
 
@@ -838,7 +860,8 @@ static func gml_struct_set(struct_value, member_name, value):
 		struct_value[key] = value
 		return value
 	if typeof(struct_value) == TYPE_OBJECT:
-		if _gml_is_instance_handle(struct_value):
+		# Inline, as in gml_struct_get, and no call on the way for an instance.
+		if struct_value is GMLHandle and struct_value.kind == GML_INSTANCE_HANDLE_KIND:
 			# An instance id writes to the instance, as the reads resolve it
 			# (the runner redirects variable_struct_* and struct_* to
 			# variable_instance_*); nothing happens once the instance is gone.
@@ -1215,7 +1238,7 @@ static func gml_struct_foreach(
 			caller_self,
 			caller_other
 		)
-	return null
+	return gml_undefined()
 
 
 static func gml_variable_get_hash(name):

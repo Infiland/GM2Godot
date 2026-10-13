@@ -1,5 +1,6 @@
 """Pure tileset metadata capture with separate legacy consumer projections."""
 
+import posixpath
 from dataclasses import dataclass, field
 
 from src.conversion.json_fields import (
@@ -220,9 +221,19 @@ def project_tileset_conversion_fields(metadata: GameMakerTilesetMetadata) -> Til
     return metadata.project_conversion_fields()
 
 
-@dataclass(frozen=True)
-class TilesetRoomLayout:
-    columns: int | None = None
+def tileset_source_grid_count(image_size: int, offset: int, tile_size: int, separation: int) -> int:
+    """Count the cells along one axis of a tileset's source sprite.
+
+    GameMaker numbers a tileset's tiles by cell in the grid of the sprite the
+    tileset is made from (tile 0, the always-empty tile, is its top-left
+    cell), so the number of cells per row is a property of that sprite, not of
+    the compiled texture page that out_columns describes. This is the rule
+    Godot's TileSetAtlasSource.get_atlas_grid_size applies to the same image.
+    """
+    step = tile_size + separation
+    if tile_size <= 0 or step <= 0 or image_size - offset < tile_size:
+        return 0
+    return 1 + (image_size - offset - tile_size) // step
 
 
 def _room_layout_integer(value: JsonValue) -> int:
@@ -234,10 +245,27 @@ def _room_layout_integer(value: JsonValue) -> int:
         return 0
 
 
-def select_tileset_room_layout(data: JsonObject) -> TilesetRoomLayout:
-    """Select columns lazily; unused tile counts must not be evaluated."""
-    columns = _room_layout_integer(data.get("out_columns", 0))
-    if columns > 0:
-        return TilesetRoomLayout(columns)
-    tile_count = _room_layout_integer(data.get("tile_count", 0))
-    return TilesetRoomLayout(tile_count if tile_count > 0 else None)
+def select_tileset_source_columns(data: JsonObject, sprite_width: int) -> int | None:
+    """Cells per row of the tileset's source sprite, or None when it has none.
+
+    Room tile layers number their tiles the way the tileset does, so this is
+    the column count their atlas coordinates are made with.
+    """
+    columns = tileset_source_grid_count(
+        sprite_width,
+        _room_layout_integer(data.get("tilexoff", 0)),
+        _room_layout_integer(data.get("tileWidth", 16)),
+        _room_layout_integer(data.get("tilehsep", 0)),
+    )
+    return columns if columns > 0 else None
+
+
+def tileset_sprite_name(data: JsonObject) -> str | None:
+    """Name of the sprite a tileset is made from, taken from its path first."""
+    reference = parse_gamemaker_tileset_sprite_reference(data, source_context="")
+    if isinstance(reference.path_value, str) and reference.path_value:
+        stem = posixpath.splitext(posixpath.basename(reference.path_value))[0]
+        if stem:
+            return stem
+    name = reference.name_value
+    return name if isinstance(name, str) and name else None

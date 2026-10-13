@@ -262,7 +262,7 @@ static func _gml_instance_position(instance):
 	return Vector2.ZERO
 
 
-static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null):
+static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null, var_struct = null):
 	var entry: Variant = _gml_object_asset_entry(object_selector)
 	if entry == null:
 		return gml_instance_noone()
@@ -285,13 +285,42 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	if layer == null and depth_value != null and parent == _gml_layer_current_scene():
 		# GameMaker puts it on the room's managed layer at its depth.
 		parent = _gml_managed_layer(parent, gml_depth_truncate(depth_value))
+	if var_struct != null and not is_undefined(var_struct):
+		# Set just before the Create event runs (gml_event_create_blocked).
+		instance.set_meta(GML_INSTANCE_CREATE_VARIABLES_META, var_struct)
 	parent.add_child(instance)
+	# An object without a Create event takes them now.
+	_gml_instance_apply_create_variables(instance)
 	# An instance_change in its Create event happens before the creator goes on.
 	_gml_instance_change_flush_instance(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
+		if instance.has_meta("_gm2godot_instance_destroyed"):
+			# Its Create event destroyed it: like GameMaker, return the id it
+			# had there, which no longer refers to an existing instance.
+			var own_id = instance.get("id")
+			return own_id if own_id is GMLHandle else gml_instance_noone()
 		handle = gml_instance_register(instance, int(entry["id"]), [])
 	return handle
+
+
+const GML_INSTANCE_CREATE_VARIABLES_META = "_gm2godot_create_variables"
+
+
+# instance_create_*'s var_struct: GameMaker copies its variables onto the new
+# instance after the Pre-Create event and before the Create event, binding the
+# struct's own methods to the instance (ShallowCopyVars in the HTML5 runner).
+# Applied once, also when a child object's Create event calls event_inherited.
+static func _gml_instance_apply_create_variables(instance):
+	if not is_instance_valid(instance) or not instance.has_meta(GML_INSTANCE_CREATE_VARIABLES_META):
+		return
+	var var_struct = instance.get_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	instance.remove_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	for name in gml_struct_get_names(var_struct):
+		var value = gml_struct_get(var_struct, name)
+		if value is GMLMethod and is_same(value.bound_self, var_struct):
+			value = gml_method(instance, value)
+		gml_struct_set(instance, name, value)
 
 
 static func _gml_instance_creation_parent(current_self, layer):
@@ -376,7 +405,7 @@ static func _gml_string_to_int64(value):
 	if text.to_lower().is_valid_hex_number(true):
 		return _gml_hex_string_to_int(text)
 	if text.is_valid_float():
-		return int(text.to_float())
+		return GMLInt64.saturate(text.to_float())
 	return gml_error("GML int64 conversion does not support string " + text)
 
 
@@ -562,15 +591,26 @@ static func gml_string_trim(value):
 	return s.strip_edges()
 
 
+# string_repeat takes its count as a 32-bit integer, as the runner's
+# yyGetInt32 does (so 2^32 + 1 is 1).
 static func gml_string_repeat(value, count):
-	var s = gml_string(value)
-	var n = int(_to_real(count))
-	if n <= 0:
+	return _gml_repeat_string(gml_string(value), float(_gml_runner_int32(_to_real(count))), "GML string_repeat")
+
+
+# The longest string the runner can build: V8's limit, past which joining
+# strings raises "Invalid string length".
+const GML_STRING_MAX_LENGTH = 536870888
+
+
+# text repeated once for each whole time count goes into it (none for 0, a
+# negative count or NaN), or an error when the result would be longer than
+# the runner's strings can be.
+static func _gml_repeat_string(text, count, api_name):
+	if not (count >= 1.0) or text.is_empty():
 		return ""
-	var result = ""
-	for i in range(n):
-		result += s
-	return result
+	if count * text.length() > GML_STRING_MAX_LENGTH:
+		return gml_error(api_name + ": Invalid string length (" + str(text.length()) + " characters repeated " + gml_string(count) + " times)")
+	return text.repeat(int(count))
 
 
 static func gml_string_digits(value):

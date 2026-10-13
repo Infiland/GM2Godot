@@ -55,7 +55,6 @@ class FixtureDefinition:
 
 RESOURCE_MATRIX_RUNTIME_WARNINGS = (
     "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
-    "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
 )
 
 

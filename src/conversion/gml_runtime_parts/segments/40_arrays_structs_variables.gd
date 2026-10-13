@@ -245,16 +245,83 @@ static func gml_array_concat(array1, array2):
 	return result
 
 
-static func gml_array_contains(array_value, value):
+# The range an array search covers, as the runner's computeIterationValues
+# works it out: [first index, number of elements, step]. The offset is
+# clamped into the array (a negative offset counts from the end) and a
+# negative length walks backwards from it.
+static func _gml_array_search_range(size, offset, length):
+	var raw_offset = _to_real(offset)
+	if is_nan(raw_offset):
+		raw_offset = 0.0
+	var first = int(clamp(raw_offset, -size, size - 1))
+	if first < 0:
+		first += size
+	var raw_length = float(size) if length == null else _to_real(length)
+	if is_nan(raw_length):
+		return [first, 0, 1]
+	if raw_length < 0.0:
+		return [first, min(first + 1, -raw_length), -1]
+	return [first, min(first + raw_length, size) - first, 1]
+
+
+# The index of the first element in the range that is equal (as with ==) to
+# value, or -1.
+static func _gml_array_search_value(array_value, value, offset, length):
+	if array_value.is_empty():
+		return -1
+	var search = _gml_array_search_range(array_value.size(), offset, length)
+	var index = search[0]
+	var remaining = search[1]
+	while remaining > 0:
+		if gml_eq(array_value[index], value):
+			return index
+		index += search[2]
+		remaining -= 1
+	return -1
+
+
+static func gml_array_contains(array_value, value, offset = 0, length = null):
 	if typeof(array_value) != TYPE_ARRAY:
 		return false
-	return array_value.has(value)
+	return _gml_array_search_value(array_value, value, offset, length) != -1
 
 
-static func gml_array_find_index(array_value, value):
+static func gml_array_get_index(array_value, value, offset = 0, length = null):
 	if typeof(array_value) != TYPE_ARRAY:
 		return -1
-	return array_value.find(value)
+	return _gml_array_search_value(array_value, value, offset, length)
+
+
+# array_find_index calls the predicate with (element, index) and returns the
+# index of the first element it is true for, or -1.
+static func gml_array_find_index(
+	array_value,
+	callback,
+	offset = 0,
+	length = null,
+	caller_self = null,
+	caller_other = null
+):
+	if typeof(array_value) != TYPE_ARRAY:
+		return gml_unsupported_type_error("GML array_find_index", array_value)
+	var resolved_callback = callback
+	if not is_method(resolved_callback) and not (
+		typeof(resolved_callback) == TYPE_DICTIONARY and resolved_callback.has("callable")
+	):
+		resolved_callback = _gml_script_resolve(resolved_callback)
+	if resolved_callback == null:
+		return gml_unsupported_type_error("GML array_find_index callback", callback)
+	if array_value.is_empty():
+		return -1
+	var search = _gml_array_search_range(array_value.size(), offset, length)
+	var index = search[0]
+	var remaining = search[1]
+	while remaining > 0:
+		if gml_bool(gml_call_value(resolved_callback, [array_value[index], index], caller_self, caller_other)):
+			return index
+		index += search[2]
+		remaining -= 1
+	return -1
 
 
 static func gml_array_foreach(
@@ -429,6 +496,16 @@ static func gml_struct(fields = {}):
 	return fields
 
 
+static func gml_struct_repeated_fields(field_groups):
+	# A struct literal that repeats a variable name, as dictionaries of its
+	# fields in order (each repeat starts the next one): the last value wins
+	# and the variable keeps its first place.
+	var fields = {}
+	for group in field_groups:
+		fields.merge(group, true)
+	return gml_struct(fields)
+
+
 static func gml_enum(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML enum declaration", fields)
@@ -438,12 +515,26 @@ static func gml_enum(fields = {}):
 	return enum_fields
 
 
+# A struct member or variable name as GameMaker spells it: names that are not
+# strings go through string(), so s[$ 4 / 2] is the member "2", not "2.0".
+static func _gml_member_key(member_name):
+	var name_type = typeof(member_name)
+	if name_type == TYPE_STRING:
+		return member_name
+	if name_type == TYPE_STRING_NAME:
+		return str(member_name)
+	return gml_string(member_name)
+
+
 static func gml_struct_get(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		if struct_value.has(key):
 			return struct_value[key]
-		return gml_undefined()
+		if _gml_static_structs.is_empty():
+			return gml_undefined()
+		var static_owner = _gml_static_chain_owner(struct_value, key)
+		return gml_undefined() if static_owner == null else static_owner[key]
 	if typeof(struct_value) == TYPE_OBJECT:
 		if (key == "x" or key == "y") and struct_value is Node2D and not (key in struct_value):
 			# The node's position (see _gml_object_builtin_field_get).
@@ -500,6 +591,9 @@ static func gml_variable_struct_names_count(struct_value):
 
 
 static func gml_variable_instance_get(instance_value, member_name):
+	if _gml_variable_instance_names_deactivated(instance_value):
+		# Unlike o.x, variable_instance_get only finds active instances.
+		return gml_undefined()
 	return gml_selector_get(instance_value, member_name)
 
 
@@ -510,6 +604,9 @@ static func gml_variable_instance_exists(instance_value, member_name):
 # Unlike o_enemy.hp = 0, variable_instance_set(o_enemy, "hp", 0) sets one
 # instance: the first one the object (or all) selects.
 static func gml_variable_instance_set(instance_value, member_name, value):
+	if _gml_variable_instance_names_deactivated(instance_value):
+		# Unlike o.x = 1, variable_instance_set only finds active instances.
+		return gml_undefined()
 	var instance: Variant = _gml_selector_direct_target(instance_value)
 	if instance == null:
 		var targets = gml_with_targets(instance_value)
@@ -545,16 +642,23 @@ static func gml_call_named(function_name, args = [], caller_self = null, caller_
 	return gml_error("GML function '" + name + "' is not available")
 
 
-# A struct (the global scope too) or a live instance node, which selector
-# reads and writes use as is; null for everything that needs resolving
-# (objects, ids, handles, keywords, methods and script functions). A struct
-# is itself whatever members it has, id and handle included.
+# A struct (the global scope too), a live instance node, or the node of an
+# instance id, which selector reads and writes use as is; null for everything
+# that needs resolving (objects, numbers, keywords, methods and script
+# functions). A struct is itself whatever members it has, id and handle
+# included. Like GameMaker, an id reaches a destroyed instance's variables
+# until the instance is removed at the end of the step (its node is freed).
 static func _gml_selector_direct_target(target):
 	var target_type = typeof(target)
 	if target_type == TYPE_DICTIONARY:
 		return target
-	if target_type == TYPE_OBJECT and is_instance_valid(target) and target is Node:
-		return target
+	if target_type == TYPE_OBJECT and is_instance_valid(target):
+		if target is Node:
+			return target
+		if target is GMLHandle and target.kind == GML_INSTANCE_HANDLE_KIND:
+			var instance = target.reference
+			if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance) and instance is Node:
+				return instance
 	return null
 
 
@@ -580,8 +684,24 @@ static func gml_selector_get(target, member_name, current_self = null, current_o
 			return gml_struct_get(gml_static_get(script_callable), member_name)
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	return gml_struct_get(targets[0], member_name)
+
+
+# inst.method(args): a method that is not bound to a struct (a static
+# function, or a script function stored in a variable) runs with the struct it
+# is called through as self and the caller as other.
+static func gml_call_member(target, member_name, args = [], caller_self = null, caller_other = null):
+	var member = gml_selector_get(target, member_name)
+	if member is GMLMethod and not member.has_bound_self:
+		var receiver: Variant = _gml_selector_direct_target(target)
+		if receiver == null:
+			receiver = _gml_instance_object_first(target)
+		if receiver != null:
+			return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)
+	return gml_call_value(member, args, caller_self, caller_other)
 
 
 # variable_instance_exists looks at one instance: the first one an object
@@ -600,6 +720,8 @@ static func gml_selector_set(target, member_name, value, current_self = null, cu
 		return value
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	for instance in targets:
 		gml_struct_set(instance, member_name, value)
@@ -614,6 +736,8 @@ static func gml_selector_update(target, member_name, update_callable, current_se
 		return updated
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
+	if targets.is_empty():
 		return gml_undefined()
 	var result = gml_undefined()
 	for instance in targets:
@@ -624,6 +748,8 @@ static func gml_selector_update(target, member_name, update_callable, current_se
 
 static func gml_selector_set_if_nullish(target, member_name, value_callable, current_self = null, current_other = null):
 	var targets = gml_with_targets(target, current_self, current_other)
+	if targets.is_empty():
+		targets = _gml_instance_deactivated_targets(target, current_self, current_other)
 	if targets.is_empty():
 		return gml_undefined()
 	var result = gml_undefined()
@@ -643,10 +769,12 @@ static func gml_selector_get_names(target, current_self = null, current_other = 
 	return gml_struct_get_names(targets[0])
 
 
+# 0 when nothing is selected, as in the runner's
+# variable_instance_names_count (yyVariable.js; the manual says -1).
 static func gml_selector_names_count(target, current_self = null, current_other = null):
 	var targets = gml_with_targets(target, current_self, current_other)
 	if targets.is_empty():
-		return -1
+		return 0
 	return gml_struct_names_count(targets[0])
 
 
@@ -664,20 +792,23 @@ static func gml_variable_global_set(member_name, value):
 
 
 static func gml_struct_exists(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.has(key)
-	if typeof(struct_value) == TYPE_OBJECT:
-		return (
-			_gml_object_has_builtin_field(struct_value, key)
-			or _object_has_property(struct_value, key)
-			or _gml_object_dynamic_fields(struct_value).has(key)
+		return struct_value.has(key) or (
+			not _gml_static_structs.is_empty()
+			and _gml_static_chain_owner(struct_value, key) != null
 		)
+	if _gml_is_instance_node(struct_value):
+		return _gml_instance_variable_exists(struct_value, key)
+	if _gml_selects_instances(struct_value):
+		return gml_selector_exists(struct_value, key)
+	if typeof(struct_value) == TYPE_OBJECT and is_instance_valid(struct_value):
+		return _object_has_property(struct_value, key) or _gml_object_dynamic_fields(struct_value).has(key)
 	return false
 
 
 static func gml_struct_set(struct_value, member_name, value):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value[key] = value
 		return value
@@ -704,7 +835,7 @@ static func gml_struct_set(struct_value, member_name, value):
 
 
 static func gml_struct_remove(struct_value, member_name):
-	var key = str(member_name)
+	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		struct_value.erase(key)
 		return gml_undefined()
@@ -719,13 +850,14 @@ static func gml_struct_remove(struct_value, member_name):
 static func gml_struct_get_names(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.keys()
-	if typeof(struct_value) == TYPE_OBJECT:
+	if _gml_is_instance_node(struct_value):
+		return _gml_instance_variable_names(struct_value)
+	if _gml_selects_instances(struct_value):
+		return gml_selector_get_names(struct_value)
+	if typeof(struct_value) == TYPE_OBJECT and is_instance_valid(struct_value):
 		var names = []
 		for property in struct_value.get_property_list():
 			names.append(property.get("name"))
-		for builtin_name in _gml_object_builtin_field_names(struct_value):
-			if not names.has(builtin_name):
-				names.append(builtin_name)
 		for dynamic_name in _gml_object_dynamic_fields(struct_value).keys():
 			if not names.has(dynamic_name):
 				names.append(dynamic_name)
@@ -736,9 +868,104 @@ static func gml_struct_get_names(struct_value):
 static func gml_struct_names_count(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		return struct_value.size()
-	if typeof(struct_value) == TYPE_OBJECT:
+	if typeof(struct_value) == TYPE_OBJECT or _gml_selects_instances(struct_value):
 		return gml_struct_get_names(struct_value).size()
-	return -1
+	return 0
+
+
+# An instance itself (self, other or a stored instance). The struct_*
+# functions treat it, and an instance id or object (anything else
+# _gml_selects_instances accepts), as the variable_instance_* ones do: the
+# runner's struct_exists, struct_get_names and struct_names_count call them
+# (yyVariable.js).
+static func _gml_is_instance_node(value):
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is Node
+
+
+static func _gml_selects_instances(value):
+	return is_handle(value) or is_numeric(value)
+
+
+# GameMaker's built-in instance variables (the manual's instance, sprite and
+# physics variables; the runner lists them in g_instance_names). Every
+# instance has them, so variable_instance_exists is true for them, and the
+# variable name functions leave them out (the runner's
+# __internal__get_variable_names lists the variables code assigned).
+const GML_INSTANCE_BUILTIN_VARIABLES = {
+	"id": true, "visible": true, "solid": true, "persistent": true, "depth": true,
+	"layer": true, "on_ui_layer": true, "collision_space": true, "alarm": true,
+	"direction": true, "friction": true, "gravity": true, "gravity_direction": true,
+	"hspeed": true, "vspeed": true, "speed": true, "xstart": true, "ystart": true,
+	"x": true, "y": true, "xprevious": true, "yprevious": true, "object_index": true,
+	"path_index": true, "path_position": true, "path_positionprevious": true,
+	"path_speed": true, "path_scale": true, "path_orientation": true, "path_endaction": true,
+	"timeline_index": true, "timeline_running": true, "timeline_speed": true,
+	"timeline_position": true, "timeline_loop": true,
+	"in_sequence": true, "sequence_instance": true, "drawn_by_sequence": true,
+	"in_collision_tree": true,
+	"bbox_left": true, "bbox_right": true, "bbox_top": true, "bbox_bottom": true,
+	"sprite_index": true, "sprite_width": true, "sprite_height": true,
+	"sprite_xoffset": true, "sprite_yoffset": true, "image_alpha": true,
+	"image_angle": true, "image_blend": true, "image_index": true, "image_number": true,
+	"image_single": true, "image_speed": true, "image_xscale": true, "image_yscale": true,
+	"mask_index": true,
+	"phy_rotation": true, "phy_position_x": true, "phy_position_y": true,
+	"phy_angular_velocity": true, "phy_linear_velocity_x": true, "phy_linear_velocity_y": true,
+	"phy_speed_x": true, "phy_speed_y": true, "phy_speed": true,
+	"phy_angular_damping": true, "phy_linear_damping": true, "phy_bullet": true,
+	"phy_fixed_rotation": true, "phy_active": true, "phy_mass": true, "phy_inertia": true,
+	"phy_com_x": true, "phy_com_y": true, "phy_dynamic": true, "phy_kinematic": true,
+	"phy_sleeping": true, "phy_position_xprevious": true, "phy_position_yprevious": true,
+	"phy_collision_points": true, "phy_collision_x": true, "phy_collision_y": true,
+	"phy_col_normal_x": true, "phy_col_normal_y": true,
+}
+
+static var _gml_instance_declared_variables = {}
+
+
+# The variables a converted object's script declares for its code (its
+# ancestors' too), in order: not the built-in ones, other or the converter's
+# own _gm_ members. They only depend on the script, so they are kept per
+# script.
+static func _gml_instance_script_variables(instance):
+	var script = instance.get_script()
+	if script == null:
+		return []
+	var names = _gml_instance_declared_variables.get(script)
+	if names == null:
+		names = []
+		for property in instance.get_property_list():
+			if (int(property.get("usage", 0)) & PROPERTY_USAGE_SCRIPT_VARIABLE) == 0:
+				continue
+			var name = str(property.get("name"))
+			if GML_INSTANCE_BUILTIN_VARIABLES.has(name) or name == "other" or name.begins_with("_gm_"):
+				continue
+			names.append(name)
+		_gml_instance_declared_variables[script] = names
+	return names
+
+
+# Whether an instance has a variable: GameMaker creates one when code first
+# assigns it. A converted object declares its variables up front holding
+# null, which a GML assignment does not store (undefined is its own value),
+# so a declared variable exists once it holds something else. (A function
+# that returns nothing gives null as well, so a variable set to such a result
+# reads as not set.)
+static func _gml_instance_variable_exists(instance, key):
+	if GML_INSTANCE_BUILTIN_VARIABLES.has(key) or _gml_object_dynamic_fields(instance).has(key):
+		return true
+	return _gml_instance_script_variables(instance).has(key) and typeof(instance.get(key)) != TYPE_NIL
+
+
+static func _gml_instance_variable_names(instance):
+	var names = []
+	for name in _gml_instance_script_variables(instance):
+		if typeof(instance.get(name)) != TYPE_NIL:
+			names.append(name)
+	for dynamic_name in _gml_object_dynamic_fields(instance).keys():
+		if not names.has(dynamic_name):
+			names.append(dynamic_name)
+	return names
 
 
 static func _gml_object_dynamic_fields(object_value, create = false):
@@ -756,17 +983,8 @@ static func _gml_object_dynamic_fields(object_value, create = false):
 	return new_fields
 
 
-static func _gml_object_builtin_field_names(object_value):
-	if object_value is Node2D:
-		return ["x", "y", "image_angle", "image_xscale", "image_yscale"]
-	return []
-
-
-static func _gml_object_has_builtin_field(object_value, member_name):
-	return _gml_object_builtin_field_names(object_value).has(str(member_name))
-
-
 const GML_OBJECT_BBOX_FIELDS = ["bbox_left", "bbox_top", "bbox_right", "bbox_bottom"]
+const GML_OBJECT_SPRITE_METRIC_FIELDS = ["sprite_width", "sprite_height", "sprite_xoffset", "sprite_yoffset"]
 const GML_OBJECT_DYNAMIC_FIELDS_META = "_gm2godot_dynamic_fields"
 # How an instance holds a member (see _gml_object_member_kind): as one of the
 # node's builtin fields, one of its properties (script variables included), or
@@ -808,19 +1026,21 @@ static func _gml_object_member_kind(object_value, key):
 
 
 # Whether a member of a Node2D instance maps to the node itself rather than to
-# a script variable: x and y are its position and the bbox_* variables are
-# computed from its collision mask. A converted object declares image_angle,
-# image_xscale and image_yscale with setters that update the node, so those
-# script variables hold the GML values when they exist.
+# a script variable: x and y are its position, the bbox_* variables are
+# computed from its collision mask and sprite_width, sprite_height,
+# sprite_xoffset and sprite_yoffset from its sprite. A converted object
+# declares image_angle, image_xscale and image_yscale with setters that update
+# the node, so those script variables hold the GML values when they exist.
 static func _gml_object_uses_builtin_field(object_value, member_name):
 	if not (object_value is Node2D):
 		return false
 	var key = str(member_name)
 	match key:
 		"x", "y", "image_angle", "image_xscale", "image_yscale":
-			# The names _gml_object_builtin_field_names lists for a Node2D.
 			return not (key in object_value)
 		"bbox_left", "bbox_top", "bbox_right", "bbox_bottom":
+			return true
+		"sprite_width", "sprite_height", "sprite_xoffset", "sprite_yoffset":
 			return true
 	return false
 
@@ -829,6 +1049,8 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 	var key = str(member_name)
 	if object_value is Node2D and GML_OBJECT_BBOX_FIELDS.has(key):
 		return _gml_collision_instance_bbox_value(object_value, key)
+	if object_value is Node2D and GML_OBJECT_SPRITE_METRIC_FIELDS.has(key):
+		return _gml_object_sprite_metric(object_value, key)
 	if object_value is Node2D:
 		var in_sequence = _gml_sequence_instances_exist and bool(
 			object_value.get_meta("gamemaker_in_sequence", false)
@@ -868,9 +1090,29 @@ static func _gml_object_builtin_field_get(object_value, member_name):
 	return gml_undefined()
 
 
+# sprite_width and sprite_height are the size of the instance's sprite, and
+# sprite_xoffset and sprite_yoffset its origin, times image_xscale or
+# image_yscale; all are 0 when the instance has no sprite (the runner's
+# yyInstance getters).
+static func _gml_object_sprite_metric(object_value, key):
+	var sprite = gml_struct_get(object_value, "sprite_index")
+	var data = _gml_draw_sprite_data(sprite)
+	if data == null:
+		return 0
+	if key == "sprite_width" or key == "sprite_xoffset":
+		var xscale = _to_real(gml_struct_get(object_value, "image_xscale"))
+		if key == "sprite_width":
+			return gml_sprite_get_width(sprite) * xscale
+		return _to_real(data["origin"].x) * xscale
+	var yscale = _to_real(gml_struct_get(object_value, "image_yscale"))
+	if key == "sprite_height":
+		return gml_sprite_get_height(sprite) * yscale
+	return _to_real(data["origin"].y) * yscale
+
+
 static func _gml_object_builtin_field_set(object_value, member_name, value):
 	var key = str(member_name)
-	if GML_OBJECT_BBOX_FIELDS.has(key):
+	if GML_OBJECT_BBOX_FIELDS.has(key) or GML_OBJECT_SPRITE_METRIC_FIELDS.has(key):
 		# Read-only in GameMaker.
 		return value
 	if object_value is Node2D:

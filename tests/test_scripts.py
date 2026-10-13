@@ -22,6 +22,7 @@ from src.conversion.json_values import JsonObject
 from src.conversion.script_functions import (
     modern_script_function_declarations,
     modern_script_structure,
+    render_script_top_level_source,
 )
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
@@ -202,11 +203,15 @@ class TestScriptConverter(unittest.TestCase):
             modern_script,
         )
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)
-        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_callable()', registry)
-        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_scoped_callable()', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_add.gd", "gm2godot_callable")', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_add.gd", "gm2godot_scoped_callable")', registry)
+        # Scripts load one by one, so one that fails to load keeps only its
+        # own entries from working.
+        self.assertNotIn("preload(", registry)
+        self.assertIn("\tvar script = load(resource_path)\n", registry)
         self.assertIn('"legacy_arguments": true', registry)
-        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
-        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_scoped_callable()', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_modern.gd", "gm2godot_callable")', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_modern.gd", "gm2godot_scoped_callable")', registry)
         self.assertIn('"legacy_arguments": false', registry)
 
     def test_resource_outcome_counts_safe_and_blocked_scripts(self) -> None:
@@ -306,7 +311,7 @@ class TestScriptConverter(unittest.TestCase):
         )
         self.assertNotIn("commented_out", script.split("func gm2godot_initialize_global_pragmas")[1])
         registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
-        self.assertIn('"global_pragma_initializer": Callable(_gm_initializer_owner_', registry)
+        self.assertIn('"global_pragma_initializer": _gm_script_method(_gm_initializer_owner_', registry)
         self.assertEqual(registry.count('"global_pragma_initializer"'), 1)
 
     def test_global_pragma_sources_reads_literal_global_pragmas_only(self) -> None:
@@ -853,6 +858,83 @@ class TestScriptConverter(unittest.TestCase):
             script,
         )
 
+    def test_modern_script_multi_line_method_default_stays_inside_the_function(self) -> None:
+        # A parameter default that is a method with several lines is a GDScript
+        # lambda; its body is indented from the line that declares it.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(value, callback = function() { switch (1) { case 1: return 5; } return 0; })\n"
+            "{\n"
+            "    var marker = callback();\n"
+            "    return marker + value;\n"
+            "}\n",
+        )
+
+        self._converter().convert_all()
+
+        script_path = self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        script_lines = script_path.read_text(encoding="utf-8").splitlines()
+        header_index = next(
+            index
+            for index, line in enumerate(script_lines)
+            if line.startswith("\tif callback == null or GMRuntime.is_undefined(callback): callback = ")
+        )
+        self.assertTrue(script_lines[header_index].endswith("):"))
+        self.assertEqual(
+            script_lines[header_index + 1],
+            "\t\tvar _gml_switch_value_0 = 1",
+        )
+        closing_index = next(
+            index
+            for index in range(header_index + 1, len(script_lines))
+            if script_lines[index] == "\t)"
+        )
+        self.assertEqual(
+            script_lines[closing_index + 1].strip(),
+            "var marker = GMRuntime.gml_call_value(callback, [], _gml_script_self, _gml_script_other, \"callback\")",
+        )
+        source_map = cast(
+            dict[str, object],
+            json.loads(script_path.with_name("scr_modern.gd.gmlmap.json").read_text(encoding="utf-8")),
+        )
+        marker_entries = [
+            entry
+            for entry in cast(list[dict[str, object]], source_map["entries"])
+            if cast(str, entry["source_text"]).startswith("var marker")
+        ]
+        self.assertEqual(len(marker_entries), 1)
+        self.assertEqual(
+            script_lines[cast(int, marker_entries[0]["generated_line"]) - 1].strip(),
+            marker_entries[0]["generated_text"],
+        )
+
+    def test_modern_script_multi_line_method_in_parent_constructor_arguments(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function Parent(callback) constructor {}\n"
+            "function Child() : Parent(function() { var seed = 4; return seed; }) constructor\n"
+            "{\n"
+            "    extra = 1;\n"
+            "}\n",
+        )
+
+        self._converter().convert_all()
+
+        script_lines = (
+            (self.godot_dir / "scripts" / "game" / "scr_modern.gd")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        header_index = next(
+            index
+            for index, line in enumerate(script_lines)
+            if line.startswith("\tGMRuntime.gml_constructor_inherit(") and "func(" in line
+        )
+        self.assertTrue(script_lines[header_index].endswith("):"))
+        self.assertEqual(script_lines[header_index + 1], "\t\tvar seed = 4")
+
     def test_discovers_constructor_and_explicit_top_level_initialization(self) -> None:
         structure = modern_script_structure(
             "function Adding() constructor {\n"
@@ -1035,6 +1117,159 @@ class TestScriptConverter(unittest.TestCase):
             )
         )
 
+    def test_function_with_other_top_level_statements_is_a_modern_script(self) -> None:
+        source = "function c() { return 1; }\nglobal.a = 1;\n"
+
+        structure = modern_script_structure(source)
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(tuple(item.name for item in structure.declarations), ("c",))
+        self.assertEqual(
+            tuple((item.kind, item.source) for item in structure.top_level_statements),
+            (("statements", "global.a = 1;"),),
+        )
+        statement = structure.top_level_statements[0]
+        self.assertEqual(source[statement.start:statement.end], statement.source)
+
+    def test_script_scope_example_keeps_both_functions_and_the_variable(self) -> None:
+        # The manual's Script Scope example: functions around a variable.
+        source = (
+            "function Foo()\n"
+            "{\n"
+            "    // Do something\n"
+            "}\n"
+            "blah = 10;\n"
+            "function Bar()\n"
+            "{\n"
+            "    // Do something else\n"
+            "}\n"
+        )
+
+        structure = modern_script_structure(source)
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(
+            tuple(item.name for item in structure.declarations),
+            ("Foo", "Bar"),
+        )
+        self.assertEqual(
+            tuple(item.source for item in structure.top_level_statements),
+            ("blah = 10;",),
+        )
+
+    def test_statements_around_functions_stay_in_place_in_one_initializer(self) -> None:
+        source = (
+            "global.before = 1;\n"
+            "function first() { return 1; }\n"
+            "if (global.before == 1) {\n"
+            "    global.after = 2;\n"
+            "}\n"
+            "function second() { return 2; }\n"
+            "global.last = global.after + 1;\n"
+        )
+
+        structure = modern_script_structure(source)
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(
+            tuple(item.name for item in structure.declarations),
+            ("first", "second"),
+        )
+        self.assertEqual(len(structure.top_level_statements), 1)
+        initializer = render_script_top_level_source(
+            source,
+            structure.top_level_statements,
+        )
+        self.assertEqual(initializer.count("\n"), source.count("\n"))
+        self.assertNotIn("function", initializer)
+        self.assertEqual(
+            tuple(line.strip() for line in initializer.splitlines() if line.strip()),
+            (
+                "global.before = 1;",
+                "if (global.before == 1) {",
+                "global.after = 2;",
+                "}",
+                "global.last = global.after + 1;",
+            ),
+        )
+
+    def test_function_text_in_strings_and_expressions_is_not_a_declaration(self) -> None:
+        structure = modern_script_structure(
+            'global.text = "function fake() { return 0; }";\n'
+            "global.handler = function named() { return 1; };\n"
+            "var _local = function() { return 2; };\n"
+            "function real() { return 3; }\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(tuple(item.name for item in structure.declarations), ("real",))
+        self.assertEqual(len(structure.top_level_statements), 1)
+        statement = structure.top_level_statements[0].source
+        self.assertIn('"function fake() { return 0; }"', statement)
+        self.assertIn("global.handler = function named()", statement)
+        self.assertIn("var _local = function()", statement)
+
+    def test_enums_and_macros_around_mixed_scripts_are_not_initialization(self) -> None:
+        structure = modern_script_structure(
+            "#macro LIMIT 3\n"
+            "enum Kind { A, B }\n"
+            "function limit() { return LIMIT; }\n"
+            "global.kind = Kind.B;\n"
+        )
+
+        self.assertIsNotNone(structure)
+        assert structure is not None
+        self.assertEqual(tuple(item.name for item in structure.declarations), ("limit",))
+        self.assertEqual(
+            tuple(item.source for item in structure.top_level_statements),
+            ("global.kind = Kind.B;",),
+        )
+
+    def test_scripts_without_a_function_declaration_stay_legacy(self) -> None:
+        self.assertIsNone(modern_script_structure("return argument0 * 3;\n"))
+        self.assertIsNone(modern_script_structure("global.ready = true;\nreturn 1;\n"))
+        self.assertIsNone(
+            modern_script_structure("var _f = function named() { return 1; };\nreturn _f();\n")
+        )
+
+    def test_converts_function_script_with_global_initialization(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function c() { return 1; }\n"
+            "global.a = 1;\n"
+            "blah = 10;\n"
+            "function d(_x) { return _x + global.a; }\n",
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (
+            self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        ).read_text(encoding="utf-8")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("func gm2godot_initialize_top_level():", script)
+        self.assertIn('"a", 1', script)
+        self.assertIn('"blah", 10', script)
+        self.assertIn('"name": "c",', registry)
+        self.assertIn('"name": "d",', registry)
+        self.assertIn('"initializer": _gm_script_method(', registry)
+
     def test_converts_global_anonymous_constructor_initializer(self) -> None:
         self._write_project()
         _write_text(
@@ -1111,7 +1346,7 @@ class TestScriptConverter(unittest.TestCase):
             script,
         )
         self.assertIn(
-            '"initializer": Callable(_gm_initializer_owner_1, '
+            '"initializer": _gm_script_method(_gm_initializer_owner_1, '
             '"gm2godot_initialize_top_level")',
             registry,
         )
@@ -1432,11 +1667,11 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('"name": "saveending"', registry)
         self.assertNotIn('"name": "ending"', registry)
         self.assertIn(
-            'preload("res://scripts/game/ending.gd").new().gm2godot_callable_loadending()',
+            '_gm_script_callable("res://scripts/game/ending.gd", "gm2godot_callable_loadending")',
             registry,
         )
         self.assertIn(
-            'preload("res://scripts/game/ending.gd").new().gm2godot_scoped_callable_saveending()',
+            '_gm_script_callable("res://scripts/game/ending.gd", "gm2godot_scoped_callable_saveending")',
             registry,
         )
 

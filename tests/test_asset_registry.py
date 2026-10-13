@@ -1590,6 +1590,52 @@ class TestAssetRegistryConverter(unittest.TestCase):
         self.assertEqual(transpile_failures[0].resource_type, "timeline")
         self.assertEqual(transpile_failures[0].event, "moment 3")
 
+    def test_timeline_moment_code_expands_project_macros_and_enums(self) -> None:
+        _write_yyp(
+            self.gm_dir,
+            [("timelines", "tl_macro"), ("scripts", "scr_config")],
+        )
+        self._write_resource("scripts", "scr_config", "GMScript", "folders/Scripts.yy")
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "scr_config", "scr_config.gml"),
+            "#macro SPAWN_X 128\n"
+            "#macro Android:SPAWN_Y 48\n"
+            "#macro SPAWN_Y 96\n"
+            "enum Mood { calm, angry = 5, afraid }\n",
+        )
+        self._write_resource(
+            "timelines",
+            "tl_macro",
+            "GMTimeline",
+            "folders/Timelines.yy",
+            {"momentList": [{"moment": 1, "eventFile": "Moment_1.gml"}]},
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "timelines", "tl_macro", "Moment_1.gml"),
+            "x = SPAWN_X;\ny = SPAWN_Y;\nmood = Mood.afraid;\n",
+        )
+
+        def moment_script(macro_configuration: str | None) -> str:
+            self._converter(macro_configuration=macro_configuration).convert_all()
+            script_path = os.path.join(
+                self.godot_dir, "gm2godot", "timelines", "tl_macro_1.gd"
+            )
+            with open(script_path, "r", encoding="utf-8") as script_file:
+                return script_file.read()
+
+        # A timeline moment is project GML: macros and enum members are
+        # replaced by their values, not read as instance variables.
+        script = moment_script(None)
+        self.assertIn('gml_variable_instance_set(_gm_instance, "x", 128)', script)
+        self.assertIn('gml_variable_instance_set(_gm_instance, "y", 96)', script)
+        self.assertIn('gml_variable_instance_set(_gm_instance, "mood", 6)', script)
+        self.assertNotIn("SPAWN_", script)
+        self.assertNotIn("Mood", script)
+        self.assertIn(
+            'gml_variable_instance_set(_gm_instance, "y", 48)',
+            moment_script("Android"),
+        )
+
     def test_safe_timeline_completes_when_other_source_cannot_be_read(self) -> None:
         _write_yyp(
             self.gm_dir,

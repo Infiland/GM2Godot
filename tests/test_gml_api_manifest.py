@@ -136,7 +136,7 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertEqual(place_meeting.issue_number, 487)
         self.assertEqual(motion_set.status, "implemented")
         self.assertEqual(motion_set.issue_number, 488)
-        self.assertEqual(path_start.status, "partial")
+        self.assertEqual(path_start.status, "implemented")
         self.assertEqual(path_start.issue_number, 489)
         self.assertEqual(draw_line.status, "implemented")
         self.assertEqual(draw_line.issue_number, 490)

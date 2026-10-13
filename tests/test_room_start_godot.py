@@ -72,7 +72,14 @@ _PROJECT = GameMakerProject(
                 EVENT_ROOM_START: 'trace("room_start_killer:victims=" + string(instance_number(o_victim)));\n',
             },
         ),
-        GameMakerObject("o_victim", {EVENT_CREATE: 'trace("create_victim");\n', EVENT_DESTROY: 'trace("destroy_victim");\n'}),
+        GameMakerObject(
+            "o_victim",
+            {
+                EVENT_CREATE: 'trace("create_victim:exists=" + (instance_exists(id) ? "yes" : "no"));\n',
+                EVENT_DESTROY: 'trace("destroy_victim");\n',
+                EVENT_STEP: 'trace("step_victim");\n',
+            },
+        ),
     ),
     rooms=(
         GameMakerRoom(
@@ -98,7 +105,7 @@ _PROJECT = GameMakerProject(
                             creation_code='trace("code_a:" + string(x) + ":other_is_self=" + (other.id == id ? "yes" : "no"));\nglobal.code_flag = "set";\n',
                         ),
                         RoomInstance("inst_a2", "o_a", 30, 0, creation_code='trace("code_a:" + string(x));\n'),
-                        RoomInstance("inst_v1", "o_victim", 50, 0),
+                        RoomInstance("inst_v1", "o_victim", 50, 0, creation_code='trace("code_victim");\n'),
                     ),
                 ),
             ),
@@ -218,6 +225,8 @@ _CREATION_TRACE = [
     "code_a:30",
     "destroy_victim",
     "kill:victims=0",
+    "create_victim:exists=no",
+    "code_victim",
     "room_code",
 ]
 _ROOM_START_TRACE = {
@@ -234,10 +243,10 @@ class TestRoomStartGodot(unittest.TestCase):
         creation = trace[: len(_CREATION_TRACE)]
         self.assertEqual(creation, _CREATION_TRACE)
         self.assertEqual(set(trace[len(_CREATION_TRACE):]), _ROOM_START_TRACE)
-        # An instance destroyed before its turn never joins the room. (The
-        # HTML5 runner would still run its Create event; see
-        # _gml_room_add_held_instance.)
-        self.assertNotIn("create_victim", trace)
+        # An instance destroyed before its turn still runs its Create event
+        # and creation code when its turn comes, then is gone: it gets no
+        # Room Start or Step event.
+        self.assertNotIn("step_victim", trace)
 
     def test_returning_to_a_room_keeps_its_persistent_instance(self) -> None:
         trace = self._run_trace(_PERSISTENT_PROJECT)

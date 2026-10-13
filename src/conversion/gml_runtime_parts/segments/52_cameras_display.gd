@@ -47,6 +47,7 @@ static var _gml_view_state = null
 # and cameras live on while the room is away.
 static var _gml_view_persistent_states = {}
 static var _gml_view_follow_frame = -1
+static var _gml_view_follow_step = -1
 static var _gml_view_legacy_active = false
 static var _gml_view_legacy_shadow = {}
 static var _gml_active_camera_handle = null
@@ -412,14 +413,19 @@ static func _gml_view_register_scene(scene):
 
 
 # Runs GameMaker's per-frame view update (camera following for the visible
-# views, after End Step and before drawing) at most once per process frame,
-# then presents the current view state on the room's Camera2D. Safe to call
-# from every draw entry point; later calls in the same frame only re-present.
+# views, after End Step and before drawing) once per game step, and at most
+# once per process frame, then presents the current view state on the room's
+# Camera2D. Safe to call from every draw entry point; later calls for the
+# same step only re-present. A room entered after a Draw event requested it
+# steps and draws in the same process frame, and that draw follows too
+# (yyRoom.js DrawViews runs UpdateViews before every draw of a room).
 static func _gml_camera_update_visible_views():
 	var state = _gml_view_active_state()
 	var frame = Engine.get_process_frames()
-	if _gml_view_follow_frame != frame:
+	var step = _gml_event_scheduler_frame_index
+	if _gml_view_follow_frame != frame or _gml_view_follow_step != step:
 		_gml_view_follow_frame = frame
+		_gml_view_follow_step = step
 		_gml_active_camera_handle = null
 		_gml_view_update_cameras(state)
 	var scene = state["scene"]

@@ -59,7 +59,7 @@ static func _to_int64_value(value):
 	if is_string(value):
 		return _gml_string_to_int64(value)
 	if _is_int64_convertible(value):
-		return int(value)
+		return GMLInt64.saturate(value)
 	return gml_unsupported_type_error("GML bitwise conversion", value)
 
 
@@ -78,6 +78,18 @@ static func _to_int32_value(value):
 	return int(value)
 
 
+# A real as the runner truncates it to a 32-bit integer (JavaScript's ~~value,
+# as in its yyGetInt32): NaN and infinities give 0, other values lose their
+# fraction and wrap around 2^32.
+static func _gml_runner_int32(value):
+	if is_nan(value) or is_inf(value):
+		return 0
+	var wrapped = int(fmod(value - fmod(value, 1.0), 4294967296.0))
+	if wrapped >= 2147483648:
+		return wrapped - 4294967296
+	if wrapped < -2147483648:
+		return wrapped + 4294967296
+	return wrapped
 
 
 # The functions gml_unsupported_call has reported, by name.

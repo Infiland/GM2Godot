@@ -229,9 +229,8 @@ static func gml_draw_tile(tileset, tiledata, frame, x, y):
 	var layout = _gml_tilemap_atlas_layout(tile_set)
 	if layout.is_empty():
 		return null
-	var atlas_index = tile_index - 1
 	var columns = int(layout["columns"])
-	var atlas_coords = Vector2i(atlas_index % columns, int(floor(float(atlas_index) / float(columns))))
+	var atlas_coords = Vector2i(tile_index % columns, int(floor(float(tile_index) / float(columns))))
 	var source = layout["source"]
 	if not source.has_tile(atlas_coords):
 		return null

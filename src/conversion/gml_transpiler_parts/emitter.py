@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Iterable, TypeGuard
 
 from .asset_lowering import asset_argument_indices, first_argument_is_script_asset
@@ -78,15 +79,20 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
 )
 from .utils import (
+    int64_literal_source as _int64_literal_source,
     normalize_local_names as _normalize_local_names,
     normalize_scope_context as _normalize_scope_context,
+    number_literal_source as _number_literal_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
 )
 
 # Read-only instance variables the runtime computes on demand (the bounding
-# box from the collision mask); they have no script variable.
+# box from the collision mask, the scaled sprite size and origin); they have
+# no script variable.
 _COMPUTED_INSTANCE_VARIABLES = frozenset(
-    name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items() if metadata.subsystem == "collision_bounds"
+    name
+    for name, metadata in BUILTIN_VARIABLE_REGISTRY.items()
+    if metadata.subsystem in {"collision_bounds", "sprite_metrics"}
 )
 
 _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -98,6 +104,8 @@ _INSTANCE_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_number": frozenset({0}),
     "instance_nearest": frozenset({2}),
     "instance_furthest": frozenset({2}),
+    "instance_deactivate_object": frozenset({0}),
+    "instance_activate_object": frozenset({0}),
 }
 
 _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
@@ -119,6 +127,10 @@ _COLLISION_SELECTOR_ARG_INDICES: dict[str, frozenset[int]] = {
     "instance_place_list": frozenset({2}),
     "instance_position_list": frozenset({2}),
     "place_empty": frozenset({2}),
+    "move_and_collide": frozenset({2}),
+    "mp_linear_step_object": frozenset({3}),
+    "mp_potential_step_object": frozenset({3}),
+    "mp_grid_add_instances": frozenset({1}),
 }
 
 
@@ -199,7 +211,7 @@ def _emit_builtin_instance_name(value: str, scope_context: _ScopeContext) -> tup
     if value in INSTANCE_NAME_REPLACEMENTS:
         return INSTANCE_NAME_REPLACEMENTS[value], POSTFIX_PRECEDENCE
     if value in _COMPUTED_INSTANCE_VARIABLES:
-        # The bounding box has no script variable; the runtime computes it.
+        # These have no script variable; the runtime computes them.
         return (
             f"GMRuntime.gml_struct_get({scope_context.self_expression}, {json.dumps(value)})",
             POSTFIX_PRECEDENCE,
@@ -280,6 +292,12 @@ def _is_alarm_array_access(
     )
 
 
+def _emit_literal(expr: _Literal | _StringLiteral | _NumberLiteral) -> str:
+    if isinstance(expr, _NumberLiteral):
+        return _number_literal_source(expr.value, expr.is_float_like)
+    return expr.value
+
+
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
@@ -289,9 +307,9 @@ def _emit_expression(
     local_names = _normalize_local_names(local_names)
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
-        return expr.value, PRIMARY_PRECEDENCE
+        return _emit_literal(expr), PRIMARY_PRECEDENCE
     if isinstance(expr, _EnumMember):
-        return str(expr.value), PRIMARY_PRECEDENCE
+        return _int64_literal_source(expr.value), PRIMARY_PRECEDENCE
     if isinstance(expr, _TemplateStringLiteral):
         return _emit_template_string(expr, local_names, scope_context)
     if isinstance(expr, _NameOf):
@@ -391,15 +409,8 @@ def _emit_expression(
                 f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
                 POSTFIX_PRECEDENCE,
             )
-        callee = _emit_child(
-            expr.callee,
-            POSTFIX_PRECEDENCE,
-            local_names=local_names,
-            scope_context=scope_context,
-        )
         return (
-            "GMRuntime.gml_call_value("
-            f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})",
+            _emit_value_call(expr.callee, args, local_names, scope_context),
             POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _ArrayLiteral):
@@ -444,16 +455,7 @@ def _emit_expression(
             POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _StructLiteral):
-        fields = ", ".join(
-            _emit_struct_field(
-                field_name,
-                field_value,
-                local_names,
-                scope_context=scope_context,
-            )
-            for field_name, field_value in expr.fields
-        )
-        return f"GMRuntime.gml_struct({{{fields}}})", POSTFIX_PRECEDENCE
+        return _emit_struct_literal(expr, local_names, scope_context), POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
         if _is_alarm_array_access(expr, local_names):
             index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
@@ -582,6 +584,41 @@ def uses_direct_member_access(
     return _uses_direct_member_access(expr, scope_context=scope_context)
 
 
+def _emit_value_call(
+    callee_expr: _Expression,
+    args: str,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    """A call of the value an expression produces: inst.method(args), f()(args)."""
+    if isinstance(callee_expr, _Member) and not _uses_direct_member_access(
+        callee_expr,
+        scope_context=scope_context,
+    ):
+        # A method that is not bound to a struct runs with the struct it is
+        # called through as self.
+        member_target = _emit_instance_keyword_argument(
+            callee_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )
+        return (
+            "GMRuntime.gml_call_member("
+            f"{member_target}, {json.dumps(callee_expr.member)}, [{args}], "
+            f"{scope_context.self_expression}, {scope_context.other_expression})"
+        )
+    callee = _emit_child(
+        callee_expr,
+        POSTFIX_PRECEDENCE,
+        local_names=local_names,
+        scope_context=scope_context,
+    )
+    return (
+        "GMRuntime.gml_call_value("
+        f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})"
+    )
+
+
 def _emit_function_literal(
     expr: _FunctionLiteral,
     local_names: Iterable[str],
@@ -627,11 +664,54 @@ def _emit_function_literal(
         parameter_names,
         scope_context=function_scope_context,
     )
-    body_lines = [*default_lines, *expr.body_lines]
+    body_lines = _rename_function_literal_locals(
+        [*default_lines, *expr.body_lines],
+        local_names,
+    )
     if _can_emit_single_line_function_literal(body_lines):
         return f"func{name}({parameters}): {body_lines[0]}"
     body = "\n".join(_prefix_multiline(line, "\t") for line in body_lines)
     return f"func{name}({parameters}):\n{body}\n"
+
+
+# A GDScript local declaration (var or a for loop variable).
+_GDSCRIPT_LOCAL_DECLARATION_RE = re.compile(r"\b(?:var|for)\s+([A-Za-z_]\w*)")
+# String literals and comments (left as they are), or a bare name that is not
+# a member access and not called.
+_GDSCRIPT_LOCAL_REFERENCE_RE = re.compile(
+    r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|#[^\n]*|(?<![\w.])[A-Za-z_]\w*(?![\w(])'
+)
+_GDSCRIPT_NAME_RE = re.compile(r"[A-Za-z_]\w*")
+
+
+def _rename_function_literal_locals(body_lines: list[str], enclosing_names: Iterable[str]) -> list[str]:
+    # Each GML function or method has its own local variables (manual:
+    # Local Variables), so a method may declare a local with the name of a
+    # local or parameter of the function it is written in. A GDScript lambda
+    # shares its enclosing function's scope, where that redeclaration is a
+    # parse error, so such locals get a name of their own. A method reaches
+    # anything outside it through its receiver, never as a bare name, so
+    # every bare use of the name in the body is the method's own local (or
+    # a nested method's, renamed alike).
+    text = "\n".join(body_lines)
+    visible_names = {sanitize_gdscript_identifier(name) for name in enclosing_names}
+    colliding_names = set(_GDSCRIPT_LOCAL_DECLARATION_RE.findall(text)) & visible_names
+    if not colliding_names:
+        return body_lines
+    used_names = set(_GDSCRIPT_NAME_RE.findall(text)) | visible_names
+    aliases: dict[str, str] = {}
+    for name in sorted(colliding_names):
+        alias = f"_gml_local_{name}"
+        suffix = 2
+        while alias in used_names:
+            alias = f"_gml_local_{name}_{suffix}"
+            suffix += 1
+        used_names.add(alias)
+        aliases[name] = alias
+    return [
+        _GDSCRIPT_LOCAL_REFERENCE_RE.sub(lambda match: aliases.get(match.group(0), match.group(0)), line)
+        for line in body_lines
+    ]
 
 
 def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
@@ -642,6 +722,29 @@ def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
         return False
     stripped = line.lstrip("\t")
     return stripped == "pass" or stripped == "return" or stripped.startswith("return ")
+
+
+def _emit_struct_literal(
+    expr: _StructLiteral,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    # A struct literal may repeat a variable name: every value is evaluated
+    # in order and the last one wins. A GDScript dictionary literal cannot
+    # repeat a key, so each repeat starts another dictionary, and the
+    # runtime merges them in order (the key keeps its first place).
+    groups: list[list[str]] = [[]]
+    group_names: set[str] = set()
+    for field_name, field_value in expr.fields:
+        if field_name in group_names:
+            groups.append([])
+            group_names = set()
+        group_names.add(field_name)
+        groups[-1].append(_emit_struct_field(field_name, field_value, local_names, scope_context=scope_context))
+    dictionaries = [f"{{{', '.join(group)}}}" for group in groups]
+    if len(dictionaries) == 1:
+        return f"GMRuntime.gml_struct({dictionaries[0]})"
+    return f"GMRuntime.gml_struct_repeated_fields([{', '.join(dictionaries)}])"
 
 
 def _emit_struct_field(
@@ -906,6 +1009,7 @@ def _emit_descriptor_call(
         "runtime_layer_api",
         "runtime_path_api",
         "runtime_path_asset_api",
+        "runtime_prepend_self",
         "runtime_room_api",
         "runtime_sequence_api",
         "runtime_self_default",
@@ -924,7 +1028,7 @@ def _emit_descriptor_call(
                 local_names,
                 scope_context=scope_context,
             )
-        if descriptor.lowering_kind == "runtime_collision_api":
+        if descriptor.lowering_kind in ("runtime_collision_api", "runtime_prepend_self"):
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_draw_api":
             emitted_args = _emit_draw_api_args(
@@ -963,7 +1067,8 @@ def _emit_descriptor_call(
         if descriptor.lowering_kind == "runtime_path_api":
             emitted_args.insert(0, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_append_self":
-            emitted_args.append(scope_context.self_expression)
+            # After the required arguments, before any optional ones.
+            emitted_args.insert(descriptor.min_args, scope_context.self_expression)
         if descriptor.lowering_kind == "runtime_self_default" and not emitted_args:
             emitted_args.append(scope_context.self_expression)
         return f"GMRuntime.{descriptor.lowering_target}({', '.join(emitted_args)})"

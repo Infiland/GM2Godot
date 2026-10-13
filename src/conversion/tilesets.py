@@ -8,6 +8,8 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, NotRequired, TypedDict, cast
 
+from PIL import Image
+
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
@@ -39,6 +41,7 @@ from src.conversion.tileset_metadata import (
     parse_gamemaker_tileset_metadata,
     parse_gamemaker_tileset_sprite_reference,
     project_tileset_conversion_fields,
+    tileset_source_grid_count,
 )
 from src.conversion.type_defs import (
     ConversionRunning,
@@ -69,6 +72,11 @@ class TilesetData(TypedDict):
     tileSetCollisions: list[JsonObject]
     out_tilehborder: int
     out_tilevborder: int
+    # Cells per row and column of the source sprite's own grid, which is what
+    # GameMaker's tile numbers count in. Filled in once the sprite image has
+    # been measured; out_columns describes the compiled texture page instead.
+    source_columns: NotRequired[int]
+    source_rows: NotRequired[int]
 
 
 class TilesetSuccess(TypedDict):
@@ -710,7 +718,14 @@ class TileSetConverter(BaseConverter):
         lines.append(f'tile_size = Vector2i({tile_w}, {tile_h})')
         lines.append('sources/0 = SubResource("TileSetAtlasSource_1")')
         lines.append(f"metadata/gamemaker_tileset_tile_count = {tileset_data['tile_count']}")
+        # out_columns and the borders describe the compiled texture page (what
+        # tileset_get_info reports); tile numbers count in the source grid.
         lines.append(f"metadata/gamemaker_tileset_out_columns = {tileset_data['out_columns']}")
+        if "source_columns" in tileset_data:
+            lines.append(f"metadata/gamemaker_tileset_source_columns = {tileset_data['source_columns']}")
+        if tileset_data["sprite_name"]:
+            # Tilemap collisions test tiles against this sprite's collision mask.
+            lines.append("metadata/gamemaker_tileset_sprite = " + json.dumps(tileset_data["sprite_name"]))
         lines.append(f"metadata/gamemaker_tileset_animation_speed = {_format_number(tileset_data['tileAnimationSpeed'])}")
         lines.append(
             "metadata/gamemaker_tileset_animation_frames = "
@@ -729,10 +744,50 @@ class TileSetConverter(BaseConverter):
         return '\n'.join(lines)
 
     def _tileset_atlas_coordinates(self, tileset_data: TilesetData) -> list[tuple[int, int]]:
+        """Atlas cell of every tile: tile N is cell N of the source sprite's grid.
+
+        Tile 0 is the always-empty top-left cell, so the cells run 0 up to
+        tile_count - 1 (tile_count includes tile 0), clipped to the cells the
+        sprite really has. Without a measured sprite the declared out_columns
+        stand in for the grid.
+        """
         tile_count = max(0, tileset_data["tile_count"])
+        if "source_columns" in tileset_data:
+            source_columns = tileset_data["source_columns"]
+            source_rows = tileset_data.get("source_rows", 0)
+            if source_columns <= 0:
+                return []
+            return [
+                (index % source_columns, index // source_columns)
+                for index in range(tile_count)
+                if index // source_columns < source_rows
+            ]
         columns = tileset_data["out_columns"] if tileset_data["out_columns"] > 0 else tile_count
         columns = max(1, columns)
         return [(index % columns, index // columns) for index in range(tile_count)]
+
+    @staticmethod
+    def _measure_source_grid(image_path: str, tileset_data: TilesetData) -> tuple[int, int] | None:
+        """Cells per row and column of the tileset image, None when it is unreadable."""
+        try:
+            with Image.open(image_path) as image:
+                width, height = image.size
+        except (OSError, ValueError, Image.DecompressionBombError):
+            return None
+        return (
+            tileset_source_grid_count(
+                width,
+                tileset_data["tilexoff"],
+                tileset_data["tileWidth"],
+                tileset_data["tilehsep"],
+            ),
+            tileset_source_grid_count(
+                height,
+                tileset_data["tileyoff"],
+                tileset_data["tileHeight"],
+                tileset_data["tilevsep"],
+            ),
+        )
 
     def _process_tileset(
         self,
@@ -808,6 +863,9 @@ class TileSetConverter(BaseConverter):
                 "sprite_name": sprite_name,
             }
         shutil.copy2(resolved_image.filesystem_path, dest_image)
+        source_grid = self._measure_source_grid(dest_image, tileset_data)
+        if source_grid is not None:
+            tileset_data["source_columns"], tileset_data["source_rows"] = source_grid
 
         # Generate and write the .tres file
         tres_content = self._generate_tileset_tres(

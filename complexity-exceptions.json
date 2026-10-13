@@ -608,8 +608,8 @@
     {
       "path": "src/conversion/gml_transpiler_parts/gml_function_dispatch.py",
       "function": "_build_function_descriptors",
-      "measured_complexity": 50,
-      "ceiling": 50,
+      "measured_complexity": 49,
+      "ceiling": 49,
       "reason": "Keep insertion order, duplicate collisions, final overrides and all public descriptor metadata.",
       "removal_action": "Extract core-value, resource/instance and platform registration phases with typed table helper.",
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-08e62a3c55d23968"
@@ -840,28 +840,10 @@
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-072cf50565558748"
     },
     {
-      "path": "src/conversion/objects.py",
-      "function": "ObjectConverter.convert_objects",
-      "measured_complexity": 22,
-      "ceiling": 22,
-      "reason": "Preserve manifest authority, initial runtime/context construction, as_completed order, first worker error after all results and sorted final accounting.",
-      "removal_action": "Extract fallback discovery and completed/skipped/failed future accounting.",
-      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-aa2d274f778c8fdd"
-    },
-    {
-      "path": "src/conversion/script_functions.py",
-      "function": "modern_script_structure",
-      "measured_complexity": 18,
-      "ceiling": 18,
-      "reason": "Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.",
-      "removal_action": "Extract declaration parsing and supported top-level initializer cases.",
-      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-34e1346ae3e0d615"
-    },
-    {
       "path": "src/conversion/script_generator.py",
       "function": "generate_script_content",
-      "measured_complexity": 34,
-      "ceiling": 34,
+      "measured_complexity": 29,
+      "ceiling": 29,
       "reason": "Keep plugin callbacks/order, dedup/default body merging, inherited runtime declarations and sprite\u2192object\u2192draw wrapper sequencing.",
       "removal_action": "Extract event/binding collection, runtime prelude and per-function body wrapping.",
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-e47f1faeb860c46f"

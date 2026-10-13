@@ -17,20 +17,35 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
+from PIL import Image
+
 from src.conversion.converter import CONVERSION_CATEGORIES, Converter
 from src.gui.setting_value import SettingValue
 from tests.godot_test_support import write_fixture_text
 
 # GameMaker event file names by event type.
 _EVENT_FILE_PREFIXES = {
-    0: "Create", 1: "Destroy", 2: "Alarm", 3: "Step", 4: "Collision", 7: "Other", 8: "Draw", 12: "CleanUp",
+    0: "Create",
+    1: "Destroy",
+    2: "Alarm",
+    3: "Step",
+    4: "Collision",
+    5: "Keyboard",
+    6: "Mouse",
+    7: "Other",
+    8: "Draw",
+    9: "KeyPress",
+    10: "KeyRelease",
+    12: "CleanUp",
 }
 EVENT_CREATE = (0, 0)
 EVENT_DESTROY = (1, 0)
 EVENT_STEP = (3, 0)
 EVENT_BEGIN_STEP = (3, 1)
 EVENT_GAME_START = (7, 2)
+EVENT_GAME_END = (7, 3)
 EVENT_ROOM_START = (7, 4)
+EVENT_ROOM_END = (7, 5)
 EVENT_DRAW = (8, 0)
 EVENT_CLEAN_UP = (12, 0)
 
@@ -49,6 +64,18 @@ class GameMakerObject:
     parent: str | None = None
     sprite: str | None = None
     visible: bool = True
+    # Collision events: the other object's name -> GML source.
+    collisions: Mapping[str, str] = field(default_factory=dict[str, str])
+
+
+@dataclass(frozen=True)
+class GameMakerSequence:
+    """A sequence with one instance track: an instance of the object is in
+    the sequence from its first frame to its last."""
+
+    name: str
+    object_name: str
+    length: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -58,6 +85,10 @@ class RoomInstance:
     x: float
     y: float
     creation_code: str | None = None
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    rotation: float = 0.0
+    image_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -136,15 +167,19 @@ class GameMakerRoom:
 
 @dataclass(frozen=True)
 class GameMakerSprite:
-    """A sprite whose frames are RGBA images (rows of (r, g, b, a) pixels)."""
+    """A sprite whose frames are RGBA images (rows of (r, g, b, a) pixels),
+    or a number of opaque white frames. Without frames it has one opaque
+    white frame, with a rectangle collision mask over the whole image."""
 
     name: str
-    width: int
-    height: int
-    frames: Sequence[Sequence[Sequence[tuple[int, int, int, int]]]]
+    width: int = 16
+    height: int = 16
+    frames: int | Sequence[Sequence[Sequence[tuple[int, int, int, int]]]] = ()
     xorigin: int = 0
     yorigin: int = 0
     playback_speed: float = 0.0
+    # GameMaker's collisionKind: 0 is precise (opaque pixels), 1 a rectangle.
+    collision_kind: int = 1
 
 
 @dataclass(frozen=True)
@@ -154,6 +189,7 @@ class GameMakerProject:
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
     sprites: Sequence[GameMakerSprite] = ()
+    sequences: Sequence[GameMakerSequence] = ()
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -177,7 +213,8 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
                 "resourceVersion": "2.0",
             }
             for event_type, event_number in game_object.events
-        ],
+        ]
+        + [_collision_event_yy(target) for target in game_object.collisions],
         "managed": True,
         "name": game_object.name,
         "overriddenProperties": [],
@@ -199,6 +236,62 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
     }
 
 
+def _collision_event_yy(target: str) -> dict[str, object]:
+    return {
+        "$GMEvent": "v1",
+        "%Name": "",
+        "collisionObjectId": {"name": target, "path": f"objects/{target}/{target}.yy"},
+        "eventNum": 0,
+        "eventType": 4,
+        "isDnD": False,
+        "name": "",
+        "resourceType": "GMEvent",
+        "resourceVersion": "2.0",
+    }
+
+
+def _sequence_yy(sequence: GameMakerSequence) -> dict[str, object]:
+    object_path = f"objects/{sequence.object_name}/{sequence.object_name}.yy"
+    return {
+        "$GMSequence": "v1",
+        "%Name": sequence.name,
+        "name": sequence.name,
+        "resourceType": "GMSequence",
+        "resourceVersion": "2.0",
+        "length": sequence.length,
+        "playback": 0,
+        "playbackSpeed": 1.0,
+        "playbackSpeedType": 1,
+        "timeUnits": 1,
+        "events": {"Keyframes": []},
+        "moments": {"Keyframes": []},
+        "eventToFunction": {},
+        "tracks": [
+            {
+                "$GMInstanceTrack": "",
+                "name": sequence.object_name,
+                "resourceType": "GMInstanceTrack",
+                "interpolation": 1,
+                "keyframes": {
+                    "Keyframes": [
+                        {
+                            "Channels": {
+                                "0": {
+                                    "Id": {"name": sequence.object_name, "path": object_path},
+                                    "resourceType": "AssetInstanceKeyframe",
+                                },
+                            },
+                            "Key": 0.0,
+                            "Length": sequence.length,
+                        },
+                    ],
+                },
+                "tracks": [],
+            },
+        ],
+    }
+
+
 def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
     return {
         "$GMRInstance": "v1",
@@ -207,7 +300,7 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "frozen": False,
         "hasCreationCode": instance.creation_code is not None,
         "ignore": False,
-        "imageIndex": 0,
+        "imageIndex": instance.image_index,
         "imageSpeed": 1.0,
         "inheritCode": False,
         "inheritedItemId": None,
@@ -221,9 +314,9 @@ def _room_instance_yy(instance: RoomInstance) -> dict[str, object]:
         "properties": [],
         "resourceType": "GMRInstance",
         "resourceVersion": "2.0",
-        "rotation": 0.0,
-        "scaleX": 1.0,
-        "scaleY": 1.0,
+        "rotation": instance.rotation,
+        "scaleX": instance.scale_x,
+        "scaleY": instance.scale_y,
         "x": instance.x,
         "y": instance.y,
     }
@@ -374,8 +467,19 @@ def _room_yy(room: GameMakerRoom) -> dict[str, object]:
     }
 
 
+def _sprite_frames(sprite: GameMakerSprite) -> Sequence[Sequence[Sequence[tuple[int, int, int, int]]]]:
+    if isinstance(sprite.frames, int):
+        count = sprite.frames
+    elif sprite.frames:
+        return sprite.frames
+    else:
+        count = 1
+    white = [[(255, 255, 255, 255)] * sprite.width for _row in range(sprite.height)]
+    return tuple(white for _index in range(count))
+
+
 def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
-    frame_names = [f"frame_{index}" for index in range(len(sprite.frames))]
+    frame_names = [f"frame_{index}" for index in range(len(_sprite_frames(sprite)))]
     return {
         "$GMSprite": "",
         "%Name": sprite.name,
@@ -384,7 +488,7 @@ def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
         "bbox_left": 0,
         "bbox_right": sprite.width - 1,
         "bbox_top": 0,
-        "collisionKind": 1,
+        "collisionKind": sprite.collision_kind,
         "collisionTolerance": 0,
         "frames": [
             {"$GMSpriteFrame": "", "%Name": name, "name": name, "resourceType": "GMSpriteFrame", "resourceVersion": "2.0"}
@@ -413,7 +517,7 @@ def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
         "sequence": {
             "$GMSequence": "",
             "%Name": sprite.name,
-            "length": float(len(sprite.frames)),
+            "length": float(len(frame_names)),
             "name": sprite.name,
             "playback": 1,
             "playbackSpeed": sprite.playback_speed,
@@ -446,11 +550,9 @@ def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
 
 
 def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
-    from PIL import Image
-
     sprite_dir = project_dir / "sprites" / sprite.name
     _write_json(sprite_dir / f"{sprite.name}.yy", _sprite_yy(sprite))
-    for index, rows in enumerate(sprite.frames):
+    for index, rows in enumerate(_sprite_frames(sprite)):
         data = bytes(channel for row in rows for pixel in row for channel in pixel)
         image = Image.frombytes("RGBA", (sprite.width, sprite.height), data)
         for path in (sprite_dir / f"frame_{index}.png", sprite_dir / "layers" / f"frame_{index}" / "layer_0.png"):
@@ -459,7 +561,7 @@ def _write_sprite(project_dir: Path, sprite: GameMakerSprite) -> None:
 
 
 def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> None:
-    """Write the project's .yyp, sprites, objects, rooms and scripts."""
+    """Write the project's .yyp, sprites, objects, rooms, scripts and sequences."""
     resources: list[dict[str, object]] = []
     for sprite in project.sprites:
         _write_sprite(project_dir, sprite)
@@ -487,9 +589,14 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
         for (event_type, event_number), source in game_object.events.items():
             prefix = _EVENT_FILE_PREFIXES[event_type]
             write_fixture_text(object_dir / f"{prefix}_{event_number}.gml", source)
+        for target, source in game_object.collisions.items():
+            write_fixture_text(object_dir / f"Collision_{target}.gml", source)
         resources.append(
             {"id": {"name": game_object.name, "path": f"objects/{game_object.name}/{game_object.name}.yy"}}
         )
+    for sequence in project.sequences:
+        _write_json(project_dir / "sequences" / sequence.name / f"{sequence.name}.yy", _sequence_yy(sequence))
+        resources.append({"id": {"name": sequence.name, "path": f"sequences/{sequence.name}/{sequence.name}.yy"}})
     for room in project.rooms:
         room_dir = project_dir / "rooms" / room.name
         _write_json(room_dir / f"{room.name}.yy", _room_yy(room))
@@ -570,6 +677,20 @@ def add_probe_autoload(godot_dir: Path, probe_source: str) -> None:
     settings_path.write_text(settings, encoding="utf-8")
 
 
+def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
+    """Import a converted project's resources (sprite images), as the editor does before a run."""
+    environment = dict(os.environ)
+    environment["HOME"] = str(godot_dir)
+    return subprocess.run(
+        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        env=environment,
+    )
+
+
 def run_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
     environment = dict(os.environ)
     environment["HOME"] = str(godot_dir)
@@ -606,21 +727,6 @@ def run_converted_project_rendered(
             "--rendering-driver",
             "opengl3",
         ],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=False,
-        env=environment,
-    )
-
-
-def import_converted_project(godot_binary: str, godot_dir: Path, *, timeout: float = 120) -> subprocess.CompletedProcess[str]:
-    """Import the converted project's resources (sprite images), which a
-    project needs before it runs."""
-    environment = dict(os.environ)
-    environment["HOME"] = str(godot_dir)
-    return subprocess.run(
-        [godot_binary, "--headless", "--recovery-mode", "--path", str(godot_dir), "--import"],
         capture_output=True,
         text=True,
         timeout=timeout,

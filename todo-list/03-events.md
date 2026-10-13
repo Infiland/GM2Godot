@@ -52,7 +52,7 @@ This file separates mapped callback names from full GameMaker event execution. A
 - [x] Animation Event callback name.
 - [x] Path Ended callback name.
 - [x] User Event 0..15 callback names.
-- [x] Close Button callback behavior through notification feature injection.
+- [x] Close Button callback name (`_on_close_button`); the runtime calls it for each instance when the window closes.
 - [x] Async Image Loaded callback name.
 - [x] Async Sound Loaded callback name.
 - [x] Async HTTP callback name.

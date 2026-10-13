@@ -51,7 +51,10 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("var id = GMRuntime.gml_instance_noone()", content)
         self.assertIn("var other = self", content)
         self.assertIn('var object_index = GMRuntime.gml_asset_get_index("o_child")', content)
-        self.assertIn("func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id):", content)
+        self.assertIn(
+            'func _gm_register_instance():\n\tif GMRuntime.gml_handle_is_valid(id) or has_meta("_gm2godot_instance_destroyed"):',
+            content,
+        )
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn("var solid = false", content)
         self.assertIn(
@@ -62,11 +65,19 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertIn("\t_gm_depth = GMRuntime.gml_instance_depth_initial(self, _gm_depth)", content)
         self.assertIn("var speed = 0.0", content)
         self.assertIn(
-            "func _gm_apply_motion_step():\n\tGMRuntime.gml_path_step(self)\n\tGMRuntime.gml_motion_step(self)",
+            "func _gm_apply_motion_step():\n\tGMRuntime.gml_motion_step(self)",
             content,
         )
-        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
-        self.assertIn("\t_gm_initialize_motion_runtime()", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()", content)
+        self.assertIn(
+            "func _gm_construct_instance():\n"
+            "\tif _gm_constructed:\n"
+            "\t\treturn\n"
+            "\t_gm_constructed = true\n"
+            "\t_gm_register_instance()\n"
+            "\t_gm_initialize_motion_runtime()\n",
+            content,
+        )
         self.assertNotIn("func _process(delta):", content)
         # Moving to another layer node is not leaving the room: no unregistering.
         self.assertIn(
@@ -103,32 +114,32 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         for member in ("image_index", "image_blend", "image_alpha"):
             self.assertIn(f"\t\t{member} = value\n\t\t_gm_apply_", content)
 
-    def test_collision_change_reports_join_an_object_notification_event(self):
+    def test_window_events_leave_the_notification_to_the_collision_report(self):
+        # Godot calls _notification in every script of an inheritance chain, so
+        # the Close Button event is a plain method the runtime calls: the one
+        # _notification is the root script's collision report.
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            {"_notification": "\tprint(\"closing\")"},
+            {"_on_close_button": "\tprint(\"closing\")"},
             object_runtime=ObjectRuntimeConfig(object_name="o_window"),
         )
 
         self.assertEqual(content.count("func _notification(what):"), 1)
-        self.assertIn(
-            "func _notification(what):\n\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
-            " or what == NOTIFICATION_EXIT_TREE:\n\t\t_gm_collision_changed()\n"
-            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tprint(\"closing\")",
-            content,
-        )
+        self.assertNotIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertIn("func _on_close_button():\n\tprint(\"closing\")", content)
 
     def test_child_objects_inherit_collision_change_reports(self):
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            {"_notification": "\tprint(\"closing\")"},
+            {"_on_close_button": "\tprint(\"closing\")"},
             object_runtime=ObjectRuntimeConfig(object_name="o_child", parent_object_names=("o_parent",)),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
 
         self.assertNotIn("_gm_collision_dirty", content)
         self.assertNotIn("func _gm_collision_changed", content)
-        self.assertIn("func _notification(what):\n\tif what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+        self.assertNotIn("_notification", content)
+        self.assertIn("func _on_close_button():\n\tprint(\"closing\")", content)
 
     def test_sprite_runtime_without_object_runtime_reports_nothing(self):
         content = generate_script_content(
@@ -149,7 +160,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -161,13 +171,9 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\nvar object_index =", content)
         self.assertNotIn("\nvar depth:", content)
         self.assertNotIn("\nvar _gm_depth", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
         self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
-            content,
-        )
-        self.assertIn(
-            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n'
-            "\tsuper._exit_tree()\n\t_gm_unregister_instance()",
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()\n',
             content,
         )
 
@@ -185,7 +191,6 @@ class TestScriptGeneratorBasic(unittest.TestCase):
                 object_name="o_child",
                 parent_object_names=("o_parent",),
                 inherit_ready=True,
-                inherit_exit_tree=True,
             ),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
@@ -196,15 +201,46 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
+        # The child says which sprite its instances start with, and builds its
+        # instance once; its parent's Create event (super._ready()) does not
+        # build it again.
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_child")\n', content)
         self.assertIn(
-            "func _ready():\n"
+            "func _gm_construct_instance():\n"
+            "\tif _gm_constructed:\n"
+            "\t\treturn\n"
+            "\t_gm_constructed = true\n"
             "\t_gm_register_instance()\n"
             "\t_gm_initialize_motion_runtime()\n"
-            "\tsprite_index = GMRuntime.gml_sprite_reference(\"s_child\")\n"
-            "\t_gm_initialize_sprite_runtime()\n"
-            "\tsuper._ready()",
+            "\t_gm_initialize_sprite_runtime()\n",
             content,
         )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
+
+    def test_child_without_its_own_sprite_starts_with_no_sprite(self):
+        # GameMaker sprites are per object: a child object without a sprite
+        # starts with sprite_index -1, not its parent's sprite.
+        content = generate_script_content(
+            [],
+            sprite_runtime=SpriteRuntimeConfig(
+                sprite_scene_paths={"s_parent": "res://sprites/s_parent/s_parent.tscn"},
+                inherit_runtime=True,
+            ),
+            object_runtime=ObjectRuntimeConfig(
+                object_name="o_child",
+                parent_object_names=("o_parent",),
+                inherit_ready=True,
+            ),
+            base_script_path="res://objects/o_parent/o_parent.gd",
+        )
+
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
+        self.assertIn(
+            "\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n",
+            content,
+        )
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
 
     def test_child_without_parent_sprite_runtime_declares_own_members(self):
         content = generate_script_content(
@@ -221,10 +257,13 @@ class TestScriptGeneratorBasic(unittest.TestCase):
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
 
-        self.assertIn("\nvar sprite_index = -1:", content)
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
         self.assertIn("func _gm_initialize_sprite_runtime():", content)
+        self.assertIn("\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n", content)
         self.assertIn(
-            "\t_gm_initialize_sprite_runtime()\n"
+            "func _ready():\n"
+            "\t_gm_construct_instance()\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\tsprite_index = \"s_child\"",
@@ -291,7 +330,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
     def test_cleanup_event(self):
         content = generate_script_content([{"eventType": 12, "eventNum": 0}])
-        self.assertIn("func _exit_tree():", content)
+        self.assertIn("func _on_clean_up():", content)
 
     def test_destroy_event(self):
         content = generate_script_content([{"eventType": 1, "eventNum": 0}])
@@ -319,6 +358,23 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
         self.assertIn("timeline_index = tl_intro", content)
         self.assertIn("timeline_running = true", content)
+        # Every instance owns these members with GameMaker's defaults.
+        self.assertIn("\nvar timeline_index = -1\n", content)
+        self.assertIn("\nvar timeline_speed = 1.0\n", content)
+        self.assertIn("\nvar timeline_running = false\n", content)
+        self.assertIn("\nvar in_sequence = false\n", content)
+        self.assertIn("\nvar sequence_instance = GMRuntime.gml_undefined()\n", content)
+        self.assertIn("\t\treturn GMRuntime.gml_instance_layer_get(self)", content)
+
+    def test_child_objects_inherit_builtin_instance_variables(self):
+        content = generate_script_content(
+            [],
+            base_script_path="res://objects/o_parent/o_parent.gd",
+            object_runtime=ObjectRuntimeConfig(object_name="o_child"),
+        )
+
+        self.assertNotIn("var timeline_index", content)
+        self.assertNotIn("var layer:", content)
 
     def test_other_event(self):
         content = generate_script_content([{"eventType": 7, "eventNum": 26}])
@@ -338,30 +394,32 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn("_on_no_more_health()", content)
         self.assertIn("func _on_no_more_health():", content)
 
-    def test_close_button_event(self):
+    def test_close_button_event_is_a_plain_method(self):
+        # The runtime keeps the game open and calls the handler of each
+        # instance (gml_game_window_close_request); the script wires nothing
+        # in _ready or _notification, where a handler would run for every
+        # script of the inheritance chain or only if Create reached it.
         content = generate_script_content([{"eventType": 7, "eventNum": 30}])
-        self.assertIn("func _ready():", content)
-        self.assertIn("get_tree().auto_accept_quit = false", content)
-        self.assertIn("func _notification(what):", content)
-        self.assertIn("if what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+        self.assertIn("func _on_close_button():", content)
+        self.assertNotIn("func _ready", content)
+        self.assertNotIn("_notification", content)
+        self.assertNotIn("auto_accept_quit", content)
 
-    def test_close_button_event_wraps_code_body(self):
+    def test_close_button_event_keeps_its_code_body(self):
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            code_bodies={"_notification": "\tget_tree().quit()"},
+            code_bodies={"_on_close_button": "\tget_tree().quit()"},
         )
-        self.assertIn(
-            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tget_tree().quit()",
-            content,
-        )
+        self.assertIn("func _on_close_button():\n\tget_tree().quit()", content)
 
-    def test_close_button_uses_existing_ready_event(self):
-        content = generate_script_content([
-            {"eventType": 0, "eventNum": 0},
-            {"eventType": 7, "eventNum": 30},
-        ])
+    def test_close_button_event_leaves_the_create_event_alone(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}, {"eventType": 7, "eventNum": 30}],
+            code_bodies={"_ready": "\tscore = 1"},
+        )
         self.assertEqual(content.count("func _ready"), 1)
-        self.assertIn("get_tree().auto_accept_quit = false", content)
+        self.assertIn("func _ready():\n\tscore = 1", content)
+        self.assertNotIn("auto_accept_quit", content)
 
     def test_create_event_code_is_skipped_while_a_room_change_is_pending(self):
         content = generate_script_content(
@@ -372,9 +430,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
         self.assertIn(
             "func _ready():\n"
-            "\t_gm_register_instance()\n"
-            "\t_gm_initialize_motion_runtime()\n"
-            "\tget_tree().auto_accept_quit = false\n"
+            "\t_gm_construct_instance()\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\tscore = 1\n",
@@ -388,7 +444,7 @@ class TestScriptGeneratorEvents(unittest.TestCase):
             object_runtime=ObjectRuntimeConfig(object_name="o_probe"),
         )
 
-        self.assertIn("func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n", content)
         self.assertNotIn("gml_event_create_blocked", content)
 
     def test_draw_gui_event(self):
@@ -415,12 +471,15 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         ):
             self.assertIn(f"func {function_name}():", content)
 
-    def test_resize_event_connects_viewport_size_changed(self):
+    def test_resize_event_is_a_plain_method(self):
+        # The runtime calls it for each instance when the window is resized,
+        # so no _ready connects the signal (an object that overrides Create or
+        # has none, below an ancestor with the event, would never connect it).
         content = generate_script_content([{"eventType": 8, "eventNum": 65}])
 
-        self.assertIn("func _ready():", content)
-        self.assertIn("get_viewport().size_changed.connect(_on_resize)", content)
         self.assertIn("func _on_resize():", content)
+        self.assertNotIn("func _ready", content)
+        self.assertNotIn("size_changed", content)
 
     def test_unknown_event(self):
         content = generate_script_content([{"eventType": 99, "eventNum": 5}])
@@ -609,7 +668,8 @@ class TestScriptGeneratorSpriteRuntime(unittest.TestCase):
         self.assertIn('const s_enemy = "s_enemy"', content)
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
-        self.assertIn('var sprite_index = GMRuntime.gml_sprite_reference("s_player"):', content)
+        self.assertIn('var sprite_index = _gm_object_sprite_index():', content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_player")\n', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)

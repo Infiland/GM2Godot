@@ -54,7 +54,22 @@ class GMLInt64:
 		if initial_value is GMLInt64:
 			_value = int(initial_value.value)
 		else:
-			_value = int(initial_value)
+			_value = GMLInt64.saturate(initial_value)
+
+	# A number as the runner's Long.fromNumber makes it an int64: NaN gives
+	# 0, a real of 2^63 or more (an infinity too) the largest int64, one of
+	# -2^63 or less the smallest, and any other real is truncated toward
+	# zero. A bare int() gives INT64_MIN for all the out-of-range reals and
+	# for NaN.
+	static func saturate(value):
+		if typeof(value) == TYPE_FLOAT:
+			if is_nan(value):
+				return 0
+			if value >= 9223372036854775808.0:
+				return GML_INT64_MAX
+			if value <= -9223372036854775808.0:
+				return GML_INT64_MIN
+		return int(value)
 
 
 class GMLPointer:
@@ -88,6 +103,8 @@ class GMLHandle:
 const GML_RECEIVER_ARGUMENTS_NONE = 0
 const GML_RECEIVER_ARGUMENTS_SELF = 1
 const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
+# The most static structs a variable lookup follows (guards a cyclic chain).
+const GML_STATIC_CHAIN_LIMIT = 256
 
 
 class GMLMethod:
@@ -126,6 +143,12 @@ class GMLMethod:
 			if receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF_OTHER:
 				call_args.append(method_other)
 			call_args.append_array(args)
+			# A GML call may pass more arguments than the function declares
+			# (array_foreach and array_find_index pass the index too); the
+			# GDScript callable takes only those it declares.
+			var declared_count = function_value.get_argument_count()
+			if call_args.size() > declared_count:
+				call_args.resize(declared_count)
 			return function_value.callv(call_args)
 		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():
 			var method_name = function_value.get_method()
@@ -171,6 +194,8 @@ static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_static_cursor = 0
+static var _gml_static_structs = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {
@@ -184,12 +209,14 @@ static var _gml_builtin_globals = {
 	"argument": [],
 	"argument_count": 0,
 	"async_load": {},
+	"delta_time": 0,
 	"display_aa": 0,
 	"event_data": {},
 	"instance_count": 0,
 	"room": _gml_undefined,
 	"room_height": 0,
-	"room_speed": 0,
+	# The game speed, seeded from the project's Game Options.
+	"room_speed": _gml_game_speed_project_fps(),
 	"room_width": 0
 }
 
@@ -275,9 +302,22 @@ static func gml_builtin_global(name):
 		return gml_os_type()
 	if key == "os_version":
 		return gml_os_version()
+	if key == "room_speed":
+		return gml_game_speed_fps()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()
+
+
+static func gml_builtin_global_set(name, value):
+	# Assigns a global built-in the runtime owns. room_speed sets the game
+	# speed, as GameMaker's set_room_speed does (yyBuiltIn.js).
+	var key = str(name)
+	if key == "room_speed":
+		_gml_game_speed_set(_to_real(value))
+	else:
+		_gml_builtin_globals[key] = value
+	return value
 
 
 # The `is` checks below first make sure the value is a live object: GML code

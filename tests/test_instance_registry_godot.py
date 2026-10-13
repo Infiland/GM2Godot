@@ -246,7 +246,6 @@ class TestInstanceRegistryGodotSmoke(unittest.TestCase):
                         object_name="o_enemy",
                         parent_object_names=("o_parent",),
                         inherit_ready=True,
-                        inherit_exit_tree=True,
                     ),
                     base_script_path="res://objects/o_parent/o_parent.gd",
                 ),

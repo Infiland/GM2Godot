@@ -160,7 +160,6 @@ class TestCaptureConversionParity(unittest.TestCase):
                     (), 0, None, None, None,
                     expected_runtime_warnings=(
                         "WARNING: GM2Godot stores multiple active GameMaker views as compatibility state; render-backed split viewports require a custom SubViewport pipeline.",
-                        "WARNING: GM2Godot does not preserve full persistent room state; room lifecycle code runs when the generated Godot scene enters.",
                     ),
                 ),
                 contract.FixtureDefinition(
@@ -532,10 +531,10 @@ class TestCaptureConversionParity(unittest.TestCase):
         self.assertTrue(all(not fixture.expected_runtime_warnings for fixture in definition.fixtures if fixture is not resource))
         mutations: tuple[tuple[str, object], ...] = (
             ("id", "renamed"), ("repository_path", "another/source"), ("project_relative_path", "Another.yyp"),
-            ("sha256", "0" * 64), ("expected_runtime_warnings", list(reversed(resource.expected_runtime_warnings))),
-            ("expected_runtime_warnings", [resource.expected_runtime_warnings[0]]),
+            ("sha256", "0" * 64), ("expected_runtime_warnings", ["WARNING: extra", *resource.expected_runtime_warnings]),
+            ("expected_runtime_warnings", [*resource.expected_runtime_warnings, resource.expected_runtime_warnings[0]]),
             ("expected_runtime_warnings", [*resource.expected_runtime_warnings, "WARNING: extra"]),
-            ("expected_runtime_warnings", ["WARNING: changed", resource.expected_runtime_warnings[1]]),
+            ("expected_runtime_warnings", ["WARNING: changed", *resource.expected_runtime_warnings[1:]]),
         )
         for key, value in mutations:
             with self.subTest(key=key, value=value), tempfile.TemporaryDirectory() as temporary:
@@ -616,9 +615,9 @@ class TestCaptureConversionParity(unittest.TestCase):
                            ("operations", ["Adding: Performed invented"]), ("unexpected", True)):
             variants.append({**good, key: value})
         issue_rows = cast(list[dict[str, object]], good["output_issues"])
-        for rows in ([], list(reversed(issue_rows)), [*issue_rows, {"severity": "warning", "line": "WARNING: extra"}],
-                     [{"severity": "error", "line": issue_rows[0]["line"]}, issue_rows[1]],
-                     [{"severity": "warning", "line": "WARNING: changed"}, issue_rows[1]]):
+        for rows in ([], [*issue_rows, issue_rows[0]], [*issue_rows, {"severity": "warning", "line": "WARNING: extra"}],
+                     [{"severity": "error", "line": issue_rows[0]["line"]}, *issue_rows[1:]],
+                     [{"severity": "warning", "line": "WARNING: changed"}, *issue_rows[1:]]):
             variants.append({**good, "output_issues": rows})
         missing = dict(good)
         del missing["output"]
@@ -627,8 +626,8 @@ class TestCaptureConversionParity(unittest.TestCase):
             with self.subTest(index=index), patch.object(parity.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(markers), "")):
                 with self.assertRaises(contract.ParityError):
                     parity.runtime_marker_snapshot(PROJECT_ROOT, Path("/project"), boot_frames=2, fixture=fixture)
-        for severity, lines in (("warning", tuple(reversed(fixture.expected_runtime_warnings))),
-                                ("warning", fixture.expected_runtime_warnings[:1]),
+        for severity, lines in (("warning", (*fixture.expected_runtime_warnings, fixture.expected_runtime_warnings[0])),
+                                ("warning", ()),
                                 ("error", fixture.expected_runtime_warnings)):
             report = godot_validation.GodotValidationReport(
                 status="failed", godot_binary="fake", project_path="/project", resource_paths=(),

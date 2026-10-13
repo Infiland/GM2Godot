@@ -94,23 +94,17 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # 151 source conversion gaps remain. Scripts and events whose
-                # only problem is a call to an unsupported function or an
-                # unmapped extension function (Steam, Google Play Services)
-                # now convert, with only those calls failing at run time, and
-                # gml_pragma, layer_force_draw_depth, string_join,
-                # show_debug_overlay and the date functions convert, which
-                # leaves 25 fewer scripts and 2 fewer objects behind. The
-                # asset-registry step also skips its 102 object/room rows
-                # whose required generated outputs are absent, plus the
-                # authored sequence whose embedded animation curve is
-                # intentionally diagnosed by #707. Rooms whose creation-code
-                # sidecars are missing convert as empty code, as GameMaker
-                # runs them. Eleven shaders fail closed for custom vertex
-                # data, reserved Godot globals, or unsupported scalar matrix
-                # constructors and are omitted once more from the registry.
-                completed=5110,
-                skipped=265,
+                # The 39 source conversion gaps remain. The asset-registry
+                # step now also skips its 5 object rows whose required
+                # generated outputs are absent, plus the authored sequence whose
+                # embedded animation curve is intentionally diagnosed by #707.
+                # Rooms whose creation-code sidecars are missing convert as
+                # empty code, as GameMaker runs them. Eleven shaders fail
+                # closed for custom vertex data, reserved Godot globals, or
+                # unsupported scalar matrix constructors and are omitted once
+                # more from the registry.
+                completed=5319,
+                skipped=56,
                 failed=11,
             ),
         )
@@ -297,13 +291,13 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 163)
-        self.assertEqual(len(script_transpile_diagnostics), 49)
-        self.assertEqual(len(script_transpile_resources), 49)
-        self.assertEqual(len(object_transpile_diagnostics), 112)
-        self.assertEqual(len(object_transpile_resources), 98)
-        self.assertEqual(len(room_transpile_diagnostics), 2)
-        self.assertEqual(room_transpile_resources, {"r_donolvl1", "r_lvl1"})
+        self.assertEqual(len(all_transpile_diagnostics), 37)
+        self.assertEqual(len(script_transpile_diagnostics), 34)
+        self.assertEqual(len(script_transpile_resources), 34)
+        self.assertEqual(len(object_transpile_diagnostics), 3)
+        self.assertEqual(len(object_transpile_resources), 3)
+        self.assertEqual(len(room_transpile_diagnostics), 0)
+        self.assertEqual(room_transpile_resources, set())
 
         # Calls the converted game cannot make fail on their own: every one
         # is an extension function the project does not map, or

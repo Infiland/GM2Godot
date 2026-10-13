@@ -62,7 +62,10 @@ func _run():
 	_case_same_object()
 	_case_solid(true)
 	_case_solid(false)
+	_case_solid_changed_by_event()
 	_case_destroyed()
+	_case_queued_for_deletion()
+	_case_step_phase()
 	_case_spawned()
 	_case_spriteless()
 	_case_other_restored()
@@ -128,6 +131,29 @@ func _case_solid(compat):
 	GMRuntime._gml_collision_set_compatibility_mode(null)
 
 
+# In compatibility mode the retry after both events reads solid again, and an
+# instance destroyed by an event no longer collides (HTML5 runner,
+# Events.js HandleCollision and yyInstance.js Collision_Instance).
+func _case_solid_changed_by_event():
+	GMRuntime._gml_collision_set_compatibility_mode(true)
+	spawn("o_wall", "vanishing", 1200, 0)
+	var mover = spawn("o_a", "mover", 1210, 0)
+	mover.xprevious = 1230.0
+	mover.hspeed = -20.0
+	_expect("vanishing wall runs its event", _dispatch(), ["wall:a:vanishing<-mover@1230"])
+	_expect("retry keeps the move once the solid instance is destroyed", mover.position.x, 1210.0)
+	_clear()
+	var door = spawn("o_wall", "opening", 1300, 0)
+	mover = spawn("o_a", "mover", 1310, 0)
+	mover.xprevious = 1330.0
+	mover.hspeed = -5.0
+	_expect("opening door runs its event", _dispatch(), ["wall:a:opening<-mover@1330"])
+	_expect("the event made the door non-solid", door.solid, false)
+	_expect("no retry once neither instance is solid", mover.position.x, 1330.0)
+	_clear()
+	GMRuntime._gml_collision_set_compatibility_mode(null)
+
+
 func _case_destroyed():
 	spawn("o_a", "killer", 400, 0)
 	spawn("o_b", "b1", 405, 0)
@@ -135,6 +161,28 @@ func _case_destroyed():
 	var gone = spawn("o_b", "gone", 400, 0)
 	GMRuntime.gml_instance_destroy(gone)
 	_expect("destroyed instances stop colliding", _dispatch(), ["a:b:killer<-b1@405", "b:a:b1<-killer@400"])
+	_clear()
+
+
+# A node queued for deletion is leaving the room like a destroyed instance,
+# and the step leaves it out of every phase, the collision events included.
+func _case_queued_for_deletion():
+	spawn("o_a", "a", 1400, 0)
+	var leaving = spawn("o_b", "leaving", 1405, 0)
+	leaving.queue_free()
+	_expect("instances queued for deletion stop colliding", _dispatch(), [])
+	_clear()
+
+
+# A step's collision phase takes in every instance of the step.
+func _case_step_phase():
+	spawn("o_a", "a", 1500, 0)
+	spawn("o_b", "b", 1505, 0)
+	entries.clear()
+	GMRuntime.gml_event_scheduler_set_enabled(true)
+	GMRuntime.gml_event_scheduler_frame(0.0, 1)
+	GMRuntime.gml_event_scheduler_set_enabled(false)
+	_expect("the step runs the collision events", entries.duplicate(), ["a:b:a<-b@1505", "b:a:b<-a@1500"])
 	_clear()
 
 

@@ -158,6 +158,7 @@ class TestTileSetConverterBasic(unittest.TestCase):
         self.assertIn('Vector2i(16, 16)', content)
         self.assertIn('0:0/0 = 0', content)
         self.assertIn('metadata/gamemaker_tileset_tile_count = 4', content)
+        self.assertIn('metadata/gamemaker_tileset_sprite = "s_ground"', content)
         self.assertIn('metadata/gamemaker_tileset_animation_frames = []', content)
 
     def test_resource_outcome_counts_logical_tileset(self):
@@ -210,6 +211,100 @@ class TestTileSetConverterBasic(unittest.TestCase):
         image_path = os.path.join(self.godot_dir, "tilesets", "ts_ground", "ts_ground.png")
         self.assertTrue(os.path.isfile(image_path),
                         "Expected PNG image to be copied to tileset output dir")
+
+
+class TestTileSetSourceGridAtlas(unittest.TestCase):
+    """GameMaker's tile N is cell N of the source sprite's grid, tile 0 being the empty top-left cell."""
+
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.logs: list[str] = []
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.gm_dir)
+        shutil.rmtree(self.godot_dir)
+
+    def _convert(
+        self, width: int, height: int, *, tile_count: int, out_columns: int,
+        tilexoff: int = 0, tileyoff: int = 0, tilehsep: int = 0, tilevsep: int = 0,
+    ) -> str:
+        tileset_dir = os.path.join(self.gm_dir, "tilesets", "ts_ground")
+        os.makedirs(tileset_dir)
+        with open(os.path.join(tileset_dir, "ts_ground.yy"), "w") as stream:
+            stream.write(_make_tileset_yy_content(
+                "ts_ground", "s_ground", tile_count=tile_count, out_columns=out_columns,
+                tilexoff=tilexoff, tileyoff=tileyoff, tilehsep=tilehsep, tilevsep=tilevsep,
+            ))
+        _make_sprite_for_tileset(self.gm_dir, "s_ground", width=width, height=height)
+        TileSetConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda message: self.logs.append(message),
+            progress_callback=lambda value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+        with open(os.path.join(self.godot_dir, "tilesets", "ts_ground", "ts_ground.tres"), encoding="utf-8") as stream:
+            return stream.read()
+
+    @staticmethod
+    def _cells(content: str) -> list[str]:
+        return [line for line in content.splitlines() if line.endswith("/0 = 0")]
+
+    def test_atlas_cells_fill_the_source_sprite_grid_whatever_out_columns_says(self) -> None:
+        # 4 x 2 cells in the sprite; the compiled texture page is 3 columns wide.
+        content = self._convert(64, 32, tile_count=8, out_columns=3)
+
+        self.assertEqual(
+            self._cells(content),
+            ["0:0/0 = 0", "1:0/0 = 0", "2:0/0 = 0", "3:0/0 = 0",
+             "0:1/0 = 0", "1:1/0 = 0", "2:1/0 = 0", "3:1/0 = 0"],
+        )
+        self.assertIn("metadata/gamemaker_tileset_source_columns = 4", content)
+        self.assertIn("metadata/gamemaker_tileset_out_columns = 3", content)
+
+    def test_atlas_cells_never_leave_the_sprite(self) -> None:
+        # A tile count past the sprite's 2 x 2 cells makes no cell outside the texture.
+        content = self._convert(32, 32, tile_count=9, out_columns=3)
+
+        self.assertEqual(self._cells(content), ["0:0/0 = 0", "1:0/0 = 0", "0:1/0 = 0", "1:1/0 = 0"])
+
+    def test_atlas_grid_follows_offset_and_separation_like_godot(self) -> None:
+        # Two 16 pixel cells 2 apart after a 4 pixel margin, one row 16 + 4 + 2 high.
+        content = self._convert(4 + 16 * 2 + 2, 16 + 4 + 2, tile_count=6, out_columns=2,
+                                tilexoff=4, tileyoff=4, tilehsep=2, tilevsep=2)
+
+        self.assertEqual(self._cells(content), ["0:0/0 = 0", "1:0/0 = 0"])
+        self.assertIn("separation = Vector2i(2, 2)", content)
+        self.assertIn("margins = Vector2i(4, 4)", content)
+        self.assertIn("metadata/gamemaker_tileset_source_columns = 2", content)
+
+    def test_sprite_smaller_than_a_tile_has_no_cells(self) -> None:
+        content = self._convert(8, 8, tile_count=4, out_columns=2)
+
+        self.assertEqual(self._cells(content), [])
+
+    def test_unreadable_image_falls_back_to_declared_columns(self) -> None:
+        tileset_dir = os.path.join(self.gm_dir, "tilesets", "ts_ground")
+        os.makedirs(tileset_dir)
+        with open(os.path.join(tileset_dir, "ts_ground.yy"), "w") as stream:
+            stream.write(_make_tileset_yy_content("ts_ground", "s_ground", tile_count=4, out_columns=2))
+        _make_sprite_for_tileset(self.gm_dir, "s_ground")
+        for root, _directories, files in os.walk(os.path.join(self.gm_dir, "sprites")):
+            for name in files:
+                if name.endswith(".png"):
+                    with open(os.path.join(root, name), "wb") as image:
+                        image.write(b"not a png")
+        TileSetConverter(
+            self.gm_dir, self.godot_dir,
+            log_callback=lambda message: self.logs.append(message),
+            progress_callback=lambda value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+        with open(os.path.join(self.godot_dir, "tilesets", "ts_ground", "ts_ground.tres"), encoding="utf-8") as stream:
+            content = stream.read()
+
+        self.assertEqual(self._cells(content), ["0:0/0 = 0", "1:0/0 = 0", "0:1/0 = 0", "1:1/0 = 0"])
+        self.assertNotIn("gamemaker_tileset_source_columns", content)
 
 
 class TestTileSetConverterEmpty(unittest.TestCase):

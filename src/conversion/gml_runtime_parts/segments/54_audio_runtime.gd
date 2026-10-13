@@ -244,9 +244,12 @@ static func gml_audio_sound_get_pitch(sound):
 	return _to_real(_gml_audio_asset_state_for_entry(sound_entry).get("pitch", 1.0))
 
 
+# Only a sound instance has a loop flag: GameMaker ignores a sound asset
+# index here, and changing the flag leaves a paused voice paused.
 static func gml_audio_sound_loop(sound, loop):
-	for entry in _gml_audio_target_entries(sound):
-		entry["loop"] = bool(loop)
+	var entry = _gml_audio_handle_entry(sound)
+	if entry != null:
+		entry["loop"] = gml_bool(loop)
 		_gml_audio_swap_entry_stream(entry)
 	return null
 
@@ -259,21 +262,21 @@ static func _gml_audio_swap_entry_stream(entry):
 	var wanted = _gml_audio_stream_for_playback(base_stream, entry["loop"])
 	if wanted == player.stream:
 		return
-	var was_playing = bool(player.playing)
-	var position = player.get_playback_position() if was_playing else 0.0
+	# A paused player reports playing as false; setting its stream stops it.
+	var was_paused = bool(player.stream_paused)
+	var was_active = bool(player.playing) or was_paused
+	var position = player.get_playback_position() if was_active else 0.0
 	player.stream = wanted
-	if was_playing:
+	if was_active:
 		player.play(position)
+		if was_paused:
+			player.stream_paused = true
 
 
 static func gml_audio_sound_get_loop(sound):
 	var handle_entry = _gml_audio_handle_entry(sound)
 	if handle_entry != null:
 		return bool(handle_entry.get("loop", false))
-	var entries = _gml_audio_target_entries(sound)
-	for entry in entries:
-		if bool(entry.get("loop", false)):
-			return true
 	return false
 
 
@@ -308,18 +311,23 @@ static func gml_audio_channel_num(num_channels):
 
 
 static func gml_audio_master_gain(gain):
-	return gml_audio_set_master_gain(gain)
-
-
-static func gml_audio_set_master_gain(gain):
 	_gml_audio_master_gain = max(_to_real(gain), 0.0)
 	for entry in _gml_audio_instances.values():
 		_gml_audio_apply_entry_volume(entry)
 	return null
 
 
-static func gml_audio_get_master_gain():
-	return _gml_audio_master_gain
+static func gml_audio_set_master_gain(listener_index, gain):
+	# GameMaker only has the main listener 0; other listeners are ignored.
+	if int(_to_real(listener_index)) == 0:
+		gml_audio_master_gain(gain)
+	return null
+
+
+static func gml_audio_get_master_gain(listener_index):
+	if int(_to_real(listener_index)) == 0:
+		return _gml_audio_master_gain
+	return 0.0
 
 
 static func gml_audio_throw_on_error(enable):
@@ -349,6 +357,7 @@ static func gml_audio_emitter_free(emitter):
 		return false
 	var handle = entry["handle"]
 	_gml_audio_emitters.erase(handle.index)
+	_gml_audio_gain_ramps.erase("emitter:" + str(handle.index))
 	gml_handle_invalidate(handle)
 	return true
 
@@ -385,13 +394,14 @@ static func gml_audio_emitter_falloff(emitter, falloff_ref, falloff_max, falloff
 	return null
 
 
-static func gml_audio_emitter_gain(emitter, gain):
+static func gml_audio_emitter_gain(emitter, gain, time = 0):
+	# The emitter fades linearly over `time` milliseconds, like sound gains.
 	var entry = _gml_audio_emitter_entry(emitter)
 	if entry == null:
 		return null
-	entry["gain"] = max(_to_real(gain), 0.0)
-	for sound_entry in _gml_audio_entries_for_emitter(entry["handle"].index):
-		sound_entry["emitter_gain"] = entry["gain"]
+	var emitter_index = entry["handle"].index
+	_gml_audio_gain_ramp_to(entry, "gain", "emitter:" + str(emitter_index), _gml_audio_gain_argument(gain), _gml_audio_fade_time_argument(time))
+	for sound_entry in _gml_audio_entries_for_emitter(emitter_index):
 		_gml_audio_apply_entry_volume(sound_entry)
 	return null
 
@@ -1117,6 +1127,9 @@ static func _gml_audio_apply_entry_volume(entry):
 	var group_state = _gml_audio_group_state.get(str(entry.get("audio_group", "audiogroup_default")), null)
 	if typeof(group_state) == TYPE_DICTIONARY:
 		entry["group_gain"] = group_state["gain"]
+	var emitter_state = _gml_audio_emitters.get(int(entry.get("emitter_index", -1)), null)
+	if typeof(emitter_state) == TYPE_DICTIONARY:
+		entry["emitter_gain"] = emitter_state["gain"]
 	var player = entry["player"]
 	if _gml_audio_player_is_valid(player):
 		player.volume_linear = _gml_audio_final_gain(

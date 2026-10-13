@@ -400,9 +400,10 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
         self.assertGreaterEqual(len(resource_report.resource_paths), 20)
         self.assertEqual(resource_report.output_issues, (), resource_report.output)
 
-        # The matrix deliberately enables two unsupported room behaviors. Boot
-        # the generated main scene and assert those warnings precisely rather
-        # than hiding them or pretending this compatibility fixture is clean.
+        # The matrix deliberately enables an unsupported room behavior (several
+        # active views). Boot the generated main scene and assert that warning
+        # precisely rather than hiding it or pretending this compatibility
+        # fixture is clean.
         boot_report = validate_generated_godot_project(
             os.fspath(destination),
             godot_binary=godot_binary,
@@ -414,16 +415,12 @@ class ResourceMatrixEndToEndTests(unittest.TestCase):
         self.assertEqual(boot_report.boot_returncode, 0, boot_report.output)
         self.assertEqual(
             [issue.severity for issue in boot_report.output_issues],
-            ["warning", "warning"],
+            ["warning"],
             boot_report.output,
         )
         warning_lines = [issue.line for issue in boot_report.output_issues]
         self.assertTrue(
             any("multiple active GameMaker views" in line for line in warning_lines),
-            warning_lines,
-        )
-        self.assertTrue(
-            any("does not preserve full persistent room state" in line for line in warning_lines),
             warning_lines,
         )
 

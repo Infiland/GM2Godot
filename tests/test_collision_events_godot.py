@@ -44,7 +44,20 @@ _OBJECTS: tuple[tuple[str, str | None, bool, dict[str, str]], ...] = (
     ),
     ("o_b", None, False, {"o_a": '\tget_parent().record("b:a", self, other)'}),
     ("o_child", "o_par", False, {"o_a": '\tget_parent().record("child:a", self, other)'}),
-    ("o_wall", None, True, {"o_a": '\tget_parent().record("wall:a", self, other)'}),
+    (
+        "o_wall",
+        None,
+        True,
+        {
+            "o_a": (
+                '\tget_parent().record("wall:a", self, other)\n'
+                '\tif label == "vanishing":\n'
+                "\t\tGMRuntime.gml_instance_destroy(self)\n"
+                '\tif label == "opening":\n'
+                "\t\tsolid = false"
+            ),
+        },
+    ),
     ("o_same", None, False, {"o_same": '\tget_parent().record("same", self, other)'}),
     ("o_c", None, False, {}),
 )
@@ -75,7 +88,6 @@ def _write_objects(project_dir: Path) -> None:
                 parent_object_names=(parent,) if parent else (),
                 solid=solid,
                 inherit_ready=parent is not None,
-                inherit_exit_tree=parent is not None,
             ),
             base_script_path=f"res://objects/{parent}/{parent}.gd" if parent else None,
         )

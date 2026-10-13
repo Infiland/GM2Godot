@@ -71,6 +71,8 @@ from src.conversion.particle_assets import (
     render_particle_system_resource,
 )
 from src.conversion.path_registry import write_path_registry
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
@@ -676,6 +678,8 @@ class AssetRegistryConverter(BaseConverter):
         self._font_atlas_plans: dict[tuple[str, str, str], GameMakerFontAtlasPlan | None] = {}
         self._timeline_action_source_failures: set[tuple[str, str]] = set()
         self._sequence_incomplete_resources: set[tuple[str, str]] = set()
+        self._project_macro_values_cache: dict[str, str] | None = None
+        self._project_enum_values_cache: dict[str, dict[str, int]] | None = None
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
         resources = self._ordered_project_resources()
@@ -2921,6 +2925,22 @@ class AssetRegistryConverter(BaseConverter):
         except (OSError, GMLTranspileError):
             return ()
 
+    def _project_macro_values(self) -> dict[str, str]:
+        if self._project_macro_values_cache is None:
+            self._project_macro_values_cache = collect_project_macro_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._project_macro_values_cache
+
+    def _project_enum_values(self) -> dict[str, dict[str, int]]:
+        if self._project_enum_values_cache is None:
+            self._project_enum_values_cache = collect_project_enum_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._project_enum_values_cache
+
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
         datafiles_source = self._resolve_discovered_project_source(
             os.path.join(self.gm_project_path, "datafiles"),
@@ -3906,6 +3926,7 @@ class AssetRegistryConverter(BaseConverter):
             body = transpile_gml_code(
                 source,
                 asset_names=asset_names,
+                macro_configuration=self.macro_configuration,
                 source_path=gm_source_path,
                 event=f"timeline moment {frame}",
                 preserve_source_comments=True,
@@ -3914,6 +3935,8 @@ class AssetRegistryConverter(BaseConverter):
                 # self and other.
                 other_expression="_gm_instance",
                 instance_target="_gm_instance",
+                enum_values=self._project_enum_values(),
+                macro_values=self._project_macro_values(),
             )
         except GMLTranspileError as exc:
             message = (

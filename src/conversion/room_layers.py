@@ -31,7 +31,10 @@ from src.conversion.room_metadata import (
     room_item_name_value,
     room_object_items,
 )
-from src.conversion.tileset_metadata import select_tileset_room_layout
+from src.conversion.tileset_metadata import (
+    select_tileset_source_columns,
+    tileset_sprite_name,
+)
 from src.conversion.type_defs import LogCallback
 
 KNOWN_LAYER_TYPES = {
@@ -425,7 +428,34 @@ def decode_tile_compressed_data(
     compressed_data: list[JsonValue],
     tile_data_format: int = 1,
 ) -> list[int]:
-    """Expand GameMaker TileCompressedData format 1 into a row-major cell array."""
+    """Expand GameMaker TileCompressedData into a row-major cell array.
+
+    Format 0 stores one raw tile value per cell. Format 1 (2022.8 and later,
+    "TileDataFormat": 1) is a run-length stream of control words:
+
+    * a negative count -n is followed by ONE tile value that repeats n times;
+    * a positive count n is followed by n literal tile values, each one cell.
+
+    The IDE starts a run as soon as two or more equal tiles are adjacent, so a
+    run is never shorter than 2, two literal blocks are never adjacent and
+    adjacent runs never repeat the same value. The empty tile -2147483648 is an
+    ordinary tile value (a run value or a literal), never a count. A tile value
+    keeps its mirror (bit 28), flip (bit 29) and
+    rotate (bit 30) flags, so it can be a large positive number or negative.
+    A zero count is an empty literal block, as in expandTiles; the IDE never
+    writes one. A count that overruns the layer or a block that runs past the
+    end of the data raises ValueError before anything is expanded.
+
+    Checked against rooms saved by the IDE: all 100 distinct format 1 tile
+    layers in 30 room .yy files from 11 public GameMaker projects decode to
+    exactly SerialiseWidth * SerialiseHeight cells with this reading, while
+    the earlier reading (a negative number is a run, every other number is one
+    tile) reached that size only for the 4 layers made of runs alone. The
+    sources are listed in tests/test_rooms.py (TileCompressedDataFormatTests).
+    The same control-word structure is the HTML5 runner's expandTiles
+    (yyRoom.js) and the 2022.8 write-up at
+    https://cookiedraggy.itch.io/kincaid/devlog/436785/weekly-roundup-week-39-mostly-recovered-from-covid
+    """
     if tile_data_format not in (0, 1):
         raise ValueError(f"Unsupported GameMaker tile data format: {tile_data_format}")
     if serialise_width < 0 or serialise_height < 0:
@@ -437,47 +467,52 @@ def decode_tile_compressed_data(
             _require_int(value, "TileCompressedData value")
             for value in compressed_data
         ]
-        if len(decoded) != expected_length:
-            raise ValueError(
-                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                    actual=len(decoded),
-                    expected=expected_length,
-                )
-            )
-        return decoded
+    else:
+        decoded = _expand_tile_runs(compressed_data, expected_length)
 
+    if len(decoded) != expected_length:
+        raise _tile_count_error(len(decoded), expected_length)
+    return decoded
+
+
+def _expand_tile_runs(compressed_data: list[JsonValue], expected_length: int) -> list[int]:
+    """Expand the format 1 control words; never produce more than expected_length cells."""
     decoded: list[int] = []
     index = 0
     while index < len(compressed_data):
-        value = _require_int(compressed_data[index], "TileCompressedData value")
-        if value < 0 and value != GAMEMAKER_EMPTY_TILE_SENTINEL:
-            if index + 1 >= len(compressed_data):
+        count = _require_int(compressed_data[index], "TileCompressedData count")
+        index += 1
+        if count < 0:
+            if index >= len(compressed_data):
                 raise ValueError("Malformed GameMaker tile data: repeated run has no value")
             repeat_value = _require_int(
-                compressed_data[index + 1], "TileCompressedData repeated value"
+                compressed_data[index], "TileCompressedData repeated value"
             )
-            decoded.extend([repeat_value] * -value)
-            index += 2
-        else:
-            decoded.append(value)
             index += 1
+            if len(decoded) - count > expected_length:
+                raise _tile_count_error(len(decoded) - count, expected_length)
+            decoded.extend([repeat_value] * -count)
+            continue
 
-        if len(decoded) > expected_length:
-            raise ValueError(
-                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                    actual=len(decoded),
-                    expected=expected_length,
-                )
-            )
-
-    if len(decoded) != expected_length:
-        raise ValueError(
-            "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                actual=len(decoded),
-                expected=expected_length,
-            )
+        if index + count > len(compressed_data):
+            raise ValueError("Malformed GameMaker tile data: literal run is shorter than its count")
+        if len(decoded) + count > expected_length:
+            raise _tile_count_error(len(decoded) + count, expected_length)
+        decoded.extend(
+            _require_int(value, "TileCompressedData value")
+            for value in compressed_data[index:index + count]
         )
+        index += count
     return decoded
+
+
+def _tile_count_error(actual: int, expected: int) -> ValueError:
+    return ValueError(
+        "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
+            actual=actual,
+            expected=expected,
+        )
+    )
 
 
 def is_empty_gamemaker_tile(raw_value: int) -> bool:
@@ -563,7 +598,7 @@ def _tile_map_layer_lines(
         return []
 
     layout = _tileset_layout(context, tileset_name)
-    columns = _tileset_columns(layout, decoded_tiles)
+    columns = _tileset_columns(context, layout, decoded_tiles)
     cells = _godot_tile_cells(decoded_tiles, width, columns)
     tile_map_data = _format_godot_tile_map_data(cells)
     transform_count = sum(
@@ -625,12 +660,42 @@ def _tileset_layout(
     return data or {}
 
 
-def _tileset_columns(layout: JsonObject, decoded_tiles: list[int]) -> int:
-    selected = select_tileset_room_layout(layout)
-    if selected.columns is not None:
-        return selected.columns
-    max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=1)
-    return max(1, max_index)
+def _tileset_columns(
+    context: RoomLayerSerializationContext,
+    layout: JsonObject,
+    decoded_tiles: list[int],
+) -> int:
+    """Cells per row of the grid the tileset's tile numbers count in.
+
+    GameMaker's tile N is cell N of the tileset's source sprite, counted from
+    0 at the top-left cell, so the converted atlas is laid out in that
+    sprite's own grid (out_columns only describes the compiled texture page).
+    A tileset whose sprite cannot be read gets a single row long enough for
+    every tile the layer uses.
+    """
+    columns = _tileset_source_columns(context, layout)
+    if columns is not None:
+        return columns
+    max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=0)
+    return max(1, max_index + 1)
+
+
+def _tileset_source_columns(
+    context: RoomLayerSerializationContext, layout: JsonObject
+) -> int | None:
+    sprite_name = tileset_sprite_name(layout)
+    if sprite_name is None or context.resource_index is None:
+        return None
+    sprite_path = context.resource_index.resolve_gm_path("sprites", sprite_name)
+    if sprite_path is None:
+        return None
+    sprite = _read_yy_json(sprite_path)
+    if sprite is None:
+        return None
+    width = sprite.get("width")
+    if isinstance(width, bool) or not isinstance(width, (int, float)):
+        return None
+    return select_tileset_source_columns(layout, int(width))
 
 
 def _godot_tile_cells(
@@ -643,7 +708,7 @@ def _godot_tile_cells(
         if is_empty_gamemaker_tile(raw_tile):
             continue
         tile = decode_gamemaker_tile(raw_tile)
-        atlas_index = max(0, tile.tile_index - 1)
+        # Tile N is cell N of the tileset's grid; tile 0 (empty) was skipped.
         alternative_tile = gamemaker_tile_transform_to_godot(
             mirror=tile.mirror,
             flip=tile.flip,
@@ -654,8 +719,8 @@ def _godot_tile_cells(
                 x=index % width,
                 y=index // width,
                 source_id=0,
-                atlas_x=atlas_index % columns,
-                atlas_y=atlas_index // columns,
+                atlas_x=tile.tile_index % columns,
+                atlas_y=tile.tile_index // columns,
                 alternative_tile=alternative_tile,
                 raw_value=raw_tile,
             )

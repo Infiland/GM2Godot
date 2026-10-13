@@ -301,7 +301,7 @@ static func _gml_collision_dispatch_context(instances, table, frame):
 		var pool = []
 		for entry in entries:
 			var inst = entry["instance"]
-			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+			if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 				continue
 			var key = inst.get_instance_id()
 			if allowed != null and not allowed.has(key):
@@ -336,13 +336,13 @@ static func _gml_collision_dispatch_instance(context, first_pool, first_index, t
 		if second_pool == null:
 			continue
 		for second_index in range(second_pool.size()):
-			# Instances destroyed by an earlier event are passed over, and an
-			# instance's state is worked out again after events ran (they may
-			# move or change any instance).
-			if first["entry"]["destroyed"] or not is_instance_valid(first["inst"]):
+			# Instances destroyed or deactivated by an earlier event are passed
+			# over, and an instance's state is worked out again after events
+			# ran (they may move or change any instance).
+			if first["entry"]["destroyed"] or first["entry"]["deactivated"] or not is_instance_valid(first["inst"]):
 				return dispatched
 			var second = second_pool[second_index]
-			if is_same(second, first) or second["entry"]["destroyed"] or not is_instance_valid(second["inst"]):
+			if is_same(second, first) or second["entry"]["destroyed"] or second["entry"]["deactivated"] or not is_instance_valid(second["inst"]):
 				continue
 			# Two instances of the same object are tested once, in list order.
 			if second_index < first_index and second["chain"][0] == first["chain"][0]:
@@ -401,12 +401,19 @@ static func _gml_collision_dispatch_pair(first, first_chain, second, second_chai
 	var dispatched = 0
 	dispatched += _gml_collision_perform_event(first, second, second_chain, frame)
 	dispatched += _gml_collision_perform_event(second, first, first_chain, frame)
-	if solid and _gml_collision_compatibility():
-		# Compatibility mode lets both instances try their motion again and
-		# moves them back only when they still overlap.
+	if not _gml_collision_compatibility():
+		return dispatched
+	# Compatibility mode lets both instances try their motion again when one
+	# of them is solid after the events, and moves them back only when they
+	# still overlap; an instance an event destroyed overlaps nothing.
+	if _gml_collision_instance_solid(first) or _gml_collision_instance_solid(second):
 		_gml_collision_step_by_speed(first)
 		_gml_collision_step_by_speed(second)
-		if _gml_collision_states_collide(_gml_collision_state(first), _gml_collision_state(second), true):
+		if (
+			_gml_collision_instance_live(first)
+			and _gml_collision_instance_live(second)
+			and _gml_collision_states_collide(_gml_collision_state(first), _gml_collision_state(second), true)
+		):
 			_gml_collision_restore_previous_position(first, second)
 			_gml_collision_restore_previous_position(second, first)
 	return dispatched
@@ -681,6 +688,8 @@ static func _gml_collision_find(kind, query, target, current_self, notme, prec, 
 	var hits = []
 	if target == null or is_undefined(target):
 		return hits if every else null
+	if (typeof(target) == TYPE_OBJECT or typeof(target) == TYPE_ARRAY) and _gml_collision_has_tilemap(target):
+		return _gml_collision_find_with_tilemaps(kind, query, target, current_self, notme, prec, every)
 	var bounds = _gml_collision_query_bounds(kind, query)
 	var has_bounds = bounds != null
 	var bounds_left = bounds[0] if has_bounds else 0.0
@@ -940,7 +949,8 @@ static func _gml_collision_hit_distance_less(left, right):
 static func _gml_collision_handle_for_instance(instance):
 	var entry: Variant = _gml_instance_entry(instance)
 	if entry == null:
-		return gml_instance_noone()
+		# A tilemap hit stands for its tilemap element.
+		return _gml_collision_tilemap_handle(instance)
 	return entry["handle"]
 
 

@@ -5,10 +5,12 @@ const GML_RANDOM_UNIT_DENOMINATOR = 4294967296.0
 const GML_MATH_DEFAULT_EPSILON = 0.00001
 const GML_MATH_MINIMUM_EPSILON = 0.00000000001
 const GML_COMPARE_UNORDERED = -2
-# The value of pi, and of pi / 180, that GameMaker's runner uses in
-# point_direction and degtorad.
+# The value of pi, of pi / 180 and of 180 / pi that GameMaker's runner uses
+# in point_direction and lengthdir_*, in degtorad and dsin, dcos and dtan, and
+# in radtodeg and darcsin, darccos, darctan and darctan2.
 const GML_RUNNER_PI = 3.14159265
 const GML_RUNNER_DEGREES_TO_RADIANS = 0.0174532925
+const GML_RUNNER_RADIANS_TO_DEGREES = 57.2957795
 
 static var _gml_random_seed = GML_RANDOM_DEFAULT_SEED
 static var _gml_random_state = GML_RANDOM_DEFAULT_SEED
@@ -20,10 +22,14 @@ static func gml_abs(value):
 		return GMLInt64.new(abs(value.value))
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML abs", value)
-	var real_value = _to_real(value)
 	if typeof(value) == TYPE_INT:
-		return abs(int(real_value))
-	return abs(real_value)
+		# A whole number stays one: a round trip through a real turns
+		# 2^63 - 1 into INT64_MIN, and the magnitude of INT64_MIN is 2^63,
+		# which only a real holds.
+		if value == GML_INT64_MIN:
+			return -float(value)
+		return abs(value)
+	return abs(_to_real(value))
 
 
 static func gml_sign(value):
@@ -40,13 +46,13 @@ static func gml_sign(value):
 static func gml_floor(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML floor", value)
-	return int(floor(_to_real(value)))
+	return _gml_whole_real(floor(_to_real(value)))
 
 
 static func gml_ceil(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML ceil", value)
-	return int(ceil(_to_real(value)))
+	return _gml_whole_real(ceil(_to_real(value)))
 
 
 static func gml_round(value):
@@ -61,7 +67,16 @@ static func gml_round(value):
 	var fraction = real_value - floor_value
 	if fraction > 0.5 or (fraction == 0.5 and fmod(floor_value, 2.0) != 0.0):
 		floor_value += 1.0
-	return int(floor_value)
+	return _gml_whole_real(floor_value)
+
+
+# A whole real (from floor, ceil or round) as an int when a 64-bit integer
+# holds it, else as the real it is: the runner's Math.floor, Math.ceil and
+# round return an infinity, NaN or a value of 2^63 or more unchanged.
+static func _gml_whole_real(value):
+	if absf(value) < 9223372036854775808.0:
+		return int(value)
+	return value
 
 
 static func gml_math_set_epsilon(value):
@@ -92,8 +107,10 @@ static func _gml_compare_reals(left_value, right_value):
 static func gml_frac(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML frac", value)
+	# The runner's frac is x - ~~x. The truncation stays a real (an int
+	# overflows past 2^63), and an infinity truncates to 0, as ~~ does.
 	var real_value = _to_real(value)
-	return real_value - int(real_value)
+	return real_value - _gml_truncate_real(real_value)
 
 
 static func gml_sqr(value):
@@ -188,11 +205,29 @@ static func gml_tan(value):
 
 
 static func gml_arcsin(value):
-	return asin(_gml_math_real("GML arcsin", value))
+	var real_value = _gml_unit_range_real("arcsin", value)
+	return asin(real_value) if typeof(real_value) == TYPE_FLOAT else real_value
 
 
 static func gml_arccos(value):
-	return acos(_gml_math_real("GML arccos", value))
+	var real_value = _gml_unit_range_real("arccos", value)
+	return acos(real_value) if typeof(real_value) == TYPE_FLOAT else real_value
+
+
+# The runner's arcsin and arccos take a value within the comparison epsilon
+# (math_set_epsilon) of -1 or 1 as exactly that and raise an error for any
+# other value outside [-1, 1] (Function_Maths.js).
+static func _gml_unit_range_real(api_name, value):
+	var real_value = _gml_math_real("GML " + api_name, value)
+	if typeof(real_value) != TYPE_FLOAT:
+		return real_value
+	if absf(real_value + 1.0) <= _gml_math_epsilon:
+		return -1.0
+	if absf(real_value - 1.0) <= _gml_math_epsilon:
+		return 1.0
+	if real_value < -1.0 or real_value > 1.0:
+		return gml_error("Value " + gml_string(real_value) + " is not within valid range [-1.0, 1.0]: " + api_name + "()")
+	return real_value
 
 
 static func gml_arctan(value):
@@ -206,33 +241,35 @@ static func gml_arctan2(y, x):
 
 
 static func gml_dsin(value):
-	return sin(deg_to_rad(_gml_math_real("GML dsin", value)))
+	return sin(_gml_math_real("GML dsin", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_dcos(value):
-	return cos(deg_to_rad(_gml_math_real("GML dcos", value)))
+	return cos(_gml_math_real("GML dcos", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_dtan(value):
-	return tan(deg_to_rad(_gml_math_real("GML dtan", value)))
+	return tan(_gml_math_real("GML dtan", value) * GML_RUNNER_DEGREES_TO_RADIANS)
 
 
 static func gml_darcsin(value):
-	return rad_to_deg(asin(_gml_math_real("GML darcsin", value)))
+	var radians = gml_arcsin(value)
+	return radians * GML_RUNNER_RADIANS_TO_DEGREES if typeof(radians) == TYPE_FLOAT else radians
 
 
 static func gml_darccos(value):
-	return rad_to_deg(acos(_gml_math_real("GML darccos", value)))
+	var radians = gml_arccos(value)
+	return radians * GML_RUNNER_RADIANS_TO_DEGREES if typeof(radians) == TYPE_FLOAT else radians
 
 
 static func gml_darctan(value):
-	return rad_to_deg(atan(_gml_math_real("GML darctan", value)))
+	return atan(_gml_math_real("GML darctan", value)) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_darctan2(y, x):
 	if not _is_real_convertible(y) or not _is_real_convertible(x):
 		return gml_error("GML darctan2 requires real-convertible arguments")
-	return rad_to_deg(atan2(_to_real(y), _to_real(x)))
+	return atan2(_to_real(y), _to_real(x)) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_degtorad(value):
@@ -243,7 +280,7 @@ static func gml_degtorad(value):
 
 
 static func gml_radtodeg(value):
-	return rad_to_deg(_gml_math_real("GML radtodeg", value))
+	return _gml_math_real("GML radtodeg", value) * GML_RUNNER_RADIANS_TO_DEGREES
 
 
 static func gml_point_distance(x1, y1, x2, y2):
@@ -265,7 +302,8 @@ static func gml_point_direction(x1, y1, x2, y2):
 		return gml_error("GML point_direction requires real-convertible arguments")
 	# GameMaker's point_direction: a vertical vector points exactly up (90)
 	# or down (270), no vector gives 0, and other angles are rounded to six
-	# decimals (computed with the runner's value of pi).
+	# decimals (computed with the runner's value of pi) through a 32-bit
+	# integer, as the runner's ~~round(dd * 1000000) does.
 	var dx = _to_real(x2) - _to_real(x1)
 	var dy = _to_real(y2) - _to_real(y1)
 	if dx == 0.0:
@@ -274,22 +312,31 @@ static func gml_point_direction(x1, y1, x2, y2):
 		if dy < 0.0:
 			return 90.0
 		return 0.0
-	var degrees = _gml_collision_round(180.0 * atan2(dy, dx) / GML_RUNNER_PI * 1000000.0) / 1000000.0
-	# (0.0 - degrees rather than -degrees: a vector straight right gives 0,
-	# not -0.)
-	return 0.0 - degrees if degrees <= 0.0 else 360.0 - degrees
+	var degrees = float(_gml_runner_int32(_gml_collision_round(180.0 * atan2(dy, dx) / GML_RUNNER_PI * 1000000.0))) / 1000000.0
+	# (The runner returns -dd, so a vector straight right gives -0.)
+	return -degrees if degrees <= 0.0 else 360.0 - degrees
 
 
 static func gml_lengthdir_x(length, direction):
 	if not _is_real_convertible(length) or not _is_real_convertible(direction):
 		return gml_error("GML lengthdir_x requires real-convertible arguments")
-	return _to_real(length) * cos(deg_to_rad(_to_real(direction)))
+	return _gml_lengthdir_snap(_to_real(length) * cos(_to_real(direction) * GML_RUNNER_PI / 180.0))
 
 
 static func gml_lengthdir_y(length, direction):
 	if not _is_real_convertible(length) or not _is_real_convertible(direction):
 		return gml_error("GML lengthdir_y requires real-convertible arguments")
-	return -_to_real(length) * sin(deg_to_rad(_to_real(direction)))
+	return _gml_lengthdir_snap(-(_to_real(length) * sin(_to_real(direction) * GML_RUNNER_PI / 180.0)))
+
+
+# The runner's lengthdir_x and lengthdir_y (computed with its value of pi)
+# return Math.round(value) when the value is within 0.0001 of it. Math.round
+# rounds halves up and gives -0 for values from -0.5 to -0.
+static func _gml_lengthdir_snap(value):
+	var nearest = floor(value + 0.5)
+	if absf(value - nearest) < 0.0001:
+		return nearest if nearest != 0.0 else value * 0.0
+	return value
 
 
 # GameMaker colours are 0xBBGGRR integers. The colour functions follow the

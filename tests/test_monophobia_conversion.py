@@ -142,8 +142,8 @@ class TestMonophobiaConversion(unittest.TestCase):
 
         self.assertIn('"name": "loadending"', registry)
         self.assertIn('"name": "saveending"', registry)
-        self.assertIn("gm2godot_callable_loadending()", registry)
-        self.assertIn("gm2godot_scoped_callable_saveending()", registry)
+        self.assertIn('"gm2godot_callable_loadending"', registry)
+        self.assertIn('"gm2godot_scoped_callable_saveending"', registry)
         self.assertIn("func _gm_script_call_loadending():", ending_script)
         self.assertIn("func _gm_script_call_saveending():", ending_script)
 

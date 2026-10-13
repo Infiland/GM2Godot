@@ -58,6 +58,7 @@ GMLFunctionLoweringKind: TypeAlias = Literal[
     "runtime_path_api",
     "runtime_path_asset_api",
     "runtime_platform_service_api",
+    "runtime_prepend_self",
     "runtime_room_api",
     "runtime_sequence_api",
     "runtime_self_default",
@@ -213,8 +214,9 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_shuffle": (1, 1),
     "array_copy": (5, 5),
     "array_concat": (2, 2),
-    "array_contains": (2, 2),
-    "array_find_index": (2, 2),
+    "array_contains": (2, 4),
+    "array_get_index": (2, 4),
+    "array_find_index": (2, 4),
     "array_foreach": (2, 4),
     "array_filter": (2, 2),
     "array_map": (2, 2),
@@ -472,9 +474,9 @@ _ASSET_ARITY: dict[str, tuple[int, int | None]] = {
 }
 
 _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
-    "instance_create_layer": (4, 4),
-    "instance_create_depth": (4, 4),
-    "instance_destroy": (0, 1),
+    "instance_create_layer": (4, 5),
+    "instance_create_depth": (4, 5),
+    "instance_destroy": (0, 2),
     "instance_exists": (1, 1),
     "instance_find": (2, 2),
     "instance_number": (1, 1),
@@ -482,6 +484,21 @@ _INSTANCE_ARITY: dict[str, tuple[int, int | None]] = {
     "instance_furthest": (3, 3),
     "instance_id_get": (1, 1),
     "instance_change": (2, 2),
+    "instance_deactivate_all": (1, 2),
+    "instance_deactivate_object": (1, 2),
+    "instance_deactivate_region": (6, 7),
+    "instance_deactivate_layer": (1, 1),
+    "instance_activate_all": (0, 1),
+    "instance_activate_object": (1, 2),
+    "instance_activate_region": (5, 6),
+    "instance_activate_layer": (1, 1),
+}
+
+# Instance functions whose runtime helper takes the calling instance first
+# (notme refers to it).
+_INSTANCE_LOWERING_KINDS: dict[str, GMLFunctionLoweringKind] = {
+    "instance_deactivate_all": "runtime_prepend_self",
+    "instance_deactivate_region": "runtime_prepend_self",
 }
 
 _COLLISION_ARITY: dict[str, tuple[int, int | None]] = {
@@ -522,12 +539,49 @@ _MOTION_ARITY: dict[str, tuple[int, int | None]] = {
     "move_snap": (2, 2),
     "move_wrap": (3, 3),
     "place_snapped": (2, 2),
+    "move_and_collide": (3, 8),
+    "mp_linear_step": (4, 4),
+    "mp_linear_step_object": (4, 4),
+    "mp_potential_step": (4, 4),
+    "mp_potential_step_object": (4, 4),
+    "mp_potential_settings": (4, 4),
 }
 
 _PATH_ARITY: dict[str, tuple[int, int | None]] = {
     "path_start": (4, 4),
     "path_end": (0, 0),
+    "path_exists": (1, 1),
+    "path_get_name": (1, 1),
     "path_get_length": (1, 1),
+    "path_get_kind": (1, 1),
+    "path_get_closed": (1, 1),
+    "path_get_precision": (1, 1),
+    "path_get_number": (1, 1),
+    "path_get_point_x": (2, 2),
+    "path_get_point_y": (2, 2),
+    "path_get_point_speed": (2, 2),
+    "path_get_x": (2, 2),
+    "path_get_y": (2, 2),
+    "path_get_speed": (2, 2),
+    "path_add": (0, 0),
+    "path_delete": (1, 1),
+    "path_duplicate": (1, 1),
+    "path_assign": (2, 2),
+    "path_append": (2, 2),
+    "path_add_point": (4, 4),
+    "path_insert_point": (5, 5),
+    "path_change_point": (5, 5),
+    "path_delete_point": (2, 2),
+    "path_clear_points": (1, 1),
+    "path_set_kind": (2, 2),
+    "path_set_closed": (2, 2),
+    "path_set_precision": (2, 2),
+    "path_shift": (3, 3),
+    "path_rescale": (3, 3),
+    "path_rotate": (2, 2),
+    "path_reverse": (1, 1),
+    "path_flip": (1, 1),
+    "path_mirror": (1, 1),
 }
 
 _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
@@ -538,6 +592,7 @@ _MP_GRID_ARITY: dict[str, tuple[int, int | None]] = {
     "mp_grid_clear_cell": (3, 3),
     "mp_grid_add_rectangle": (5, 5),
     "mp_grid_path": (7, 7),
+    "mp_grid_add_instances": (3, 3),
 }
 
 _INPUT_ARITY: dict[str, tuple[int, int | None]] = {
@@ -550,6 +605,8 @@ _INPUT_ARITY: dict[str, tuple[int, int | None]] = {
     "mouse_check_button": (1, 1),
     "mouse_check_button_pressed": (1, 1),
     "mouse_check_button_released": (1, 1),
+    "mouse_clear": (1, 1),
+    "io_clear": (0, 0),
     "display_mouse_get_x": (0, 0),
     "display_mouse_get_y": (0, 0),
     "display_mouse_set": (2, 2),
@@ -598,8 +655,8 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
     "audio_sound_get_asset": (1, 1),
     "audio_channel_num": (1, 1),
     "audio_master_gain": (1, 1),
-    "audio_set_master_gain": (1, 1),
-    "audio_get_master_gain": (0, 0),
+    "audio_set_master_gain": (2, 2),
+    "audio_get_master_gain": (1, 1),
     "audio_throw_on_error": (1, 1),
     "audio_emitter_create": (0, 0),
     "audio_emitter_exists": (1, 1),
@@ -607,7 +664,7 @@ _AUDIO_ARITY: dict[str, tuple[int, int | None]] = {
     "audio_emitter_position": (4, 4),
     "audio_emitter_velocity": (4, 4),
     "audio_emitter_falloff": (4, 4),
-    "audio_emitter_gain": (2, 2),
+    "audio_emitter_gain": (2, 3),
     "audio_emitter_get_gain": (1, 1),
     "audio_emitter_pitch": (2, 2),
     "audio_emitter_get_pitch": (1, 1),
@@ -733,17 +790,26 @@ _DS_COLLECTIONS_ARITY: dict[str, tuple[int, int | None]] = {
 _TIME_ARITY: dict[str, tuple[int, int | None]] = {
     "alarm_get": (1, 1),
     "alarm_set": (2, 2),
+    "get_timer": (0, 0),
     "time_source_create": (4, 7),
     "time_source_start": (1, 1),
     "time_source_stop": (1, 1),
     "time_source_pause": (1, 1),
     "time_source_resume": (1, 1),
-    "time_source_destroy": (1, 1),
+    "time_source_destroy": (1, 2),
     "time_source_get_state": (1, 1),
     "time_source_get_period": (1, 1),
     "time_source_get_reps_completed": (1, 1),
     "time_source_get_reps_remaining": (1, 1),
     "time_source_get_time_remaining": (1, 1),
+    "time_source_get_units": (1, 1),
+    "time_source_get_parent": (1, 1),
+    "time_source_get_children": (1, 1),
+    "time_source_exists": (1, 1),
+    "time_source_reset": (1, 1),
+    "time_source_reconfigure": (4, 7),
+    "time_bpm_to_seconds": (1, 1),
+    "time_seconds_to_bpm": (1, 1),
     "call_later": (3, 4),
     "call_cancel": (1, 1),
 }
@@ -754,6 +820,7 @@ _ROOM_ARITY: dict[str, tuple[int, int | None]] = {
     "room_goto_previous": (0, 0),
     "room_restart": (0, 0),
     "game_set_speed": (2, 2),
+    "game_get_speed": (1, 1),
     "game_restart": (0, 0),
     "game_end": (0, 0),
     "room_exists": (1, 1),
@@ -1500,7 +1567,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "array_push":
             lowering_kind = "runtime_variadic_1"
-        elif name == "array_foreach":
+        elif name in {"array_foreach", "array_find_index"}:
             lowering_kind = "runtime_array_foreach"
         elif name == "array_sort":
             lowering_kind = "runtime_array_sort"
@@ -1557,7 +1624,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
 
     for name, target in INSTANCE_RUNTIME_FUNCTIONS.items():
         min_args, max_args = _INSTANCE_ARITY[name]
-        lowering_kind: GMLFunctionLoweringKind = "runtime_instance_api"
+        lowering_kind: GMLFunctionLoweringKind = _INSTANCE_LOWERING_KINDS.get(name, "runtime_instance_api")
         if name in ("instance_create_layer", "instance_create_depth", "instance_change"):
             lowering_kind = "runtime_append_self"
         elif name == "instance_destroy":
@@ -1577,7 +1644,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name in ("path_start", "path_end"):
             lowering_kind = "runtime_path_api"
-        elif name == "path_get_length":
+        else:
             lowering_kind = "runtime_path_asset_api"
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
@@ -1657,6 +1724,9 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         descriptors[name] = _descriptor(name, min_args, max_args, lowering_kind, target)
 
     descriptors["method"] = _descriptor("method", 2, 2, "method", "gml_method")
+    # Events run at once with the caller's self and other.
+    descriptors["event_user"] = _descriptor("event_user", 1, 1, "runtime_call_scope", "gml_event_user")
+    descriptors["event_perform"] = _descriptor("event_perform", 2, 2, "runtime_call_scope", "gml_event_perform")
     descriptors["with_targets"] = _descriptor(
         "with_targets",
         1,

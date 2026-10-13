@@ -336,9 +336,32 @@ static func _gml_instance_change_apply(inst, entry, op):
 	for i in range(_gml_step_entries.size()):
 		if is_same(_gml_step_entries[i], entry):
 			_gml_step_infos[i] = _gml_step_script_info(inst)
+			_gml_instance_change_step_methods(i, inst)
 	_gml_input_live_table_mark = -1
 	if op["perf"]:
 		_gml_instance_change_create(inst)
+
+
+# The step list keeps, by event method, the positions of the instances that
+# have it. The instance at a position has other methods now: the lists that
+# differ are replaced by an updated copy (a dispatch that runs one is still
+# going through the old one).
+static func _gml_instance_change_step_methods(position, inst):
+	var info = _gml_step_infos[position]
+	for method_name in _gml_step_method_positions.keys():
+		var positions = _gml_step_method_positions[method_name]
+		var at = positions.bsearch(position)
+		var listed = at < positions.size() and positions[at] == position
+		var has_method = _gml_step_has_method(info, inst, method_name)
+		if listed == has_method:
+			continue
+		positions = positions.duplicate()
+		if has_method:
+			positions.insert(at, position)
+		else:
+			positions.remove_at(at)
+		_gml_step_method_positions[method_name] = positions
+		_gml_step_positions_version += 1
 
 
 # The new object's object_index, parents, solid and persistent flags and
@@ -394,6 +417,7 @@ static func _gml_instance_change_reindex(entry, object_selector, parent_selector
 	if entry["collision_tracked"]:
 		inst.set_notify_local_transform(true)
 	_gml_collision_register_instance_events(inst, chain)
+	_gml_window_events_register_instance(inst)
 
 
 static func _gml_instance_change_index_insert(index_map, selector, entry):
@@ -504,16 +528,10 @@ static func _gml_instance_change_event(inst, method_name):
 
 
 static func _gml_instance_change_clean_up(inst):
-	# The Clean Up event is the object's _exit_tree, which also unregisters
-	# the instance unless the instance is only leaving the tree for a while;
-	# here it stays registered.
-	if not inst.has_method("_exit_tree"):
-		return
-	var preserving = inst.get_meta("_gm2godot_room_preserving_persistent", false)
-	inst.set_meta("_gm2godot_room_preserving_persistent", true)
-	_gml_instance_change_event(inst, "_exit_tree")
-	if is_instance_valid(inst):
-		inst.set_meta("_gm2godot_room_preserving_persistent", preserving)
+	# The Clean Up event runs for every change with perf, whatever object the
+	# instance has, and once more when the instance is destroyed (so the
+	# instance's cleaned_up flag stays as it is).
+	_gml_instance_change_event(inst, "_on_clean_up")
 
 
 # The draw pipeline hides the sprite node of an instance with a Draw event; a

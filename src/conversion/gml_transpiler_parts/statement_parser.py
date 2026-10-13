@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Final, Iterable, Mapping, MutableMapping, MutableSet
 
-from .constants import BINARY_PRECEDENCE, EOF
+from .constants import ASSIGNMENT_OPERATORS, BINARY_PRECEDENCE, EOF
 from .expression_api import (
     emit_instance_keyword_argument,
     evaluate_enum_value_tokens,
@@ -25,6 +26,13 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
+from .statement_boundaries import (
+    matching_close_index,
+    scan_expression_end,
+    scan_statement_end,
+    skip_newline_tokens,
+)
+from .statement_macros import expand_statement_macros, macro_tokens_at
 from .statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
@@ -39,6 +47,7 @@ from .utils import (
     indent_lines,
     insert_lines_before_continue,
     insert_until_check_before_continue,
+    int64_literal_source,
     macro_configuration_matches,
     normalize_scope_context,
     scope_context_with_global_names,
@@ -102,6 +111,13 @@ class _StatementParser:
         control_flow_capture: ControlFlowCapture | None = None,
         instance_change_continuations: bool = False,
     ) -> None:
+        # Macros whose value is statements are spliced in before anything
+        # reads the tokens, so their var declarations are hoisted like any
+        # other.
+        tokens = expand_statement_macros(
+            tokens,
+            {**_source_macro_values(tokens, macro_configuration), **(macro_values or {})},
+        )
         self.tokens = tokens
         self.position = 0
         initial_local_names = set(local_names or [])
@@ -189,6 +205,7 @@ class _StatementParser:
         return lines
 
     def _parse_statement(self) -> list[str]:
+        self._expand_statement_start_macro()
         if self._check_directive("#macro"):
             return self._parse_macro_statement()
         if self._check_identifier("globalvar"):
@@ -222,9 +239,15 @@ class _StatementParser:
         return self._parse_simple_statement()
 
     def _parse_simple_statement(self) -> list[str]:
+        declared_function = _named_function_declaration_name(self.tokens, self.position)
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []
+        if declared_function is not None:
+            statement_tokens = _function_declaration_as_assignment(
+                declared_function,
+                statement_tokens,
+            )
         continuation_lines = self._parse_instance_change_continuation(statement_tokens)
         if continuation_lines is not None:
             return continuation_lines
@@ -245,6 +268,33 @@ class _StatementParser:
             generated_counter=self.generated_counter,
             control_flow_capture=self.control_flow_capture,
         )
+
+    def _expand_statement_start_macro(self) -> None:
+        # A macro is text substitution, so one used as a statement runs its
+        # value as that statement: with #macro M x = 5, M; assigns x. (A
+        # write to the macro itself is left to report the constant.)
+        expanded: set[str] = set()
+        token = self._peek()
+        while (
+            token.kind == "IDENT"
+            and token.value in self.macro_values
+            and token.value not in expanded
+            and not self._macro_is_written(self.position)
+        ):
+            expanded.add(token.value)
+            self.tokens = [
+                *self.tokens[:self.position],
+                *macro_tokens_at(self.macro_values[token.value], token),
+                *self.tokens[self.position + 1:],
+            ]
+            token = self._peek()
+
+    def _macro_is_written(self, index: int) -> bool:
+        next_index = skip_newline_tokens(self.tokens, index + 1)
+        if next_index >= len(self.tokens):
+            return False
+        next_token = self.tokens[next_index]
+        return next_token.kind == "OP" and (next_token.value in ASSIGNMENT_OPERATORS or next_token.value in ("++", "--"))
 
     def _parse_macro_statement(self) -> list[str]:
         self._consume_directive("#macro")
@@ -322,7 +372,7 @@ class _StatementParser:
             else:
                 enum_value = next_integer_value
                 next_integer_value += 1
-            value = str(enum_value)
+            value = int64_literal_source(enum_value)
             current_enum_values[member_name] = enum_value
             members.append((member_name, value))
 
@@ -339,6 +389,10 @@ class _StatementParser:
         condition_tokens = self._read_condition_tokens()
         if not condition_tokens:
             raise GMLTranspileError("Expected if condition")
+        # if <condition> then <statement> (manual: If Else and Conditional
+        # Operators).
+        self._skip_newlines()
+        self._match_identifier("then")
 
         condition = transpile_gml_condition(
             tokens_to_source(condition_tokens),
@@ -476,6 +530,10 @@ class _StatementParser:
         self._consume("(")
         header_tokens = self._read_balanced_tokens("(", ")")
         header_parts = split_top_level_tokens(header_tokens, ";")
+        if len(header_parts) == 4 and all(token.kind == "NEWLINE" for token in header_parts[3]):
+            # The operation may end with a semicolon: the manual's form is
+            # for (<assignment>; <expression>; <operation>;).
+            header_parts = header_parts[:3]
         if len(header_parts) != 3:
             raise GMLTranspileError("Expected for initializer, condition, and operation clauses")
 
@@ -580,8 +638,7 @@ class _StatementParser:
         body_lines = insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
         lines.extend(indent_lines(body_lines or ["pass"]))
-        lines.append(f"\tif {condition}:")
-        lines.append("\t\tbreak")
+        lines.extend(indent_lines([f"if {condition}:", "\tbreak"]))
         return lines
 
     def _parse_switch_statement(self) -> list[str]:
@@ -626,15 +683,21 @@ class _StatementParser:
         ])
         for section_kind, section_value, section_lines in sections:
             if section_kind == "case":
-                lines.append(
-                    f"\tif not {switch_matched} and GMRuntime.gml_eq({switch_value}, {section_value}):"
+                section_test = (
+                    f"if not {switch_matched} and "
+                    f"GMRuntime.gml_eq({switch_value}, {section_value}):"
                 )
-                lines.append(f"\t\t{switch_matched} = true")
             else:
-                lines.append(f"\tif not {switch_matched} and not {switch_has_case}:")
-                lines.append(f"\t\t{switch_matched} = true")
-
-            lines.append(f"\tif {switch_matched}:")
+                section_test = f"if not {switch_matched} and not {switch_has_case}:"
+            lines.extend(
+                indent_lines(
+                    [
+                        section_test,
+                        f"\t{switch_matched} = true",
+                        f"if {switch_matched}:",
+                    ]
+                )
+            )
             lines.extend(indent_lines(indent_lines(section_lines or ["pass"])))
         lines.append("\tbreak")
         if switch_capture is not None:
@@ -811,7 +874,7 @@ class _StatementParser:
                 f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
                 f"\t{control_name} = GMRuntime.gml_undefined()",
                 "\twhile true:",
-                *[f"\t\t{line}" if line else "" for line in (catch_lines or ["pass"])],
+                *indent_lines(indent_lines(catch_lines or ["pass"])),
                 "\t\tbreak",
             ])
 
@@ -1041,6 +1104,16 @@ class _StatementParser:
         return expanded
 
     def _read_condition_tokens(self) -> list[_Token]:
+        # The condition is one expression, with or without parentheses; the
+        # body may follow on the same line.
+        start = skip_newline_tokens(self.tokens, self.position)
+        end = scan_expression_end(self.tokens, start)
+        if end is not None:
+            self.position = end
+            tokens = [token for token in self.tokens[start:end] if token.kind != "NEWLINE"]
+            if tokens[0].value == "(" and matching_close_index(tokens, 0) == len(tokens) - 1:
+                return tokens[1:-1]
+            return tokens
         if self._check("("):
             condition_start = self.position
             self._advance()
@@ -1141,6 +1214,14 @@ class _StatementParser:
         raise self._error(f"Expected '{closer}'")
 
     def _read_simple_statement(self) -> list[_Token]:
+        # A statement ends where its expression ends: it may share a line
+        # with the next statement, and line breaks inside it are white space.
+        end = scan_statement_end(self.tokens, self.position)
+        if end is not None:
+            statement_tokens = [token for token in self.tokens[self.position:end] if token.kind != "NEWLINE"]
+            self.position = end
+            self._match(";")
+            return statement_tokens
         tokens: list[_Token] = []
         depth = 0
         while not self._at_end():
@@ -1305,9 +1386,19 @@ def _continuation_lines(continuation: _InstanceChangeContinuation) -> list[str]:
     return lines
 
 
+# The temporaries counter of the statements being parsed. Statements parsed
+# while it is set are a method's body written in them, which becomes a GDScript
+# lambda inside them; redeclaring a name already in scope there is a parse
+# error, so the method numbers its temporaries (switch, try, with, repeat...)
+# from the same counter.
+_ACTIVE_GENERATED_COUNTER: ContextVar[list[int] | None] = ContextVar(
+    "gml_active_generated_counter", default=None
+)
+
+
 def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     parser = _StatementParser(
-        list(request.tokens),
+        _hoist_function_declarations(list(request.tokens)),
         local_names=request.local_names,
         instance_variables=request.instance_variables,
         return_depth=request.return_depth,
@@ -1325,8 +1416,13 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
         instance_change_continuations=request.instance_change_continuations,
+        generated_counter=_ACTIVE_GENERATED_COUNTER.get(),
     )
-    lines = parser.parse()
+    active_counter = _ACTIVE_GENERATED_COUNTER.set(parser.generated_counter)
+    try:
+        lines = parser.parse()
+    finally:
+        _ACTIVE_GENERATED_COUNTER.reset(active_counter)
     return GMLStatementResult(
         lines=tuple(lines),
         continued_instance_changes=tuple(parser.continued_instance_changes),
@@ -1339,6 +1435,155 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     )
 
 
+# A named function declaration (function name(...) {...}) in event, method,
+# constructor or script-function code is a method variable of the instance or
+# struct running that code, bound to it, as if it were written name =
+# function(...) {...} (manual: GML Overview > Script Functions And Variables,
+# Method Variables: "Defining a function in an Object's event using either
+# syntax will make the function only available in the context of its
+# instance"). GameMaker has the function available throughout the body, even
+# before its line runs, so the declarations at the top of a body are moved to
+# its start.
+_EXPRESSION_KEYWORDS = frozenset({
+    "and",
+    "case",
+    "delete",
+    "div",
+    "do",
+    "else",
+    "in",
+    "mod",
+    "new",
+    "not",
+    "or",
+    "return",
+    "then",
+    "throw",
+    "xor",
+})
+_OPENING_BRACKETS = frozenset({"(", "[", "{"})
+_CLOSING_BRACKETS = frozenset({")", "]", "}"})
+
+
+def _named_function_declaration_name(tokens: list[_Token], index: int) -> str | None:
+    if index >= len(tokens) or tokens[index].kind != "IDENT" or tokens[index].value != "function":
+        return None
+    name_index = skip_newline_tokens(tokens, index + 1)
+    if (
+        name_index >= len(tokens)
+        or tokens[name_index].kind != "IDENT"
+        or tokens[name_index].value == "constructor"
+    ):
+        return None
+    parameters_index = skip_newline_tokens(tokens, name_index + 1)
+    if parameters_index >= len(tokens) or tokens[parameters_index].value != "(":
+        return None
+    return tokens[name_index].value
+
+
+def _function_declaration_as_assignment(name: str, statement_tokens: list[_Token]) -> list[_Token]:
+    first = statement_tokens[0]
+    return [
+        _Token("IDENT", name, line=first.line, column=first.column, index=first.index),
+        _Token("OP", "=", line=first.line, column=first.column, index=first.index),
+        *statement_tokens,
+    ]
+
+
+def _starts_statement(tokens: list[_Token], index: int) -> bool:
+    previous = index - 1
+    crossed_line_break = False
+    while previous >= 0 and tokens[previous].kind == "NEWLINE":
+        previous -= 1
+        crossed_line_break = True
+    if previous < 0:
+        return True
+    token = tokens[previous]
+    if token.value in (";", "}"):
+        return True
+    if not crossed_line_break:
+        return False
+    # Line breaks are white space, but a function declaration cannot continue
+    # an expression: after anything that can end one, it starts a statement.
+    if token.kind == "IDENT":
+        return token.value not in _EXPRESSION_KEYWORDS
+    return token.kind in ("NUMBER", "STRING", "VERBATIM_STRING", "TEMPLATE_STRING") or token.value in (")", "]")
+
+
+def _hoist_function_declarations(tokens: list[_Token]) -> list[_Token]:
+    spans: list[tuple[int, int]] = []
+    depth = 0
+    in_directive = False
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "DIRECTIVE":
+            in_directive = True
+        elif token.kind == "NEWLINE":
+            in_directive = False
+        elif token.kind == "OP" and token.value in _OPENING_BRACKETS:
+            depth += 1
+        elif token.kind == "OP" and token.value in _CLOSING_BRACKETS:
+            depth = max(0, depth - 1)
+        elif (
+            depth == 0
+            and not in_directive
+            and _named_function_declaration_name(tokens, index) is not None
+            and _starts_statement(tokens, index)
+        ):
+            end = scan_statement_end(tokens, index)
+            if end is not None and end > index:
+                spans.append((index, end))
+                index = end
+                continue
+        index += 1
+    if not spans:
+        return tokens
+    hoisted: list[_Token] = []
+    remaining: list[_Token] = []
+    cursor = 0
+    for start, end in spans:
+        remaining.extend(tokens[cursor:start])
+        hoisted.extend(tokens[start:end])
+        hoisted.append(_Token("OP", ";", line=tokens[end - 1].line, column=tokens[end - 1].column, index=tokens[end - 1].index))
+        cursor = end
+    remaining.extend(tokens[cursor:])
+    return [*hoisted, *remaining]
+
+
+def _source_macro_values(tokens: list[_Token], macro_configuration: str | None) -> dict[str, str]:
+    # The #macro definitions in these tokens; one for the active
+    # configuration replaces the plain one.
+    values: dict[str, str] = {}
+    configured: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        if tokens[index].kind != "DIRECTIVE" or tokens[index].value != "#macro":
+            index += 1
+            continue
+        end = index + 1
+        while end < len(tokens) and tokens[end].kind not in ("NEWLINE", "EOF"):
+            end += 1
+        definition = tokens[index + 1:end]
+        index = end
+        if len(definition) >= 3 and definition[1].value == ":":
+            configuration, name, value_tokens = definition[0].value, definition[2].value, definition[3:]
+            if not macro_configuration_matches(configuration, macro_configuration):
+                continue
+            configured.add(name)
+        elif definition and definition[0].kind == "IDENT":
+            name, value_tokens = definition[0].value, definition[1:]
+            if name in configured:
+                continue
+        else:
+            continue
+        if value_tokens:
+            values[name] = tokens_to_source(value_tokens)
+    return values
+
+
 def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
     names: list[str] = []
     seen: set[str] = set()
@@ -1349,6 +1594,11 @@ def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
         token = tokens[index]
         if token.kind == "EOF":
             break
+        if token.kind == "DIRECTIVE" and token.value == "#macro":
+            # A macro's value declares its locals where the macro is used.
+            while index < len(tokens) and tokens[index].kind not in ("NEWLINE", "EOF"):
+                index += 1
+            continue
         if token.kind == "IDENT" and token.value == "function":
             index = _skip_function_literal(tokens, index)
             continue

@@ -32,6 +32,13 @@ static func _gml_shutdown_detach_method(method, pending, seen_objects):
 	method.callable_owner = null
 
 
+# Whether a value met at shutdown is a method. GML data can hold freed nodes
+# (a destroyed instance's id keeps its node, a stored self), which "is" must
+# not test.
+static func _gml_shutdown_is_method(value):
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLMethod
+
+
 static func _gml_shutdown_detach_methods(roots):
 	# Use an explicit worklist to remain stack-safe for deeply nested GML data.
 	# The identity list keeps cyclic Array/Dictionary graphs finite without
@@ -43,6 +50,8 @@ static func _gml_shutdown_detach_methods(roots):
 	var seen_objects = {}
 	while not pending.is_empty():
 		var value = pending.pop_back()
+		if typeof(value) == TYPE_OBJECT and not is_instance_valid(value):
+			continue
 		if value is GMLMethod:
 			_gml_shutdown_detach_method(value, pending, seen_objects)
 			continue
@@ -51,7 +60,7 @@ static func _gml_shutdown_detach_methods(roots):
 			if seen_objects.has(exception_id):
 				continue
 			seen_objects[exception_id] = true
-			if value.value is GMLMethod:
+			if _gml_shutdown_is_method(value.value):
 				_gml_shutdown_detach_method(value.value, pending, seen_objects)
 				value.value = null
 			else:
@@ -62,7 +71,7 @@ static func _gml_shutdown_detach_methods(roots):
 			if seen_objects.has(handle_id):
 				continue
 			seen_objects[handle_id] = true
-			if value.reference is GMLMethod:
+			if _gml_shutdown_is_method(value.reference):
 				_gml_shutdown_detach_method(value.reference, pending, seen_objects)
 				value.reference = null
 			else:
@@ -76,7 +85,7 @@ static func _gml_shutdown_detach_methods(roots):
 		if value_type == TYPE_ARRAY:
 			for index in range(value.size()):
 				var element = value[index]
-				if element is GMLMethod:
+				if _gml_shutdown_is_method(element):
 					_gml_shutdown_detach_method(element, pending, seen_objects)
 					value[index] = null
 				else:
@@ -84,12 +93,12 @@ static func _gml_shutdown_detach_methods(roots):
 			continue
 		for key in value.keys():
 			var element = value[key]
-			if element is GMLMethod:
+			if _gml_shutdown_is_method(element):
 				_gml_shutdown_detach_method(element, pending, seen_objects)
 				value[key] = null
 			else:
 				pending.append(element)
-			if key is GMLMethod:
+			if _gml_shutdown_is_method(key):
 				_gml_shutdown_detach_method(key, pending, seen_objects)
 				value.erase(key)
 			else:
@@ -102,10 +111,12 @@ static func gm2godot_runtime_shutdown():
 	# containers so Godot can release generated script instances at shutdown.
 	gm2godot_draw_runtime_shutdown()
 	gml_sequence_runtime_cleanup_all()
+	_gml_time_source_shutdown()
 	_gml_shutdown_detach_methods([
 		_gml_script_registry,
 		_gml_script_argument_stack,
 		_gml_static_registry,
+		_gml_static_structs,
 		_gml_static_named_scopes,
 		_gml_static_root,
 		_gml_global_scope,
@@ -119,9 +130,13 @@ static func gm2godot_runtime_shutdown():
 	_gml_script_registry_initializers_running = false
 	_gml_script_registry_initializers_complete = false
 	_gml_static_registry.clear()
+	_gml_static_structs.clear()
+	_gml_static_cursor = 0
 	_gml_static_named_scopes.clear()
 	_gml_static_root.clear()
 	_gml_global_scope.clear()
+	# Last, once no GML data is left to reach their nodes.
+	_gml_room_drop_parked_rooms()
 
 
 static func gml_method_call(
@@ -455,7 +470,7 @@ static func gml_new(constructor, args = [], caller_self = null, caller_other = n
 	var instance = gml_struct({})
 	var constructor_static = gml_static_get(constructor)
 	if not is_undefined(constructor_static):
-		gml_static_set(instance, constructor_static)
+		_gml_static_link_new(instance, constructor_static)
 	# GameMaker's bound-constructor exception uses the constructor's bound
 	# scope as other. An unbound script constructor uses the scope that called new.
 	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_self
@@ -506,20 +521,16 @@ static func gml_exception_value(exception):
 	return gml_undefined()
 
 
+# The value a catch block receives. The runner (Function_Debug.js,
+# __yy__processException) turns only a runtime error into the message,
+# longMessage, script and stacktrace struct; a value given to throw (a
+# number, a string, an array, a struct, undefined) reaches catch unchanged.
 static func gml_exception_struct(exception):
-	if not (exception is GMLException):
-		return gml_struct({
-			"message": gml_string(exception),
-			"longMessage": gml_string(exception),
-			"script": "",
-			"stacktrace": []
-		})
-	if is_struct(exception.value):
+	if exception is GMLException:
 		return exception.value
-	var message = gml_string(exception.value)
 	return gml_struct({
-		"message": message,
-		"longMessage": message,
+		"message": gml_string(exception),
+		"longMessage": gml_string(exception),
 		"script": "",
 		"stacktrace": []
 	})

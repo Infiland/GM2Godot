@@ -38,7 +38,7 @@ class ScriptFunctionDeclaration:
 @dataclass(frozen=True)
 class ScriptTopLevelStatement:
     source: str
-    kind: Literal["global_constructor_assignment", "constructor_call"]
+    kind: Literal["global_constructor_assignment", "constructor_call", "statements"]
     start: int
     end: int
     constructor_name: str | None = None
@@ -270,8 +270,258 @@ def render_script_top_level_source(
 ) -> str:
     rendered = [char if char in "\r\n" else " " for char in source]
     for statement in statements:
-        rendered[statement.start:statement.end] = source[statement.start:statement.end]
+        rendered[statement.start:statement.end] = statement.source
     return "".join(rendered)
+
+
+_ENUM_DECLARATION_RE = re.compile(r"enum\s+[A-Za-z_][A-Za-z0-9_]*\s*\{")
+_FUNCTION_DECLARATION_RE = re.compile(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+_IDENTIFIER_CHARACTERS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+)
+# Words after which a value is expected, so that a function that follows them
+# is a function expression, not a declaration.
+_WORDS_BEFORE_A_VALUE = frozenset({
+    "and",
+    "case",
+    "delete",
+    "div",
+    "do",
+    "else",
+    "in",
+    "mod",
+    "new",
+    "not",
+    "or",
+    "return",
+    "then",
+    "throw",
+    "xor",
+})
+
+
+def _read_function_declaration(
+    candidate: str,
+    source: str,
+    index: int,
+) -> tuple[ScriptFunctionDeclaration, int] | None:
+    """The function declared at ``index`` and where its body ends."""
+    match = _FUNCTION_DECLARATION_RE.match(candidate, index)
+    if match is None:
+        return None
+    params_start = match.end() - 1
+    params_end = find_matching_delimiter(candidate, params_start, "(", ")")
+    if params_end is None:
+        return None
+    body_start = _find_function_body_start(candidate, params_end + 1)
+    if body_start is None:
+        return None
+    parsed_qualifier = _parse_function_qualifier(candidate[params_end + 1:body_start])
+    if parsed_qualifier is None:
+        return None
+    is_constructor, parent_constructor = parsed_qualifier
+    body_end = find_matching_delimiter(candidate, body_start, "{", "}")
+    if body_end is None:
+        return None
+    try:
+        parameters = parse_script_function_parameters(candidate[params_start + 1:params_end])
+    except GMLTranspileError:
+        return None
+    declaration = ScriptFunctionDeclaration(
+        name=match.group(1),
+        parameters=parameters,
+        body=candidate[body_start + 1:body_end],
+        is_constructor=is_constructor,
+        parent_constructor=parent_constructor,
+        body_line_offset=source.count("\n", 0, body_start + 1),
+        body_column_offset=(
+            body_start + 1
+            if (last_newline := source.rfind("\n", 0, body_start + 1)) == -1
+            else body_start - last_newline
+        ),
+    )
+    return declaration, body_end + 1
+
+
+def _skip_string_literal(text: str, index: int) -> int | None:
+    """The end of the string literal that starts at ``index``, if one does."""
+    if is_verbatim_string_start(text, index):
+        return index + len(read_verbatim_string(text, index))
+    if text.startswith('$"', index):
+        return index + len(read_template_string(text, index))
+    quote = text[index]
+    if quote not in ("'", '"'):
+        return None
+    cursor = index + 1
+    while cursor < len(text):
+        if text[cursor] == "\\":
+            cursor += 2
+            continue
+        if text[cursor] == quote:
+            return cursor + 1
+        cursor += 1
+    return len(text)
+
+
+def _blank_layout_span(characters: list[str], start: int, end: int) -> None:
+    for position in range(start, end):
+        if characters[position] not in "\r\n":
+            characters[position] = " "
+
+
+class _TopLevelScan:
+    """Walks the code of a script, taking out its functions, enums and macros."""
+
+    def __init__(self, source: str, candidate: str) -> None:
+        self.source = source
+        self.candidate = candidate
+        self.initialization = list(candidate)
+        self.declarations: list[ScriptFunctionDeclaration] = []
+        self.depth = 0
+        self.index = 0
+        # What the code before the index ended in, to tell whether a function
+        # that follows is a declaration or an expression.
+        self.previous = ""
+        self.previous_word = ""
+        self.after_line_break = False
+
+    def run(self) -> bool:
+        """Scan the whole script; False when an enum is not closed."""
+        while self.index < len(self.candidate):
+            if not self._step():
+                return False
+        return True
+
+    def _advance(self, end: int, previous: str, previous_word: str) -> None:
+        self.index = end
+        self.previous = previous
+        self.previous_word = previous_word
+        self.after_line_break = False
+
+    def _step(self) -> bool:
+        character = self.candidate[self.index]
+        if character.isspace():
+            self.after_line_break = self.after_line_break or character == "\n"
+            self.index += 1
+            return True
+        string_end = _skip_string_literal(self.candidate, self.index)
+        if string_end is not None:
+            self._advance(string_end, '"', "")
+            return True
+        if character == "#" and self._skip_preprocessor():
+            return True
+        if character in _IDENTIFIER_CHARACTERS:
+            return self._read_word()
+        if character in "([{":
+            self.depth += 1
+        elif character in ")]}":
+            self.depth = max(0, self.depth - 1)
+        self._advance(self.index + 1, character, "")
+        return True
+
+    def _skip_preprocessor(self) -> bool:
+        end = _skip_top_level_preprocessor_declaration(self.candidate, self.index)
+        if end is None:
+            return False
+        _blank_layout_span(self.initialization, self.index, end)
+        self.index = end
+        return True
+
+    def _read_word(self) -> bool:
+        word_end = self.index
+        while word_end < len(self.candidate) and self.candidate[word_end] in _IDENTIFIER_CHARACTERS:
+            word_end += 1
+        word = self.candidate[self.index:word_end]
+        if self.depth == 0 and _starts_statement(
+            self.previous,
+            self.previous_word,
+            self.after_line_break,
+        ):
+            if word == "function" and self._take_function():
+                return True
+            if word == "enum":
+                taken = self._take_enum()
+                if taken is None:
+                    return False
+                if taken:
+                    return True
+        self._advance(word_end, word[-1], word)
+        return True
+
+    def _take_span(self, end: int) -> None:
+        _blank_layout_span(self.initialization, self.index, end)
+        self._advance(end, "}", "")
+
+    def _take_function(self) -> bool:
+        read = _read_function_declaration(self.candidate, self.source, self.index)
+        if read is None:
+            return False
+        declaration, end = read
+        self.declarations.append(declaration)
+        self._take_span(end)
+        return True
+
+    def _take_enum(self) -> bool | None:
+        enum_match = _ENUM_DECLARATION_RE.match(self.candidate, self.index)
+        if enum_match is None:
+            return False
+        body_end = find_matching_delimiter(self.candidate, enum_match.end() - 1, "{", "}")
+        if body_end is None:
+            return None
+        self._take_span(body_end + 1)
+        return True
+
+
+def _initialization_statements(initialization: str) -> tuple[ScriptTopLevelStatement, ...]:
+    """The code left outside the functions, as one statement run in place."""
+    if not initialization.strip().strip(";"):
+        return ()
+    start = len(initialization) - len(initialization.lstrip())
+    end = len(initialization.rstrip())
+    return (
+        ScriptTopLevelStatement(
+            source=initialization[start:end],
+            kind="statements",
+            start=start,
+            end=end,
+        ),
+    )
+
+
+def _declarations_and_global_initialization(
+    source: str,
+    candidate: str,
+) -> ModernScriptStructure | None:
+    """A script with functions and any other code outside them.
+
+    GameMaker 2.3+ compiles every function declared at the top level of a
+    script asset as a global script function, and the rest of the script is
+    global initialization: it runs once, before the first room starts, and
+    its variables are global (manual: GML Overview > Script Functions And
+    Variables, "Script Scope"). The code outside the functions is kept in
+    place, with the functions, enums and macros blanked out, as the
+    initialization to transpile.
+    """
+    scan = _TopLevelScan(source, candidate)
+    if not scan.run() or not scan.declarations:
+        return None
+    return ModernScriptStructure(
+        declarations=tuple(scan.declarations),
+        top_level_statements=_initialization_statements("".join(scan.initialization)),
+    )
+
+
+def _starts_statement(previous: str, previous_word: str, after_line_break: bool) -> bool:
+    """Whether a statement can start after the code that ends in ``previous``."""
+    if not previous or previous in ";}":
+        return True
+    if not after_line_break:
+        return False
+    # Line breaks are white space, but a declaration cannot continue an
+    # expression: it starts a statement after anything that can end one.
+    if previous in _IDENTIFIER_CHARACTERS:
+        return previous_word not in _WORDS_BEFORE_A_VALUE
+    return previous in ")]\"'"
 
 
 def modern_script_structure(
@@ -286,7 +536,17 @@ def modern_script_structure(
     candidate = _mask_comments_preserving_layout(preprocessed.source)
     if not candidate.strip():
         return None
+    structure = _declarations_and_constructor_initializers(source, candidate)
+    if structure is not None:
+        return structure
+    return _declarations_and_global_initialization(source, candidate)
 
+
+def _declarations_and_constructor_initializers(
+    source: str,
+    candidate: str,
+) -> ModernScriptStructure | None:
+    """A script made only of functions and constructor initialization."""
     declarations: list[ScriptFunctionDeclaration] = []
     top_level_statements: list[ScriptTopLevelStatement] = []
     index = 0
@@ -296,12 +556,9 @@ def modern_script_structure(
         if index >= len(candidate):
             break
 
-        enum_match = re.match(
-            r"enum\s+[A-Za-z_][A-Za-z0-9_]*\s*\{",
-            candidate[index:],
-        )
+        enum_match = _ENUM_DECLARATION_RE.match(candidate, index)
         if enum_match is not None:
-            body_start = index + enum_match.end() - 1
+            body_start = enum_match.end() - 1
             body_end = find_matching_delimiter(candidate, body_start, "{", "}")
             if body_end is None:
                 return None
@@ -354,46 +611,11 @@ def modern_script_structure(
             index = statement_end
             continue
 
-        match = re.match(r"function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", candidate[index:])
-        if match is None:
+        read = _read_function_declaration(candidate, source, index)
+        if read is None:
             return None
-        name = match.group(1)
-        declaration_start = index + match.start()
-        params_start = candidate.find("(", declaration_start)
-        params_end = find_matching_delimiter(candidate, params_start, "(", ")")
-        if params_end is None:
-            return None
-        body_start = _find_function_body_start(candidate, params_end + 1)
-        if body_start is None:
-            return None
-        qualifier = candidate[params_end + 1:body_start].strip()
-        parsed_qualifier = _parse_function_qualifier(qualifier)
-        if parsed_qualifier is None:
-            return None
-        is_constructor, parent_constructor = parsed_qualifier
-        body_end = find_matching_delimiter(candidate, body_start, "{", "}")
-        if body_end is None:
-            return None
-        try:
-            parameters = parse_script_function_parameters(candidate[params_start + 1:params_end])
-        except GMLTranspileError:
-            return None
-        declarations.append(
-            ScriptFunctionDeclaration(
-                name=name,
-                parameters=parameters,
-                body=candidate[body_start + 1:body_end],
-                is_constructor=is_constructor,
-                parent_constructor=parent_constructor,
-                body_line_offset=source.count("\n", 0, body_start + 1),
-                body_column_offset=(
-                    body_start + 1
-                    if (last_newline := source.rfind("\n", 0, body_start + 1)) == -1
-                    else body_start - last_newline
-                ),
-            )
-        )
-        index = body_end + 1
+        declaration, index = read
+        declarations.append(declaration)
 
     if not declarations and not top_level_statements:
         return None

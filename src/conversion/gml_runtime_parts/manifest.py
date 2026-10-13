@@ -140,6 +140,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         ),
     ),
     _segment(
+        "45_collision_tilemaps.gd",
+        "GameMaker collision queries against tilemap elements and their tiles.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+        ),
+        tests=("tests/test_tilemap_collisions_godot.py",),
+    ),
+    _segment(
         "46_motion_helpers.gd",
         "Motion, direction, friction, and wrapping helpers.",
         depends_on=(
@@ -155,6 +166,22 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "Path asset state, path following, and route planning helpers.",
         depends_on=("00_prelude.gd", "35_maths_numbers.gd", "46_motion_helpers.gd"),
         tests=("tests/test_paths_motion_godot.py",),
+    ),
+    _segment(
+        "47_motion_planning_steps.gd",
+        "move_and_collide, mp_linear_step, mp_potential_step and mp_grid_add_instances.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "35_maths_numbers.gd",
+            "45_collision_queries.gd",
+            "46_motion_helpers.gd",
+            "47_paths_motion_planning.gd",
+        ),
+        tests=(
+            "tests/test_motion_planning_steps_godot.py",
+            "tests/test_move_and_collide_tilemaps_godot.py",
+        ),
     ),
     _segment(
         "48_drawing_basic_forms.gd",
@@ -235,6 +262,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "Date functions, the local time zone's rules, and date_set_timezone.",
         depends_on=("00_prelude.gd", "35_maths_numbers.gd"),
         tests=("tests/test_dates_godot.py",),
+    ),
+    _segment(
+        "56_object_variable_definitions.gd",
+        "Object Variable Definitions and room instance overrides run before the Create event.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+        ),
+        tests=("tests/test_variable_definitions_godot.py",),
     ),
     _segment(
         "57_ds_lists_stacks_queues.gd",
@@ -359,6 +397,19 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_game_step_godot.py", "tests/test_event_scheduler_godot.py"),
     ),
     _segment(
+        "75_instance_activation.gd",
+        "Instance deactivation and activation: active lists, regions, layers, and node processing.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+            "50_draw_pipeline.gd",
+            "50_static_types_and_clone.gd",
+        ),
+        tests=("tests/test_instance_deactivation_godot.py",),
+    ),
+    _segment(
         "76_instance_change.gd",
         "instance_change: Destroy, Clean Up and Create events, the node's switch to the new object's script and "
         "the rest of the calling event.",
@@ -368,6 +419,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
             "45_collision_queries.gd",
             "50_draw_pipeline.gd",
             "53_game_input.gd",
+            "55_room_game_flow.gd",
             "56_time_alarms.gd",
             "70_handle_string_helpers.gd",
             "74_game_step.gd",

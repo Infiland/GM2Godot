@@ -46,6 +46,9 @@ static var _gml_input_raw_gesture_events = []
 static var _gml_input_raw_last_key = 0
 # Keys cleared with keyboard_clear() while held, until they are released.
 static var _gml_input_key_suppressed = {}
+# Mouse buttons cleared with mouse_clear() or io_clear(), until their next
+# press or release.
+static var _gml_input_mouse_suppressed = {}
 # Keyboard state, keyboard_key, keyboard_lastkey and the keyboard events use
 # GameMaker's virtual key codes (the vk_* constants, and ord() for A-Z and
 # 0-9). This table gives the code of every Godot key whose key code differs;
@@ -144,6 +147,7 @@ static func gml_input_set_step_latching(enabled):
 	_gml_input_raw_gesture_events = []
 	_gml_input_raw_last_key = 0
 	_gml_input_key_suppressed = {}
+	_gml_input_mouse_suppressed = {}
 	return null
 
 
@@ -160,6 +164,7 @@ static func gml_input_begin_step():
 	_gml_input_key_pressed = _gml_input_raw_keys["pressed"]
 	_gml_input_key_released = _gml_input_raw_keys["released"]
 	_gml_input_mouse_current = _gml_input_state_copy(_gml_input_raw_mouse["down"])
+	_gml_input_latch_mouse_suppression()
 	_gml_input_mouse_pressed = _gml_input_raw_mouse["pressed"]
 	_gml_input_mouse_released = _gml_input_raw_mouse["released"]
 	_gml_input_gamepad_current = _gml_input_state_copy(_gml_input_raw_gamepad["down"])
@@ -174,6 +179,19 @@ static func gml_input_begin_step():
 	_gml_input_gesture_events = _gml_input_raw_gesture_events
 	_gml_input_raw_gesture_events = []
 	_gml_input_latch_keyboard_key()
+	return null
+
+
+static func _gml_input_latch_mouse_suppression():
+	# A cleared button stays up while it is held; a press or release that
+	# arrived since the clear is reported as usual and ends the suppression
+	# (HTML5 runner yyIOManager IO_Update and ButtonCleared).
+	for button_code in _gml_input_mouse_suppressed.keys():
+		var has_edge = _gml_input_raw_mouse["pressed"].has(button_code) or _gml_input_raw_mouse["released"].has(button_code)
+		if has_edge or not bool(_gml_input_raw_mouse["down"].get(button_code, false)):
+			_gml_input_mouse_suppressed.erase(button_code)
+		else:
+			_gml_input_mouse_current[button_code] = false
 	return null
 
 
@@ -315,8 +333,12 @@ static func _gml_input_godot_key(key_code):
 static func gml_input_set_mouse_button_state(button, down):
 	# Records a Godot mouse button under its GameMaker code (mb_left 1,
 	# mb_right 2, mb_middle 3, mb_side1 4, mb_side2 5).
+	var button_code = _gml_input_gamemaker_mouse_button(button)
+	var is_down = gml_bool(down)
+	if not _gml_input_step_latching and bool(_gml_input_raw_mouse["down"].get(button_code, false)) != is_down:
+		_gml_input_mouse_suppressed.erase(button_code)
 	var step_state = [_gml_input_mouse_current, _gml_input_mouse_pressed, _gml_input_mouse_released]
-	_gml_input_raw_transition(_gml_input_raw_mouse, step_state, _gml_input_gamemaker_mouse_button(button), gml_bool(down))
+	_gml_input_raw_transition(_gml_input_raw_mouse, step_state, button_code, is_down)
 	return null
 
 
@@ -574,6 +596,52 @@ static func gml_mouse_check_button_released(button):
 	if button_code == -1 or button_code == 0:
 		return _gml_input_any_button_in(_gml_input_mouse_released) == (button_code == -1)
 	return bool(_gml_input_mouse_released.get(button_code, false))
+
+
+static func gml_mouse_clear(button):
+	# Like GameMaker, a cleared button reads as up at once and, while it stays
+	# held, until it is released (the release is still reported) or pressed
+	# again. mb_any clears mb_left, mb_right and mb_middle; other buttons are
+	# ignored (HTML5 runner Function_IO.js mouse_clear, Button_Clear).
+	var button_code = _gml_input_mouse_button(button)
+	if button_code == -1:
+		for code in [1, 2, 3]:
+			_gml_input_clear_mouse_button(code)
+	elif button_code >= 1 and button_code <= 3:
+		_gml_input_clear_mouse_button(button_code)
+	return null
+
+
+static func _gml_input_clear_mouse_button(button_code):
+	_gml_input_mouse_current[button_code] = false
+	_gml_input_mouse_pressed[button_code] = false
+	_gml_input_mouse_released[button_code] = false
+	if bool(_gml_input_raw_mouse["down"].get(button_code, false)):
+		_gml_input_mouse_suppressed[button_code] = true
+	return null
+
+
+static func gml_io_clear():
+	# GameMaker's io_clear (HTML5 runner yyIOManager.Clear): every key and
+	# mouse button reads as up for the rest of the step, the wheel is cleared
+	# and keyboard_key, keyboard_lastkey and keyboard_string are reset. A key
+	# that is still held is seen again on the next step; mouse buttons stay
+	# up like after mouse_clear.
+	for key_code in _gml_input_key_current.keys() + _gml_input_raw_keys["down"].keys():
+		_gml_input_key_current[key_code] = false
+	_gml_input_key_current.erase(0)
+	_gml_input_key_current.erase(1)
+	_gml_input_key_pressed = {}
+	_gml_input_key_released = {}
+	for button_code in [1, 2, 3, 4, 5]:
+		_gml_input_clear_mouse_button(button_code)
+	_gml_input_mouse_wheel_up = false
+	_gml_input_mouse_wheel_down = false
+	_gml_input_keyboard_key = 0
+	_gml_input_keyboard_lastkey = 0
+	_gml_input_raw_last_key = 0
+	_gml_input_keyboard_string = ""
+	return null
 
 
 static func _gml_input_any_button_in(state):

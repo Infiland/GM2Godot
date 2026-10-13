@@ -219,11 +219,11 @@ static func gml_layer_destroy(layer):
 	if not (node is Node):
 		_gml_layer_unregister_handle(handle)
 		return false
+	# The instances on the layer are destroyed, as with instance_destroy (the
+	# runner's RemoveLayer calls RemoveInstanceElement for each one).
+	_gml_instances_destroy_under(node)
 	for child in _gml_layer_tree_nodes(node):
 		_gml_depth_forget(child.get_instance_id())
-		var instance_handle = _gml_instance_handle_for_node(child)
-		if gml_handle_is_valid(instance_handle):
-			gml_instance_unregister(instance_handle)
 		var element_handle = _gml_layer_element_handle_for_node(child)
 		if gml_handle_is_valid(element_handle):
 			_gml_layer_element_unregister_handle(element_handle)
@@ -398,6 +398,32 @@ static func _gml_room_child_has_depth(node, depth):
 	return false
 
 
+
+
+static func gml_instance_layer_get(instance):
+	# GameMaker's layer variable: the handle of the room or runtime layer the
+	# instance is on. An instance made with instance_create_depth, or given a
+	# depth of its own, is on a managed depth layer and reads -1 (an invalid
+	# layer handle).
+	if not (instance is Node) or instance.has_meta(GML_EXPLICIT_DEPTH_META):
+		return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+	var node = instance.get_parent()
+	while node != null:
+		if _gml_layer_node_has_metadata(node):
+			return _gml_layer_register_node(node)
+		if node.has_meta(&"gm2godot_room_root_policy"):
+			break
+		node = node.get_parent()
+	return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+
+
+static func gml_instance_layer_set(instance, layer):
+	# Assigning layer moves the instance to that layer, which gives it the
+	# layer's depth (HTML5 runner yyInstance.js layer setter).
+	gml_layer_add_instance(layer, instance)
+	return null
+
+
 static func gml_layer_get_all_elements(layer):
 	var handle = _gml_layer_resolve_handle(layer)
 	if not gml_handle_is_valid(handle):
@@ -468,10 +494,11 @@ static func gml_tilemap_set(tilemap_element_id, tiledata, xcell, ycell):
 	var layout = _gml_tilemap_atlas_layout(node.tile_set)
 	if layout.is_empty():
 		return false
-	var atlas_index = tile_index - 1
+	# Tile N is cell N of the tileset sprite's own grid; tile 0 is the empty
+	# top-left cell (tilemap_set rejects tile_index >= the tileset's tile count).
 	var atlas_coords = Vector2i(
-		atlas_index % int(layout["columns"]),
-		int(floor(float(atlas_index) / float(layout["columns"])))
+		tile_index % int(layout["columns"]),
+		int(floor(float(tile_index) / float(layout["columns"])))
 	)
 	var source = layout["source"]
 	if source is TileSetAtlasSource and not source.has_tile(atlas_coords):
@@ -504,7 +531,7 @@ static func gml_tilemap_get(tilemap_element_id, xcell, ycell):
 	if layout.is_empty():
 		return -1
 	var atlas_coords = node.get_cell_atlas_coords(coords)
-	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x + 1
+	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x
 	var alternative_tile = node.get_cell_alternative_tile(coords)
 	tile_value |= _gml_tilemap_transform_from_godot(alternative_tile)
 	return tile_value
@@ -540,7 +567,7 @@ static func gml_layer_element_move(element, layer):
 	# offset instead of the old one.
 	var shift = _gml_layer_element_offset(layer_node, element_node) - _gml_layer_element_offset(old_layer, element_node)
 	if old_layer != null:
-		element_node.reparent(layer_node, true)
+		_gml_instance_reparent(element_node, layer_node)
 	else:
 		layer_node.add_child(element_node)
 	if element_node is Node2D:
@@ -1077,12 +1104,14 @@ static func _gml_tilemap_atlas_layout(tile_set):
 	var source = tile_set.get_source(source_id)
 	if not (source is TileSetAtlasSource):
 		return {}
-	var columns = int(tile_set.get_meta("gamemaker_tileset_out_columns", 0))
+	# GameMaker numbers tiles by cell of the tileset sprite's own grid, which is
+	# the converted atlas's grid. The tileset's out_columns describe the compiled
+	# texture page tileset_get_info reports, not the numbering.
+	var columns = int(source.get_atlas_grid_size().x)
 	if columns <= 0:
-		var grid_size = source.get_atlas_grid_size()
-		if grid_size.x <= 0:
-			return {}
-		columns = grid_size.x
+		columns = int(tile_set.get_meta("gamemaker_tileset_source_columns", 0))
+	if columns <= 0:
+		return {}
 	var layout = {
 		"source_id": source_id,
 		"source": source,

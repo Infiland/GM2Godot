@@ -511,20 +511,16 @@ static func gml_exception_value(exception):
 	return gml_undefined()
 
 
+# The value a catch block receives. The runner (Function_Debug.js,
+# __yy__processException) turns only a runtime error into the message,
+# longMessage, script and stacktrace struct; a value given to throw (a
+# number, a string, an array, a struct, undefined) reaches catch unchanged.
 static func gml_exception_struct(exception):
-	if not (exception is GMLException):
-		return gml_struct({
-			"message": gml_string(exception),
-			"longMessage": gml_string(exception),
-			"script": "",
-			"stacktrace": []
-		})
-	if is_struct(exception.value):
+	if exception is GMLException:
 		return exception.value
-	var message = gml_string(exception.value)
 	return gml_struct({
-		"message": message,
-		"longMessage": message,
+		"message": gml_string(exception),
+		"longMessage": gml_string(exception),
 		"script": "",
 		"stacktrace": []
 	})

@@ -3484,11 +3484,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_weak_ref_create", GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "os_type":', GML_RUNTIME_SCRIPT)
         self.assertIn('if key == "fps_real":', GML_RUNTIME_SCRIPT)
-        self.assertIn('if key == "current_year":', GML_RUNTIME_SCRIPT)
-        self.assertIn('if key == "current_month":', GML_RUNTIME_SCRIPT)
-        self.assertIn('if key == "current_day":', GML_RUNTIME_SCRIPT)
-        self.assertIn('if key == "current_minute":', GML_RUNTIME_SCRIPT)
-        self.assertIn('if key == "current_second":', GML_RUNTIME_SCRIPT)
+        self.assertIn('return gml_date_current_field(key.trim_prefix("current_"))', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string_hash_to_newline", GML_RUNTIME_SCRIPT)
 
     def test_runtime_contains_tcc_strict_validation_helpers(self):

@@ -4,21 +4,33 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Collection, Iterable
 
-from .constants import GDSCRIPT_RESERVED_IDENTIFIERS
+from .constants import (
+    BUILTIN_VARIABLE_REGISTRY,
+    GDSCRIPT_RESERVED_IDENTIFIERS,
+    GML_BUILTIN_CONSTANT_IDENTIFIERS,
+    LEGACY_GLOBAL_BUILTINS,
+    NAME_REPLACEMENTS,
+    VIRTUAL_KEY_ACTIONS,
+    VIRTUAL_KEY_CONSTANTS,
+)
+from .gml_function_dispatch import get_gml_function_descriptor
+from .instance_change_sites import instance_change_site_indices
 from .lexical_api import (
     is_verbatim_string_start,
     read_ordinary_string,
     read_template_string,
     read_verbatim_string,
     sanitize_gdscript_identifier,
+    tokenize_gml_source,
 )
 from .result_models import (
     GMLSourceDiagnostic,
     GMLSourceMap,
     GMLSourceMapEntry,
 )
+from .shared_models import GMLTranspileError, Token
 
 _IDENTIFIER_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 _DECLARATION_RE = re.compile(r"\b(?:var|globalvar|static)\s+([^;\n]+)")
@@ -60,6 +72,49 @@ _GML_KEYWORDS = frozenset({
     "with",
     "xor",
 })
+
+
+INSTANCE_CHANGE_DEFERRED_CODE = "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+_MACRO_NAME_RE = re.compile(r"^\s*#macro\s+(?:[A-Za-z_][A-Za-z0-9_]*:)?([A-Za-z_][A-Za-z0-9_]*)")
+_ENUM_NAME_RE = re.compile(r"\benum\s+([A-Za-z_][A-Za-z0-9_]*)")
+# Calls the converted game makes after a pending instance_change, in order.
+_INSTANCE_CHANGE_QUEUED_CALLS = frozenset({"instance_change", "instance_destroy"})
+# Function lowerings that do not use the calling instance (the instance
+# functions take theirs as an argument).
+_INSTANCE_FREE_LOWERINGS = frozenset({
+    "keyboard_check",
+    "print",
+    "runtime",
+    "runtime_array_foreach",
+    "runtime_array_sort",
+    "runtime_audio_api",
+    "runtime_draw_api",
+    "runtime_instance_api",
+    "runtime_instance_keyword_first_arg",
+    "runtime_layer_api",
+    "runtime_path_asset_api",
+    "runtime_platform_service_api",
+    "runtime_room_api",
+    "runtime_sequence_api",
+    "runtime_time_api",
+    "runtime_variadic_1",
+    "runtime_variadic_all",
+})
+# Functions with such a lowering that act on the calling instance all the same.
+_INSTANCE_FUNCTIONS = frozenset({"alarm_get", "alarm_set", "script_execute"})
+# Words after which a name followed by = starts an assignment.
+_STATEMENT_LEAD_WORDS = frozenset({"begin", "do", "else", "end", "then"})
+# Words that are part of the syntax, not values.
+_INSTANCE_CHANGE_SYNTAX_WORDS = (_GML_KEYWORDS - {"self"}) | _STATEMENT_LEAD_WORDS
+_INSTANCE_FREE_NAMES = frozenset(
+    {"other", "true", "false"}
+    | GML_BUILTIN_CONSTANT_IDENTIFIERS
+    | LEGACY_GLOBAL_BUILTINS
+    | set(NAME_REPLACEMENTS)
+    | set(VIRTUAL_KEY_ACTIONS)
+    | set(VIRTUAL_KEY_CONSTANTS)
+    | {name for name, metadata in BUILTIN_VARIABLE_REGISTRY.items() if metadata.scope != "instance"}
+)
 
 
 @dataclass(frozen=True)
@@ -227,6 +282,236 @@ def analyze_gml_source_identifiers(source: str) -> tuple[GMLSourceDiagnostic, ..
                 )
             )
     return tuple(diagnostics)
+
+
+def analyze_gml_instance_change_reads(
+    source: str,
+    *,
+    known_names: Iterable[str] = (),
+    continued_calls: Collection[int] = (),
+    change_functions: Collection[str] = (),
+    change_macros: Collection[str] = (),
+) -> tuple[GMLSourceDiagnostic, ...]:
+    """Report instance_change calls whose following code meets the old object.
+
+    An instance_change that the transpiler compiles with the rest of the event
+    as its continuation (continued_calls holds the place of each among the
+    source's sites, see instance_change_sites) changes the object before that
+    code runs, as GameMaker does. For the others the converted game changes the
+    object once the event that called instance_change returns (see the
+    runtime's 76_instance_change.gd): the rest of the event runs on the old
+    object, before the new object's Create event, where GameMaker runs it
+    after. What that code reads (instance variables, self, the instance's
+    events, mask or sprite through a function) may differ. What it assigns to
+    the instance's variables is assigned again after the change, but only when
+    it changed the variable's value: an assignment of the value the variable
+    had at the call is lost. known_names are names that do not belong to the
+    instance (assets, enums, macros). change_functions and change_macros are
+    the project's script functions and macros that run instance_change: a call
+    of one is such a site too, and never continued when it is a function's.
+    """
+    names = frozenset(change_functions) | frozenset(change_macros)
+    tokens = _instance_change_tokens(source, names)
+    if not tokens:
+        return ()
+    free_names = _INSTANCE_FREE_NAMES | set(known_names) | _local_names(source)
+    diagnostics: list[GMLSourceDiagnostic] = []
+    for ordinal, index in enumerate(instance_change_site_indices(tokens, names)):
+        token = tokens[index]
+        site = _instance_change_subject(tokens, index, change_functions, change_macros)
+        if site is None or ordinal in continued_calls:
+            continue
+        subject, last = site
+        found = _first_instance_use(tokens, last + 1, free_names)
+        if found is None:
+            continue
+        use, assigns = found
+        if assigns:
+            message = (
+                f"{subject} at line {token.line} is followed by an assignment to the instance's "
+                f"variable '{use.value}' (line {use.line}). The converted game changes the instance once "
+                "the event returns and makes the assignment again afterwards only if it changed the "
+                "variable's value, so an assignment of the value the variable had at the call is lost."
+            )
+        else:
+            message = (
+                f"{subject} at line {token.line} is followed by code that reads the instance "
+                f"('{use.value}' at line {use.line}). The converted game changes the instance once "
+                "the event returns, so that code still sees the old object and runs before the new "
+                "object's Create event; what it assigns to the instance is kept when it changes a "
+                "variable's value."
+            )
+        diagnostics.append(
+            GMLSourceDiagnostic(
+                severity="warning",
+                code=INSTANCE_CHANGE_DEFERRED_CODE,
+                message=message,
+                line=token.line,
+                column=token.column,
+                identifier=use.value,
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _instance_change_subject(
+    tokens: list[Token],
+    index: int,
+    change_functions: Collection[str],
+    change_macros: Collection[str],
+) -> tuple[str, int] | None:
+    """Name what runs instance_change at a site token, with the index of the last token of its use.
+
+    Returns None for a site that is not a call.
+    """
+    name = tokens[index].value
+    if name == "instance_change" and _is_instance_change_call(tokens, index):
+        return "instance_change", _closing_index(tokens, index + 1)
+    if name != "instance_change" and name in change_macros:
+        return f"The macro {name}, which runs instance_change,", index
+    if name != "instance_change" and name in change_functions and _token_value(tokens, index + 1) == "(":
+        return f"The call of the script function {name}, which runs instance_change,", _closing_index(tokens, index + 1)
+    return None
+
+
+def _instance_change_tokens(source: str, names: Collection[str] = ()) -> list[Token]:
+    if "instance_change" not in source and not any(name in source for name in names):
+        return []
+    comments_stripped = _source_lexical_views(source)[0]
+    # Preprocessor lines (#macro, #region) are not statements; a #macro line
+    # goes on with the next line when it ends with a backslash.
+    lines: list[str] = []
+    continues = False
+    for line in comments_stripped.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        blank = continues or line.lstrip().startswith("#")
+        continues = blank and bare.endswith("\\")
+        lines.append(" " * len(bare) + line[len(bare):] if blank else line)
+    try:
+        return tokenize_gml_source("".join(lines))
+    except GMLTranspileError:
+        return []
+
+
+def _local_names(source: str) -> set[str]:
+    names = {identifier for identifier, _line, _column in _declared_identifier_locations(source)}
+    comments_stripped = _source_lexical_views(source)[0]
+    for line in comments_stripped.splitlines():
+        macro = _MACRO_NAME_RE.match(line)
+        if macro is not None:
+            names.add(macro.group(1))
+    names.update(_ENUM_NAME_RE.findall(comments_stripped))
+    return names
+
+
+def _is_instance_change_call(tokens: list[Token], index: int) -> bool:
+    token = tokens[index]
+    return (
+        token.kind == "IDENT"
+        and token.value == "instance_change"
+        and _token_value(tokens, index + 1) == "("
+        and _token_value(tokens, index - 1) != "."
+    )
+
+
+def _token_value(tokens: list[Token], index: int) -> str | None:
+    if 0 <= index < len(tokens):
+        return tokens[index].value
+    return None
+
+
+def _closing_index(tokens: list[Token], open_index: int) -> int:
+    depth = 0
+    for index in range(open_index, len(tokens)):
+        value = tokens[index].value
+        if tokens[index].kind != "OP":
+            continue
+        if value in ("(", "[", "{"):
+            depth += 1
+        elif value in (")", "]", "}"):
+            depth -= 1
+            if depth == 0:
+                return index
+    return len(tokens)
+
+
+def _first_instance_use(
+    tokens: list[Token],
+    start: int,
+    free_names: set[str] | frozenset[str],
+) -> tuple[Token, bool] | None:
+    """Return the first token that meets the instance, and whether it is an assignment target."""
+    other_bodies = _with_body_ranges(tokens, start)
+    for index in range(start, len(tokens)):
+        token = tokens[index]
+        if token.kind != "IDENT" or _token_value(tokens, index - 1) == ".":
+            # (A member of something else: global, another instance, a struct.)
+            continue
+        use = _instance_use(tokens, index, free_names)
+        if use == "assign" and any(first <= index <= last for first, last in other_bodies):
+            # (A with statement assigns to the instances it visits, not to this one.)
+            continue
+        if use is not None:
+            return token, use == "assign"
+    return None
+
+
+def _with_body_ranges(tokens: list[Token], start: int) -> list[tuple[int, int]]:
+    """Return the first and last token of each with statement body after start.
+
+    A body that is a single statement counts as its first token, which is all an
+    assignment target needs.
+    """
+    ranges: list[tuple[int, int]] = []
+    for index in range(start, len(tokens)):
+        if tokens[index].kind != "IDENT" or tokens[index].value != "with":
+            continue
+        if _token_value(tokens, index + 1) != "(" or _token_value(tokens, index - 1) == ".":
+            continue
+        body = _closing_index(tokens, index + 1) + 1
+        last = _closing_index(tokens, body) if _token_value(tokens, body) == "{" else body
+        ranges.append((body, last))
+    return ranges
+
+
+def _instance_use(tokens: list[Token], index: int, free_names: set[str] | frozenset[str]) -> str | None:
+    name = tokens[index].value
+    if name in ("self", "id"):
+        return "read"
+    if name in _INSTANCE_CHANGE_SYNTAX_WORDS:
+        return None
+    following = _token_value(tokens, index + 1)
+    if following == "(":
+        return "read" if _call_uses_instance(name) else None
+    if name in free_names:
+        return None
+    if following == "=" and _starts_statement(tokens, index):
+        return "assign"
+    return "read"
+
+
+def _call_uses_instance(name: str) -> bool:
+    if name in _INSTANCE_CHANGE_QUEUED_CALLS:
+        return False
+    if name in _INSTANCE_FUNCTIONS:
+        return True
+    descriptor = get_gml_function_descriptor(name)
+    # A script function, a method or a function without a mapping may use it.
+    return descriptor is None or descriptor.lowering_kind not in _INSTANCE_FREE_LOWERINGS
+
+
+def _starts_statement(tokens: list[Token], index: int) -> bool:
+    if index == 0:
+        return True
+    previous = tokens[index - 1]
+    if previous.kind == "NEWLINE":
+        return True
+    if previous.kind == "OP":
+        return previous.value in (";", "{", "}", ")", "]", ":", "++", "--")
+    if previous.kind == "IDENT" and previous.value in _GML_KEYWORDS:
+        return previous.value in _STATEMENT_LEAD_WORDS
+    # A value ends the statement before it.
+    return True
 
 
 def _blank_source_span(buffer: list[str], start: int, end: int) -> None:

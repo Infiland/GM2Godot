@@ -434,7 +434,8 @@ class TestGMLAPIManifest(unittest.TestCase):
         gml_pragma = get_gml_api_entry("gml_pragma")
         self.assertIsNotNone(gml_pragma)
         assert gml_pragma is not None
-        self.assertEqual(gml_pragma.status, "unsupported")
+        # A compile-time pragma does nothing when the code runs.
+        self.assertEqual(gml_pragma.status, "implemented")
         self.assertEqual(gml_pragma.issue_number, 515)
         steam_is_initialized = get_gml_api_entry("steam_is_initialized")
         self.assertIsNotNone(steam_is_initialized)
@@ -932,27 +933,27 @@ class TestGMLAPIManifest(unittest.TestCase):
         self.assertIn("expects 3", diagnostic)
         self.assertIn("#482", diagnostic)
 
-    def test_transpiler_rejects_known_unimplemented_gml_builtin_calls(self):
-        with self.assertRaisesRegex(GMLTranspileError, "show_message_async.*unsupported"):
-            transpile_gml_expression('show_message_async("Hello")')
-        with self.assertRaisesRegex(GMLTranspileError, "effect_create_above.*unsupported"):
-            transpile_gml_expression("effect_create_above(0, 0, 0, 0, 0, 0)")
-        with self.assertRaisesRegex(GMLTranspileError, "shader_enable_corner_id.*unsupported"):
-            transpile_gml_expression("shader_enable_corner_id(true)")
-        with self.assertRaisesRegex(GMLTranspileError, "physics_joint_prismatic_create.*unsupported"):
-            transpile_gml_expression("physics_joint_prismatic_create()")
-        with self.assertRaisesRegex(GMLTranspileError, "sequence_track_new.*unsupported.*#567"):
-            transpile_gml_expression("sequence_track_new(seqtracktype_graphic)")
-        with self.assertRaisesRegex(GMLTranspileError, "skeleton_animation_set.*unsupported.*#568"):
-            transpile_gml_expression("skeleton_animation_set('walk')")
-        with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_x.*unsupported.*#569.*sensor"):
-            transpile_gml_expression("device_get_tilt_x()")
-        with self.assertRaisesRegex(GMLTranspileError, "gif_open.*unsupported.*#493.*GIF"):
-            transpile_gml_expression("gif_open(320, 180)")
-        with self.assertRaisesRegex(GMLTranspileError, "os_request_permission.*unsupported.*#569.*permission"):
-            transpile_gml_expression('os_request_permission("DeviceMotion")')
-        with self.assertRaisesRegex(GMLTranspileError, "external_call.*unsupported"):
-            transpile_gml_expression("external_call('native_ext', 'fn')")
+    def test_transpiler_lowers_known_unimplemented_gml_builtin_calls_to_failing_calls(self):
+        # GameMaker keeps running the rest of the code (the HTML5 runner's
+        # ErrorFunction reports the function and returns); only the call fails.
+        cases = (
+            ('show_message_async("Hello")', "show_message_async", "unsupported"),
+            ("effect_create_above(0, 0, 0, 0, 0, 0)", "effect_create_above", "unsupported"),
+            ("shader_enable_corner_id(true)", "shader_enable_corner_id", "unsupported"),
+            ("physics_joint_prismatic_create()", "physics_joint_prismatic_create", "unsupported"),
+            ("sequence_track_new(seqtracktype_graphic)", "sequence_track_new", "unsupported.*#567"),
+            ("skeleton_animation_set('walk')", "skeleton_animation_set", "unsupported.*#568"),
+            ("device_get_tilt_x()", "device_get_tilt_x", "unsupported.*#569.*sensor"),
+            ("gif_open(320, 180)", "gif_open", "unsupported.*#493.*GIF"),
+            ('os_request_permission("DeviceMotion")', "os_request_permission", "unsupported.*#569.*permission"),
+            ("external_call('native_ext', 'fn')", "external_call", "unsupported"),
+        )
+        for source, name, reason in cases:
+            with self.subTest(source=source):
+                self.assertRegex(
+                    transpile_gml_expression(source),
+                    rf'^GMRuntime\.gml_unsupported_call\("{name}", "[^"]*{reason}[^"]*", \[',
+                )
 
     def test_transpiler_rejects_wrong_arity_for_known_helpers(self):
         with self.assertRaisesRegex(GMLTranspileError, "real.*expects 1.*got 0"):

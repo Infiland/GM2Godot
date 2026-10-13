@@ -37,7 +37,8 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             event_list: list[JsonObject] | None = None,
                             parent_object_name: str | None = None,
                             persistent: bool = False,
-                            mask_sprite_name: str | None = None) -> str:
+                            mask_sprite_name: str | None = None,
+                            visible: bool = True) -> str:
     """Build a GameMaker object .yy file string."""
     sprite_id = _sprite_reference(sprite_name)
     sprite_mask_id = _sprite_reference(mask_sprite_name)
@@ -92,10 +93,11 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "solid": false,\n'
         '  "spriteId": {sprite_id},\n'
         '  "spriteMaskId": {sprite_mask_id},\n'
-        '  "visible": true,\n'
+        '  "visible": {visible},\n'
         '}}'
     ).format(
         name=name,
+        visible=str(visible).lower(),
         sprite_id=sprite_id,
         sprite_mask_id=sprite_mask_id,
         parent_path=parent_path,
@@ -330,6 +332,23 @@ class TestObjectConverterBasic(unittest.TestCase):
         self.assertNotIn('instance', content)
         self.assertIn('type="Script"', content)
         self.assertIn('script = ExtResource', content)
+        self.assertNotIn('visible', content)
+
+    def test_invisible_object_scene_root_is_not_visible(self):
+        # Every instance starts with its object's visible flag (SetObjectIndex
+        # in the HTML5 runner's yyInstance.js).
+        obj_dir = os.path.join(self.gm_dir, "objects", "o_hidden")
+        os.makedirs(obj_dir)
+        with open(os.path.join(obj_dir, "o_hidden.yy"), "w") as f:
+            f.write(_make_object_yy_content("o_hidden", sprite_name="s_player", visible=False))
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_hidden", "o_hidden.tscn"), encoding="utf-8") as f:
+            content = f.read()
+        root = content[content.index('[node name="o_hidden"'):content.index('[node name="s_player"')]
+        self.assertIn("\nvisible = false\n", root)
+        self.assertIn("script = ExtResource", root)
 
 
 class TestObjectConverterEmpty(unittest.TestCase):
@@ -2134,7 +2153,7 @@ class TestScriptGeneration(unittest.TestCase):
             "Create_0.gml",
         )
         with open(source_path, "w", encoding="utf-8") as f:
-            f.write('show_message_async("Hello");')
+            f.write("score = ;")
         with open(
             os.path.join(
                 self.gm_dir,
@@ -2234,11 +2253,227 @@ class TestScriptGeneration(unittest.TestCase):
         recorded = converter.diagnostics.diagnostics()
         self.assertEqual(len(recorded), 1)
         self.assertEqual(recorded[0].code, "GM2GD-GML-TRANSPILE")
-        self.assertEqual(recorded[0].api, "show_message_async")
-        self.assertEqual(recorded[0].issue_number, 507)
         self.assertEqual(recorded[0].resource, "o_blocked")
         self.assertEqual(recorded[0].resource_type, "object")
         self.assertEqual(recorded[0].event, "_ready")
+
+    def test_unsupported_call_keeps_the_rest_of_the_event(self):
+        # GameMaker runs the rest of an event around a call the converted game
+        # cannot make; only that call fails, at run time.
+        self._setup_object(
+            "o_asks",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_asks", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write('show_message_async("Hello");\nscore = 1;')
+        self._write_object_manifest("o_asks")
+
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+        outcome = converter.convert(
+            self.gm_dir,
+            "windows",
+            self.godot_dir,
+            {"objects": objects_enabled},
+        )
+
+        self.assertEqual(outcome.state, "success")
+        with open(
+            os.path.join(self.godot_dir, "objects", "o_asks", "o_asks.gd"),
+            encoding="utf-8",
+        ) as f:
+            script = f.read()
+        self.assertRegex(
+            script,
+            r'\tGMRuntime\.gml_unsupported_call\("show_message_async", "[^"]*#507[^"]*", \["Hello"\]\)\n'
+            r'\t[^\n]*score[^\n]*1',
+        )
+        recorded = converter.diagnostics.diagnostics()
+        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-UNSUPPORTED-CALL"])
+        self.assertEqual(recorded[0].severity, "warning")
+        self.assertEqual(recorded[0].api, "show_message_async")
+        self.assertEqual(recorded[0].manifest_entry, "show_message_async")
+        self.assertEqual(recorded[0].issue_number, 507)
+        self.assertEqual(recorded[0].resource, "o_asks")
+        self.assertEqual(recorded[0].resource_type, "object")
+        self.assertEqual(recorded[0].event, "_ready")
+
+    def test_code_meeting_the_instance_after_a_deferred_instance_change_is_reported(self):
+        # Where the converter cannot run the rest of the event after the
+        # change (a loop, an event the runtime does not call by itself) the
+        # converted instance changes once the event returns, so code after
+        # instance_change that reads the instance sees the old object. The
+        # instance_change statements of the other events are not reported.
+        self._setup_object(
+            "o_door",
+            event_list=[
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 3, "eventNum": 0},
+                {"eventType": 1, "eventNum": 0},
+            ],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "if global.locked { instance_change(o_locked, true) }\nimage_speed = 0;",
+            "Step_0.gml": "repeat (2) { instance_change(o_locked, true); }\nif (hp > 0) { hp -= 1; }",
+            "Destroy_0.gml": "instance_change(o_locked, true);\nhp = 1;",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_object_manifest("o_door", "o_locked")
+
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+        outcome = converter.convert(self.gm_dir, "windows", self.godot_dir, {"objects": objects_enabled})
+
+        self.assertEqual(outcome.state, "success")
+        recorded = sorted(converter.diagnostics.diagnostics(), key=lambda diagnostic: str(diagnostic.event))
+        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-INSTANCE-CHANGE-DEFERRED"] * 2)
+        self.assertEqual([diagnostic.event for diagnostic in recorded], ["_on_destroy", "_on_step"])
+        for diagnostic in recorded:
+            self.assertEqual(diagnostic.severity, "warning")
+            self.assertEqual(diagnostic.resource, "o_door")
+            self.assertEqual((diagnostic.line, diagnostic.api), (1, "instance_change"))
+        self.assertTrue(str(recorded[0].source_path).endswith("Destroy_0.gml"))
+        self.assertIn("assignment to the instance's variable 'hp'", recorded[0].message)
+        self.assertTrue(str(recorded[1].source_path).endswith("Step_0.gml"))
+        self.assertIn("reads the instance", recorded[1].message)
+
+        # The statement of the Create event runs the rest of the event on the
+        # new object; the others only call instance_change.
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertEqual(script.count("GMRuntime.gml_instance_change_then("), 1)
+        self.assertEqual(script.count("GMRuntime.gml_instance_change("), 2)
+        create = script[script.index("func _ready():"):script.index("func _on_step():")]
+        self.assertIn("gml_instance_change_then(", create)
+
+    def _instance_change_diagnostics(self, diagnostics: DiagnosticCollector):
+        return sorted(
+            (
+                diagnostic
+                for diagnostic in diagnostics.diagnostics()
+                if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+            ),
+            key=lambda diagnostic: (str(diagnostic.event), diagnostic.line or 0),
+        )
+
+    def _write_project_scripts(self, scripts: dict[str, str], *object_names: str) -> None:
+        resources: list[JsonObject] = []
+        for name, source in scripts.items():
+            script_dir = os.path.join(self.gm_dir, "scripts", name)
+            os.makedirs(script_dir, exist_ok=True)
+            with open(os.path.join(script_dir, f"{name}.yy"), "w", encoding="utf-8") as f:
+                json.dump({"%Name": name, "name": name, "resourceType": "GMScript"}, f)
+            with open(os.path.join(script_dir, f"{name}.gml"), "w", encoding="utf-8") as f:
+                f.write(source)
+            resources.append({"id": {"name": name, "path": f"scripts/{name}/{name}.yy"}})
+        for name in object_names:
+            resources.append({"id": {"name": name, "path": f"objects/{name}/{name}.yy"}})
+        with open(os.path.join(self.gm_dir, "Project.yyp"), "w", encoding="utf-8") as f:
+            json.dump({"resources": resources, "RoomOrderNodes": [], "resourceType": "GMProject"}, f)
+
+    def test_call_of_a_script_function_that_changes_the_object_is_reported(self):
+        # instance_change inside a script function is not compiled with the
+        # rest of the event, so the converted instance changes once the event
+        # returns: the calls of such a function (also through another function)
+        # are reported where code after them meets the instance.
+        self._setup_object(
+            "o_door",
+            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "scr_wrap(o_locked);\nhp = 1;",
+            "Step_0.gml": "var _s = sprite_index;\nscr_become(o_locked);\nsprite_index = _s;\nscr_plain(o_locked);\nhp = 2;",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_project_scripts(
+            {
+                "scr_become": "function scr_become(_o) { instance_change(_o, true); }\n",
+                "scr_wrap": "function scr_wrap(_o) {\n    scr_become(_o);\n}\n",
+                "scr_plain": "function scr_plain(_o) { return _o; }\n",
+            },
+            "o_door",
+            "o_locked",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        recorded = self._instance_change_diagnostics(diagnostics)
+        self.assertEqual([(d.event, d.line, d.column) for d in recorded], [("_on_step", 2, 1), ("_ready", 1, 1)])
+        self.assertIn("script function scr_become, which runs instance_change", recorded[0].message)
+        self.assertIn("assignment to the instance's variable 'sprite_index'", recorded[0].message)
+        self.assertIn("script function scr_wrap, which runs instance_change", recorded[1].message)
+        self.assertEqual(recorded[0].severity, "warning")
+        self.assertEqual((recorded[0].resource, recorded[0].resource_type), ("o_door", "object"))
+        self.assertEqual(recorded[0].api, "instance_change")
+        self.assertTrue(str(recorded[0].source_path).endswith("Step_0.gml"))
+
+        # The calls stay ordinary calls: no continuation is compiled for them.
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertNotIn("gml_instance_change_then", script)
+
+    def test_macro_that_changes_the_object_is_reported_only_where_it_is_not_continued(self):
+        # A macro used as a statement of the event runs the rest of the event
+        # after the change; in a loop it does not, and the code after it is
+        # reported.
+        self._setup_object(
+            "o_door",
+            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "BECOME_LOCKED;\nhp = 1;",
+            "Step_0.gml": "// BECOME_LOCKED in a comment\nrepeat (2) {\n    BECOME_LOCKED;\n}\nhp = 2;",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_project_scripts(
+            {
+                "macros": "#macro BECOME_LOCKED instance_change(o_locked, true)\n#macro PLAIN 3\n",
+                "scr_use": "function scr_use() { BECOME_LOCKED; }\n",
+            },
+            "o_door",
+            "o_locked",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        recorded = self._instance_change_diagnostics(diagnostics)
+        self.assertEqual([(d.event, d.line) for d in recorded], [("_on_step", 3)])
+        self.assertIn("The macro BECOME_LOCKED, which runs instance_change,", recorded[0].message)
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        create = script[script.index("func _ready():"):script.index("func _on_step():")]
+        self.assertIn("gml_instance_change_then(", create)
 
     def test_missing_event_source_skips_object_and_makes_conversion_partial(self):
         self._setup_object(
@@ -2499,12 +2734,139 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _ready():", parent_content)
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        # No ancestor's event can change the instance's script, so the call is
+        # an ordinary one and the child's event goes on after it.
         self.assertIn(
             "\tchild_before = true\n"
             "\tsuper._ready()\n"
             "\tchild_after = true",
             child_content,
         )
+        self.assertNotIn("_gml_change_continue", child_content)
+        self.assertNotIn("gml_event_nest", child_content)
+
+    def _convert_child_of_changing_parent(
+        self,
+        parent_code: str,
+        child_code: str,
+        *,
+        event_type: int = 0,
+        event_num: int = 0,
+        grandparent: bool = False,
+    ) -> str:
+        """Convert a child (and, optionally, a childless-event middle object) of a parent and return the child's script."""
+        event: JsonObject = {"eventType": event_type, "eventNum": event_num}
+        file_name = {0: "Create_0.gml", 3: "Step_0.gml"}[event_type]
+        self._setup_object("o_parent", event_list=[event])
+        if grandparent:
+            self._setup_object("o_middle", event_list=[], parent_object_name="o_parent")
+        self._setup_object(
+            "o_child",
+            event_list=[event],
+            parent_object_name="o_middle" if grandparent else "o_parent",
+        )
+        for object_name, code in (("o_parent", parent_code), ("o_child", child_code)):
+            with open(
+                os.path.join(self.gm_dir, "objects", object_name, file_name),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            return f.read()
+
+    def test_child_event_inherited_runs_rest_as_continuation_when_parent_changes_object(self):
+        """event_inherited() reaching a parent's instance_change ends the child's own code."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true); parent_after = 1;",
+            "child_before = true; event_inherited(); child_after = true;",
+        )
+        self.assertIn(
+            "\tchild_before = true\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            "\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, \"child_after\", true)\n"
+            "\tsuper._ready()\n"
+            "\t_gml_change_continue.call()\n"
+            "\treturn",
+            child_content,
+        )
+        self.assertNotIn("gml_event_nest", child_content)
+
+    def test_child_event_inherited_continuation_reaches_grandparent_events(self):
+        """An ancestor above the nearest parent decides too (the middle object has no event)."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true);",
+            "event_inherited(); child_after = true;",
+            event_type=3,
+            grandparent=True,
+        )
+        self.assertIn("\tsuper._on_step()\n\t_gml_change_continue.call()\n\treturn", child_content)
+
+    def test_child_event_inherited_stays_plain_when_the_ancestor_event_cannot_continue(self):
+        """The Destroy event runs inside the code that destroys the instance: no continuation form."""
+        self._setup_object("o_parent", event_list=[{"eventType": 1, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 1, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        for object_name, code in (
+            ("o_parent", "instance_change(o_target, true);"),
+            ("o_child", "event_inherited(); child_after = true;"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", object_name, "Destroy_0.gml"), "w", encoding="utf-8") as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            child_content = f.read()
+        self.assertNotIn("_gml_change_continue", child_content)
+
+    def test_child_event_inherited_in_a_loop_raises_the_instance_nesting_count(self):
+        """Where the rest of the event cannot be a function, the parent's change waits for the child's event."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true);",
+            "for (var i = 0; i < 2; i++) { event_inherited(); } child_after = true;",
+        )
+        self.assertIn(
+            "GMRuntime.gml_event_nest(self)\n\t\tsuper._ready()\n\t\tGMRuntime.gml_event_unnest(self)",
+            child_content,
+        )
+
+    def test_child_event_inherited_continuation_sees_a_parent_macro_that_changes_the_object(self):
+        """A macro that expands to instance_change in the parent's event counts as the call."""
+        self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        self._reference_object_and_scripts("o_child", "macros")
+        with open(os.path.join(self.gm_dir, "Project.yyp"), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "resources": [
+                        {"id": {"name": name, "path": f"{kind}/{name}/{name}.yy"}}
+                        for kind, name in (("scripts", "macros"), ("objects", "o_parent"), ("objects", "o_child"))
+                    ],
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                f,
+            )
+        with open(os.path.join(self.gm_dir, "scripts", "macros", "macros.gml"), "w", encoding="utf-8") as f:
+            f.write("#macro BECOME_TARGET instance_change(o_target, true)\n")
+        for object_name, code in (
+            ("o_parent", "BECOME_TARGET;"),
+            ("o_child", "event_inherited(); child_after = true;"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", object_name, "Create_0.gml"), "w", encoding="utf-8") as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            child_content = f.read()
+        self.assertIn("\tsuper._ready()\n\t_gml_change_continue.call()\n\treturn", child_content)
 
     def test_event_inherited_noops_when_parent_lacks_matching_event(self):
         self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}])
@@ -3597,10 +3959,21 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         assert parsed is not None
         self.assertEqual(
             trace,
-            ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "properties", "overriddenProperties", "spriteMaskId"],
+            [
+                "spriteId",
+                "parentObjectId",
+                "eventList",
+                "solid",
+                "persistent",
+                "visible",
+                "properties",
+                "overriddenProperties",
+                "spriteMaskId",
+            ],
         )
         self.assertTrue(parsed["solid"])
         self.assertFalse(parsed["persistent"])
+        self.assertTrue(parsed["visible"])
 
     def test_live_reference_capture_keeps_explicit_path_authority_before_resolution(self) -> None:
         with patch.object(self.converter, "_resolve_project_source") as resolver:

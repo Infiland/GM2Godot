@@ -17,7 +17,13 @@ from src.conversion.architecture_policy import (
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.gml_transpiler import (
+    GMLTranspileError,
+    transpile_gml_code,
+    transpile_gml_code_with_source_map,
+)
+from src.conversion.instance_change_diagnostics import record_instance_change_reads
+from src.conversion.instance_change_names import InstanceChangeNames, collect_instance_change_names
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_variables import (
     VariableDefinition,
@@ -203,6 +209,7 @@ class RoomConverter(BaseConverter):
         self.macro_configuration = macro_configuration
         self._asset_names_cache: set[str] | None = None
         self._macro_values_cache: dict[str, str] | None = None
+        self._instance_change_names_cache: InstanceChangeNames | None = None
         self._enum_values_cache: dict[str, dict[str, int]] | None = None
 
     def _build_resource_index(self) -> GameMakerResourceIndex:
@@ -609,6 +616,15 @@ class RoomConverter(BaseConverter):
             )
         return self._macro_values_cache
 
+    def _project_instance_change_names(self) -> InstanceChangeNames:
+        if self._instance_change_names_cache is None:
+            self._instance_change_names_cache = collect_instance_change_names(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+                macro_values=self._project_macro_values(),
+            )
+        return self._instance_change_names_cache
+
     def _project_enum_values(self) -> dict[str, dict[str, int]]:
         if self._enum_values_cache is None:
             self._enum_values_cache = collect_project_enum_values(
@@ -741,8 +757,12 @@ class RoomConverter(BaseConverter):
             self._safe_log(message)
             raise _RoomCreationCodeBlocked(message) from exc
 
+        instance_change_names = self._project_instance_change_names()
         try:
-            return transpile_gml_code(
+            # An instance's creation code runs from the room's start-up, with
+            # no method of the instance's script below it, so an instance_change
+            # in it can run the rest of the code on the new object.
+            result = transpile_gml_code_with_source_map(
                 source,
                 asset_names=asset_names,
                 top_level_global_scope=top_level_global_scope,
@@ -753,9 +773,12 @@ class RoomConverter(BaseConverter):
                 self_expression=self_expression,
                 other_expression=other_expression,
                 instance_target=instance_target,
+                instance_change_continuations=instance_target is not None,
+                instance_change_names=instance_change_names.all,
                 enum_values=self._project_enum_values(),
                 macro_values=self._project_macro_values(),
             )
+            code = result.code
         except GMLTranspileError as exc:
             message = (
                 "Warning: Could not transpile GameMaker {label} for room {room}: {path}: {error}".format(
@@ -782,6 +805,26 @@ class RoomConverter(BaseConverter):
                 )
             self._safe_log(message)
             raise _RoomCreationCodeBlocked(message) from exc
+        if self.diagnostics is not None:
+            self.diagnostics.add_unsupported_calls(
+                code,
+                source_path=source_path,
+                resource=room_name,
+                resource_type="room",
+                event=label,
+            )
+            record_instance_change_reads(
+                self.diagnostics,
+                source,
+                known_names=asset_names | set(self._project_enum_values()) | set(self._project_macro_values()),
+                continued_calls=result.continued_instance_changes,
+                names=instance_change_names,
+                source_path=source_path,
+                resource=room_name,
+                resource_type="room",
+                event=label,
+            )
+        return code
 
     def _render_room_script(
         self,

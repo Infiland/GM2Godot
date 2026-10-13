@@ -28,6 +28,7 @@ from .constants import (
     RIGHT_ASSOCIATIVE,
     TERNARY_PRECEDENCE,
     UNARY_PRECEDENCE,
+    UNSUPPORTED_CALL_RUNTIME_FUNCTION,
     VIRTUAL_KEY_ACTIONS,
     VIRTUAL_KEY_CONSTANTS,
 )
@@ -824,7 +825,12 @@ def _emit_builtin_call(
 
     extension_function = scope_context.extension_functions.get(expr.callee.value)
     if extension_function is not None:
-        raise GMLTranspileError(diagnostic_for_unmapped_extension_function(extension_function))
+        return _emit_unsupported_call(
+            expr,
+            diagnostic_for_unmapped_extension_function(extension_function),
+            local_names,
+            scope_context,
+        )
 
     if expr.callee.value.startswith("AdMob_"):
         emitted_args = ", ".join(
@@ -846,8 +852,28 @@ def _emit_builtin_call(
 
     diagnostic = diagnostic_for_unimplemented_gml_api(expr.callee.value)
     if diagnostic is not None:
-        raise GMLTranspileError(diagnostic)
+        return _emit_unsupported_call(expr, diagnostic, local_names, scope_context)
     return None
+
+
+# A call the converted game cannot run fails on its own, as the HTML5 runner's
+# ErrorFunction does: it reports an error and returns undefined while the rest
+# of the script or event keeps running. Its arguments are still evaluated.
+def _emit_unsupported_call(
+    expr: _Call,
+    reason: str,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    assert isinstance(expr.callee, _Name)
+    emitted_args = ", ".join(
+        _emit_expression(arg, local_names, scope_context=scope_context)[0]
+        for arg in expr.args
+    )
+    return (
+        f"GMRuntime.{UNSUPPORTED_CALL_RUNTIME_FUNCTION}("
+        f"{json.dumps(expr.callee.value)}, {json.dumps(reason)}, [{emitted_args}])"
+    )
 
 
 def _emit_descriptor_call(

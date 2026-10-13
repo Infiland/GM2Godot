@@ -292,16 +292,9 @@ static func gml_builtin_global(name):
 		return gml_working_directory()
 	if key == "current_time":
 		return Time.get_ticks_msec()
-	if key == "current_year":
-		return int(Time.get_datetime_dict_from_system().get("year", 0))
-	if key == "current_month":
-		return int(Time.get_datetime_dict_from_system().get("month", 0))
-	if key == "current_day":
-		return int(Time.get_datetime_dict_from_system().get("day", 0))
-	if key == "current_minute":
-		return int(Time.get_datetime_dict_from_system().get("minute", 0))
-	if key == "current_second":
-		return int(Time.get_datetime_dict_from_system().get("second", 0))
+	if key in ["current_year", "current_month", "current_day", "current_weekday", "current_hour", "current_minute", "current_second"]:
+		# In the time zone date_set_timezone chose (yyBuiltIn.js get_current_*).
+		return gml_date_current_field(key.trim_prefix("current_"))
 	if key == "debug_mode":
 		return bool(ProjectSettings.get_setting(GML_DEBUG_MODE_SETTING, false))
 	if key == "fps":

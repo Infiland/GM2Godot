@@ -27,6 +27,7 @@ from src.conversion.script_functions import (
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
     ScriptConverter,
+    global_pragma_sources,
 )
 from tests.godot_test_support import write_fixture_text as _write_text
 
@@ -246,6 +247,88 @@ class TestScriptConverter(unittest.TestCase):
                 and diagnostic.resource == "scr_modern"
                 for diagnostic in diagnostics.diagnostics()
             )
+        )
+
+    def test_unsupported_call_keeps_the_script(self) -> None:
+        # A call the converted game cannot make fails on its own at run time;
+        # GameMaker runs the rest of the script, so the script still converts.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            'function scr_modern() {\n    show_question("Quit?");\n    return 7;\n}\n',
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        result = converter.conversion_step_result()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertRegex(
+            script,
+            r'\tGMRuntime\.gml_unsupported_call\("show_question", "[^"]*#515[^"]*", \["Quit\?"\]\)\n'
+            r"\treturn 7\n",
+        )
+        self.assertEqual(result.resources.completed, 2)
+        self.assertEqual(result.resources.skipped, 0)
+        unsupported = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-UNSUPPORTED-CALL"
+        ]
+        self.assertEqual(len(unsupported), 1)
+        self.assertEqual(unsupported[0].severity, "warning")
+        self.assertEqual(unsupported[0].api, "show_question")
+        self.assertEqual(unsupported[0].issue_number, 515)
+        self.assertEqual(unsupported[0].resource, "scr_modern")
+        self.assertEqual(unsupported[0].resource_type, "script")
+        self.assertFalse(
+            any(diagnostic.code == "GM2GD-GML-TRANSPILE" for diagnostic in diagnostics.diagnostics())
+        )
+
+    def test_global_pragma_code_becomes_a_registry_initializer(self) -> None:
+        # GameMaker runs gml_pragma("global", code) code before the first
+        # room, wherever the pragma is; the call itself does nothing at run time.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern() {\n"
+            '    gml_pragma("global", "scr_modern();");\n'
+            '    // gml_pragma("global", "commented_out();");\n'
+            '    gml_pragma("UnityBuild", "true");\n'
+            "    global.ready = true;\n"
+            "}\n",
+        )
+        converter = self._converter(diagnostics=DiagnosticCollector())
+
+        converter.convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertIn('\tGMRuntime.gml_pragma(["global", "scr_modern();"])\n', script)
+        self.assertRegex(
+            script,
+            r"\nfunc gm2godot_initialize_global_pragmas\(\):\n\t[^\n]*scr_modern[^\n]*\n$",
+        )
+        self.assertNotIn("commented_out", script.split("func gm2godot_initialize_global_pragmas")[1])
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertIn('"global_pragma_initializer": _gm_script_method(_gm_initializer_owner_', registry)
+        self.assertEqual(registry.count('"global_pragma_initializer"'), 1)
+
+    def test_global_pragma_sources_reads_literal_global_pragmas_only(self) -> None:
+        self.assertEqual(
+            global_pragma_sources(
+                '#macro CODE "ignored()"\n'
+                'gml_pragma("global", "a();");\n'
+                "/* gml_pragma(\"global\", \"b();\"); */\n"
+                "gml_pragma(\"global\", @'c(\"x\");');\n"
+                'gml_pragma("global", CODE);\n'
+                "gml_pragma(\"global\", code_variable);\n"
+                'gml_pragma("forceinline");\n'
+                'gml_pragma("optimise", "js_array_check", "push, off");\n'
+                'gml_pragma( "global" , "d();" );\n',
+                macro_values={"CODE": '"from_macro();"', "OTHER": "1"},
+            ),
+            ("a();", 'c("x");', "from_macro();", "d();"),
         )
 
     def test_missing_only_declared_script_is_requested_and_skipped(self) -> None:

@@ -6,9 +6,11 @@ import unittest
 
 from src.conversion.gml_transpiler import (
     GMLTranspileError,
+    GMLTranspileResult,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
+    transpile_gml_code_with_source_map,
     transpile_gml_expression,
 )
 from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
@@ -1054,10 +1056,86 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
 
     def test_transpiles_string_join(self):
+        # string_join(delimiter, value1, ...) joins the values after the
+        # delimiter (Function_String.js string_join).
         self.assertEqual(
-            transpile_gml_expression('string_join(arr, ",")'),
-            'GMRuntime.gml_string_join(arr, ",")',
+            transpile_gml_expression('string_join(",", a, 1, "b")'),
+            'GMRuntime.gml_string_join_values(",", [a, 1, "b"])',
         )
+        self.assertEqual(
+            transpile_gml_expression('string_join(",", a)'),
+            'GMRuntime.gml_string_join_values(",", [a])',
+        )
+
+    def test_transpiles_string_format(self):
+        self.assertEqual(
+            transpile_gml_expression("string_format(score, 6, 2)"),
+            "GMRuntime.gml_string_format(score, 6, 2)",
+        )
+
+    def test_transpiles_string_count_point_in_rectangle_and_array_set(self):
+        self.assertEqual(
+            transpile_gml_expression('string_count("Easy", tags)'),
+            'GMRuntime.gml_string_count("Easy", tags)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("point_in_rectangle(mx, my, 40, 720, 120, 760)"),
+            "GMRuntime.gml_point_in_rectangle(mx, my, 40, 720, 120, 760)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("array_set(items, 2, 5)"),
+            "GMRuntime.gml_array_set_function(items, 2, 5)",
+        )
+
+    def test_transpiles_device_mouse_buttons_and_mouse_wheel_calls(self):
+        self.assertEqual(
+            transpile_gml_expression("device_mouse_check_button_released(0, mb_left)"),
+            "GMRuntime.gml_device_mouse_check_button_released(0, MOUSE_BUTTON_LEFT)",
+        )
+        self.assertEqual(transpile_gml_expression("mouse_wheel_up()"), "GMRuntime.gml_mouse_wheel_up()")
+        self.assertEqual(transpile_gml_expression("mouse_wheel_down()"), "GMRuntime.gml_mouse_wheel_down()")
+
+    def test_transpiles_object_get_name_and_sprite_exists(self):
+        self.assertEqual(
+            transpile_gml_expression("object_get_name(object_index)"),
+            "GMRuntime.gml_object_get_name(object_index)",
+        )
+        self.assertEqual(transpile_gml_expression("sprite_exists(spr)"), "GMRuntime.gml_sprite_exists(spr)")
+
+    def test_transpiles_room_set_width_and_height(self):
+        self.assertEqual(
+            transpile_gml_expression("room_set_width(level_room, blocks * 32)"),
+            "GMRuntime.gml_room_set_width(level_room, GMRuntime.gml_mul(blocks, 32))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("room_set_height(level_room, 768)"),
+            "GMRuntime.gml_room_set_height(level_room, 768)",
+        )
+
+    def test_transpiles_layer_draw_depth_forcing(self):
+        self.assertEqual(
+            transpile_gml_expression("layer_force_draw_depth(true, 0)"),
+            "GMRuntime.gml_layer_force_draw_depth(true, 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("layer_is_draw_depth_forced()"),
+            "GMRuntime.gml_layer_is_draw_depth_forced()",
+        )
+        self.assertEqual(transpile_gml_expression("layer_get_forced_depth()"), "GMRuntime.gml_layer_get_forced_depth()")
+
+    def test_transpiles_date_functions_and_time_zone_constants(self):
+        self.assertEqual(
+            transpile_gml_expression("date_create_datetime(2024, 2, 29, 23, 59, 59)"),
+            "GMRuntime.gml_date_create_datetime(2024, 2, 29, 23, 59, 59)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("date_day_span(date_current_datetime(), d)"),
+            "GMRuntime.gml_date_day_span(GMRuntime.gml_date_current_datetime(), d)",
+        )
+        self.assertEqual(transpile_gml_expression("date_set_timezone(timezone_utc)"), "GMRuntime.gml_date_set_timezone(1)")
+        self.assertEqual(transpile_gml_expression("timezone_local"), "0")
+        with self.assertRaises(GMLTranspileError):
+            transpile_gml_expression("date_inc_day(d)")
 
     def test_transpiles_chr(self):
         self.assertEqual(
@@ -3817,6 +3895,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("instance_destroy()"),
             "GMRuntime.gml_instance_destroy(self)",
         )
+        # instance_change acts on the calling instance.
+        self.assertEqual(
+            transpile_gml_code("instance_change(o_enemy, true);", indent="", asset_names=asset_names),
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_enemy"), true, self)',
+        )
         self.assertEqual(
             transpile_gml_expression("instance_destroy(o_enemy, false)", asset_names=asset_names),
             'GMRuntime.gml_instance_destroy(GMRuntime.gml_asset_get_index("o_enemy"), false)',
@@ -3826,6 +3909,298 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"), self, other):\n'
             '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", 0)',
         )
+
+    def _transpile_with_continuations(
+        self,
+        source: str,
+        *,
+        enabled: bool = True,
+        inherited_event_call: str | None = None,
+        inherited_event_continuation: bool = False,
+        macro_values: dict[str, str] | None = None,
+        instance_change_names: tuple[str, ...] = (),
+    ) -> GMLTranspileResult:
+        return transpile_gml_code_with_source_map(
+            source,
+            indent="",
+            asset_names={"o_b", "o_c", "s_a"},
+            instance_target="self",
+            direct_instance_names={"hp", "speed"},
+            dynamic_instance_names=set(),
+            inherited_event_call=inherited_event_call,
+            instance_change_continuations=enabled,
+            inherited_event_continuation=inherited_event_continuation,
+            macro_values=macro_values,
+            instance_change_names=instance_change_names,
+        )
+
+    def test_instance_change_runs_the_rest_of_the_event_on_the_new_object(self):
+        # GameMaker changes the instance at the call, so the statements after
+        # it act on the new object. The converter cannot swap a node's script
+        # while a method of the old script runs, so the rest of the event is
+        # compiled as a function that gml_instance_change_then runs after the
+        # change, reaching the instance by name only, and the event returns.
+        result = self._transpile_with_continuations(
+            "var s = sprite_index;\ninstance_change(o_b, false);\nsprite_index = s;\nhp = 3;"
+        )
+        self.assertEqual(
+            result.code,
+            "var s = sprite_index\n"
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "sprite_index", s)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), false, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        # The call is reported by its place among the sites of the source, so
+        # the analyser does not warn about it.
+        self.assertEqual(result.continued_instance_changes, (0,))
+
+        # The last statement has nothing to continue with.
+        self.assertEqual(
+            self._transpile_with_continuations("instance_change(o_b, true);").code,
+            "var _gml_change_continue = func():\n"
+            "\tpass\n"
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+
+    def test_instance_change_continuation_is_off_unless_the_event_allows_it(self):
+        # (The Destroy event, the user events and the like run inside code of
+        # the instance that goes on after them.)
+        result = self._transpile_with_continuations("instance_change(o_b, true);\nhp = 1;", enabled=False)
+        self.assertEqual(
+            result.code,
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nhp = 1',
+        )
+        self.assertEqual(result.continued_instance_changes, ())
+        self.assertEqual(
+            transpile_gml_code("instance_change(o_b, true);\nhp = 1;", indent="", asset_names={"o_b"}),
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nhp = 1',
+        )
+
+    def test_instance_change_continuation_follows_the_branches_it_is_in(self):
+        # Each branch that changes the instance carries the statements that come
+        # after the branches, since they run on the new object in that branch.
+        result = self._transpile_with_continuations(
+            "if hp = 1 { instance_change(o_b, 1) } else { instance_change(o_c, 0); hp = 9 }\nx = 3"
+        )
+        self.assertEqual(
+            result.code,
+            "if GMRuntime.gml_eq(hp, 1):\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            '\tGMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), 1, '
+            "_gml_change_continue, self)\n"
+            "\treturn\n"
+            "else:\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 9)\n'
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            '\tGMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_c"), 0, '
+            "_gml_change_continue, self)\n"
+            "\treturn\n"
+            "position.x = 3",
+        )
+        self.assertEqual(result.continued_instance_changes, (0, 1))
+
+        # An unbraced branch and an else-if chain.
+        unbraced = self._transpile_with_continuations("if (hp = 1) instance_change(o_b, 1);\nelse hp = 2;\nx = 3")
+        self.assertEqual(unbraced.continued_instance_changes, (0,))
+        self.assertIn('"x", 3)', unbraced.code.split("else:")[0])
+        self.assertIn("else:\n\thp = 2\nposition.x = 3", unbraced.code)
+        chain = self._transpile_with_continuations(
+            "if (hp) { instance_change(o_b, true) } else if (speed) { instance_change(o_c, true) }\nhp = 2;"
+        )
+        self.assertEqual(chain.continued_instance_changes, (0, 1))
+        self.assertEqual(chain.code.count("gml_instance_change_then("), 2)
+        self.assertTrue(chain.code.endswith("\nhp = 2"))
+
+    def test_instance_change_continuation_ends_at_exit_and_nests_later_calls(self):
+        result = self._transpile_with_continuations("instance_change(o_b, true); exit; hp = 4")
+        self.assertIn("\treturn\n", result.code)
+        # Only the first call of a straight run of statements is a site; the
+        # call that follows it is made by the continuation on the instance
+        # (its own change takes place when the continuation returns).
+        several = self._transpile_with_continuations(
+            "instance_change(o_b, true);\ninstance_change(o_c, true);\nhp = 1;"
+        )
+        self.assertEqual(several.continued_instance_changes, (0,))
+        self.assertEqual(
+            several.code,
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_c"), true, _gml_change_self)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 1)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        # (The count does not depend on where the call is: comments before it
+        # do not move it, and calls that stay deferred are counted.)
+        counted = self._transpile_with_continuations(
+            "/* a\nb */ with (o_c) { instance_change(o_b, true); }\n// c\n  instance_change(o_c, false); hp = 1;"
+            "\n\tif hp { instance_change(o_c, false) }"
+        )
+        self.assertEqual(counted.continued_instance_changes, (1,))
+
+    def test_instance_change_keeps_the_deferred_form_where_the_rest_cannot_run_after_it(self):
+        deferred_sources = (
+            # Inside a loop, a switch, a try statement or a with statement the
+            # rest of the event is not the rest of the enclosing statement.
+            "while (hp > 0) { instance_change(o_b, true); hp -= 1; }\nx = 1",
+            "repeat (3) { instance_change(o_b, true); }",
+            "switch (hp) { case 1: instance_change(o_b, true); break; }\nx = 1",
+            "try { instance_change(o_b, true); } catch (e) { }\nx = 1",
+            "with (o_c) { instance_change(o_b, true); }\nhp = 1",
+            # An argument that changes a variable, or code that goes on to the
+            # parent's event, must not run twice or after the swap.
+            "instance_change(o_b, ++hp);\nx = 1",
+        )
+        for source in deferred_sources:
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(source)
+                self.assertNotIn("gml_instance_change_then", result.code)
+                self.assertIn("GMRuntime.gml_instance_change(", result.code)
+                self.assertEqual(result.continued_instance_changes, ())
+
+        inherited = self._transpile_with_continuations(
+            "instance_change(o_b, true);\nevent_inherited();", inherited_event_call="super._on_step()"
+        )
+        self.assertEqual(
+            inherited.code,
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nsuper._on_step()',
+        )
+        # event_inherited before the call is no obstacle.
+        before = self._transpile_with_continuations(
+            "event_inherited();\ninstance_change(o_b, true);\nx = 1", inherited_event_call="super._on_step()"
+        )
+        self.assertTrue(before.code.startswith("super._on_step()\nvar _gml_change_self = self\n"))
+        self.assertEqual(before.continued_instance_changes, (0,))
+
+    def test_event_inherited_ends_the_event_when_an_ancestor_can_change_the_object(self):
+        # The parent's event may replace the node's script under the child's
+        # method, which must use no member afterwards: the rest of the child's
+        # event is a function made before the call and run right after it.
+        result = self._transpile_with_continuations(
+            "var s = sprite_index;\nevent_inherited();\nsprite_index = s;\nhp = 3;",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            result.code,
+            "var s = sprite_index\n"
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "sprite_index", s)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            "super._on_step()\n"
+            "_gml_change_continue.call()\n"
+            "return",
+        )
+        self.assertEqual(result.continued_instance_changes, ())
+
+        # Inside a branch, the statements after the branches go with it, as
+        # they do for an instance_change.
+        branch = self._transpile_with_continuations(
+            "if hp = 1 { event_inherited(); hp = 2 }\nx = 3",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            branch.code,
+            "if GMRuntime.gml_eq(hp, 1):\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 2)\n'
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            "\tsuper._on_step()\n"
+            "\t_gml_change_continue.call()\n"
+            "\treturn\n"
+            "position.x = 3",
+        )
+
+        # Without an ancestor that can change the object the call stays plain.
+        plain = self._transpile_with_continuations(
+            "event_inherited();\nhp = 3;", inherited_event_call="super._on_step()"
+        )
+        self.assertEqual(plain.code, "super._on_step()\nhp = 3")
+
+    def test_event_inherited_outside_the_events_own_statements_marks_the_instance(self):
+        # Where the rest of the event cannot be a function (a loop, a with, a
+        # switch or try statement, or a call that another call of the parent's
+        # event follows) the call raises the instance's nesting count, which
+        # makes a change in the parent's event wait for the child's event to
+        # return.
+        for source in (
+            "for (var i = 0; i < 2; i++) { event_inherited(); }\nhp = 3;",
+            "try { event_inherited(); } catch (e) { }\nhp = 3;",
+            "with (o_c) { event_inherited(); }\nhp = 3;",
+            "switch (hp) { case 1: event_inherited(); break; default: break; }\nhp = 3;",
+            "if hp { switch (hp) { default: event_inherited(); } }\nhp = 3;",
+        ):
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(
+                    source, inherited_event_call="super._on_step()", inherited_event_continuation=True
+                )
+                self.assertRegex(
+                    result.code,
+                    r"GMRuntime\.gml_event_nest\(self\)\n\t+super\._on_step\(\)\n\t+GMRuntime\.gml_event_unnest\(self\)",
+                )
+                self.assertNotIn("_gml_change_continue", result.code)
+
+        # (The last call of a straight run of statements ends the event.)
+        twice = self._transpile_with_continuations(
+            "event_inherited();\nhp = 3;\nevent_inherited();",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            twice.code,
+            "GMRuntime.gml_event_nest(self)\nsuper._on_step()\nGMRuntime.gml_event_unnest(self)\nhp = 3\n"
+            "var _gml_change_continue = func():\n\tpass\n"
+            "super._on_step()\n_gml_change_continue.call()\nreturn",
+        )
+
+    def test_a_macro_used_as_a_statement_continues_like_instance_change(self):
+        macros = {"BECOME": "instance_change(o_b, true)", "PLAIN": "hp = 5"}
+        result = self._transpile_with_continuations(
+            "BECOME;\nhp = 3;", macro_values=macros, instance_change_names=("BECOME",)
+        )
+        self.assertEqual(
+            result.code,
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        self.assertEqual(result.continued_instance_changes, (0,))
+
+        # The sites are numbered as the source reads, whatever the macros
+        # splice in front of them: a script function call is one (never
+        # continued), the macro is the second, the call after it the third.
+        numbered = self._transpile_with_continuations(
+            "// BECOME\nscr_wrap(o_b);\nif (hp) { BECOME; }\ninstance_change(o_c, true);\nhp = 1;",
+            macro_values={**macros, "LOCAL": "instance_change(o_b, true); instance_change(o_c, true)"},
+            instance_change_names=("BECOME", "scr_wrap"),
+        )
+        self.assertEqual(numbered.continued_instance_changes, (1, 2))
+
+        # A macro in a loop or in an expression stays an ordinary use.
+        for source in ("repeat (2) { BECOME; }\nhp = 3;", "var f = function() { BECOME; };\nhp = 3;"):
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(
+                    source, macro_values=macros, instance_change_names=("BECOME",)
+                )
+                self.assertNotIn("gml_instance_change_then", result.code)
+                self.assertEqual(result.continued_instance_changes, ())
 
     def test_cross_instance_dot_access_uses_selector_helpers(self):
         asset_names = {"o_enemy", "o_parent"}
@@ -4413,12 +4788,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_camera_display_unsupported_gif_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "gif_open.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_open(320, 180);", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "gif_add_surface.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_add_surface(gif_id, surf, 6);", indent="")
-        with self.assertRaisesRegex(GMLTranspileError, "gif_save_buffer.*unsupported.*#493.*GIF"):
-            transpile_gml_code("gif_save_buffer(gif_id);", indent="")
+        # An unsupported call fails on its own at run time; the code around it
+        # still converts.
+        self.assertRegex(
+            transpile_gml_code("gif_open(320, 180);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_open", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[320, 180\]\)$',
+        )
+        self.assertRegex(
+            transpile_gml_code("gif_add_surface(gif_id, surf, 6);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_add_surface", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[gif_id, surf, 6\]\)$',
+        )
+        self.assertRegex(
+            transpile_gml_code("gif_save_buffer(gif_id);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("gif_save_buffer", "[^"]*unsupported[^"]*#493[^"]*GIF[^"]*", \[gif_id\]\)$',
+        )
 
     def test_transpiles_array_assignments_through_runtime(self):
         self.assertEqual(
@@ -5439,8 +5822,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_sequence_track_authoring_rejects_with_diagnostic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "sequence_track_new.*unsupported.*#567"):
-            transpile_gml_code("sequence_track_new(seqtracktype_graphic);", indent="")
+        self.assertRegex(
+            transpile_gml_code("sequence_track_new(seqtracktype_graphic);", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("sequence_track_new", "[^"]*unsupported[^"]*#567[^"]*", \[',
+        )
 
     def test_ds_list_collection_helpers_lower_to_runtime(self):
         self.assertEqual(
@@ -6153,6 +6538,40 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'alive = GMRuntime.gml_weak_ref_alive(GMRuntime.gml_weak_ref_create(GMRuntime.gml_struct({"a": 1})))',
         )
 
+    def test_compile_time_and_runner_debug_calls_lower_to_runtime_no_ops(self):
+        # The HTML5 runner does nothing for these (Function_Debug.js,
+        # Function_Game.js); gml_pragma is compile-time and takes any number
+        # of arguments.
+        self.assertEqual(
+            transpile_gml_code(
+                'gml_pragma("global", "init();");'
+                'gml_pragma("MarkTagAsUsed", "a", "b", "c");'
+                "show_debug_overlay(true);"
+                "show_debug_overlay(true, false, 2, 0.5, true, -1);"
+                "open = is_debug_overlay_open();"
+                "mouse = is_mouse_over_debug_overlay();"
+                "keyboard = is_keyboard_used_debug_overlay();"
+                'debug_event("DumpMemory", true);'
+                "scheduler_resolution_set(2);"
+                "resolution = scheduler_resolution_get();"
+                "os_powersave_enable(false);"
+                "os_lock_orientation(true);",
+                indent="",
+            ),
+            'GMRuntime.gml_pragma(["global", "init();"])\n'
+            'GMRuntime.gml_pragma(["MarkTagAsUsed", "a", "b", "c"])\n'
+            "GMRuntime.gml_show_debug_overlay(true)\n"
+            "GMRuntime.gml_show_debug_overlay(true, false, 2, 0.5, true, -1)\n"
+            "open = GMRuntime.gml_is_debug_overlay_open()\n"
+            "mouse = GMRuntime.gml_is_mouse_over_debug_overlay()\n"
+            "keyboard = GMRuntime.gml_is_keyboard_used_debug_overlay()\n"
+            'GMRuntime.gml_debug_event("DumpMemory", true)\n'
+            "GMRuntime.gml_scheduler_resolution_set(2)\n"
+            "resolution = GMRuntime.gml_scheduler_resolution_get()\n"
+            "GMRuntime.gml_os_powersave_enable(false)\n"
+            "GMRuntime.gml_os_lock_orientation(true)",
+        )
+
     def test_os_debug_gc_helper_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "environment_get_variable.*expects 1.*got 0"):
             transpile_gml_code("environment_get_variable();", indent="")
@@ -6223,8 +6642,10 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("xboxlive_achievements_set_progress(user_id, 'Achievement');", indent="")
 
     def test_os_device_media_unsupported_apis_get_diagnostics(self):
-        with self.assertRaisesRegex(GMLTranspileError, "device_get_tilt_y.*unsupported.*#569.*sensor"):
-            transpile_gml_code("device_get_tilt_y();", indent="")
+        self.assertRegex(
+            transpile_gml_code("device_get_tilt_y();", indent=""),
+            r'^GMRuntime\.gml_unsupported_call\("device_get_tilt_y", "[^"]*unsupported[^"]*#569[^"]*sensor[^"]*", \[\]\)$',
+        )
 
     def test_extension_function_mappings_emit_configured_hook_calls(self):
         self.assertEqual(
@@ -6263,14 +6684,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
 
     def test_unmapped_extension_function_reports_actionable_diagnostic(self):
-        with self.assertRaisesRegex(
-            GMLTranspileError,
-            "ads_show_rewarded.*AdSDK.*gm2godot_extension_functions.json",
-        ):
-            transpile_gml_expression(
-                'ads_show_rewarded("zone_1")',
+        # Without a mapping the call fails on its own at run time with the
+        # actionable message; the rest of the script still converts.
+        self.assertRegex(
+            transpile_gml_code(
+                'ads_show_rewarded("zone_1");\nscore = 1;',
+                indent="",
                 extension_functions={"ads_show_rewarded": "AdSDK"},
-            )
+            ),
+            r'^GMRuntime\.gml_unsupported_call\("ads_show_rewarded", '
+            r'"[^"]*AdSDK[^"]*gm2godot_extension_functions\.json[^"]*", \["zone_1"\]\)\n'
+            r"score = 1$",
+        )
 
     def test_extension_mapping_arity_errors_are_deterministic(self):
         with self.assertRaisesRegex(GMLTranspileError, "ads_show_rewarded.*expects 1.*got 0"):

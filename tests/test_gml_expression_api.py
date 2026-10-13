@@ -581,7 +581,7 @@ class GMLExpressionAPITests(unittest.TestCase):
         self.assertEqual(str(error), "Expected expression, got: ) at line 2, column 3")
 
         facade_exports = literal_all_exports(FACADE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(len(facade_exports), 44)
+        self.assertEqual(len(facade_exports), 45)
         self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         package_internal_only: set[str] = {str(name) for name in PUBLIC_NAMES}
         package_internal_only.difference_update(

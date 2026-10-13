@@ -506,7 +506,10 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         os.makedirs(os.path.join(self.gm_dir, "options", "main"), exist_ok=True)
         os.makedirs(os.path.join(self.gm_dir, "options", "windows"), exist_ok=True)
         with open(os.path.join(self.gm_dir, "options", "main", "options_main.yy"), "w", encoding="utf-8") as f:
-            f.write('{"option_game_speed":144,}')
+            f.write(
+                '{"option_game_speed":144,"option_draw_colour":4278255360,'
+                '"option_legacy_primitive_drawing":false,"option_collision_compatibility":true,}'
+            )
         with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
             f.write(
                 "{"
@@ -564,16 +567,49 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn('config/version="123"', content)
         self.assertIn("boot_splash/show_image=false", content)
         self.assertIn("run/max_fps=144", content)
+        self.assertIn("config/gm2godot_collision_compatibility=true", content)
         self.assertIn("window/vsync/vsync_mode=0", content)
         self.assertIn("window/size/resizable=true", content)
         self.assertIn("window/size/borderless=false", content)
         self.assertIn("textures/canvas_textures/default_texture_filter=1", content)
         self.assertIn("window/size/mode=3", content)
+        gm2godot = self._section_body(content, "gm2godot")
+        self.assertIn("draw/initial_colour=65280", gm2godot)
+        self.assertIn("draw/legacy_primitive_drawing=false", gm2godot)
         unsupported_logs = [
             log for log in self.logs if "option_windows_custom_future" in log
         ]
         self.assertTrue(unsupported_logs)
         self.assertTrue(all(log.startswith("Info:") for log in unsupported_logs))
+
+    def test_scaling_and_window_colour_options_map_to_stretch_and_clear_colour(self) -> None:
+        with open(os.path.join(self.gm_dir, "options", "main", "options_main.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_game_speed":60,"option_window_colour":4278206719,}')
+        with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_windows_scale":0,}')
+
+        self._make_converter().update_project_settings()
+
+        with open(self.project_godot, "r", encoding="utf-8") as f:
+            content = f.read()
+        display = self._section_body(content, "display")
+        rendering = self._section_body(content, "rendering")
+        self.assertIn('window/stretch/aspect="keep"', display)
+        # 4278206719 is 0xFF0040FF: alpha FF, blue 00, green 40, red FF.
+        self.assertIn(
+            "environment/defaults/default_clear_color=Color(1, 0.25098, 0, 1)",
+            rendering,
+        )
+
+        with open(os.path.join(self.gm_dir, "options", "windows", "options_windows.yy"), "w", encoding="utf-8") as f:
+            f.write('{"option_windows_scale":1,}')
+        self._make_converter().update_project_settings()
+
+        with open(self.project_godot, "r", encoding="utf-8") as f:
+            content = f.read()
+        display = self._section_body(content, "display")
+        self.assertIn('window/stretch/aspect="ignore"', display)
+        self.assertNotIn('window/stretch/aspect="keep"', display)
 
     def test_places_settings_in_canonical_sections_and_preserves_existing_settings(self) -> None:
         converter = self._make_converter()
@@ -590,6 +626,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
         self.assertIn('config/description="true"', application)
         self.assertIn('config/version="123"', application)
         self.assertIn("run/max_fps=144", application)
+        self.assertIn("config/gm2godot_collision_compatibility=true", application)
         self.assertNotIn("window/", application)
         self.assertNotIn("textures/canvas_textures/default_texture_filter", application)
 
@@ -705,6 +742,8 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
                 '\t\t"description_type": type_string(typeof(ProjectSettings.get_setting('
                 '"application/config/description"))),\n'
                 '\t\t"max_fps": ProjectSettings.get_setting("application/run/max_fps"),\n'
+                '\t\t"collision_compatibility": ProjectSettings.get_setting('
+                '"application/config/gm2godot_collision_compatibility"),\n'
                 '\t\t"vsync": ProjectSettings.get_setting("display/window/vsync/vsync_mode"),\n'
                 '\t\t"resizable": ProjectSettings.get_setting("display/window/size/resizable"),\n'
                 '\t\t"borderless": ProjectSettings.get_setting("display/window/size/borderless"),\n'
@@ -765,6 +804,7 @@ class TestUpdateProjectSettingsFromManifest(unittest.TestCase):
             settings,
             {
                 "borderless": False,
+                "collision_compatibility": True,
                 "description": "true",
                 "description_type": "String",
                 "legacy_mode": False,

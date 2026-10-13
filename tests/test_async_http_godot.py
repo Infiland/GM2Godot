@@ -74,6 +74,8 @@ class TestAsyncHttpGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Delivered async events are logged only while tracing is on.
+            \tGMRuntime.gml_event_scheduler_set_tracing(true)
             \tvar get_id = GMRuntime.gml_http_get("http://127.0.0.1:__PORT__/hello")
             \texpected[get_id] = "GET:/hello"
             \tvar post_id = GMRuntime.gml_http_post_string("http://127.0.0.1:__PORT__/post", "x=1")
@@ -85,14 +87,16 @@ class TestAsyncHttpGodotSmoke(unittest.TestCase):
             \tGMRuntime.gml_buffer_write(buffer, 11, "save")
             \tvar save_id = GMRuntime.gml_buffer_save_async(buffer, "save/async_bridge.bin")
 
+            \t# Async events reach their handlers in the async phase of a step.
             \tGMRuntime.gml_async_dispatch("dialog", {"id": 999, "status": 0}, "_on_async_dialog")
-            \tif not _check(dialog_seen, "manual async dialog dispatch did not reach handler"):
-            \t\treturn
 
             \tfor _i in range(30):
-            \t\tif seen.size() == expected.size() and save_seen:
+            \t\tif seen.size() == expected.size() and save_seen and dialog_seen:
             \t\t\tbreak
             \t\tawait get_tree().create_timer(0.1).timeout
+
+            \tif not _check(dialog_seen, "manual async dialog dispatch did not reach handler"):
+            \t\treturn
 
             \tif not _check(seen.size() == expected.size(), "not all HTTP async events arrived"):
             \t\treturn

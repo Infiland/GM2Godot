@@ -64,11 +64,18 @@ static func _gml_all_instance_targets():
 
 
 static func _gml_live_instance_entries():
+	# The registered instances in creation order; nodes freed without being
+	# unregistered are forgotten on the way.
 	var entries = []
-	for entry in _gml_instance_entries.values():
-		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
+	var freed = []
+	for entry in _gml_instance_live_order:
+		var instance = entry["instance"]
+		if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
+			freed.append(entry)
+		else:
 			entries.append(entry)
-	entries.sort_custom(_gml_instance_entry_order_less)
+	for entry in freed:
+		gml_instance_unregister(entry)
 	return entries
 
 
@@ -77,7 +84,20 @@ static func _gml_instance_entry_order_less(left, right):
 
 
 static func _gml_instance_entry(instance_or_handle):
-	if typeof(instance_or_handle) == TYPE_DICTIONARY and instance_or_handle.has("handle"):
+	var value_type = typeof(instance_or_handle)
+	if value_type == TYPE_INT:
+		# A raw instance id (keywords are negative and never registered).
+		var id_entry = _gml_instance_entries.get(instance_or_handle)
+		if id_entry != null and gml_handle_is_valid(id_entry["handle"]):
+			return id_entry
+		return null
+	if value_type == TYPE_OBJECT:
+		if not is_instance_valid(instance_or_handle):
+			return null
+		if instance_or_handle is Node:
+			var node_handle = _gml_instance_handles_by_node_id.get(instance_or_handle.get_instance_id())
+			return null if node_handle == null else _gml_instance_entries.get(node_handle.index)
+	if value_type == TYPE_DICTIONARY and instance_or_handle.has("handle"):
 		return instance_or_handle
 	if is_handle(instance_or_handle):
 		if instance_or_handle.kind == GML_INSTANCE_HANDLE_KIND and _gml_instance_entries.has(instance_or_handle.index):
@@ -98,7 +118,7 @@ static func _gml_instance_entry(instance_or_handle):
 
 
 static func _gml_instance_handle_for_node(instance):
-	if instance is Object:
+	if typeof(instance) == TYPE_OBJECT and is_instance_valid(instance):
 		var node_id = instance.get_instance_id()
 		if _gml_instance_handles_by_node_id.has(node_id):
 			return _gml_instance_handles_by_node_id[node_id]
@@ -115,32 +135,21 @@ static func _gml_instance_selector_targets(selector):
 		var keyword_targets = _gml_legacy_instance_keyword_targets(keyword_index, null, null)
 		if keyword_targets != null:
 			return keyword_targets
+	# A registered instance exists until it is unregistered, which happens
+	# right after its Destroy event: like GameMaker, the event still sees it.
 	var entry: Variant = _gml_instance_entry(selector)
 	if entry != null:
-		if entry["destroyed"]:
-			return []
 		return [entry["instance"]]
-	var object_id = _gml_object_selector_id(selector)
-	if object_id != -1 and _gml_instance_ids_by_object.has(object_id):
-		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])
-	var object_name = _gml_object_selector_name(selector)
-	if object_name != "" and _gml_instance_ids_by_object_name.has(object_name):
-		return _gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])
+	var object_entries: Variant = _gml_instance_object_entries(selector)
+	if object_entries != null:
+		return _gml_instance_entry_targets(object_entries)
+	if _gml_object_asset_entry(selector) != null:
+		# An object without instances.
+		return []
 	return null
 
 
-static func _gml_instance_targets_from_indices(indices):
-	var targets = []
-	for handle_index in indices:
-		if not _gml_instance_entries.has(handle_index):
-			continue
-		var entry = _gml_instance_entries[handle_index]
-		if not entry["destroyed"] and gml_handle_is_valid(entry["handle"]):
-			targets.append(entry["instance"])
-	return targets
-
-
-static func _gml_instance_index_add(index_map, selector, handle_index):
+static func _gml_instance_index_add(index_map, selector, entry):
 	if selector == null:
 		return
 	if is_numeric(selector) and _to_int64_value(selector) == -1:
@@ -149,14 +158,13 @@ static func _gml_instance_index_add(index_map, selector, handle_index):
 		return
 	if not index_map.has(selector):
 		index_map[selector] = []
-	if not index_map[selector].has(handle_index):
-		index_map[selector].append(handle_index)
+	index_map[selector].append(entry)
 
 
-static func _gml_instance_index_remove(index_map, selector, handle_index):
+static func _gml_instance_index_remove(index_map, selector, entry):
 	if selector == null or not index_map.has(selector):
 		return
-	index_map[selector].erase(handle_index)
+	_gml_instance_order_erase(index_map[selector], entry)
 	if index_map[selector].is_empty():
 		index_map.erase(selector)
 
@@ -208,20 +216,36 @@ static func _gml_object_asset_entry(selector):
 
 
 static func _gml_instance_distance_extreme(x, y, target, nearest):
-	var targets = gml_with_targets(target)
-	if targets.is_empty():
-		return gml_instance_noone()
-	var origin = Vector2(_to_real(x), _to_real(y))
+	# GameMaker's instance_nearest/instance_furthest: the distance from (x, y)
+	# to an instance's x and y has to beat 10000000000 (nearest) or
+	# -10000000000 (furthest) and every distance before it, so the first
+	# instance wins a tie.
+	var px = _to_real(x)
+	var py = _to_real(y)
+	var best_distance = 10000000000.0 if nearest else -10000000000.0
 	var best_entry = null
-	var best_distance = 0.0
-	for instance in targets:
-		var entry: Variant = _gml_instance_entry(instance)
-		if entry == null:
+	var entries: Variant = _gml_instance_target_entries(target)
+	if entries == null:
+		entries = []
+		for instance in gml_with_targets(target):
+			var instance_entry: Variant = _gml_instance_entry(instance)
+			if instance_entry != null:
+				entries.append(instance_entry)
+	for entry in entries:
+		var instance = entry["instance"]
+		if typeof(instance) == TYPE_OBJECT and not is_instance_valid(instance):
 			continue
-		var distance = origin.distance_squared_to(_gml_instance_position(instance))
-		if best_entry == null or (nearest and distance < best_distance) or ((not nearest) and distance > best_distance):
-			best_entry = entry
+		var position = (
+			instance.position
+			if instance is Node2D and not _gml_sequence_instances_exist
+			else _gml_instance_position(instance)
+		)
+		var xx = px - position.x
+		var yy = py - position.y
+		var distance = sqrt(xx * xx + yy * yy)
+		if (distance < best_distance) if nearest else (distance > best_distance):
 			best_distance = distance
+			best_entry = entry
 	if best_entry == null:
 		return gml_instance_noone()
 	return best_entry["handle"]
@@ -229,7 +253,7 @@ static func _gml_instance_distance_extreme(x, y, target, nearest):
 
 static func _gml_instance_position(instance):
 	if instance is Node2D:
-		return instance.global_position
+		return _gml_collision_instance_xy(instance)
 	if instance is Object:
 		var x_value = gml_variable_instance_get(instance, "x")
 		var y_value = gml_variable_instance_get(instance, "y")
@@ -238,7 +262,7 @@ static func _gml_instance_position(instance):
 	return Vector2.ZERO
 
 
-static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null):
+static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, current_self = null, var_struct = null):
 	var entry: Variant = _gml_object_asset_entry(object_selector)
 	if entry == null:
 		return gml_instance_noone()
@@ -258,11 +282,43 @@ static func _gml_instance_create_at(x, y, layer, depth_value, object_selector, c
 	var parent = _gml_instance_creation_parent(current_self, layer)
 	if parent == null:
 		return gml_instance_noone()
+	if layer == null and depth_value != null and parent == _gml_layer_current_scene():
+		# GameMaker puts it on the room's managed layer at its depth.
+		parent = _gml_managed_layer(parent, gml_depth_truncate(depth_value))
+	if var_struct != null and not is_undefined(var_struct):
+		# Set just before the Create event runs (gml_event_create_blocked).
+		instance.set_meta(GML_INSTANCE_CREATE_VARIABLES_META, var_struct)
 	parent.add_child(instance)
+	# An object without a Create event takes them now.
+	_gml_instance_apply_create_variables(instance)
 	var handle = _gml_instance_handle_for_node(instance)
 	if not gml_handle_is_valid(handle):
+		if instance.has_meta("_gm2godot_instance_destroyed"):
+			# Its Create event destroyed it: like GameMaker, return the id it
+			# had there, which no longer refers to an existing instance.
+			var own_id = instance.get("id")
+			return own_id if own_id is GMLHandle else gml_instance_noone()
 		handle = gml_instance_register(instance, int(entry["id"]), [])
 	return handle
+
+
+const GML_INSTANCE_CREATE_VARIABLES_META = "_gm2godot_create_variables"
+
+
+# instance_create_*'s var_struct: GameMaker copies its variables onto the new
+# instance after the Pre-Create event and before the Create event, binding the
+# struct's own methods to the instance (ShallowCopyVars in the HTML5 runner).
+# Applied once, also when a child object's Create event calls event_inherited.
+static func _gml_instance_apply_create_variables(instance):
+	if not is_instance_valid(instance) or not instance.has_meta(GML_INSTANCE_CREATE_VARIABLES_META):
+		return
+	var var_struct = instance.get_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	instance.remove_meta(GML_INSTANCE_CREATE_VARIABLES_META)
+	for name in gml_struct_get_names(var_struct):
+		var value = gml_struct_get(var_struct, name)
+		if value is GMLMethod and is_same(value.bound_self, var_struct):
+			value = gml_method(instance, value)
+		gml_struct_set(instance, name, value)
 
 
 static func _gml_instance_creation_parent(current_self, layer):
@@ -282,12 +338,10 @@ static func _gml_instance_creation_parent(current_self, layer):
 
 
 static func _gml_instance_apply_depth(instance, depth_value):
-	var resolved_depth = int(_to_real(depth_value))
-	if instance is CanvasItem:
-		instance.z_index = -resolved_depth
+	var resolved_depth = _to_real(depth_value)
 	if instance is Object:
-		if _object_has_property(instance, "depth"):
-			instance.set("depth", resolved_depth)
+		instance.set("depth", resolved_depth)
+	gml_instance_depth_assign(instance, resolved_depth)
 
 
 static func _gml_instance_set_meta(instance, key, value):
@@ -349,7 +403,7 @@ static func _gml_string_to_int64(value):
 	if text.to_lower().is_valid_hex_number(true):
 		return _gml_hex_string_to_int(text)
 	if text.is_valid_float():
-		return int(text.to_float())
+		return GMLInt64.saturate(text.to_float())
 	return gml_error("GML int64 conversion does not support string " + text)
 
 
@@ -387,11 +441,32 @@ static func _to_array_index(value):
 	return resolved_index
 
 
+static var _gml_script_property_names_cache = {}
+
+
 static func _object_has_property(object_value, property_name):
-	for property in object_value.get_property_list():
-		if property.get("name") == property_name:
-			return true
-	return false
+	# get_property_list() allocates every property description, so scripted
+	# objects (all converted instances) cache their names per class + script.
+	# Scriptless objects keep the full scan: some built-in classes expose
+	# per-instance properties (e.g. shader parameters).
+	var script = object_value.get_script()
+	if script == null:
+		for property in object_value.get_property_list():
+			if property.get("name") == property_name:
+				return true
+		return false
+	var class_names = _gml_script_property_names_cache.get(script)
+	if class_names == null:
+		class_names = {}
+		_gml_script_property_names_cache[script] = class_names
+	var class_name_value = object_value.get_class()
+	var names = class_names.get(class_name_value)
+	if names == null:
+		names = {}
+		for property in object_value.get_property_list():
+			names[str(property.get("name"))] = true
+		class_names[class_name_value] = names
+	return names.has(str(property_name))
 
 
 static func _gml_one_based_index(value):
@@ -499,15 +574,26 @@ static func gml_string_trim(value):
 	return s.strip_edges()
 
 
+# string_repeat takes its count as a 32-bit integer, as the runner's
+# yyGetInt32 does (so 2^32 + 1 is 1).
 static func gml_string_repeat(value, count):
-	var s = gml_string(value)
-	var n = int(_to_real(count))
-	if n <= 0:
+	return _gml_repeat_string(gml_string(value), float(_gml_runner_int32(_to_real(count))), "GML string_repeat")
+
+
+# The longest string the runner can build: V8's limit, past which joining
+# strings raises "Invalid string length".
+const GML_STRING_MAX_LENGTH = 536870888
+
+
+# text repeated once for each whole time count goes into it (none for 0, a
+# negative count or NaN), or an error when the result would be longer than
+# the runner's strings can be.
+static func _gml_repeat_string(text, count, api_name):
+	if not (count >= 1.0) or text.is_empty():
 		return ""
-	var result = ""
-	for i in range(n):
-		result += s
-	return result
+	if count * text.length() > GML_STRING_MAX_LENGTH:
+		return gml_error(api_name + ": Invalid string length (" + str(text.length()) + " characters repeated " + gml_string(count) + " times)")
+	return text.repeat(int(count))
 
 
 static func gml_string_digits(value):

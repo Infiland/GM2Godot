@@ -1,3 +1,8 @@
+# While tracing is on (gml_event_scheduler_set_tracing), every delivered async
+# event is recorded; gml_async_event_log() returns at most this many of the
+# latest records.
+const GML_ASYNC_EVENT_LOG_LIMIT = 256
+
 static var _gml_async_next_request_id_value = 1
 static var _gml_async_event_log = []
 static var _gml_async_queue = []
@@ -128,6 +133,10 @@ static func gml_async_next_request_id():
 
 static func gml_async_dispatch(kind, payload, handler_name = ""):
 	var request_id = _gml_async_enqueue(kind, payload, handler_name, false)
+	# Under the GameMaker frame pump, async events wait for the async phase of
+	# the next step, like GameMaker's async queue.
+	if gml_event_scheduler_pump_attached():
+		return request_id
 	if _gml_async_active_depth == 0:
 		gml_async_queue_flush()
 	else:
@@ -156,6 +165,20 @@ static func gml_async_queue_flush(max_events = -1):
 	return dispatched
 
 
+static func gml_async_step_flush():
+	# The async phase of a step delivers the events queued before it began;
+	# events queued by their handlers wait for the next step.
+	return gml_async_queue_flush(_gml_async_queue.size())
+
+
+static func gml_async_frame_pump():
+	# GMAsync calls this once per frame. The GameMaker frame pump delivers
+	# async events inside the step instead.
+	if gml_event_scheduler_pump_attached():
+		return 0
+	return gml_async_queue_flush()
+
+
 static func gml_async_queue_size():
 	return _gml_async_queue.size()
 
@@ -165,7 +188,11 @@ static func gml_async_queue_snapshot():
 
 
 static func gml_async_event_log():
-	return _gml_clone_value(_gml_async_event_log, 16)
+	# The latest records, oldest first.
+	var records = _gml_async_event_log
+	if records.size() > GML_ASYNC_EVENT_LOG_LIMIT:
+		records = records.slice(records.size() - GML_ASYNC_EVENT_LOG_LIMIT)
+	return _gml_clone_value(records, 16)
 
 
 static func gml_async_event_log_clear():
@@ -320,6 +347,8 @@ static func _gml_async_handler_names(kind, handler_name):
 static func _gml_async_schedule_flush():
 	if _gml_async_flush_scheduled or _gml_async_queue.is_empty():
 		return
+	if gml_event_scheduler_pump_attached():
+		return
 	var main_loop = Engine.get_main_loop()
 	if not (main_loop is SceneTree):
 		return
@@ -342,22 +371,27 @@ static func _gml_async_deliver(event):
 	if main_loop is SceneTree:
 		listener_count = _gml_async_dispatch_node(main_loop.root, handler_names)
 	_gml_async_active_depth -= 1
-	_gml_async_event_log.append({
-		"kind": kind,
-		"handler": handler_name,
-		"handlers": handler_names,
-		"payload": _gml_clone_value(payload, 16),
-		"queue_sequence": event.get("queue_sequence", 0),
-		"dispatch_sequence": _gml_async_dispatch_sequence,
-		"listener_count": listener_count,
-	})
+	if _gml_event_scheduler_tracing:
+		_gml_async_event_log.append({
+			"kind": kind,
+			"handler": handler_name,
+			"handlers": handler_names,
+			"payload": _gml_clone_value(payload, 16),
+			"queue_sequence": event.get("queue_sequence", 0),
+			"dispatch_sequence": _gml_async_dispatch_sequence,
+			"listener_count": listener_count,
+		})
+		# Trimmed in batches, so recording stays cheap.
+		if _gml_async_event_log.size() >= GML_ASYNC_EVENT_LOG_LIMIT * 2:
+			_gml_async_event_log = _gml_async_event_log.slice(-GML_ASYNC_EVENT_LOG_LIMIT)
 	if _gml_async_active_depth == 0:
 		_gml_builtin_globals["async_load"] = {}
 	return listener_count
 
 
 static func _gml_async_dispatch_node(node, handler_names):
-	if node == null:
+	# Deactivated instances get no asynchronous events.
+	if node == null or _gml_instance_node_deactivated(node):
 		return 0
 	var count = 0
 	for handler_name in handler_names:

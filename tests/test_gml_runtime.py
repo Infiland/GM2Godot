@@ -323,7 +323,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("cull_clockwise", "1"),
     RuntimeValueParityCase("gpu_set_blendmode(bm_add)", "GMRuntime.gml_gpu_set_blendmode(1)"),
     RuntimeValueParityCase("gpu_get_blendmode()", "GMRuntime.gml_gpu_get_blendmode()"),
-    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(2)"),
+    RuntimeValueParityCase("draw_set_blend_mode(bm_subtract)", "GMRuntime.gml_draw_set_blend_mode(3)"),
+    RuntimeValueParityCase("bm_max", "2"),
+    RuntimeValueParityCase("bm_min", "4"),
+    RuntimeValueParityCase("bm_reverse_subtract", "5"),
     RuntimeValueParityCase(
         "draw_circle_color(4, 5, 8, c_white, c_black, false)",
         "GMRuntime.gml_draw_circle_color(4, 5, 8, 0xffffff, 0x000000, false)",
@@ -608,6 +611,32 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         'GMRuntime.gml_instance_furthest(position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
     ),
     RuntimeValueParityCase("instance_id_get(0)", "GMRuntime.gml_instance_id_get(0)"),
+    RuntimeValueParityCase("instance_deactivate_all(true)", "GMRuntime.gml_instance_deactivate_all(self, true)"),
+    RuntimeValueParityCase(
+        "instance_deactivate_object(o_enemy)",
+        'GMRuntime.gml_instance_deactivate_object(GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "instance_deactivate_object(self)", "GMRuntime.gml_instance_deactivate_object(self)"
+    ),
+    RuntimeValueParityCase(
+        "instance_deactivate_region(0, 0, 64, 32, false, true)",
+        "GMRuntime.gml_instance_deactivate_region(self, 0, 0, 64, 32, false, true)",
+    ),
+    RuntimeValueParityCase(
+        'instance_deactivate_layer("Enemies")', 'GMRuntime.gml_instance_deactivate_layer("Enemies")'
+    ),
+    RuntimeValueParityCase("instance_activate_all()", "GMRuntime.gml_instance_activate_all()"),
+    RuntimeValueParityCase(
+        "instance_activate_object(all)", "GMRuntime.gml_instance_activate_object(GMRuntime.gml_instance_all())"
+    ),
+    RuntimeValueParityCase(
+        "instance_activate_region(0, 0, 64, 32, true)",
+        "GMRuntime.gml_instance_activate_region(0, 0, 64, 32, true)",
+    ),
+    RuntimeValueParityCase(
+        "instance_activate_layer(layer)", "GMRuntime.gml_instance_activate_layer(layer)"
+    ),
     RuntimeValueParityCase(
         "place_meeting(x, y, o_enemy)",
         'GMRuntime.gml_place_meeting(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_enemy"))',
@@ -676,6 +705,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("move_snap(16, 16)", "GMRuntime.gml_move_snap(self, 16, 16)"),
     RuntimeValueParityCase("place_snapped(16, 16)", "GMRuntime.gml_place_snapped(self, 16, 16)"),
     RuntimeValueParityCase(
+        "move_and_collide(4, 0, o_enemy)",
+        'GMRuntime.gml_move_and_collide(self, 4, 0, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase(
+        "mp_linear_step_object(48, 48, 2, o_enemy)",
+        'GMRuntime.gml_mp_linear_step_object(self, 48, 48, 2, GMRuntime.gml_asset_get_index("o_enemy"))',
+    ),
+    RuntimeValueParityCase("mp_potential_step(48, 48, 2, false)", "GMRuntime.gml_mp_potential_step(self, 48, 48, 2, false)"),
+    RuntimeValueParityCase(
         "path_start(path_patrol, 4, 0, false)",
         'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 0, false)',
     ),
@@ -686,6 +724,10 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     ),
     RuntimeValueParityCase("mp_grid_create(0, 0, 4, 4, 16, 16)", "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)"),
     RuntimeValueParityCase("mp_grid_add_cell(grid, 1, 2)", "GMRuntime.gml_mp_grid_add_cell(grid, 1, 2)"),
+    RuntimeValueParityCase(
+        "mp_grid_add_instances(grid, o_enemy, true)",
+        'GMRuntime.gml_mp_grid_add_instances(grid, GMRuntime.gml_asset_get_index("o_enemy"), true)',
+    ),
     RuntimeValueParityCase(
         "mp_grid_path(grid, path_patrol, 0, 0, 48, 48, false)",
         'GMRuntime.gml_mp_grid_path(grid, GMRuntime.gml_asset_get_index("path_patrol"), 0, 0, 48, 48, false)',
@@ -703,8 +745,49 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
         "GMRuntime.gml_matrix_build_projection_ortho(320, 180, 1, 1000)",
     ),
     RuntimeValueParityCase("make_color_rgb(255, 128, 0)", "GMRuntime.gml_make_color_rgb(255, 128, 0)"),
+    RuntimeValueParityCase("make_colour_rgb(255, 128, 0)", "GMRuntime.gml_make_color_rgb(255, 128, 0)"),
+    RuntimeValueParityCase("make_color_hsv(0, 255, 255)", "GMRuntime.gml_make_color_hsv(0, 255, 255)"),
+    RuntimeValueParityCase("make_colour_hsv(0, 255, 255)", "GMRuntime.gml_make_color_hsv(0, 255, 255)"),
+    RuntimeValueParityCase(
+        "merge_color(c_red, c_blue, 0.5)",
+        "GMRuntime.gml_merge_color(0x0000ff, 0xff0000, 0.5)",
+    ),
+    RuntimeValueParityCase(
+        "merge_colour(c_red, c_blue, 0.5)",
+        "GMRuntime.gml_merge_color(0x0000ff, 0xff0000, 0.5)",
+    ),
+    RuntimeValueParityCase("color_get_red(c_red)", "GMRuntime.gml_color_get_red(0x0000ff)"),
+    RuntimeValueParityCase("colour_get_red(c_red)", "GMRuntime.gml_color_get_red(0x0000ff)"),
+    RuntimeValueParityCase("color_get_green(c_lime)", "GMRuntime.gml_color_get_green(0x00ff00)"),
+    RuntimeValueParityCase("colour_get_green(c_lime)", "GMRuntime.gml_color_get_green(0x00ff00)"),
+    RuntimeValueParityCase("color_get_blue(c_blue)", "GMRuntime.gml_color_get_blue(0xff0000)"),
+    RuntimeValueParityCase("colour_get_blue(c_blue)", "GMRuntime.gml_color_get_blue(0xff0000)"),
+    RuntimeValueParityCase("color_get_hue(c_red)", "GMRuntime.gml_color_get_hue(0x0000ff)"),
+    RuntimeValueParityCase("colour_get_hue(c_red)", "GMRuntime.gml_color_get_hue(0x0000ff)"),
+    RuntimeValueParityCase("color_get_saturation(c_red)", "GMRuntime.gml_color_get_saturation(0x0000ff)"),
+    RuntimeValueParityCase("colour_get_saturation(c_red)", "GMRuntime.gml_color_get_saturation(0x0000ff)"),
+    RuntimeValueParityCase("color_get_value(c_red)", "GMRuntime.gml_color_get_value(0x0000ff)"),
+    RuntimeValueParityCase("colour_get_value(c_red)", "GMRuntime.gml_color_get_value(0x0000ff)"),
     RuntimeValueParityCase("draw_set_color(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
     RuntimeValueParityCase("draw_get_color()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase("draw_set_colour(c_red)", "GMRuntime.gml_draw_set_color(0x0000ff)"),
+    RuntimeValueParityCase("draw_get_colour()", "GMRuntime.gml_draw_get_color()"),
+    RuntimeValueParityCase(
+        'draw_text_colour(1, 2, "a", c_red, c_red, c_blue, c_blue, 0.5)',
+        'GMRuntime.gml_draw_text_color(1, 2, "a", 0x0000ff, 0x0000ff, 0xff0000, 0xff0000, 0.5)',
+    ),
+    RuntimeValueParityCase(
+        "draw_line_width_colour(0, 1, 2, 3, 4, c_red, c_blue)",
+        "GMRuntime.gml_draw_line_width_color(0, 1, 2, 3, 4, 0x0000ff, 0xff0000)",
+    ),
+    RuntimeValueParityCase(
+        "draw_sprite_stretched(spr_player, 0, 1, 2, 3, 4)",
+        'GMRuntime.gml_draw_sprite_stretched(GMRuntime.gml_asset_get_index("spr_player"), 0, 1, 2, 3, 4)',
+    ),
+    RuntimeValueParityCase(
+        "draw_healthbar(0, 0, 10, 4, 50, c_black, c_red, c_lime, 0, true, true)",
+        "GMRuntime.gml_draw_healthbar(0, 0, 10, 4, 50, 0x000000, 0x0000ff, 0x00ff00, 0, true, true)",
+    ),
     RuntimeValueParityCase("draw_set_alpha(0.5)", "GMRuntime.gml_draw_set_alpha(0.5)"),
     RuntimeValueParityCase("draw_get_alpha()", "GMRuntime.gml_draw_get_alpha()"),
     RuntimeValueParityCase("draw_set_line_width(2)", "GMRuntime.gml_draw_set_line_width(2)"),
@@ -828,13 +911,15 @@ RUNTIME_VALUE_PARITY_CASES: tuple[RuntimeValueParityCase, ...] = (
     RuntimeValueParityCase("window_restore()", "GMRuntime.gml_window_restore()"),
     RuntimeValueParityCase('screen_save("shot.png")', 'GMRuntime.gml_screen_save("shot.png")'),
     RuntimeValueParityCase('screen_save_part("shot_part.png", 0, 0, 8, 8)', 'GMRuntime.gml_screen_save_part("shot_part.png", 0, 0, 8, 8)'),
-    RuntimeValueParityCase("keyboard_check(vk_left)", "GMRuntime.gml_keyboard_check(KEY_LEFT)"),
-    RuntimeValueParityCase("keyboard_check_pressed(vk_space)", "GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)"),
-    RuntimeValueParityCase("keyboard_check_released(vk_escape)", "GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)"),
-    RuntimeValueParityCase("keyboard_clear(vk_anykey)", "GMRuntime.gml_keyboard_clear(0)"),
+    RuntimeValueParityCase("keyboard_check(vk_left)", "GMRuntime.gml_keyboard_check(37)"),
+    RuntimeValueParityCase("keyboard_check_pressed(vk_space)", "GMRuntime.gml_keyboard_check_pressed(32)"),
+    RuntimeValueParityCase("keyboard_check_released(vk_escape)", "GMRuntime.gml_keyboard_check_released(27)"),
+    RuntimeValueParityCase("keyboard_clear(vk_anykey)", "GMRuntime.gml_keyboard_clear(1)"),
     RuntimeValueParityCase("mouse_check_button(mb_left)", "GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)"),
     RuntimeValueParityCase("mouse_check_button_pressed(mb_right)", "GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)"),
     RuntimeValueParityCase("mouse_check_button_released(mb_middle)", "GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)"),
+    RuntimeValueParityCase("mouse_clear(mb_any)", "GMRuntime.gml_mouse_clear(-1)"),
+    RuntimeValueParityCase("io_clear()", "GMRuntime.gml_io_clear()"),
     RuntimeValueParityCase("display_mouse_get_x()", "GMRuntime.gml_display_mouse_get_x()"),
     RuntimeValueParityCase("display_mouse_get_y()", "GMRuntime.gml_display_mouse_get_y()"),
     RuntimeValueParityCase("device_mouse_x_to_gui(0)", "GMRuntime.gml_device_mouse_x_to_gui(0)"),
@@ -1162,6 +1247,14 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_instance_id_get",
             "gml_instance_nearest",
             "gml_instance_furthest",
+            "gml_instance_deactivate_all",
+            "gml_instance_deactivate_object",
+            "gml_instance_deactivate_region",
+            "gml_instance_deactivate_layer",
+            "gml_instance_activate_all",
+            "gml_instance_activate_object",
+            "gml_instance_activate_region",
+            "gml_instance_activate_layer",
             "gml_instance_create_layer",
             "gml_instance_create_depth",
             "gml_with_targets",
@@ -1189,6 +1282,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_move_random",
             "gml_move_snap",
             "gml_place_snapped",
+            "gml_move_and_collide",
+            "gml_mp_linear_step",
+            "gml_mp_linear_step_object",
+            "gml_mp_potential_step",
+            "gml_mp_potential_step_object",
+            "gml_mp_potential_settings",
             "gml_path_registry_set",
             "gml_path_start",
             "gml_path_end",
@@ -1201,6 +1300,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mp_grid_clear_cell",
             "gml_mp_grid_add_rectangle",
             "gml_mp_grid_path",
+            "gml_mp_grid_add_instances",
             "gml_draw_begin",
             "gml_draw_end",
             "gml_draw_event_dispatch_frame",
@@ -1330,6 +1430,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_mouse_check_button",
             "gml_mouse_check_button_pressed",
             "gml_mouse_check_button_released",
+            "gml_mouse_clear",
+            "gml_io_clear",
             "gml_display_mouse_get_x",
             "gml_display_mouse_get_y",
             "gml_device_mouse_x_to_gui",
@@ -1833,7 +1935,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "gml_time_source_get_time_remaining",
             "gml_call_later",
             "gml_call_cancel",
-            "gml_time_source_tick_all",
+            "gml_time_source_frame_tick",
+            "gml_time_source_step",
         )
         for helper_name in helper_names:
             self.assertIn(f"static func {helper_name}", GML_RUNTIME_SCRIPT)
@@ -1926,7 +2029,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func is_undefined(value):\n\treturn value is GMLUndefined", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_undefined(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLUndefined", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_pointer_values(self):
         self.assertIn('const GML_TYPE_POINTER = "ptr"', GML_RUNTIME_SCRIPT)
@@ -1935,7 +2038,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static var _gml_pointer_invalid = GMLPointer.new(-1, true)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_pointer_null():\n\treturn _gml_pointer_null", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_pointer_invalid():\n\treturn _gml_pointer_invalid", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func is_ptr(value):\n\treturn value is GMLPointer", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_ptr(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLPointer", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_ptr(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_string(value):\n\t\tvar pointer_value = _gml_string_to_int64(value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_undefined(pointer_value):\n\t\t\treturn pointer_value", GML_RUNTIME_SCRIPT)
@@ -1975,8 +2078,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("const GML_HANDLE_INDEX_MASK = 0xffffffff", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_handle_type_ids = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_handle_next_type_id = 1", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func is_handle(value):\n\treturn value is GMLHandle", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func is_int64(value):\n\treturn value is GMLInt64", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_handle(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_int64(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("var handle_type_id = _gml_handle_type_id(handle_kind)", GML_RUNTIME_SCRIPT)
         self.assertIn("var encoded_value = _gml_encode_handle_value(handle_type_id, handle_index)", GML_RUNTIME_SCRIPT)
         self.assertIn("type_id = int(handle_type_id)", GML_RUNTIME_SCRIPT)
@@ -2003,13 +2106,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_handle_invalid(kind = \"\", invalid_index = GML_HANDLE_INVALID_INDEX):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_make_handle(str(kind), int(invalid_index), null, \"\", false)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_noone():", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "_gml_instance_noone_handle = gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_INVALID_INDEX)",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("static func gml_instance_all():", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_handle_invalid(GML_INSTANCE_HANDLE_KIND, GML_INSTANCE_ALL_INDEX)", GML_RUNTIME_SCRIPT)
         self.assertIn('const GML_REFERENCE_HANDLE_KIND = "dbgref"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_handle_is_valid(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("if _gml_is_invalid_handle_index(handle.kind, handle.index):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if handle.reference is Object and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if typeof(handle.reference) == TYPE_OBJECT and not is_instance_valid(handle.reference):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_resolves_instance_keywords_as_with_targets(self):
         self.assertIn("static func gml_with_targets(target, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
@@ -2046,7 +2152,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_selector_get(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_struct_get(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_exists(target, member_name, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if gml_struct_exists(instance, member_name):\n\t\t\treturn true", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_struct_exists(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_set(target, member_name, value, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_selector_update(target, member_name, update_callable, current_self = null, current_other = null):", GML_RUNTIME_SCRIPT)
@@ -2063,46 +2169,64 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_handle_eq(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.kind == right.kind and left.index == right.index", GML_RUNTIME_SCRIPT)
         self.assertIn("return left.index == _to_int64_value(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_handle(value):\n\t\treturn gml_handle_is_valid(value)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:\n"
+            "\t\t# Most often an instance (or noone) from a query. A destroyed\n"
+            "\t\t# instance's id is still a positive number, so true.\n"
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)",
+            GML_RUNTIME_SCRIPT,
+        )
 
     def test_runtime_tracks_instance_registry_and_object_selectors(self):
         self.assertIn("static var _gml_instance_entries = {}", GML_RUNTIME_SCRIPT)
-        self.assertIn("static var _gml_instance_ids_by_object = {}", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_instance_live_order = []", GML_RUNTIME_SCRIPT)
+        self.assertIn("static var _gml_instance_live_by_object = {}", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_register(instance, object_selector = null, parent_selectors = []):", GML_RUNTIME_SCRIPT)
         self.assertIn('"selector_ids": selector_ids,', GML_RUNTIME_SCRIPT)
         self.assertIn('"selector_names": selector_names,', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_unregister(instance_or_handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_instance_selector_targets(selector):", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object[object_id])", GML_RUNTIME_SCRIPT)
-        self.assertIn("_gml_instance_targets_from_indices(_gml_instance_ids_by_object_name[object_name])", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_instance_destroy(target = null):", GML_RUNTIME_SCRIPT)
-        self.assertIn("instance.call(\"_on_destroy\")", GML_RUNTIME_SCRIPT)
+        self.assertIn("var object_entries: Variant = _gml_instance_object_entries(selector)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_entry_targets(object_entries)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_instance_create_layer(x, y, layer, object_selector, current_self = null, var_struct = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("static func gml_instance_destroy(target = null, execute_event = true):", GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_instance_perform_own_event(instance, "_on_destroy")', GML_RUNTIME_SCRIPT)
         self.assertIn("instance.queue_free()", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_collision_queries_use_active_precise_polygons(self):
+    def test_runtime_collision_queries_use_gamemaker_masks(self):
         self.assertIn("static func gml_place_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_place_free(current_self, x, y):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_place_empty(current_self, x, y, target = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_position_meeting(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_place(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_instance_position(current_self, x, y, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_distance_to_object(current_self, target):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_distance_to_point(current_self, x, y):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_point(current_self, x, y, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_rectangle(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_collision_ellipse(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_line(current_self, x1, y1, x2, y2, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_circle(current_self, x, y, radius, target, precise = false, notme = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_point_list(current_self, x, y, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_rectangle_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_line_list(current_self, x1, y1, x2, y2, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_circle_list(current_self, x, y, radius, target, precise, notme, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_place_list(current_self, x, y, target, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_instance_position_list(current_self, x, y, target, list_id, ordered):", GML_RUNTIME_SCRIPT)
+        # Collisions read the converted sprite's GameMaker mask, not Godot physics.
+        self.assertIn(
+            'const GML_COLLISION_COMPATIBILITY_SETTING = "application/config/gm2godot_collision_compatibility"',
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn('if properties.has("metadata/gamemaker_precise_mask"):', GML_RUNTIME_SCRIPT)
+        self.assertIn('data["left"] = int(meta.get("gamemaker_bbox_left", 0))', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_compute_bbox(state):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_precise_point(state, px, py):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_sat_check(left_points, right_points):", GML_RUNTIME_SCRIPT)
         self.assertNotIn("precise collision masks are approximated", GML_RUNTIME_SCRIPT)
-        self.assertIn("if node is CollisionShape2D:", GML_RUNTIME_SCRIPT)
-        self.assertIn("if shape is RectangleShape2D:", GML_RUNTIME_SCRIPT)
-        self.assertIn("if shape is CircleShape2D:", GML_RUNTIME_SCRIPT)
-        self.assertIn('node.has_meta("gamemaker_precise_mask")', GML_RUNTIME_SCRIPT)
-        self.assertIn('node.has_meta("gamemaker_collision_bounds")', GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_polygons_intersect(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_polygon_has_point(polygon, point):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_line_intersects_polygon(start, finish, polygon):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_circle_intersects_polygon(center, radius, polygon):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_converts_and_parses_handle_strings(self):
         self.assertIn("static func gml_string(value):", GML_RUNTIME_SCRIPT)
@@ -2245,7 +2369,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if not constructor.is_constructor:", GML_RUNTIME_SCRIPT)
         self.assertIn("var instance = gml_struct({})", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
-        self.assertIn("gml_static_set(instance, constructor_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_link_new(instance, constructor_static)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_constructor_invoke(", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(instance)", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(constructor_other)", GML_RUNTIME_SCRIPT)
@@ -2266,17 +2390,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("func _init(exception_value = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("value = exception_value", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_gml_exception(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return value is GMLException", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLException", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_throw(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLException.new(value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_exception_value(exception):", GML_RUNTIME_SCRIPT)
         self.assertIn("if exception is GMLException:\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_exception_struct(exception):", GML_RUNTIME_SCRIPT)
+        # catch receives a thrown value unchanged (the runner's
+        # __yy__processException); only a runtime error becomes a struct.
+        self.assertIn(
+            "static func gml_exception_struct(exception):\n"
+            "\tif exception is GMLException:\n"
+            "\t\treturn exception.value\n",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn('"message": gml_string(exception)', GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_struct(exception.value):\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
-        self.assertIn("var message = gml_string(exception.value)", GML_RUNTIME_SCRIPT)
-        self.assertIn('"longMessage": message', GML_RUNTIME_SCRIPT)
+        self.assertIn('"longMessage": gml_string(exception)', GML_RUNTIME_SCRIPT)
         self.assertIn('"script": ""', GML_RUNTIME_SCRIPT)
         self.assertIn('"stacktrace": []', GML_RUNTIME_SCRIPT)
 
@@ -2328,7 +2457,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if text.to_lower().is_valid_hex_number(true):", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(_gml_hex_string_to_int(text))", GML_RUNTIME_SCRIPT)
         self.assertIn("if text.is_valid_float():\n\t\treturn text.to_float()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if text.is_valid_float():\n\t\treturn int(text.to_float())", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.is_valid_float():\n\t\treturn GMLInt64.saturate(text.to_float())", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML real conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_hex_string_to_int(value):", GML_RUNTIME_SCRIPT)
@@ -2343,8 +2472,15 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
             GML_RUNTIME_SCRIPT,
         )
+        # Plain numbers and bools come first, then handles; undefined is false.
         self.assertIn(
-            "static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false",
+            "static func gml_bool(value):\n\tvar value_type = typeof(value)\n\tif value_type == TYPE_BOOL:\n\t\treturn value\n"
+            "\tif value_type == TYPE_FLOAT or value_type == TYPE_INT:\n\t\treturn float(value) > 0.5\n",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "\t\treturn gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)\n"
+            "\tif is_undefined(value):\n\t\treturn false",
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("if is_ptr(value):\n\t\treturn not value.invalid and value.value != 0", GML_RUNTIME_SCRIPT)
@@ -2359,9 +2495,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func is_array(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return typeof(value) == TYPE_ARRAY", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_struct(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_DICTIONARY or (typeof(value) == TYPE_OBJECT and is_instance_valid(value))", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_method(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return value is GMLMethod or typeof(value) == TYPE_CALLABLE", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLMethod", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_callable(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return is_method(value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_numeric(value):\n\treturn is_real(value) or is_int64(value) or is_bool(value)", GML_RUNTIME_SCRIPT)
@@ -2404,11 +2540,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return INF if left_value > 0.0 else -INF", GML_RUNTIME_SCRIPT)
         self.assertIn("return left_value / right_value", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_sqrt(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if real_value < 0.0:\n\t\treturn NAN", GML_RUNTIME_SCRIPT)
+        # math_set_epsilon applies to sqrt: values within it below 0 give 0.
+        self.assertIn(
+            "if real_value < 0.0:\n\t\t# Like comparisons, sqrt uses math_set_epsilon: a negative value no\n"
+            "\t\t# further from 0 than the epsilon counts as 0.\n"
+            "\t\tif real_value >= -_gml_math_epsilon:\n\t\t\treturn 0.0\n\t\treturn NAN",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return fmod(_to_real(left), right_real)", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_repeat_count_preserves_gml_rounding(self):
@@ -2433,7 +2575,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_array_set_mutates_reference_without_copying(self):
         self.assertIn('return gml_unsupported_type_error("GML array set", array_value)', GML_RUNTIME_SCRIPT)
         self.assertIn("if resolved_index >= array_value.size():", GML_RUNTIME_SCRIPT)
-        self.assertIn("array_value.resize(resolved_index + 1)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_array_grow(array_value, resolved_index + 1)", GML_RUNTIME_SCRIPT)
         self.assertIn("array_value[resolved_index] = value", GML_RUNTIME_SCRIPT)
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)
@@ -2458,7 +2600,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_preserves_nan_numeric_type_and_inequality(self):
         self.assertIn("static func is_nan_value(value):\n\treturn is_number(value) and is_nan(float(value))", GML_RUNTIME_SCRIPT)
         self.assertIn("if value_type == TYPE_INT or value_type == TYPE_FLOAT:\n\t\treturn GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "if is_nan(difference):\n\t\tif is_inf(left_value) and is_inf(right_value):\n\t\t\treturn 0\n"
+            "\t\treturn GML_COMPARE_UNORDERED",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return _gml_compare_numeric(left, right) == 0", GML_RUNTIME_SCRIPT)
         self.assertIn("if not _gml_values_equal_for_array(left[index], right[index]):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_eq(left, right)", GML_RUNTIME_SCRIPT)
 
@@ -2598,11 +2745,11 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("class GMLUndefined:", GML_RUNTIME_SCRIPT)
         self.assertIn("static var _gml_undefined = GMLUndefined.new()", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func is_undefined(value):\n\treturn value is GMLUndefined", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func is_undefined(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLUndefined", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_undefined(left) or is_undefined(right):\n\t\treturn is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_bool(value):\n\tif is_undefined(value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tif is_undefined(value):\n\t\treturn false\n\tif is_ptr(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
         self.assertIn(
             "if not is_undefined(stored_key):\n\t\t\treturn resolved_map[stored_key]",
@@ -2614,8 +2761,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_instance_exists(instance_value, member_name):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_exists(instance_value, member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_variable_instance_set(instance_value, member_name, value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return gml_selector_set(instance_value, member_name, value)", GML_RUNTIME_SCRIPT)
-        self.assertIn("for instance in gml_with_targets(target, current_self, current_other):", GML_RUNTIME_SCRIPT)
+        # variable_instance_set and variable_instance_exists use the first
+        # instance an object selects; o_enemy.hp = 0 sets them all.
+        self.assertIn(
+            "\t\tvar targets = gml_with_targets(instance_value)\n"
+            "\t\tif targets.is_empty():\n"
+            "\t\t\treturn gml_undefined()\n"
+            "\t\tinstance = targets[0]\n"
+            "\tgml_struct_set(instance, member_name, value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("return gml_struct_exists(targets[0], member_name)", GML_RUNTIME_SCRIPT)
         self.assertIn("for instance in targets:\n\t\tgml_struct_set(instance, member_name, value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_scope_is_a_shared_struct_for_instance_apis(self):
@@ -2743,6 +2899,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_room_flow_helpers_use_registry_order_and_lifecycle(self):
         self.assertIn('const GML_ROOM_PERSISTENT_ROOT_NAME = "_GM2GodotPersistentInstances"', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_enter_scene(scene, force = false):", GML_RUNTIME_SCRIPT)
+        # Placed instances are built (registered, with their start position
+        # and image settings) before any Create event and join the room one
+        # at a time, in creation order, when it starts.
+        self.assertIn("static func gml_room_prepare_scene(scene):", GML_RUNTIME_SCRIPT)
+        self.assertIn('node.call("_gm_construct_instance" if node.has_method("_gm_construct_instance") else "_gm_register_instance")', GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_room_create_instances(scene)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_goto(room_asset):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_goto_next():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_room_goto_previous():", GML_RUNTIME_SCRIPT)
@@ -2902,8 +3064,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_time_alarm_scheduler_helpers(self):
         self.assertIn("const GML_ALARM_COUNT = 12", GML_RUNTIME_SCRIPT)
-        self.assertIn("const GML_TIME_SOURCE_UNITS_FRAMES = 0", GML_RUNTIME_SCRIPT)
-        self.assertIn("const GML_TIME_SOURCE_UNITS_SECONDS = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_GLOBAL = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_GAME = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_SECONDS = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_UNITS_FRAMES = 1", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_EXPIRY_NEAREST = 0", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_TIME_SOURCE_EXPIRY_AFTER = 1", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_INITIAL = 0", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_ACTIVE = 1", GML_RUNTIME_SCRIPT)
         self.assertIn("const GML_TIME_SOURCE_STATE_PAUSED = 2", GML_RUNTIME_SCRIPT)
@@ -2916,20 +3082,34 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_event_scheduler_tick_alarms(instances = null, delta_frames = 1, frame = -1):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_event_scheduler_phase_order():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_event_scheduler_trace():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = 0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_create(parent, period, units, callback, args = null, reps = 1, expiry_type = GML_TIME_SOURCE_EXPIRY_AFTER):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_start(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_stop(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_pause(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_resume(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_destroy(handle):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_destroy(handle, destroy_tree = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_time_source_get_state(handle):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_time_source_tick_all(delta_seconds, delta_frames):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_frame_tick(real_usec):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_time_source_step(game_usec):", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_game_step_loop_helpers(self):
+        self.assertIn("static func gml_event_scheduler_pump_attach():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_pump_detach():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_game_frame(delta_seconds = 0.0):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_event_scheduler_frame_drawable():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_change_pending():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_room_apply_pending_change():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_async_step_flush():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_game_speed_fps():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_image_frame_for_index(image_index, image_number):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if gml_room_change_pending():\n\t\t\tbreak", GML_RUNTIME_SCRIPT)
 
     def test_runtime_collision_event_dispatch_helpers(self):
         self.assertIn("static func gml_collision_event_dispatch_frame(instances = null, frame = -1):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_collision_event_trace():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_binding_target_matches(other_inst, binding):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_collision_restore_solid_contact(inst, other_inst):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_registered_table():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_collision_restore_previous_position(inst, other_inst):", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_COLLISION_EVENT_PREFIX = \"_on_collision_\"", GML_RUNTIME_SCRIPT)
         self.assertIn('"collision",', GML_RUNTIME_SCRIPT)
 
     def test_runtime_draw_event_dispatch_helpers(self):
@@ -2938,15 +3118,22 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_draw_event_phase_order():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_draw_event_trace():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_surface_target_stack_depth():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_draw_instance_order_less(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_draw_sort_by_depth(nodes):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gm2godot_draw_event_trace_enable(enabled = true):", GML_RUNTIME_SCRIPT)
 
     def test_runtime_input_event_dispatch_helpers(self):
         self.assertIn("static func gml_input_event_capture(event):", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_input_dispatch_frame(instances = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_dispatch_frame(instances = null, event_types = null):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_begin_step():", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func gml_input_set_step_latching(enabled):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_enqueue_gesture(event_num, payload = null, global_event = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_end_frame():", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_input_dispatch_trace():", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_input_mouse_event_button_and_phase(event_num):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_dispatch_keyboard(instances, event_type):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_dispatch_mouse(instances):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_input_mouse_order_less(left, right):", GML_RUNTIME_SCRIPT)
+        self.assertIn("const GML_INPUT_GAMEMAKER_KEY_CODES = {", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tKEY_LEFT: 37,", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_later(period, units, callback, repeat = false):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_call_cancel(handle):", GML_RUNTIME_SCRIPT)
         self.assertIn('inst.call(method_name)', GML_RUNTIME_SCRIPT)
@@ -2957,7 +3144,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_names_count(instance_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn []", GML_RUNTIME_SCRIPT)
-        self.assertIn("if targets.is_empty():\n\t\treturn -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_variable_helpers_use_shared_global_scope(self):
         self.assertIn("static func gml_variable_global_exists(member_name):", GML_RUNTIME_SCRIPT)
@@ -2972,7 +3159,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_struct_names_count(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
-        self.assertIn("return -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_variable_names(struct_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_get_names(struct_value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_foreach_invokes_callback_for_visible_members(self):
         self.assertIn("static func gml_struct_foreach(", GML_RUNTIME_SCRIPT)
@@ -3028,6 +3216,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_static_same(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left == right", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_statics_are_members_of_the_structs_made_by_new(self):
+        self.assertIn("static func _gml_static_chain_owner(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_link_new(value, static_struct):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_chain_owner(struct_value, key) != null", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_call_member(target, member_name, args = [], caller_self = null, caller_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if member is GMLMethod and not member.has_bound_self:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)",
+            GML_RUNTIME_SCRIPT,
+        )
+
     def test_runtime_constructor_identity_uses_static_chain(self):
         self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)
         self.assertIn("if not is_struct(struct_value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
@@ -3043,7 +3248,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var constructor_name = _gml_static_name(static_struct)", GML_RUNTIME_SCRIPT)
         self.assertIn("if constructor_name != \"\":\n\t\treturn constructor_name", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_name(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn('entry.has("constructor_name")', GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_static_registry[index].has("constructor_name")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)
@@ -3107,7 +3312,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("get:\n\t\t\treturn _value", GML_RUNTIME_SCRIPT)
         self.assertIn('push_error("GML int64 values are immutable")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_int64(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return value is GMLInt64", GML_RUNTIME_SCRIPT)
+        self.assertIn("return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLInt64", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
 
     def test_runtime_converts_supported_int64_inputs(self):
@@ -3140,16 +3345,21 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return _to_int32_value(left) + _to_int32_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) - _to_int32_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) * _to_int32_value(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return int(_to_int32_value(left) / right_int)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return int(left / right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) % right_int", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int32 division by zero")', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML int32 modulo by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_error(GML_MOD_BY_ZERO_MESSAGE)", GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_MOD_BY_ZERO_MESSAGE = "unable to mod with zero"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_int_div(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLInt64.new(int(_to_int64_value(left) / right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("if right_int == -1 and left_int == GML_INT64_MIN:", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 division by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_real_int_div(left_value, right_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var quotient = _gml_truncate_real(left_value) / divisor", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_whole_real(quotient - fmod(quotient, 1.0))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_checks_int32_range_over_godot_ints(self):
         self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)
@@ -3167,7 +3377,9 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_lte(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_gt(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_gte(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_nan_value(left) or is_nan_value(right):\n\t\treturn false", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_compare_reals(left_value, right_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("if absf(difference) <= _gml_math_epsilon:", GML_RUNTIME_SCRIPT)
+        self.assertIn("return order != GML_COMPARE_UNORDERED and order < 0", GML_RUNTIME_SCRIPT)
         self.assertIn("if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_string(left) and is_string(right):", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_unsupported_binary_type_error("GML less-than comparison", left, right)', GML_RUNTIME_SCRIPT)
@@ -3189,7 +3401,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("if is_string(right):\n\t\tif is_number(left):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
+        self.assertIn('return _gml_repeat_string(str(right), _to_real(left), "GML multiply")', GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_type_table_errors_are_centralized(self):

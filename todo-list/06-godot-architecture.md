@@ -35,7 +35,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 - [x] Use deterministic room child hierarchy matching GameMaker layer/depth order.
 - [x] Use `CanvasLayer` for GUI layers and draw GUI behavior.
 - [ ] Use `TileMapLayer` or Godot 4 equivalent for tile layers where compatible.
-- [ ] Use `Parallax2D`/background controllers for scrolling/tiled backgrounds where compatible.
+- [x] Draw scrolling/tiled backgrounds with a runtime background controller (a repeating `Sprite2D` region kept over the visible area every frame); `Parallax2D` repeats a fixed number of copies around the screen and cannot follow GameMaker's per-view tiling.
 - [ ] Use `Path2D`/`Curve2D` for converted paths where compatible.
 - [ ] Use `AnimationPlayer`, `Animation`, and `AnimationLibrary` for sequences where compatible.
 - [ ] Use generated runtime schedulers when native Godot nodes would change GameMaker semantics.
@@ -67,7 +67,7 @@ This file tracks the Godot-side architecture needed for high-fidelity generated 
 
 ## Event Architecture
 
-- [x] Some Godot callbacks are generated directly, such as `_ready`, `_process`, `_physics_process`, `_draw`, and `_exit_tree` mappings.
+- [x] Some Godot callbacks are generated directly, such as `_ready`, `_process`, `_physics_process` and `_exit_tree` mappings; GameMaker draw events become `_on_draw*` methods that the runtime draw pipeline calls.
 - [ ] Centralize event order in `GMEvents` instead of relying only on Godot callback order.
 - [ ] Use Godot `_process` as a frame pump, not as the final GameMaker Step semantic.
 - [ ] Use `_physics_process` carefully because GameMaker Begin Step is not identical to Godot fixed physics order.

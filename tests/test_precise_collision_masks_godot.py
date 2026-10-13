@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
 from typing import TypedDict, cast
@@ -13,6 +12,11 @@ from PIL import Image
 
 from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.sprites import SpriteConverter
+from tests.collision_runtime_support import (
+    object_entry,
+    sprite_entry,
+    write_smoke_files,
+)
 from tests.godot_test_support import (
     find_smoke_godot_binary as _find_godot_binary,
     write_fixture_text as _write_text,
@@ -160,212 +164,24 @@ def _write_gamemaker_fixture(project_dir: Path, fixture: _FixtureSpec) -> None:
     )
 
 
-def _write_godot_probe(project_dir: Path) -> None:
-    actor_script = textwrap.dedent(
-        """\
-        extends Node2D
-
-        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
-
-        var id = GMRuntime.gml_instance_noone()
-        var other = GMRuntime.gml_instance_noone()
-        var object_name = ""
-        var hits = 0
-
-        func configure(gm_object_name):
-        \tobject_name = gm_object_name
-
-        func _ready():
-        \tid = GMRuntime.gml_instance_register(self, object_name)
-
-        func _gm_collision_event_bindings():
-        \tif object_name != "subject":
-        \t\treturn []
-        \treturn [{"target_object": "target", "method": "_on_collision_target"}]
-
-        func _on_collision_target():
-        \thits += 1
-        """
+def _write_godot_probe(project_dir: Path, fixture: _FixtureSpec) -> None:
+    sprite_entries = [
+        sprite_entry(index, sprite["name"])
+        for index, sprite in enumerate(fixture["sprites"], start=1)
+    ]
+    object_entries = [
+        object_entry(100 + index, name)
+        for index, name in enumerate(("rectangle", "precise_static", "subject", "target"))
+    ]
+    write_smoke_files(
+        project_dir,
+        [*sprite_entries, *object_entries],
+        {
+            "smoke.gd": "precise_masks_smoke.gd",
+            "instance.gd": "instance.gd",
+            "precise_actor.gd": "precise_actor.gd",
+        },
     )
-    smoke_script = textwrap.dedent(
-        """\
-        extends Node2D
-
-        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
-        const Actor = preload("res://collision_actor.gd")
-
-        func _check(condition, message):
-        \tif condition:
-        \t\treturn true
-        \tpush_error(str(message))
-        \tget_tree().quit(1)
-        \treturn false
-
-        func _spawn_sprite(path, object_name, world_position):
-        \tvar sprite = load(path).instantiate()
-        \tsprite.position = world_position
-        \tadd_child(sprite)
-        \tvar handle = GMRuntime.gml_instance_register(sprite, object_name)
-        \treturn {"instance": sprite, "handle": handle}
-
-        func _ready():
-        \tvar rectangle = _spawn_sprite(
-        \t\t"res://sprites/spr_rectangle/spr_rectangle.tscn",
-        \t\t"rectangle",
-        \t\tVector2(10, 20)
-        \t)
-        \tvar rectangle_point = rectangle["instance"].to_global(Vector2(0.5, 0.5))
-        \tif not _check(
-        \t\tGMRuntime.gml_handle_is_valid(
-        \t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\trectangle["instance"],
-        \t\t\t\trectangle_point.x,
-        \t\t\t\trectangle_point.y,
-        \t\t\t\trectangle["handle"],
-        \t\t\t\ttrue,
-        \t\t\t\tfalse
-        \t\t\t)
-        \t\t),
-        \t\t"rectangle mask did not include a transparent source pixel"
-        \t):
-        \t\treturn
-
-        \tvar precise = _spawn_sprite(
-        \t\t"res://sprites/spr_precise_static/spr_precise_static.tscn",
-        \t\t"precise_static",
-        \t\tVector2(30, 20)
-        \t)
-        \tprecise["instance"].scale = Vector2(2, 1)
-        \tprecise["instance"].rotation_degrees = 90
-        \tvar first_pixel = precise["instance"].to_global(Vector2(-1.5, -1.5))
-        \tvar last_pixel = precise["instance"].to_global(Vector2(1.5, 1.5))
-        \tvar transparent_pixel = precise["instance"].to_global(Vector2(0.5, 0.5))
-        \tfor opaque_point in [first_pixel, last_pixel]:
-        \t\tif not _check(
-        \t\t\tGMRuntime.gml_handle_is_valid(
-        \t\t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\t\tprecise["instance"],
-        \t\t\t\t\topaque_point.x,
-        \t\t\t\t\topaque_point.y,
-        \t\t\t\t\tprecise["handle"],
-        \t\t\t\t\ttrue,
-        \t\t\t\t\tfalse
-        \t\t\t\t)
-        \t\t\t),
-        \t\t\t"static precise mask did not composite or transform an opaque frame pixel"
-        \t\t):
-        \t\t\treturn
-        \tif not _check(
-        \t\tnot GMRuntime.gml_handle_is_valid(
-        \t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\tprecise["instance"],
-        \t\t\t\ttransparent_pixel.x,
-        \t\t\t\ttransparent_pixel.y,
-        \t\t\t\tprecise["handle"],
-        \t\t\t\ttrue,
-        \t\t\t\tfalse
-        \t\t\t)
-        \t\t),
-        \t\t"precise query used the bounding rectangle"
-        \t):
-        \t\treturn
-        \tif not _check(
-        \t\tGMRuntime.gml_handle_is_valid(
-        \t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\tprecise["instance"],
-        \t\t\t\ttransparent_pixel.x,
-        \t\t\t\ttransparent_pixel.y,
-        \t\t\t\tprecise["handle"],
-        \t\t\t\tfalse,
-        \t\t\t\tfalse
-        \t\t\t)
-        \t\t),
-        \t\t"non-precise query did not use the transformed mask bounds"
-        \t):
-        \t\treturn
-
-        \tvar subject = Actor.new()
-        \tsubject.configure("subject")
-        \tsubject.position = Vector2(60, 20)
-        \tvar per_frame_mask = load(
-        \t\t"res://sprites/spr_precise_per_frame/spr_precise_per_frame.tscn"
-        \t).instantiate()
-        \tsubject.add_child(per_frame_mask)
-        \tadd_child(subject)
-        \tvar visual = per_frame_mask.get_node("AnimatedSprite2D")
-        \tvisual.pause()
-        \tvisual.frame = 0
-
-        \tvar target = Actor.new()
-        \ttarget.configure("target")
-        \ttarget.position = Vector2(61.5, 21.5)
-        \tvar target_shape = CollisionShape2D.new()
-        \tvar target_rectangle = RectangleShape2D.new()
-        \ttarget_rectangle.size = Vector2(0.5, 0.5)
-        \ttarget_shape.shape = target_rectangle
-        \ttarget.add_child(target_shape)
-        \tadd_child(target)
-
-        \tif not _check(
-        \t\tnot GMRuntime.gml_handle_is_valid(
-        \t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\tsubject,
-        \t\t\t\ttarget.position.x,
-        \t\t\t\ttarget.position.y,
-        \t\t\t\tsubject.id,
-        \t\t\t\ttrue,
-        \t\t\t\tfalse
-        \t\t\t)
-        \t\t),
-        \t\t"per-frame mask exposed a pixel from the inactive frame"
-        \t):
-        \t\treturn
-        \tif not _check(
-        \t\tGMRuntime.gml_collision_event_dispatch_frame([subject, target], 1) == 0,
-        \t\t"collision event used an inactive per-frame mask"
-        \t):
-        \t\treturn
-
-        \tvisual.frame = 1
-        \tif not _check(
-        \t\tGMRuntime.gml_handle_is_valid(
-        \t\t\tGMRuntime.gml_collision_point(
-        \t\t\t\tsubject,
-        \t\t\t\ttarget.position.x,
-        \t\t\t\ttarget.position.y,
-        \t\t\t\tsubject.id,
-        \t\t\t\ttrue,
-        \t\t\t\tfalse
-        \t\t\t)
-        \t\t),
-        \t\t"image frame change did not activate its precise mask"
-        \t):
-        \t\treturn
-        \tif not _check(
-        \t\tGMRuntime.gml_collision_event_dispatch_frame([subject, target], 2) == 1,
-        \t\t"collision event and precise query did not share the active mask"
-        \t):
-        \t\treturn
-        \tif not _check(subject.hits == 1, "collision callback was not dispatched once"):
-        \t\treturn
-
-        \tprint("PRECISE_COLLISION_MASKS_OK")
-        \tget_tree().quit(0)
-        """
-    )
-    smoke_scene = textwrap.dedent(
-        """\
-        [gd_scene load_steps=2 format=3]
-
-        [ext_resource type="Script" path="res://smoke.gd" id="1"]
-
-        [node name="Smoke" type="Node2D"]
-        script = ExtResource("1")
-        """
-    )
-    _write_text(project_dir / "collision_actor.gd", actor_script)
-    _write_text(project_dir / "smoke.gd", smoke_script)
-    _write_text(project_dir / "smoke.tscn", smoke_scene)
 
 
 class TestPreciseCollisionMasksGodot(unittest.TestCase):
@@ -393,7 +209,8 @@ class TestPreciseCollisionMasksGodot(unittest.TestCase):
             godot_dir = root / "godot"
             gamemaker_dir.mkdir()
             godot_dir.mkdir()
-            _write_gamemaker_fixture(gamemaker_dir, _load_fixture())
+            fixture = _load_fixture()
+            _write_gamemaker_fixture(gamemaker_dir, fixture)
 
             logs: list[str] = []
             converter = SpriteConverter(
@@ -417,7 +234,7 @@ class TestPreciseCollisionMasksGodot(unittest.TestCase):
                 ),
             )
             write_gml_runtime(str(godot_dir))
-            _write_godot_probe(godot_dir)
+            _write_godot_probe(godot_dir, fixture)
 
             godot_environment = dict(os.environ)
             godot_environment["HOME"] = str(root / "home")
@@ -432,7 +249,7 @@ class TestPreciseCollisionMasksGodot(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=90,
                 check=False,
                 env=godot_environment,
             )
@@ -456,7 +273,7 @@ class TestPreciseCollisionMasksGodot(unittest.TestCase):
                 ],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=90,
                 check=False,
                 env=godot_environment,
             )

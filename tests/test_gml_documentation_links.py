@@ -114,6 +114,7 @@ class TestGMLDocumentationLinks(unittest.TestCase):
             "array_copy",
             "array_concat",
             "array_contains",
+            "array_get_index",
             "array_find_index",
             "array_map",
             "array_filter",

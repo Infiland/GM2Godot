@@ -84,6 +84,14 @@ class TestRuntimeManagers(unittest.TestCase):
         )
         self.assertIn("func _exit_tree():", script)
         self.assertIn("GMRuntimeFacade.gm2godot_runtime_shutdown()", script)
+        # Closing the window runs the Close Button event of the instances that
+        # have one, and ends the game otherwise (the instances run Clean Up).
+        self.assertIn(
+            "func _notification(what):\n"
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n"
+            "\t\tGMRuntimeFacade.gml_game_window_close_request()",
+            script,
+        )
         self.assertIn(
             "GMRuntimeFacade.gml_included_file_integrity_prewarm()",
             script,
@@ -107,9 +115,14 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn('"Area2D.area_entered"', script)
         self.assertIn('"Timer.timeout"', script)
         self.assertIn("func _process(delta):", script)
-        self.assertIn("GMRuntimeFacade.gml_input_dispatch_frame()", script)
-        self.assertIn("GMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)", script)
-        self.assertIn("GMRuntimeFacade.gml_input_end_frame()", script)
+        self.assertIn("\tGMRuntimeFacade.gml_event_scheduler_pump_attach()", script)
+        self.assertIn("\tGMRuntimeFacade.gml_event_scheduler_game_frame(float(delta))", script)
+        # Keyboard and mouse events run inside the step, not before it.
+        self.assertNotIn("gml_input_dispatch_frame()", script)
+        self.assertLess(
+            script.index("gml_event_scheduler_pump_attach()"),
+            script.index("func _process(delta):"),
+        )
 
     def test_input_manager_captures_godot_input_events(self) -> None:
         definition = next(
@@ -135,7 +148,13 @@ class TestRuntimeManagers(unittest.TestCase):
 
         self.assertIn('const GMRuntimeFacade = preload("res://gm2godot/gml_runtime.gd")', script)
         self.assertIn("func _process(_delta):", script)
-        self.assertIn("GMRuntimeFacade.gml_draw_event_dispatch_frame()", script)
+        self.assertIn(
+            "\tif not GMRuntimeFacade.gml_event_scheduler_frame_drawable():\n\t\treturn\n"
+            "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()\n"
+            "\twhile GMRuntimeFacade.gml_event_scheduler_after_draw():\n"
+            "\t\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
+            script,
+        )
 
     def test_async_manager_pumps_async_queue(self) -> None:
         definition = next(
@@ -150,7 +169,7 @@ class TestRuntimeManagers(unittest.TestCase):
         self.assertIn('"HTTPRequest.request_completed"', script)
         self.assertIn('"AudioStreamPlayer.finished"', script)
         self.assertIn("func _process(_delta):", script)
-        self.assertIn("GMRuntimeFacade.gml_async_queue_flush()", script)
+        self.assertIn("GMRuntimeFacade.gml_async_frame_pump()", script)
 
     def test_write_runtime_managers_writes_each_manager_script(self) -> None:
         output_paths = write_runtime_managers(self.godot_dir)

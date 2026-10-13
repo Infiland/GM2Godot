@@ -190,7 +190,7 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 - Each room is a `Node2D` root using `res://gm2godot/gml_room_node.gd`.
 - The first ordered GameMaker room becomes the Godot main scene when it was converted successfully.
-- GameMaker layers become `Node2D` children. The depth mapping is `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later.
+- GameMaker layers become `Node2D` children with an absolute `z_index = -GameMaker depth`, because lower GameMaker depth and higher Godot `z_index` both draw later. Fractional depths are truncated toward zero, like GameMaker. Every distinct depth keeps its own `z_index`: when a depth in use is beyond Godot's ±4096 `z_index` range, the distinct depths in use (layers, instance depths, particle systems) are ranked into that range in depth order, which stays exact for up to 8193 distinct depths at once.
 - Every room reserves a `GMGUI` `CanvasLayer` at layer `1000` for Draw GUI phases.
 - Decodable tile data uses Godot 4 `TileMapLayer` output.
 - Native Godot callbacks do not define GameMaker event order; the runtime managers coordinate the generated phases.
@@ -206,6 +206,15 @@ The generated room policy translates GameMaker’s flat resource model into a Go
 
 The policy is a conversion-time description, not proof of gameplay parity. Inspect its `project_features`, `renderer`, `collision`, `audio`, `file_buffer_network`, `runtime_managers`, and `signal_queue_policy` fields together with diagnostics. The canonical, implementation-facing policy is [`godot_architecture_policy.md`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/godot_architecture_policy.md).
 
+### Window, application surface and views
+
+- The first room in room order sizes GameMaker's application surface: the bounding box of its visible viewports when views are enabled, otherwise the room size. GM2Godot writes that size to `display/window/size/viewport_width` and `viewport_height` with the `viewport` stretch mode, so the root viewport plays the application surface: every room renders at that resolution and is scaled into the window. The platform Scaling option selects the `keep` (letterboxed) or `ignore` (full scale) stretch aspect, and the window colour becomes the default clear colour.
+- Each room root stores its eight view slots in `metadata/gamemaker_views`. When the room enters the tree the runtime creates one camera per view slot, exposes them through `view_camera[]` and the other view arrays, and destroys them when a non-persistent room ends. A persistent room keeps its views and cameras: coming back to it finds the same cameras and view settings, until `game_restart()` starts every room afresh.
+- Once per frame, after End Step and before drawing, visible views follow their target object or instance with GameMaker's border, speed and room-clamp rules. The first visible view is shown through the room's single `ViewCamera` `Camera2D`, whose position, zoom and rotation come from the view rectangle or from custom view/projection matrices, mapped onto the view's scaled viewport. Further visible views keep their state, and the mouse resolves through them, but they are not rendered; a runtime diagnostic reports this. With views enabled and none visible, nothing of the room is drawn and its Draw Begin, Draw and Draw End events do not run: the window colour shows, with Pre Draw, Post Draw and Draw GUI output on top.
+- `window_set_size()` and the other window functions change only the window; the application surface keeps its size and `application_get_position()` reports its letterboxed rectangle in the window.
+- The `GMGUI` layer maps GUI coordinates onto the application surface: 1:1 by default, scaled by `display_set_gui_size()`, or relative to the window with `display_set_gui_maximise()`. The setting persists across rooms.
+- `mouse_x`/`mouse_y` resolve through the visible views (the last visible view containing the point first), `window_mouse_get_*` report window pixels, and `device_mouse_*_to_gui` report GUI coordinates.
+
 ## Runtime facade and autoload managers
 
 Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `GMRuntime.gml_*`. That static compatibility facade is the stable call-site boundary. The generated autoloads under `res://gm2godot/managers/` divide lifecycle ownership into explicit domains and register in this order:
@@ -216,7 +225,7 @@ Generated scripts continue to preload `res://gm2godot/gml_runtime.gd` and call `
 | 10 | `GMAssets` | Assets, texture groups, audio groups and dynamic assets |
 | 20 | `GMRooms` | Room order, current room, transitions and layers |
 | 30 | `GMInstances` | Live instances, handles, object indices and creation order |
-| 40 | `GMEvents` | Input dispatch, Step scheduler, alarms, timelines, sequences and collision window |
+| 40 | `GMEvents` | GameMaker step loop: input latch, image animation, Step phases, alarms, timelines, sequences, collision window and room changes |
 | 50 | `GMDraw` | Ordered Draw phases, draw state, surfaces, shaders and texture-group state |
 | 60 | `GMInput` | Godot input capture and GameMaker keyboard, mouse, gamepad and gesture state |
 | 70 | `GMAudio` | Audio instances, groups, emitters and listeners |
@@ -233,35 +242,62 @@ See [`runtime_managers.md`](https://github.com/Infiland/GM2Godot/blob/main/src/c
 
 ### Room entry and transitions
 
-Generated object `_ready()` methods register the instance, initialize motion state, and run converted Create behavior when present. The generated room root then performs the room-entry sequence:
+Generated object `_ready()` methods build the instance and run converted Create behavior when present. Building happens once per instance, in the object's own `_gm_construct_instance()`: it registers the instance, sets `xstart`/`ystart` and `xprevious`/`yprevious` from its position, and gives it its own object's sprite (`-1` for an object without one; sprites are not inherited) and its room placement's image settings. The Create events of parent objects, which `event_inherited()` runs, do not build it again. As in GameMaker, an object without an event of its own runs its nearest ancestor's, and `event_inherited()` runs the nearest ancestor's event above the object, past parents that do not have it. As in GameMaker, every instance placed in a room is built before the first Create event runs: when the room scene enters the tree, the room root builds its placed instances in the room's creation order and holds them out of the tree. The room root then performs the room-entry sequence:
 
 1. Register layer and view metadata.
 2. Instantiate authored room particle-layer systems.
 3. Update the current room and room globals.
-4. Run instance creation code in declared GameMaker creation order.
+4. Add the held instances back one at a time in the declared GameMaker creation order: each runs its Create event, then its instance creation code, before the next one is added. An instance destroyed before its turn (by an earlier Create event or creation code) still runs its Create event and creation code, as in GameMaker, and is then freed; it stays destroyed and gets no further events. Once an earlier instance has requested a room change, later instances run neither their Create event nor their creation code, unless the instance or the room is persistent.
 5. Dispatch Game Start once for the running game.
 6. Run room creation code.
 7. Dispatch Room Start.
 
-For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, restores those instances, and runs the entry sequence for the new scene.
+Instances destroyed earlier, even in the same step, receive no Game Start, Room Start, Room End or Game End event.
+
+In object events, instance creation code and timeline moments, `other` is the instance itself, as in GameMaker, except inside collision events and `with` blocks. Room creation code runs with the room root as both `self` and `other`.
+
+For `room_goto*()` and `room_restart()`, the compatibility runtime dispatches Room End on the old scene, moves persistent instances to a root-level holding node, replaces the room scene, and runs the entry sequence for the new scene. As in GameMaker, the persistent instances join the new room once its own instances are created: each joins the layer of the same name as the one it left (a new layer of that name at its depth when the room has none) and takes that layer's depth, while one with its own depth (from `instance_create_depth()` or a `depth` assignment) keeps it.
+
+`game_restart()` dispatches Game End, then ends the game as GameMaker's runner does: every instance is removed, persistent ones included, without further events, the time sources made by `call_later()` are destroyed and all sounds stop. The first room then starts as it did at launch, Game Start included.
 
 ### Per-frame scheduler
 
-`GMInput._input(event)` captures native input as it arrives. On the generated `GMEvents` frame pump, input event bindings are dispatched first, followed by the central scheduler:
+`GMInput._input(event)` captures native input as it arrives. Every Godot frame, the generated `GMEvents` frame pump runs one GameMaker step in the order of the GameMaker runner:
 
 ```text
-Begin Step
+latch input (pressed/released edges since the previous step)
+→ xprevious/yprevious, image animation, Animation End
+→ Begin Step
+→ Async events
+→ timelines
 → time sources
 → alarms
-→ authored sequences and timelines
+→ keyboard events (held, pressed, released)
+→ mouse events
+→ authored sequences
 → Step
 → motion/path update
+→ Outside Room, Intersect Boundary, and, while views are enabled, Outside View and view boundary events
 → collision dispatch
 → End Step
-→ clear one-frame input edges
+→ Draw phases (GMDraw)
 ```
 
 Collision is therefore evaluated after motion/path updates and before End Step. Do not attach correctness to the incidental `_process()` order of individual object nodes.
+
+Input that arrives between two frames belongs to the next step. `keyboard_check_pressed()`, `keyboard_check_released()`, `mouse_check_button_pressed()` and `mouse_check_button_released()` keep their value for the whole step, including Draw and Draw GUI, and reset when the next step starts; a press and release that both happen between two steps are both reported.
+
+Keyboard state uses GameMaker's virtual key codes everywhere: the `vk_*` constants, `ord()`, `keyboard_key`, `keyboard_lastkey` and the numbers of Keyboard, Key Press and Key Release events. Godot key events are translated when they are captured, and `vk_lshift`/`vk_rshift`, `vk_lcontrol`/`vk_rcontrol` and `vk_lalt`/`vk_ralt` follow the side of the key that was pressed. In the keyboard phase each held (pressed, released) key, in key code order, runs the matching event of every instance that has one; the `<Any Key>` event follows when at least one key was in that state and the `<No Key>` event otherwise. `keyboard_clear(key)` forgets the key until it is released and pressed again, without a Key Release event and without changing `keyboard_string`.
+
+Mouse events run object by object in object index order and, for each object, from the newest instance to the oldest. An instance whose collision mask (its mask or sprite, scaled and rotated like the instance) contains the mouse position in the room gets its held, pressed and released button events, `<No Button>` when no button is held or pressed, and Mouse Enter once when the mouse moves onto it; Mouse Leave runs once when the mouse leaves it. As in GameMaker, the room position under the mouse is worked out once for all instances, so a view or camera that a mouse event moves changes the hit tests from the next step on. The global button events and the mouse wheel events follow for every instance. A child object receives the keyboard and mouse events it inherits from its parents.
+
+Every instance with a sprite advances `image_index` by `image_speed` times the sprite's playback speed (frames per second divided by the game speed, or frames per game frame) before Begin Step. `image_index` keeps its fractional value, wraps into `0..image_number` in both directions and runs Animation End when it wraps; the frame shown is the integer part wrapped into the sprite's frame count. The sprite scenes of object instances never play on their own, while sprites placed on room asset layers keep their scene animation. `sprite_index` holds the sprite's asset index (or `-1`), and changing it keeps `image_index`.
+
+`room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`, `game_restart()` and `game_end()` record a request. The current event finishes and the step is not drawn. No further events run in that step, apart from the Create, Destroy, Alarm and Other events of persistent instances or of a persistent room: an instance created after the request gets no Create event, and `instance_destroy()` runs no Destroy event. The change happens at the end of the step, or right after the draw when a Draw event requested it; after a room switch the new room steps and draws in the same frame, as GameMaker does.
+
+Each phase runs for the live instances in creation order. An instance created during a phase takes part from the next phase on (one created in Begin Step gets that step's Step and End Step events), and a destroyed instance gets no further events. An instance with no speed, no gravity and no path is left alone by the motion update, as in GameMaker.
+
+`GMRuntime.gml_event_scheduler_set_tracing(true)` makes the runtime record the events each step runs (`gml_event_scheduler_trace()`, the latest 1024), the input events (`gml_input_dispatch_trace()`, the latest 256), the collision events and solid move-backs (`gml_collision_event_trace()`, the latest 256), the delivered async events (`gml_async_event_log()`, the latest 256) and the room changes (`gml_room_transition_log()`, the latest 64). Tracing is meant for tests and debugging and is off by default, so a running game keeps no record of its events, as in GameMaker.
 
 ### Precise sprite collision masks
 
@@ -279,7 +315,7 @@ Version 0.7.46 normalizes each current `GMParticleSystem` asset into one determi
 
 At runtime, each authored emitter becomes a managed `GPUParticles2D` with a `ParticleProcessMaterial`. Lifetime frames and per-step speed/gravity are converted at the generated room speed; region shapes, initial direction/spread, orientation, size ranges/increment curves, colour/alpha ramps, additive blend, built-in particle textures, custom sprite textures, and stream or one-shot burst mode are applied where Godot has a safe mapping. Exact GameMaker Gaussian/inverse-Gaussian placement, wiggle/increment evolution, sprite flipbooks, delay/interval scheduling, and secondary spawning remain descriptor-preserved approximations rather than claimed native parity.
 
-A `GMRParticleSystem` room asset keeps its layer visibility, inverse-depth `z_index`, layer offset, element position/rotation/scale/modulate, source asset ID, and source metadata. Room entry creates its system below that element. Tree exit destroys the system's emitter and owned-type handles and frees every managed particle node; directly created one-shot nodes also free themselves after Godot's `finished` signal. Non-empty legacy attractor, destroyer, deflector, or changer fields do not silently disappear: conversion records `GM2GD-PARTICLE-MODIFIER-UNSUPPORTED` against the source `.yy` field and retains the unsupported category in the descriptor.
+A `GMRParticleSystem` room asset keeps its layer visibility, inverse-depth `z_index`, element position/rotation/scale/modulate, source asset ID, and source metadata; like GameMaker, it is drawn at its own position, not at the layer offset. Room entry creates its system below that element. Tree exit destroys the system's emitter and owned-type handles and frees every managed particle node; directly created one-shot nodes also free themselves after Godot's `finished` signal. Non-empty legacy attractor, destroyer, deflector, or changer fields do not silently disappear: conversion records `GM2GD-PARTICLE-MODIFIER-UNSUPPORTED` against the source `.yy` field and retains the unsupported category in the descriptor.
 
 These mappings follow the GameMaker LTS [Particle System Editor](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Particle_Systems.htm), [`particle_get_info`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/particle_get_info.htm), and [`part_system_create`](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Drawing/Particles/Particle_Systems/part_system_create.htm) contracts. Generated behavior and cleanup are tested with exact Godot 4.7.2 [`GPUParticles2D`](https://docs.godotengine.org/en/4.7/classes/class_gpuparticles2d.html) and [`ParticleProcessMaterial`](https://docs.godotengine.org/en/4.7/classes/class_particleprocessmaterial.html) APIs.
 
@@ -300,6 +336,8 @@ Pre Draw → Draw Begin → Draw → Draw End → Post Draw
 → Draw GUI Begin → Draw GUI → Draw GUI End
 ```
 
+Each phase visits visible instances from the highest depth to the lowest; instances at the same depth keep scene-tree order, so later-created instances draw on top. Assigning an instance a `depth` that does not truncate to its room layer's depth moves it off that layer to the room's managed layer node for that depth, as GameMaker moves it to a managed layer at that depth, so the room layer's visibility, position and `layer_destroy` no longer affect it; assigning the depth it already has changes nothing. `instance_create_depth` puts the new instance on that managed layer too. Particle systems share the managed layers: `part_system_create` without a layer starts on the one at depth 0, `part_system_depth` moves the system to the one at its depth, and `part_system_layer` puts it back on a layer, where it draws with that layer. Layers that share a depth draw in GameMaker's order: a layer added at a depth already in use (a managed layer, `layer_create`, `layer_depth`) draws behind the layers already there. An object without a Draw event keeps its default sprite node. Draw functions write into canvas items owned by the drawing instance (Draw) or by the phase's draw space (Draw Begin/End, Pre/Post Draw and the GUI phases), which are cleared at the start of every dispatched frame, while draw state (colour, alpha, font, alignment, blend mode and shader) carries across instances and frames as in GameMaker.
+
 `GMAsync` owns FIFO delivery for queued HTTP, networking, audio, platform, and extension callbacks. It scopes `async_load` to each delivered Async event. Godot signals that affect GameMaker ordering—such as supported collision, timer, animation, HTTP-completion, and audio-finished signals—must be queued through the manager identified by `architecture_policy.json`; user-authored native callbacks are outside this ordering contract unless they use the same queue.
 
 The current GameMaker-facing phase contract and known deviations live in [`runtime_managers.md`](https://github.com/Infiland/GM2Godot/blob/main/src/conversion/runtime_managers.md). GameMaker’s reference order is linked from that canonical document.
@@ -314,7 +352,7 @@ Runtime state has three practical ownership levels:
 | Autoload manager buckets | Domain registries, queue metadata and future migrated runtime state | Across generated room scene changes |
 | Room/object scene state | Layer nodes, object instances, transient draw/collision data | Normally one room or frame unless explicitly preserved |
 
-Persistent **instances** are reparented across generated room transitions. Their instance creation code is not rerun after restoration. Full persistent **room** state is not preserved: the generated scene enters again and lifecycle/room creation behavior runs, with a runtime warning. This is a deliberate, reported deviation rather than silent parity.
+Persistent **instances** are reparented across generated room transitions. As in GameMaker, an instance kept from an earlier visit stands in for the copy placed in the room when that room is entered again, so its Create event and instance creation code do not run again. A persistent **room** is kept as it was left: its scene leaves the tree with its instances, layers and room particle systems, and its instances leave the instance lists, so no event, `with`, `instance_number()` or collision meets them while another room runs. Entering it again (or `room_restart()` in it) brings the same scene back with the same instance and layer ids; Create events, instance creation code and the room creation code do not run again, Room Start does. `game_restart()` starts every room afresh.
 
 One-frame input edges, collision pairs, transient draw state, room-local layers, and non-persistent instances should be reset at their documented frame or room boundary. Add a regression test whenever custom runtime work moves state between ownership levels.
 
@@ -396,7 +434,8 @@ Use the full mapping, platform-hook, and callback-schema contract in [`extension
 | --- | --- |
 | Runtime-authored collision masks | Imported static and per-frame precise sprite masks are generated exactly within the documented complexity bound; runtime mask mutation, `mask_index`, skeletal/tile masks, and physics fixtures still need project-specific review. |
 | Advanced particle behavior | Authored systems and room elements instantiate managed emitters, but legacy field modifiers and engine-specific distribution, timing, wiggle, flipbook, and secondary-spawn details need diagnostics-guided visual review. |
-| Persistent rooms | Persistent instances are carried across room changes, but full persistent room state is not retained. |
+| Persistent rooms | Rooms marked persistent keep their state across visits. Changing a room's persistence at run time with `room_persistent` is not supported. As in GameMaker's HTML5 runner, an instance of a persistent room that is not the current room is still reached through its id (`with`, `instance_exists()`), but `instance_destroy()` passes over it. |
+| Multiple views and view surfaces | Only the first visible view is drawn; further views keep their camera state and mouse mapping, so split-screen layouts need a custom `SubViewport` setup. Views assigned to `view_surface_id` are not rendered into their surface, and camera begin, end and update scripts do not run. |
 | Shaders and GPU state | Supported 2D attributes, varyings, uniforms, base-texture sampling, and matrix transforms compile under exact Godot 4.7.2; custom vertex streams, macros, 3D/clip-space logic, multi-pass effects, GPU state, and visual parity remain manual review areas. |
 | Native extensions and platform services | Closed binaries, entitlements, permissions and SDK initialization require explicit reviewed Godot integrations. |
 | `game_end` | Maps to `SceneTree.quit()`; platform-specific close prompts and window behavior are not emulated. |

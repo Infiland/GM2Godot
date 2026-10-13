@@ -7,7 +7,7 @@ STATIC_MAPPINGS: StaticMappings = {
     (3, 1): EventMapping("_on_begin_step", "", 1, "Step_1.gml"),
     (3, 0): EventMapping("_on_step", "", 2, "Step_0.gml"),
     (3, 2): EventMapping("_on_end_step", "", 12, "Step_2.gml"),
-    (8, 0): EventMapping("_draw", "", 3, "Draw_0.gml"),
+    (8, 0): EventMapping("_on_draw", "", 3, "Draw_0.gml"),
     (8, 64): EventMapping("_on_draw_gui", "", 15, "Draw_64.gml"),
     (8, 65): EventMapping("_on_resize", "", 6, "Draw_65.gml"),
     (8, 72): EventMapping("_on_draw_begin", "", 16, "Draw_72.gml"),
@@ -16,7 +16,7 @@ STATIC_MAPPINGS: StaticMappings = {
     (8, 75): EventMapping("_on_draw_gui_end", "", 15, "Draw_75.gml"),
     (8, 76): EventMapping("_on_pre_draw", "", 16, "Draw_76.gml"),
     (8, 77): EventMapping("_on_post_draw", "", 16, "Draw_77.gml"),
-    (12, 0): EventMapping("_exit_tree", "", 5, "CleanUp_0.gml"),
+    (12, 0): EventMapping("_on_clean_up", "", 5, "CleanUp_0.gml"),
 }
 
 
@@ -29,7 +29,11 @@ def map_destroy_event(_event: JsonObject, gml_filename: str) -> EventMapping:
 
 
 def map_cleanup_event(_event: JsonObject, gml_filename: str) -> EventMapping:
-    return EventMapping("_exit_tree", "", 5, gml_filename)
+    # Not _exit_tree: the runtime runs Clean Up as GameMaker does (right after
+    # Destroy, at the end of a non-persistent room and at the end of the
+    # game), never when a node only moves, as persistent instances do between
+    # rooms.
+    return EventMapping("_on_clean_up", "", 5, gml_filename)
 
 
 def map_alarm_event(event: JsonObject, gml_filename: str) -> EventMapping:

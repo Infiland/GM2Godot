@@ -62,63 +62,45 @@ static func gml_timeline_max_moment(timeline):
 
 
 static func gml_timeline_step(instance):
+	# One step of the instance's timeline (HTML5 runner Events.js
+	# HandleTimeLine). The position moves by the speed first; then every
+	# moment from the first one at or after the old position up to, but not
+	# including, the first one at or after the new position runs (at or
+	# before, when the speed is not positive). Moments may change the
+	# timeline variables. A looping timeline then restarts at 0 once the
+	# position is past its last moment (at its last moment once it is below
+	# 0, when running backwards).
 	var state = _gml_timeline_state(instance)
 	if state == null:
 		return false
-	state["index"] = _gml_object_timeline_get(
-		instance,
-		"timeline_index",
-		state.get("index", -1)
-	)
-	state["position"] = _gml_object_timeline_get(
-		instance,
-		"timeline_position",
-		state.get("position", 0.0)
-	)
-	state["speed"] = _gml_object_timeline_get(
-		instance,
-		"timeline_speed",
-		state.get("speed", 1.0)
-	)
-	state["running"] = _gml_object_timeline_get(
-		instance,
-		"timeline_running",
-		state.get("running", false)
-	)
-	state["loop"] = _gml_object_timeline_get(
-		instance,
-		"timeline_loop",
-		state.get("loop", false)
-	)
+	_gml_timeline_read_state(instance, state)
 	if not bool(state.get("running", false)):
 		return true
 	var timeline = state.get("index", -1)
 	if not gml_timeline_exists(timeline):
 		return false
+	var moment_times = _gml_timeline_sorted_moments(timeline)
 	var position = _to_real(state.get("position", 0.0))
 	var speed_value = _to_real(state.get("speed", 1.0))
-	var previous_position = position
+	var forward = speed_value > 0.0
+	var first_index = _gml_timeline_find_moment(moment_times, position, forward)
 	position += speed_value
-	var max_moment = gml_timeline_max_moment(timeline)
-	if bool(state.get("loop", false)) and max_moment >= 0:
-		var span = float(max_moment + 1)
-		_gml_timeline_dispatch_wrapped(
-			instance,
-			timeline,
-			previous_position,
-			position,
-			span
-		)
-		position = fposmod(position, span)
-	else:
-		_gml_timeline_dispatch_between(
-			instance,
-			timeline,
-			previous_position,
-			position,
-			speed_value
-		)
+	var end_index = _gml_timeline_find_moment(moment_times, position, forward)
 	state["position"] = position
+	_gml_timeline_apply_state(instance, state)
+	var moment_index = first_index
+	while (forward and moment_index < end_index) or (not forward and moment_index > end_index):
+		_gml_timeline_perform_moment(instance, state, moment_index)
+		moment_index += 1 if forward else -1
+	_gml_timeline_read_state(instance, state)
+	moment_times = _gml_timeline_sorted_moments(timeline)
+	if bool(state.get("loop", false)) and not moment_times.is_empty():
+		var last_time = float(moment_times[moment_times.size() - 1])
+		position = _to_real(state.get("position", 0.0))
+		if forward and position > last_time:
+			state["position"] = 0.0
+		elif not forward and position < 0.0:
+			state["position"] = last_time
 	_gml_timeline_apply_state(instance, state)
 	return true
 
@@ -166,7 +148,8 @@ static func gml_layer_sequence_create(layer, x, y, sequence):
 		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
 	var node = Node2D.new()
 	node.name = "Sequence_" + str(sequence_object.get("name", sequence_object.get("id", "dynamic")))
-	node.position = Vector2(_to_real(x), _to_real(y))
+	# Drawn at the layer offset like every sequence element.
+	node.position = Vector2(_to_real(x), _to_real(y)) + _gml_layer_node_offset(layer_node)
 	node.set_meta("gamemaker_sequence_instance", true)
 	node.set_meta("gamemaker_sequence_asset", sequence_object.get("id", -1))
 	node.set_meta("gamemaker_sequence_name", sequence_object.get("name", ""))
@@ -185,6 +168,10 @@ static func gml_layer_sequence_destroy(sequence_element_id):
 		return false
 	var element = instance.get("elementID", null)
 	var node = _gml_layer_element_resolve_node(element)
+	# The instances the sequence created are destroyed, as with
+	# instance_destroy (CleanupInstances calls Command_Destroy in the runner).
+	if node is Node:
+		_gml_instances_destroy_under(node)
 	_gml_sequence_cleanup_instance(instance)
 	if element is GMLHandle:
 		_gml_sequence_elements_by_index.erase(element.index)
@@ -338,55 +325,53 @@ static func _gml_timeline_apply_state(instance, state):
 			instance.set("timeline_loop", state["loop"])
 
 
-static func _gml_timeline_dispatch_between(instance, timeline, previous_position, position, speed_value):
+static func _gml_timeline_read_state(instance, state):
+	for member_name in ["index", "position", "speed", "running", "loop"]:
+		state[member_name] = _gml_object_timeline_get(
+			instance,
+			"timeline_" + member_name,
+			state.get(member_name)
+		)
+
+
+static func _gml_timeline_sorted_moments(timeline):
 	var moments = _gml_timeline_moments(timeline)
 	if moments == null:
-		return
-	var ordered_moments = moments.keys()
-	ordered_moments.sort()
-	if speed_value < 0.0:
-		ordered_moments.reverse()
-	for moment in ordered_moments:
-		var moment_value = float(moment)
-		if speed_value >= 0.0 and (moment_value <= previous_position or moment_value > position):
-			continue
-		if speed_value < 0.0 and (moment_value >= previous_position or moment_value < position):
-			continue
-		for action in moments[moment]:
-			_gml_sequence_timeline_dispatch_action(instance, action)
+		return []
+	var moment_times = moments.keys()
+	moment_times.sort()
+	return moment_times
 
 
-static func _gml_timeline_dispatch_wrapped(instance, timeline, previous_position, position, span):
-	var moments = _gml_timeline_moments(timeline)
-	if moments == null or span <= 0.0 or is_equal_approx(previous_position, position):
+static func _gml_timeline_find_moment(moment_times, position, forward):
+	# yyTimeline.js FindLarger (the first moment at or after the position, or
+	# the moment count) and FindSmaller (the last moment at or before it, or
+	# -1).
+	if forward:
+		for moment_index in range(moment_times.size()):
+			if float(moment_times[moment_index]) >= position:
+				return moment_index
+		return moment_times.size()
+	for moment_index in range(moment_times.size() - 1, -1, -1):
+		if float(moment_times[moment_index]) <= position:
+			return moment_index
+	return -1
+
+
+static func _gml_timeline_perform_moment(instance, state, moment_index):
+	# Functions/Function_Game.js event_perform_timeline: the moment comes
+	# from the instance's current timeline, which an earlier moment may have
+	# changed.
+	_gml_timeline_read_state(instance, state)
+	var moments = _gml_timeline_moments(state.get("index", -1))
+	if moments == null:
 		return
-	var ordered_moments = moments.keys()
-	ordered_moments.sort()
-	var direction = 1 if position > previous_position else -1
-	if direction < 0:
-		ordered_moments.reverse()
-	var first_cycle = int(floor(previous_position / span))
-	var last_cycle = int(floor(position / span))
-	var cycle = first_cycle
-	while (
-		(direction > 0 and cycle <= last_cycle)
-		or (direction < 0 and cycle >= last_cycle)
-	):
-		for moment in ordered_moments:
-			var event_position = float(moment) + float(cycle) * span
-			if direction > 0 and (
-				event_position <= previous_position
-				or event_position > position
-			):
-				continue
-			if direction < 0 and (
-				event_position >= previous_position
-				or event_position < position
-			):
-				continue
-			for action in moments[moment]:
-				_gml_sequence_timeline_dispatch_action(instance, action)
-		cycle += direction
+	var moment_times = moments.keys()
+	moment_times.sort()
+	if moment_index < 0 or moment_index >= moment_times.size():
+		return
+	for action in moments[moment_times[moment_index]]:
+		_gml_sequence_timeline_dispatch_action(instance, action)
 
 
 static func _gml_object_timeline_get(instance, member_name, fallback):

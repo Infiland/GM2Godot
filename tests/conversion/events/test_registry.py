@@ -18,7 +18,7 @@ class TestEventRegistry(unittest.TestCase):
         assert close_button is not None
         assert legacy_lives is not None
 
-        self.assertEqual(close_button.godot_func, "_notification")
+        self.assertEqual(close_button.godot_func, "_on_close_button")
         self.assertEqual(legacy_lives.godot_func, "_on_no_more_lives")
 
     def test_keeps_dynamic_handlers(self):

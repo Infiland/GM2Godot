@@ -29,6 +29,11 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \treturn true
 
         func _ready():
+        \t# Exercises the runtime API directly: without the GameMaker frame
+        \t# pump, async events are delivered immediately.
+        \tGMRuntime.gml_event_scheduler_pump_detach()
+        \t# Delivered async events are logged only while tracing is on.
+        \tGMRuntime.gml_event_scheduler_set_tracing(true)
         \tif AudioServer.get_bus_index("audiogroup_music") == -1:
         \t\tAudioServer.add_bus()
         \t\tAudioServer.set_bus_name(AudioServer.get_bus_count() - 1, "audiogroup_music")
@@ -93,10 +98,10 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(GMRuntime.gml_audio_sound_get_asset(first) == sound_id, "sound asset getter failed"):
         \t\treturn
-        \tGMRuntime.gml_audio_set_master_gain(0.5)
-        \tif not _check(abs(GMRuntime.gml_audio_get_master_gain() - 0.5) <= 0.001, "master gain getter failed"):
+        \tGMRuntime.gml_audio_set_master_gain(0, 0.5)
+        \tif not _check(abs(GMRuntime.gml_audio_get_master_gain(0) - 0.5) <= 0.001, "master gain getter failed"):
         \t\treturn
-        \tGMRuntime.gml_audio_set_master_gain(1.0)
+        \tGMRuntime.gml_audio_set_master_gain(0, 1.0)
         \tvar spatial = GMRuntime.gml_audio_play_sound_at(sound_id, 12, 34, 0, 64, 512, 1, false, 4, 0.75)
         \tvar spatial_player = GMRuntime.gml_handle_resolve(spatial)
         \tif not _check(spatial_player is AudioStreamPlayer2D, "positional sound did not use AudioStreamPlayer2D"):

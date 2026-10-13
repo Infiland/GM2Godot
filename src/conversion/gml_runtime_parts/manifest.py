@@ -100,13 +100,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "30_numeric_arithmetic.gd",
         "GML arithmetic, comparison, nullish, and boolean operators.",
         depends_on=("00_prelude.gd",),
-        tests=("tests/test_gml_runtime.py",),
+        tests=("tests/test_gml_runtime.py", "tests/test_gml_value_semantics_godot.py"),
     ),
     _segment(
         "35_maths_numbers.gd",
         "Math, number conversion, random, and geometry helpers.",
         depends_on=("00_prelude.gd", "30_numeric_arithmetic.gd"),
-        tests=("tests/test_gml_runtime.py", "tests/test_math_random_godot.py"),
+        tests=(
+            "tests/test_gml_runtime.py",
+            "tests/test_math_random_godot.py",
+            "tests/test_gml_value_semantics_godot.py",
+        ),
     ),
     _segment(
         "40_arrays_structs_variables.gd",
@@ -121,14 +125,40 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "45_collision_queries.gd",
-        "Instance collision query helpers and DS-list collision result writers.",
-        depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "40_arrays_structs_variables.gd"),
-        tests=("tests/test_collision_queries_godot.py",),
+        "GameMaker bounding boxes, collision masks, collision queries and collision events.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "15_asset_registry.gd",
+            "35_maths_numbers.gd",
+            "40_arrays_structs_variables.gd",
+        ),
+        tests=(
+            "tests/test_collision_queries_godot.py",
+            "tests/test_collision_events_godot.py",
+            "tests/test_precise_collision_masks_godot.py",
+        ),
+    ),
+    _segment(
+        "45_collision_tilemaps.gd",
+        "GameMaker collision queries against tilemap elements and their tiles.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+        ),
+        tests=("tests/test_tilemap_collisions_godot.py",),
     ),
     _segment(
         "46_motion_helpers.gd",
         "Motion, direction, friction, and wrapping helpers.",
-        depends_on=("00_prelude.gd", "30_numeric_arithmetic.gd", "35_maths_numbers.gd"),
+        depends_on=(
+            "00_prelude.gd",
+            "30_numeric_arithmetic.gd",
+            "35_maths_numbers.gd",
+            "45_collision_queries.gd",
+        ),
         tests=("tests/test_motion_helpers_godot.py",),
     ),
     _segment(
@@ -138,16 +168,51 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_paths_motion_godot.py",),
     ),
     _segment(
+        "47_motion_planning_steps.gd",
+        "move_and_collide, mp_linear_step, mp_potential_step and mp_grid_add_instances.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "35_maths_numbers.gd",
+            "45_collision_queries.gd",
+            "46_motion_helpers.gd",
+            "47_paths_motion_planning.gd",
+        ),
+        tests=(
+            "tests/test_motion_planning_steps_godot.py",
+            "tests/test_move_and_collide_tilemaps_godot.py",
+        ),
+    ),
+    _segment(
         "48_drawing_basic_forms.gd",
         "Draw state, primitive drawing, sprite, text, texture, and video helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),
-        tests=("tests/test_draw_basic_godot.py", "tests/test_draw_sprite_text_godot.py"),
+        tests=(
+            "tests/test_draw_basic_godot.py",
+            "tests/test_draw_sprite_text_godot.py",
+            "tests/test_font_text_godot.py",
+            "tests/test_font_view_render_godot.py",
+        ),
     ),
     _segment(
         "49_drawing_surfaces.gd",
         "Surface handles, application surface state, and surface draw targets.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "48_drawing_basic_forms.gd"),
         tests=("tests/test_draw_surfaces_godot.py",),
+    ),
+    _segment(
+        "50_draw_pipeline.gd",
+        "Draw event dispatch, RenderingServer draw sinks, GPU state segments, and depth ordering.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "48_drawing_basic_forms.gd",
+            "49_drawing_surfaces.gd",
+        ),
+        tests=(
+            "tests/test_draw_event_dispatch_godot.py",
+            "tests/test_draw_pipeline_godot.py",
+        ),
     ),
     _segment(
         "51_particles.gd",
@@ -171,7 +236,7 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "54_audio_runtime.gd",
         "Audio bus, emitter, listener, sync-group, and playback helpers.",
         depends_on=("00_prelude.gd", "10_handles_and_instances.gd", "15_asset_registry.gd"),
-        tests=("tests/test_audio_runtime_godot.py",),
+        tests=("tests/test_audio_runtime_godot.py", "tests/test_audio_gain_fades_godot.py"),
     ),
     _segment(
         "55_room_game_flow.gd",
@@ -191,6 +256,17 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "Date, time, delta-time, and alarm helpers.",
         depends_on=("00_prelude.gd", "30_numeric_arithmetic.gd"),
         tests=("tests/test_time_alarms_godot.py",),
+    ),
+    _segment(
+        "56_object_variable_definitions.gd",
+        "Object Variable Definitions and room instance overrides run before the Create event.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+        ),
+        tests=("tests/test_variable_definitions_godot.py",),
     ),
     _segment(
         "57_ds_lists_stacks_queues.gd",
@@ -213,8 +289,13 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     _segment(
         "50_static_types_and_clone.gd",
         "Deep clone helpers, equality and ordering value semantics, and static type metadata.",
-        depends_on=("00_prelude.gd", "20_methods_and_exceptions.gd", "40_arrays_structs_variables.gd"),
-        tests=("tests/test_gml_runtime.py",),
+        depends_on=(
+            "00_prelude.gd",
+            "20_methods_and_exceptions.gd",
+            "35_maths_numbers.gd",
+            "40_arrays_structs_variables.gd",
+        ),
+        tests=("tests/test_gml_runtime.py", "tests/test_gml_value_semantics_godot.py"),
     ),
     _segment(
         "60_conversion_helpers.gd",
@@ -293,6 +374,34 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         "Platform service bridge hooks for Steam, achievements, media, and OS services.",
         depends_on=("00_prelude.gd", "67_async_runtime.gd", "72_os_debug_gc.gd"),
         tests=("tests/test_platform_services_godot.py",),
+    ),
+    _segment(
+        "74_game_step.gd",
+        "GameMaker step loop: frame pump, image animation, Other events, and room-change abort.",
+        depends_on=(
+            "00_prelude.gd",
+            "15_asset_registry.gd",
+            "45_collision_queries.gd",
+            "52_cameras_display.gd",
+            "53_game_input.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+            "67_async_runtime.gd",
+        ),
+        tests=("tests/test_game_step_godot.py", "tests/test_event_scheduler_godot.py"),
+    ),
+    _segment(
+        "75_instance_activation.gd",
+        "Instance deactivation and activation: active lists, regions, layers, and node processing.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+            "50_draw_pipeline.gd",
+            "50_static_types_and_clone.gd",
+        ),
+        tests=("tests/test_instance_deactivation_godot.py",),
     ),
     _segment(
         "80_static_hash_clone_error.gd",

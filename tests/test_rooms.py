@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 from typing import IO, Any, Callable, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -35,8 +35,11 @@ from src.conversion.room_layers import (
     is_empty_gamemaker_tile,
     serialize_room_layers,
 )
-from src.conversion.rooms import ROOM_RUNTIME_SCRIPT_RELATIVE_PATH, RoomConverter
-from src.conversion.tileset_metadata import select_tileset_room_layout
+from src.conversion.rooms import (
+    ROOM_RUNTIME_SCRIPT_RELATIVE_PATH,
+    RoomConverter,
+    render_room_runtime_script,
+)
 
 
 def _write_file(path: str, content: str) -> None:
@@ -171,16 +174,35 @@ def _make_object_yy(name: str, parent_path: str = "folders/Objects.yy") -> str:
     ).format(name=name, parent_path=parent_path)
 
 
-def _make_sprite_yy(name: str, parent_path: str = "folders/Sprites.yy") -> str:
+def _make_sprite_yy(
+    name: str,
+    parent_path: str = "folders/Sprites.yy",
+    size: tuple[int, int] | None = None,
+) -> str:
+    size_lines = "" if size is None else '  "width":{},\n  "height":{},\n'.format(*size)
     return (
         '{{\n'
         '  "$GMSprite":"",\n'
         '  "%Name":"{name}",\n'
         '  "name":"{name}",\n'
+        '{size_lines}'
         '  "parent":{{"name":"Sprites","path":"{parent_path}",}},\n'
         '  "resourceType":"GMSprite",\n'
         '}}\n'
-    ).format(name=name, parent_path=parent_path)
+    ).format(name=name, parent_path=parent_path, size_lines=size_lines)
+
+
+def _node_block(scene: str, node_name: str) -> list[str]:
+    """The property lines of the scene node named `node_name`."""
+    lines = scene.splitlines()
+    header = f'[node name="{node_name}" '
+    start = next(index for index, line in enumerate(lines) if line.startswith(header))
+    block: list[str] = []
+    for line in lines[start + 1:]:
+        if not line or line.startswith("["):
+            break
+        block.append(line)
+    return block
 
 
 class TestRoomConverter(unittest.TestCase):
@@ -397,9 +419,14 @@ class TestRoomConverter(unittest.TestCase):
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Node2D"]\n'.format(name))
         return scene_path
 
-    def _write_sprite(self, name: str, parent_path: str = "folders/Sprites.yy") -> str:
+    def _write_sprite(
+        self,
+        name: str,
+        parent_path: str = "folders/Sprites.yy",
+        size: tuple[int, int] | None = None,
+    ) -> str:
         sprite_path = os.path.join(self.gm_dir, "sprites", name, name + ".yy")
-        _write_file(sprite_path, _make_sprite_yy(name, parent_path))
+        _write_file(sprite_path, _make_sprite_yy(name, parent_path, size))
         return sprite_path
 
     def _write_sprite_scene(self, name: str, *subfolders: str) -> str:
@@ -419,6 +446,8 @@ class TestRoomConverter(unittest.TestCase):
         parent_path: str = "folders/Tile Sets.yy",
         tile_count: int = 4,
         out_columns: int = 2,
+        tilexoff: int = 0,
+        tilehsep: int = 0,
     ) -> str:
         tileset_path = os.path.join(self.gm_dir, "tilesets", name, name + ".yy")
         _write_file(
@@ -435,9 +464,9 @@ class TestRoomConverter(unittest.TestCase):
                 '  "tileHeight":16,\n'
                 '  "tileWidth":16,\n'
                 '  "tile_count":{tile_count},\n'
-                '  "tilehsep":0,\n'
+                '  "tilehsep":{tilehsep},\n'
                 '  "tilevsep":0,\n'
-                '  "tilexoff":0,\n'
+                '  "tilexoff":{tilexoff},\n'
                 '  "tileyoff":0,\n'
                 '}}\n'
             ).format(
@@ -445,6 +474,8 @@ class TestRoomConverter(unittest.TestCase):
                 out_columns=out_columns,
                 parent_path=parent_path,
                 tile_count=tile_count,
+                tilexoff=tilexoff,
+                tilehsep=tilehsep,
             ),
         )
         return tileset_path
@@ -484,6 +515,13 @@ class TestRoomConverter(unittest.TestCase):
         )
         with open(script_path, "r", encoding="utf-8") as f:
             return f.read()
+
+    def _root_metadata_json(self, content: str, key: str) -> Any:
+        prefix = f"metadata/{key} = "
+        for line in content.splitlines():
+            if line.startswith(prefix):
+                return json.loads(line[len(prefix):])
+        self.fail(f"scene has no metadata/{key}")
 
     def test_generates_minimal_room_scene_with_metadata(self):
         self._write_yyp(["r_test"])
@@ -672,16 +710,37 @@ class TestRoomConverter(unittest.TestCase):
             '[ext_resource type="PackedScene" path="res://sprites/s_background/s_background.tscn" id="1"]',
             content,
         )
+        # The element sits at the layer offset and holds the blend and alpha,
+        # its sprite scene only supplies frames, and the runtime draws them
+        # through the Tiles region from the sprite's top-left corner
+        # (backgrounds ignore the sprite origin).
+        self.assertNotIn("position", _node_block(content, "Backgrounds"))
         self.assertIn(
-            '[node name="s_background" parent="Backgrounds" instance=ExtResource("1")]',
+            '[node name="s_background" type="Node2D" parent="Backgrounds"]\n'
+            "visible = true\n"
+            "position = Vector2(16, 32)\n",
             content,
         )
-        self.assertIn('position = Vector2(16, 32)', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "background"', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_background_visual_type = "sprite"', content)
+        self.assertIn(
+            '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]\n'
+            "visible = false\n"
+            "metadata/gamemaker_background_frames = true\n",
+            content,
+        )
+        self.assertIn(
+            '[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]\n'
+            "texture_repeat = 2\n"
+            "centered = false\n"
+            "region_enabled = true\n"
+            "metadata/gamemaker_background_tiles = true\n",
+            content,
+        )
+        self.assertNotIn("Parallax2D", content)
 
-    def test_sprite_background_layer_with_scrolling_uses_parallax_runtime(self):
+    def test_tiled_scrolling_sprite_background_is_drawn_by_the_runtime(self):
         self._write_yyp(["r_background"], extra_resources=[("sprites", "s_background")])
         self._write_sprite("s_background")
         self._write_sprite_scene("s_background")
@@ -700,14 +759,21 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_background")
 
-        self.assertIn('[node name="s_background" type="Parallax2D" parent="Backgrounds"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 768)', content)
-        self.assertIn('scroll_offset = Vector2(0, 0)', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
+        # Tiling repeats the sprite at its own size over whatever the view
+        # shows, which the runtime works out every frame; nothing in the
+        # scene repeats at the room size.
+        self.assertIn('[node name="s_background" type="Node2D" parent="Backgrounds"]', content)
+        self.assertIn('metadata/gamemaker_background_htiled = true', content)
+        self.assertIn('metadata/gamemaker_background_vtiled = true', content)
+        self.assertIn('metadata/gamemaker_background_hspeed = 1', content)
+        self.assertIn('metadata/gamemaker_background_vspeed = -2', content)
         self.assertIn(
             '[node name="s_backgroundVisual" parent="Backgrounds/s_background" instance=ExtResource("1")]',
             content,
         )
+        self.assertIn('[node name="Tiles" type="Sprite2D" parent="Backgrounds/s_background"]', content)
+        self.assertNotIn("Parallax2D", content)
+        self.assertNotIn("repeat_size", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_background_layer_preserves_scrolling_tiling_runtime_metadata(self):
@@ -737,11 +803,9 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_layer_vspeed = 0', content)
         self.assertIn('metadata/gamemaker_background_stretch = true', content)
         self.assertIn('metadata/gamemaker_background_animation_fps = 12', content)
-        self.assertIn('[node name="BackgroundVisual" type="Parallax2D" parent="MovingBackground"]', content)
-        self.assertIn('repeat_size = Vector2(1024, 0)', content)
-        self.assertIn('repeat_times = 3', content)
-        self.assertIn('metadata/gamemaker_background_runtime_support = true', content)
-        self.assertIn('[node name="BackgroundColor" type="ColorRect" parent="MovingBackground/BackgroundVisual"]', content)
+        # A colour fills whatever is drawn, whatever the layer offset.
+        self.assertIn('[node name="BackgroundVisual" type="ColorRect" parent="MovingBackground"]', content)
+        self.assertNotIn("Parallax2D", content)
         self.assertFalse(any("scrolling/tiling" in log for log in self.logs))
 
     def test_layer_depth_maps_to_inverse_z_index(self):
@@ -795,13 +859,14 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_asset_count = 0', content)
 
     def test_decodes_gamemaker_tile_compressed_data(self):
+        # Run of two 1s, a literal block of two tiles, a run of two empty tiles.
         decoded = decode_tile_compressed_data(
             3,
             2,
-            [-2, 1, 0, -2, GAMEMAKER_EMPTY_TILE_SENTINEL, 2],
+            [-2, 1, 2, 0, 2, -2, GAMEMAKER_EMPTY_TILE_SENTINEL],
         )
 
-        self.assertEqual(decoded, [1, 1, 0, GAMEMAKER_EMPTY_TILE_SENTINEL, GAMEMAKER_EMPTY_TILE_SENTINEL, 2])
+        self.assertEqual(decoded, [1, 1, 0, 2, GAMEMAKER_EMPTY_TILE_SENTINEL, GAMEMAKER_EMPTY_TILE_SENTINEL])
         self.assertTrue(is_empty_gamemaker_tile(0))
         self.assertTrue(is_empty_gamemaker_tile(GAMEMAKER_EMPTY_TILE_SENTINEL))
         self.assertFalse(is_empty_gamemaker_tile(1))
@@ -854,8 +919,9 @@ class TestRoomConverter(unittest.TestCase):
                 )
 
     def test_tile_layer_emits_tilemaplayer_with_decoded_cells(self):
-        self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
         self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_sprite("s_tiles", size=(32, 32))
         self._write_tileset_resource("ts_ground")
         self._write_room("r_tiles", layers=[
             {
@@ -869,7 +935,7 @@ class TestRoomConverter(unittest.TestCase):
                     "SerialiseWidth": 3,
                     "SerialiseHeight": 2,
                     "TileDataFormat": 1,
-                    "TileCompressedData": [-2, 1, 0, 2, -2, GAMEMAKER_EMPTY_TILE_SENTINEL],
+                    "TileCompressedData": [-2, 1, 2, 0, 2, -2, GAMEMAKER_EMPTY_TILE_SENTINEL],
                 },
             }
         ])
@@ -878,15 +944,133 @@ class TestRoomConverter(unittest.TestCase):
         content = self._read_scene("r_tiles")
 
         self.assertIn('[ext_resource type="TileSet" path="res://tilesets/ts_ground/ts_ground.tres" id="1"]', content)
-        self.assertIn('[node name="TileMap" type="TileMapLayer" parent="Tiles"]', content)
-        self.assertIn('position = Vector2(8, 16)', content)
+        self.assertNotIn("position", _node_block(content, "Tiles"))
+        self.assertIn(
+            '[node name="TileMap" type="TileMapLayer" parent="Tiles"]\nvisible = true\nposition = Vector2(8, 16)\n',
+            content,
+        )
         self.assertIn('tile_set = ExtResource("1")', content)
-        self.assertIn('tile_map_data = PackedByteArray(0, 0', content)
+        # Tile N is cell N of the two column sprite grid: tile 1 is (1, 0), tile 2 is (0, 1).
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 0, 1, 0, 0), (0, 1, 0, 1, 0)) + "\n", content)
         self.assertIn('metadata/gamemaker_layer_element_type = "tilemap"', content)
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
         self.assertIn('metadata/gamemaker_tile_empty_values = [0, -2147483648]', content)
         self.assertIn('metadata/gamemaker_tile_raw_values = [1, 1, 0, 2, 0, 0]', content)
+
+    def test_tile_layer_decodes_literal_blocks_between_different_neighbouring_tiles(self):
+        self._write_yyp(["r_mixed"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        self._write_tileset("ts_ground", tile_count=6, out_columns=2)
+        self._write_sprite("s_tiles", size=(32, 48))
+        self._write_tileset_resource("ts_ground")
+        # Row 0 is tiles 1, 2, 3, 4 and row 1 is tiles 4, 4, 5, empty: a block of
+        # three literal tiles, a run of three 4s across the row end, a block of
+        # two literal tiles. Read as one tile per entry this would be 9 cells.
+        self._write_room("r_mixed", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 4, "SerialiseHeight": 2, "TileDataFormat": 1,
+                    "TileCompressedData": [3, 1, 2, 3, -3, 4, 2, 5, GAMEMAKER_EMPTY_TILE_SENTINEL],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_mixed")
+
+        self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        # Tile N is cell N of the two column sprite grid: (N % 2, N // 2).
+        self.assertIn(
+            "\n" + _tile_map_data(
+                (0, 0, 1, 0, 0),
+                (1, 0, 0, 1, 0),
+                (2, 0, 1, 1, 0),
+                (3, 0, 0, 2, 0),
+                (0, 1, 0, 2, 0),
+                (1, 1, 0, 2, 0),
+                (2, 1, 1, 2, 0),
+            ) + "\n",
+            content,
+        )
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 8', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 7', content)
+        self.assertIn('metadata/gamemaker_tile_raw_values = [1, 2, 3, 4, 4, 4, 5, 0]', content)
+
+    def test_tile_layer_converts_a_layer_saved_by_the_ide(self):
+        # Tile_Tapetes of Room1 in https://github.com/MrNicolass/Makolindo-Game
+        # (commit d932e02f, rooms/Room1/Room1.yy), a 20 x 12 layer saved by the
+        # IDE with "TileDataFormat":1, copied verbatim (see IDE_TILE_TAPETES).
+        self._write_yyp(["r_ide"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        self._write_tileset("ts_ground", tile_count=100, out_columns=10)
+        self._write_sprite("s_tiles", size=(160, 160))
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_ide", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 20, "SerialiseHeight": 12, "TileDataFormat": 1,
+                    "TileCompressedData": list(IDE_TILE_TAPETES),
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_ide")
+
+        self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        flip_h = GODOT_TILE_TRANSFORM_FLIP_H
+        flip_v = GODOT_TILE_TRANSFORM_FLIP_V
+        transpose = GODOT_TILE_TRANSFORM_TRANSPOSE
+        # Tile N is cell N of the ten column sprite grid: (N % 10, N // 10). Row 6 and
+        # row 7 each hold five tiles from column 10; rotate alone is transpose with
+        # flip_h, and mirror + flip + rotate is transpose with flip_v.
+        self.assertIn(
+            "\n" + _tile_map_data(
+                (10, 6, 5, 6, transpose | flip_v),
+                (11, 6, 4, 9, transpose | flip_h),
+                (12, 6, 4, 8, transpose | flip_h),
+                (13, 6, 4, 7, transpose | flip_h),
+                (14, 6, 4, 6, transpose | flip_h),
+                (10, 7, 4, 6, transpose | flip_v),
+                (11, 7, 5, 9, transpose | flip_h),
+                (12, 7, 5, 8, transpose | flip_h),
+                (13, 7, 5, 7, transpose | flip_h),
+                (14, 7, 5, 6, transpose | flip_h),
+            ) + "\n",
+            content,
+        )
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 240', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 10', content)
+        self.assertIn('metadata/gamemaker_tile_transform_cell_count = 10', content)
+
+    def test_tile_layer_with_miscounted_format_one_data_warns_and_is_dropped(self):
+        self._write_yyp(["r_short"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_short", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 3, "SerialiseHeight": 2, "TileDataFormat": 1,
+                    "TileCompressedData": [-2, 1, 2, 0, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+
+        self.assertNotIn('type="TileMapLayer"', self._read_scene("r_short"))
+        self.assertTrue(any(
+            "Could not decode GameMaker tile data" in log and "decoded 4 cells, expected 6" in log
+            for log in self.logs
+        ))
 
     def test_tile_layer_accepts_raw_tile_data_format_zero(self):
         self._write_yyp(["r_raw_tiles"], extra_resources=[("tilesets", "ts_ground")])
@@ -915,6 +1099,105 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 4', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 2', content)
         self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        # The tileset has no readable sprite: its tiles go in one row, tile N at column N.
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 1, 2, 0, 0)) + "\n", content)
+
+    def test_tile_layer_reads_uncompressed_tile_serialise_data_from_older_rooms(self):
+        # Rooms saved before GameMaker 2022.8 have no TileDataFormat and keep
+        # every cell under TileSerialiseData, with the empty cell written as
+        # the unsigned 2147483648.
+        self._write_yyp(["r_old_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_old_tiles", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 2,
+                    "SerialiseHeight": 2,
+                    "TileSerialiseData": [1, 2147483648, 2147483648, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_old_tiles")
+
+        self.assertIn('metadata/gamemaker_tile_data_format = 0', content)
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 4', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 2', content)
+        self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 1, 2, 0, 0)) + "\n", content)
+
+    def test_tile_layer_counts_tiles_in_the_source_sprite_grid_not_out_columns(self):
+        self._write_yyp(["r_grid"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        # The sprite is 4 x 3 cells; the compiled texture page is 7 columns wide.
+        self._write_tileset("ts_ground", tile_count=12, out_columns=7)
+        self._write_sprite("s_tiles", size=(64, 48))
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_grid", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 5,
+                    "SerialiseHeight": 1,
+                    "TileDataFormat": 0,
+                    "TileCompressedData": [
+                        1,
+                        5 | GAMEMAKER_TILE_MIRROR_BIT,
+                        11 | GAMEMAKER_TILE_FLIP_BIT | GAMEMAKER_TILE_ROTATE_BIT,
+                        0,
+                        4,
+                    ],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_grid")
+
+        self.assertIn(
+            "\n" + _tile_map_data(
+                (0, 0, 1, 0, 0),
+                (1, 0, 1, 1, GODOT_TILE_TRANSFORM_FLIP_H),
+                (2, 0, 3, 2, GODOT_TILE_TRANSFORM_TRANSPOSE),
+                (4, 0, 0, 1, 0),
+            ) + "\n",
+            content,
+        )
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 4', content)
+        self.assertIn('metadata/gamemaker_tile_raw_values = [1, ', content)
+
+    def test_tile_layer_atlas_cells_follow_tileset_offset_and_separation(self):
+        self._write_yyp(["r_sep"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        # Three 16 pixel cells after a 4 pixel margin, 2 pixels apart: 4 + 3 * 16 + 2 * 2 wide.
+        self._write_tileset("ts_ground", tile_count=3, out_columns=3, tilexoff=4, tilehsep=2)
+        self._write_sprite("s_tiles", size=(56, 16))
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_sep", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 2, "SerialiseHeight": 1, "TileDataFormat": 0,
+                    "TileCompressedData": [1, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+
+        self.assertIn(
+            "\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 0, 2, 0, 0)) + "\n",
+            self._read_scene("r_sep"),
+        )
 
     def test_missing_tileset_warns_without_emitting_tilemaplayer(self):
         self._write_yyp(["r_tiles"])
@@ -1083,7 +1366,8 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('position = Vector2(100, 200)', content)
-        self.assertIn('rotation_degrees = 90', content)
+        # GameMaker turns counter-clockwise on screen, Godot clockwise.
+        self.assertIn('rotation_degrees = -90\n', content)
         self.assertIn('scale = Vector2(2, 0.5)', content)
         self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "instance"', content)
@@ -1180,7 +1464,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('[ext_resource type="PackedScene" path="res://sprites/s_decor/s_decor.tscn" id="1"]', content)
         self.assertIn('[node name="spr_decor_1" parent="Assets" instance=ExtResource("1")]', content)
         self.assertIn('position = Vector2(24, 48)', content)
-        self.assertIn('rotation_degrees = 15', content)
+        self.assertIn('rotation_degrees = -15\n', content)
         self.assertIn('scale = Vector2(2, 3)', content)
         self.assertIn('modulate = Color(1, 1, 1, 1)', content)
         self.assertIn('metadata/gamemaker_layer_element_type = "sprite"', content)
@@ -1235,6 +1519,61 @@ class TestRoomConverter(unittest.TestCase):
             "GMRTextGraphic" in log and "layer element type undefined" in log
             for log in self.logs
         ))
+
+    def test_layer_offset_places_only_the_elements_gamemaker_draws_at_it(self):
+        # GameMaker draws backgrounds, sprites, tilemaps and sequences at the
+        # layer offset (yyRoom.js DrawLayer*Element add m_xoffset), instances,
+        # particle systems, legacy tiles and text at their own position. The
+        # layer node stays at the origin, so an instance created on the layer
+        # later is not moved by the offset either.
+        self._write_yyp(["r_offset"], extra_resources=[("sprites", "s_decor")])
+        self._write_sprite("s_decor")
+        self._write_sprite_scene("s_decor")
+        self._write_room("r_offset", layers=[
+            {
+                "%Name": "Assets",
+                "resourceType": "GMRAssetLayer",
+                "x": 10,
+                "y": 20,
+                "assets": [
+                    {
+                        "%Name": "spr_decor",
+                        "resourceType": "GMRSpriteGraphic",
+                        "spriteId": {"name": "s_decor", "path": "sprites/s_decor/s_decor.yy"},
+                        "x": 24,
+                        "y": 48,
+                    },
+                    {"%Name": "seq_intro", "resourceType": "GMRSequenceGraphic", "x": 1, "y": 2},
+                    {"%Name": "particle_fx", "resourceType": "GMRParticleSystem", "x": 3, "y": 4},
+                    {"%Name": "legacy_tile", "resourceType": "GMRTileGraphic", "x": 5, "y": 6},
+                    {"%Name": "label", "resourceType": "GMRTextGraphic", "x": 7, "y": 8},
+                ],
+            },
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "x": 30,
+                "y": 40,
+                "instances": [{"name": "inst_a", "x": 100, "y": 200}],
+            },
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_offset")
+
+        def position(node_name: str) -> list[str]:
+            return [line for line in _node_block(content, node_name) if line.startswith("position = ")]
+
+        self.assertEqual(position("Assets"), [])
+        self.assertIn("metadata/gamemaker_layer_x = 10", _node_block(content, "Assets"))
+        self.assertEqual(position("spr_decor"), ["position = Vector2(34, 68)"])
+        self.assertEqual(position("seq_intro"), ["position = Vector2(11, 22)"])
+        self.assertEqual(position("particle_fx"), ["position = Vector2(3, 4)"])
+        self.assertEqual(position("legacy_tile"), ["position = Vector2(5, 6)"])
+        self.assertEqual(position("label"), ["position = Vector2(7, 8)"])
+        self.assertEqual(position("Instances"), [])
+        self.assertIn("metadata/gamemaker_layer_x = 30", _node_block(content, "Instances"))
+        self.assertEqual(position("inst_a"), ["position = Vector2(100, 200)"])
 
     def test_ignored_asset_is_skipped_with_warning(self):
         self._write_yyp(["r_assets"], extra_resources=[("sprites", "s_decor")])
@@ -1384,7 +1723,7 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('extends "res://gm2godot/gml_room_node.gd"', script)
         self.assertIn("func _gm2godot_room_creation_code():", script)
 
-    def test_missing_room_creation_code_skips_room_with_structured_diagnostic(self):
+    def test_missing_room_creation_code_converts_room_as_empty_code(self):
         self._write_yyp(["r_missing_code"])
         missing_path = os.path.join(
             self.gm_dir, "rooms", "r_missing_code", "MissingCreationCode.gml"
@@ -1402,11 +1741,18 @@ class TestRoomConverter(unittest.TestCase):
         counts = converter.conversion_step_result().resources
         self.assertEqual(counts.requested, 1)
         self.assertEqual(counts.executed, 1)
-        self.assertEqual(counts.completed, 0)
-        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
         self.assertEqual(counts.failed, 0)
+        self.assertTrue(
+            os.path.exists(
+                os.path.join(self.godot_dir, "rooms", "r_missing_code", "r_missing_code.tscn")
+            )
+        )
         self.assertFalse(
-            os.path.exists(os.path.join(self.godot_dir, "rooms", "r_missing_code"))
+            os.path.exists(
+                os.path.join(self.godot_dir, "rooms", "r_missing_code", "r_missing_code.gd")
+            )
         )
         missing_logs = [
             log
@@ -1981,8 +2327,8 @@ class TestRoomConverter(unittest.TestCase):
             "r_exec",
             "InstanceCreationCode_inst_player.gml",
         )
-        _write_file(room_creation_path, 'room_trace = "room creation";\n')
-        _write_file(instance_code_path, 'x = 42; custom_value = "instance creation";\n')
+        _write_file(room_creation_path, 'room_trace = "room creation";\nscr_note(other);\n')
+        _write_file(instance_code_path, 'x = 42; custom_value = "instance creation";\nscr_note(other);\n')
         self._write_room(
             "r_exec",
             creation_code_file="RoomCreationCode.gml",
@@ -2018,6 +2364,105 @@ class TestRoomConverter(unittest.TestCase):
             'GMRuntime.gml_variable_instance_set(_gm_instance, "custom_value", "instance creation")',
             script,
         )
+        # GameMaker runs creation code with the running instance (a stand-in
+        # instance for room creation code) as both self and other.
+        self.assertIn('GMRuntime.gml_call_named("scr_note", [self], self, self)', script)
+        self.assertIn(
+            'GMRuntime.gml_call_named("scr_note", [_gm_instance], _gm_instance, _gm_instance)',
+            script,
+        )
+        self.assertNotIn("gml_instance_noone()", script)
+
+    def _write_macro_config_script(self) -> None:
+        """A project script that declares the macros and enum the tests below use."""
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "scr_config", "scr_config.yy"),
+            json.dumps({"%Name": "scr_config", "name": "scr_config", "resourceType": "GMScript"}),
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "scr_config", "scr_config.gml"),
+            "#macro SPAWN_X 128\n"
+            "#macro Android:SPAWN_Y 48\n"
+            "#macro SPAWN_Y 96\n"
+            "#macro DOUBLE_X (SPAWN_X * 2)\n"
+            "enum Mood { calm, angry = 5, afraid }\n",
+        )
+
+    def test_room_and_instance_creation_code_expand_project_macros_and_enums(self):
+        self._write_yyp(
+            ["r_macro"],
+            extra_resources=[("objects", "o_player"), ("scripts", "scr_config")],
+        )
+        self._write_macro_config_script()
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_macro", "RoomCreationCode.gml"),
+            "room_macro = SPAWN_X + Mood.afraid;\nroom_double = DOUBLE_X;\n",
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_macro", "InstanceCreationCode_inst_player.gml"),
+            "x = SPAWN_X;\ny = SPAWN_Y;\nmood = Mood.angry;\n",
+        )
+        self._write_room(
+            "r_macro",
+            creation_code_file="RoomCreationCode.gml",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": "inst_player",
+                            "objectId": {"name": "o_player"},
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self._make_converter().convert_all()
+        script = self._read_room_script("r_macro")
+
+        # Macros and enum members are project constants in room creation code
+        # and instance creation code, not instance-variable reads.
+        self.assertIn('"room_macro", GMRuntime.gml_add(128, 6))', script)
+        self.assertIn('"room_double", (GMRuntime.gml_mul(128, 2)))', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "x", 128)', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "y", 96)', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "mood", 5)', script)
+        self.assertNotIn("SPAWN_X", script)
+        self.assertNotIn("Mood", script)
+
+    def test_room_creation_code_macros_follow_the_selected_configuration(self):
+        self._write_yyp(["r_cfg"], extra_resources=[("scripts", "scr_config")])
+        self._write_macro_config_script()
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_cfg", "RoomCreationCode.gml"),
+            "room_y = SPAWN_Y;\n",
+        )
+        self._write_room("r_cfg", creation_code_file="RoomCreationCode.gml")
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            max_workers=1,
+            macro_configuration="Android",
+        )
+
+        converter.convert_all()
+
+        self.assertIn('"room_y", 48)', self._read_room_script("r_cfg"))
+
+    def test_room_node_holds_placed_instances_until_the_room_starts(self):
+        script = render_room_runtime_script()
+
+        self.assertIn(
+            "func _enter_tree():\n\tGMRuntime._gml_view_room_prepare(self)\n\tGMRuntime.gml_room_prepare_scene(self)",
+            script,
+        )
+        self.assertIn("func _ready():\n\tGMRuntime.gml_room_enter_scene(self)", script)
 
     def test_instance_creation_code_blocker_skips_room_and_completes_safe_sibling(self):
         self._write_yyp(
@@ -2129,7 +2574,7 @@ class TestRoomConverter(unittest.TestCase):
             (diagnostic, startup_diagnostics[0]),
         )
 
-    def test_missing_instance_creation_code_skips_room_with_structured_diagnostic(self):
+    def test_missing_instance_creation_code_converts_room_as_empty_code(self):
         self._write_yyp(["r_missing_instance_code"], extra_resources=[("objects", "o_player")])
         self._write_object("o_player")
         self._write_object_scene("o_player")
@@ -2161,12 +2606,20 @@ class TestRoomConverter(unittest.TestCase):
         counts = converter.conversion_step_result().resources
         self.assertEqual(counts.requested, 1)
         self.assertEqual(counts.executed, 1)
-        self.assertEqual(counts.completed, 0)
-        self.assertEqual(counts.skipped, 1)
+        self.assertEqual(counts.completed, 1)
+        self.assertEqual(counts.skipped, 0)
         self.assertEqual(counts.failed, 0)
+        content = self._read_scene("r_missing_instance_code")
+        self.assertIn('metadata/gamemaker_instance_name = "inst_player"', content)
+        self.assertIn("metadata/gamemaker_creation_code_file_exists = false", content)
         self.assertFalse(
             os.path.exists(
-                os.path.join(self.godot_dir, "rooms", "r_missing_instance_code")
+                os.path.join(
+                    self.godot_dir,
+                    "rooms",
+                    "r_missing_instance_code",
+                    "r_missing_instance_code.gd",
+                )
             )
         )
         missing_logs = [
@@ -2276,16 +2729,38 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_camera")
 
-        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]', content)
-        self.assertIn('position = Vector2(420, 380)', content)
-        self.assertIn('enabled = true', content)
-        self.assertIn('metadata/gamemaker_view_visible = true', content)
-        self.assertIn('limit_left = 100', content)
-        self.assertIn('limit_top = 200', content)
-        self.assertIn('limit_right = 740', content)
-        self.assertIn('limit_bottom = 560', content)
-        self.assertIn('zoom = Vector2(2, 2)', content)
-        self.assertIn('metadata/gamemaker_view_object_name = "o_player"', content)
+        self.assertIn(
+            '[node name="ViewCamera" type="Camera2D" parent="."]\n'
+            "position = Vector2(420, 380)\n"
+            "ignore_rotation = false\n"
+            "limit_enabled = false\n"
+            "zoom = Vector2(2, 2)\n"
+            "metadata/gamemaker_view_camera = true\n",
+            content,
+        )
+        self.assertNotIn("limit_left", content)
+        views = self._root_metadata_json(content, "gamemaker_views")
+        self.assertEqual(len(views), 8)
+        self.assertEqual(
+            views[0],
+            {
+                "visible": True,
+                "xview": 100,
+                "yview": 200,
+                "wview": 640,
+                "hview": 360,
+                "xport": 0,
+                "yport": 0,
+                "wport": 1280,
+                "hport": 720,
+                "object": "o_player",
+                "hborder": 32,
+                "vborder": 16,
+                "hspeed": -1,
+                "vspeed": 4,
+            },
+        )
+        self.assertFalse(views[1]["visible"])
         self.assertFalse(any("follows object o_player" in log for log in self.logs))
 
     def test_multiple_visible_views_disable_additional_cameras_and_warn(self):
@@ -2302,9 +2777,11 @@ class TestRoomConverter(unittest.TestCase):
         self._make_converter().convert_all()
         content = self._read_scene("r_cameras")
 
-        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\nenabled = true', content)
-        self.assertIn('[node name="ViewCamera_2" type="Camera2D" parent="."]\nposition = Vector2(480, 90)\nenabled = false', content)
-        self.assertEqual(content.count("metadata/gamemaker_view_visible = true"), 2)
+        self.assertIn('[node name="ViewCamera" type="Camera2D" parent="."]\nposition = Vector2(160, 90)\n', content)
+        self.assertEqual(content.count('type="Camera2D"'), 1)
+        views = self._root_metadata_json(content, "gamemaker_views")
+        self.assertEqual([view["visible"] for view in views[:3]], [True, True, False])
+        self.assertEqual(views[1]["xview"], 320)
         self.assertTrue(any("multiple visible GameMaker views" in log for log in self.logs))
 
     def test_room_inheritance_resolves_settings_and_layers(self):
@@ -2333,8 +2810,8 @@ class TestRoomConverter(unittest.TestCase):
 
     def test_sets_project_startup_scene_to_first_room_order_node(self):
         self._write_yyp(["r_second", "r_first"], room_order=["r_first", "r_second"])
-        self._write_room("r_second")
-        self._write_room("r_first")
+        self._write_room("r_second", width=800, height=600)
+        self._write_room("r_first", width=640, height=480)
         self._write_project_godot(
             '[application]\n'
             'config/name="Existing"\n'
@@ -2342,6 +2819,7 @@ class TestRoomConverter(unittest.TestCase):
             '\n'
             '[display]\n'
             'window/size/viewport_width=1280\n'
+            'mouse_cursor/custom_image="res://cursor.png"\n'
         )
 
         self._make_converter().convert_all()
@@ -2353,9 +2831,69 @@ class TestRoomConverter(unittest.TestCase):
         self.assertNotIn('run/main_scene="res://old.tscn"', content)
         self.assertIn('config/name="Existing"', content)
         self.assertIn('[display]', content)
-        self.assertIn('window/size/viewport_width=1280', content)
+        self.assertIn('mouse_cursor/custom_image="res://cursor.png"', content)
+        self.assertNotIn('window/size/viewport_width=1280', content)
+        self.assertIn('window/size/viewport_width=640', content)
+        self.assertIn('window/size/viewport_height=480', content)
+        self.assertIn('window/stretch/mode="viewport"', content)
         self.assertTrue(any("startup scene" in log.lower() for log in self.logs))
         self.assertTrue(any("r_first" in log for log in self.logs))
+        self.assertTrue(any("application surface size 640x480" in log for log in self.logs))
+
+    def test_first_room_visible_viewports_size_the_application_surface(self):
+        self._write_yyp(["r_first", "r_second"], room_order=["r_first", "r_second"])
+        self._write_room(
+            "r_first",
+            width=2000,
+            height=1000,
+            views=[
+                {
+                    "visible": True,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 0,
+                    "yport": 0,
+                    "wport": 640,
+                    "hport": 640,
+                },
+                {
+                    "visible": False,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 0,
+                    "yport": 0,
+                    "wport": 4000,
+                    "hport": 4000,
+                },
+                {
+                    "visible": True,
+                    "xview": 0,
+                    "yview": 0,
+                    "wview": 64,
+                    "hview": 64,
+                    "xport": 600,
+                    "yport": 100,
+                    "wport": 100,
+                    "hport": 600,
+                },
+            ],
+            view_settings={"enableViews": True},
+        )
+        self._write_room("r_second", width=320, height=240)
+        self._write_project_godot()
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "project.godot"), "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn('window/size/viewport_width=700', content)
+        self.assertIn('window/size/viewport_height=700', content)
+        self.assertIn('window/stretch/mode="viewport"', content)
 
     def test_sets_project_startup_scene_to_first_room_subfolder_path(self):
         self._write_yyp(["r_intro"])
@@ -2481,6 +3019,12 @@ class TestRoomConverter(unittest.TestCase):
                             creation_code_file="RoomCreationCode.gml" if name == "r_blocked" else "",
                         ),
                     )
+                    if name == "r_blocked":
+                        # Untranspilable creation code blocks the first room.
+                        _write_file(
+                            os.path.join(gm_dir, "rooms", name, "RoomCreationCode.gml"),
+                            "room_value = @;\n",
+                        )
                 project_path = os.path.join(godot_dir, "project.godot")
                 initial = (
                     '[application]\nconfig/name="Existing"\n'
@@ -2698,12 +3242,161 @@ class TestRoomConverter(unittest.TestCase):
 
 
 
+_EMPTY = GAMEMAKER_EMPTY_TILE_SENTINEL
+
+# Layers copied verbatim from rooms saved by the GameMaker IDE ("TileDataFormat":1),
+# each from a public project, with the tiles dictionary's SerialiseWidth/Height.
+# SnowState, rooms/rDemo/rDemo.yy, layer FrontTrees (18 x 13):
+# https://raw.githubusercontent.com/sohomsahaun/SnowState/0d5fbbf4e7c88fbcc6f4e1d93c8e8be9676dd621/rooms/rDemo/rDemo.yy
+IDE_FRONT_TREES = (-146, _EMPTY, 2, 3, 4, -34, _EMPTY, -2, 0, -50, _EMPTY)
+# Makolindo-Game, rooms/Room1/Room1.yy, layer Tile_Tapetes (20 x 12), with tile flags:
+# https://raw.githubusercontent.com/MrNicolass/Makolindo-Game/d932e02fdc3e058c7bb5f1f472fff27232a7f7fa/rooms/Room1/Room1.yy
+IDE_TILE_TAPETES = (
+    -130, _EMPTY,
+    5, 1879048257, 1073741918, 1073741908, 1073741898, 1073741888,
+    -15, _EMPTY,
+    5, 1879048256, 1073741919, 1073741909, 1073741899, 1073741889,
+    -85, _EMPTY,
+)
+
+
+class TileCompressedDataFormatTests(unittest.TestCase):
+    """TileCompressedData with "TileDataFormat":1 as the IDE saves it.
+
+    A negative count -n is followed by one tile value repeated n times; a
+    positive count n is followed by n literal tile values (the empty tile
+    -2147483648 is a tile value, never a count). The earlier reading took
+    every non-negative entry for one tile, so any layer with two different
+    neighbouring tiles decoded to the wrong cell count and was dropped.
+
+    The format was confirmed against real IDE-saved rooms: all 100 distinct
+    format 1 tile layers in these 30 room .yy files decode to exactly
+    SerialiseWidth * SerialiseHeight cells, and only the 4 layers made of runs
+    alone do under the old reading (paths under rooms/, at the commit given):
+
+    * sohomsahaun/SnowState 0d5fbbf4 rDemo
+    * bredi-amai/gmSMB c7bebd6a rm1_1 rm1_2 rm1_3 rm2_1 rm2_2 rm2_3
+    * SadBread/SB-Deltarune-Engine be2f9af9 rPush rPush2 rRoom6
+    * MrNicolass/Makolindo-Game d932e02f Room1-9 Room11 Room12 Chefe
+    * bennyfrancis/Celestefall 0cc2c254 r_demo
+    * cubeww/IWBT-GMS2_3-Engine-YoYoYo-Edition 2d757fcd rEnd rTitle
+    * tinkerer-red/GMLC de25e48c room0
+    * Argsf2011/2012X_Game_GameMakerStudio2 5ef5969c rm_hill
+    * KingSlendy/K-R-GMS2-Engine 575e0bb9 rTitle
+    * femloy/OpenTower 51060bc5 top_1 and hayaunderscore/oveninjector 02f3eeaf top_1
+
+    Each file is https://raw.githubusercontent.com/<owner>/<repo>/<commit>/rooms/<room>/<room>.yy.
+    Across them the empty tile never appears as a count, no count is zero and no
+    run is shorter than 2 (the IDE starts a run at two equal neighbours). The same
+    control word structure is expandTiles in the HTML5 runner (yyRoom.js) and the
+    2022.8 write-up at
+    https://cookiedraggy.itch.io/kincaid/devlog/436785/weekly-roundup-week-39-mostly-recovered-from-covid
+    """
+
+    def test_real_ide_layer_with_empty_runs_and_a_literal_block(self):
+        decoded = decode_tile_compressed_data(18, 13, list(IDE_FRONT_TREES))
+
+        self.assertEqual(len(decoded), 18 * 13)
+        # Eight empty rows and two empty cells, tiles 3 and 4 side by side (row 8, columns 2 and 3).
+        self.assertEqual(decoded[:146], [_EMPTY] * 146)
+        self.assertEqual(decoded[146:148], [3, 4])
+        self.assertEqual(decoded[148:182], [_EMPTY] * 34)
+        self.assertEqual(decoded[182:184], [0, 0])
+        self.assertEqual(decoded[184:], [_EMPTY] * 50)
+
+    def test_real_ide_layer_with_tile_flags_in_literal_blocks(self):
+        decoded = decode_tile_compressed_data(20, 12, list(IDE_TILE_TAPETES))
+
+        self.assertEqual(len(decoded), 240)
+        row_6 = decoded[130:135]
+        row_7 = decoded[150:155]
+        self.assertEqual(row_6, [1879048257, 1073741918, 1073741908, 1073741898, 1073741888])
+        self.assertEqual(row_7, [1879048256, 1073741919, 1073741909, 1073741899, 1073741889])
+        first = decode_gamemaker_tile(row_6[0])
+        self.assertEqual((first.tile_index, first.mirror, first.flip, first.rotate), (65, True, True, True))
+        second = decode_gamemaker_tile(row_6[1])
+        self.assertEqual((second.tile_index, second.mirror, second.flip, second.rotate), (94, False, False, True))
+        non_empty = [value for value in decoded if not is_empty_gamemaker_tile(value)]
+        self.assertEqual(non_empty, row_6 + row_7)
+
+    def test_negative_count_repeats_the_next_value(self):
+        self.assertEqual(decode_tile_compressed_data(4, 1, [-4, 7]), [7, 7, 7, 7])
+        self.assertEqual(decode_tile_compressed_data(3, 1, [-3, _EMPTY]), [_EMPTY] * 3)
+        self.assertEqual(
+            decode_tile_compressed_data(2, 1, [-2, 1 | GAMEMAKER_TILE_MIRROR_BIT]),
+            [1 | GAMEMAKER_TILE_MIRROR_BIT] * 2,
+        )
+
+    def test_positive_count_takes_that_many_literal_values(self):
+        self.assertEqual(decode_tile_compressed_data(3, 1, [3, 1, 2, 3]), [1, 2, 3])
+        self.assertEqual(decode_tile_compressed_data(3, 1, [1, 5, -2, 6]), [5, 6, 6])
+        # Literal values keep any bit pattern: flags, the empty tile and 0.
+        literal = [0, _EMPTY, 9 | GAMEMAKER_TILE_ROTATE_BIT | GAMEMAKER_TILE_FLIP_BIT]
+        self.assertEqual(decode_tile_compressed_data(3, 1, [3, *literal]), literal)
+
+    def test_a_value_equal_to_a_count_is_still_a_value(self):
+        # The first 2 is a count and the second a literal value; the first -2 is a literal
+        # value and the second a count.
+        self.assertEqual(decode_tile_compressed_data(4, 1, [2, 2, -2, -2, 9]), [2, -2, 9, 9])
+
+    def test_a_zero_count_is_an_empty_literal_block(self):
+        self.assertEqual(decode_tile_compressed_data(2, 1, [0, 2, 4, 5]), [4, 5])
+
+    def test_old_reading_of_mixed_neighbours_is_not_used(self):
+        # Entries 3, 1, 2, 3 are one block of three tiles, not four tiles.
+        self.assertEqual(decode_tile_compressed_data(3, 1, [3, 1, 2, 3]), [1, 2, 3])
+        with self.assertRaisesRegex(ValueError, "decoded 3 cells, expected 4"):
+            decode_tile_compressed_data(4, 1, [3, 1, 2, 3])
+
+    def test_empty_data_is_valid_only_for_an_empty_layer(self):
+        self.assertEqual(decode_tile_compressed_data(0, 5, []), [])
+        with self.assertRaisesRegex(ValueError, "decoded 0 cells, expected 1"):
+            decode_tile_compressed_data(1, 1, [])
+
+    def test_malformed_data_raises_value_errors(self):
+        cases = [
+            ("repeated run has no value", 2, 1, [-2]),
+            ("literal run is shorter than its count", 3, 1, [3, 1, 2]),
+            ("literal run is shorter than its count", 1, 1, [2]),
+            ("decoded 3 cells, expected 2", 2, 1, [-3, 1]),
+            ("decoded 3 cells, expected 2", 2, 1, [3, 1, 2, 3]),
+            ("decoded 1 cells, expected 2", 2, 1, [1, 4]),
+            ("decoded 2 cells, expected 3", 3, 1, [-2, 4]),
+            ("decoded 2147483648 cells, expected 6", 3, 2, [_EMPTY, 1]),
+            ("TileCompressedData count must be an integer", 1, 1, [None, 1]),
+            ("TileCompressedData repeated value must be an integer", 2, 1, [-2, None]),
+            ("TileCompressedData value must be an integer", 1, 1, [1, None]),
+        ]
+        for message, width, height, data in cases:
+            with self.subTest(message=message, data=data):
+                with self.assertRaisesRegex(ValueError, message):
+                    decode_tile_compressed_data(width, height, cast("list[JsonValue]", data))
+
+    def test_unsupported_format_and_negative_dimensions_raise(self):
+        with self.assertRaisesRegex(ValueError, "Unsupported GameMaker tile data format: 2"):
+            decode_tile_compressed_data(1, 1, [1], tile_data_format=2)
+        with self.assertRaisesRegex(ValueError, "dimensions must be non-negative"):
+            decode_tile_compressed_data(-1, 1, [])
+
+
+def _tile_map_data(*cells: tuple[int, int, int, int, int]) -> str:
+    """The TileMapLayer data of cells given as (x, y, atlas_x, atlas_y, alternative)."""
+    values = [0, 0]
+    for x, y, atlas_x, atlas_y, alternative in cells:
+        for value in (x, y, 0, atlas_x, atlas_y, alternative):
+            values.extend([value & 0xFF, (value >> 8) & 0xFF])
+    return "tile_map_data = PackedByteArray({})".format(", ".join(str(value) for value in values))
+
+
 class _TypedLayoutResourceIndex:
-    def __init__(self, source: str, output_root: str) -> None:
+    def __init__(self, source: str, output_root: str, sprite_source: str | None = None) -> None:
         self.source = source
+        self.sprite_source = sprite_source
         self.godot_project_path = output_root
 
     def resolve_gm_path(self, kind: str, name: str) -> str | None:
+        if kind == "sprites" and name == "typed_sprite":
+            return self.sprite_source
         return self.source if kind == "tilesets" and name == "typed" else None
 
     def resolve_godot_path(self, kind: str, name: str) -> str | None:
@@ -2711,10 +3404,16 @@ class _TypedLayoutResourceIndex:
 
 
 class TestTypedRoomTilesetAcquisition(unittest.TestCase):
+    TILESET_WITH_SPRITE = (
+        '{"spriteId":{"name":"typed_sprite","path":"sprites/typed_sprite/typed_sprite.yy"},'
+        '"tileWidth":16,"out_columns":%s,"unknown":"a,}",}'
+    )
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.directory.name, "tileset.yy")
-        self.index = _TypedLayoutResourceIndex(self.path, self.directory.name)
+        self.sprite_path = os.path.join(self.directory.name, "typed_sprite.yy")
+        self.index = _TypedLayoutResourceIndex(self.path, self.directory.name, self.sprite_path)
         with open(os.path.join(self.directory.name, "typed.tres"), "w", encoding="utf-8") as stream:
             stream.write('[gd_resource type="TileSet" format=3]')
 
@@ -2723,6 +3422,10 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
 
     def _write_layout(self, source: str) -> None:
         with open(self.path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def _write_sprite(self, source: str) -> None:
+        with open(self.sprite_path, "w", encoding="utf-8") as stream:
             stream.write(source)
 
     def _serialize_layout(self) -> SerializedRoomLayers:
@@ -2734,28 +3437,61 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         return serialize_room_layers(room, resource_index=self.index)
 
     def test_shared_decoder_receives_actual_utf8_content_path_and_returns_same_object(self) -> None:
-        source = '{"out_columns":"3.5","unknown":"a,}",}'
+        source = self.TILESET_WITH_SPRITE % '"3.5"'
+        sprite_source = '{"width":64,"height":48,"unknown":"b,}",}'
         self._write_layout(source)
-        document = decode_gamemaker_json(source, source_path=self.path)
-        with (
-            patch("src.conversion.room_layers.decode_gamemaker_json", return_value=document) as decoder,
-            patch("src.conversion.room_layers.select_tileset_room_layout", wraps=select_tileset_room_layout) as selection,
-        ):
+        self._write_sprite(sprite_source)
+        documents = [
+            decode_gamemaker_json(source, source_path=self.path),
+            decode_gamemaker_json(sprite_source, source_path=self.sprite_path),
+        ]
+        with patch("src.conversion.room_layers.decode_gamemaker_json", side_effect=documents) as decoder:
             result = self._serialize_layout()
-        self.assertIs(selection.call_args.args[0], document.value)
-        decoder.assert_called_once_with(source, source_path=self.path)
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0)", result.node_lines)
+        self.assertEqual(decoder.call_args_list, [
+            call(source, source_path=self.path),
+            call(sprite_source, source_path=self.sprite_path),
+        ])
+        # Tile 9 is cell 9 of the sprite's 4 column grid, whatever out_columns says.
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), result.node_lines)
 
     def test_live_file_replacement_changes_serialized_atlas_cells(self) -> None:
-        self._write_layout('{"out_columns":2}')
+        self._write_layout(self.TILESET_WITH_SPRITE % 9)
+        self._write_sprite('{"width":32,"height":96}')
         first = self._serialize_layout()
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0)", first.node_lines)
-        self._write_layout('{"out_columns":0,"tile_count":"7.9"}')
+        self.assertIn(_tile_map_data((0, 0, 1, 4, 0)), first.node_lines)
+        self._write_sprite('{"width":64,"height":48}')
         second = self._serialize_layout()
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0)", second.node_lines)
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), second.node_lines)
+        self._write_layout('{"spriteId":{"name":"typed_sprite"},"tileWidth":16,"tilexoff":4,"tilehsep":2}')
+        self._write_sprite('{"width":%d,"height":48}' % (4 + 16 * 3 + 2 * 2))
+        third = self._serialize_layout()
+        self.assertIn(_tile_map_data((0, 0, 0, 3, 0)), third.node_lines)
+
+    def test_tile_n_is_source_cell_n_and_out_columns_play_no_part(self) -> None:
+        self._write_sprite('{"width":48,"height":48}')
+        for out_columns in (0, 1, 3, 17):
+            with self.subTest(out_columns=out_columns):
+                self._write_layout(self.TILESET_WITH_SPRITE % out_columns)
+                self.assertIn(_tile_map_data((0, 0, 0, 3, 0)), self._serialize_layout().node_lines)
+
+    def test_tileset_without_a_readable_sprite_lays_tiles_out_in_one_row(self) -> None:
+        expected = _tile_map_data((0, 0, 9, 0, 0))
+        self._write_layout(self.TILESET_WITH_SPRITE % 2)
+        self._write_sprite('{"height":48}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_sprite('{"width":8}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_sprite('[]')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        os.unlink(self.sprite_path)
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self.index.sprite_source = None
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_layout('{"out_columns":2}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
 
     def test_nonobject_roots_io_and_json_errors_use_decoded_tile_fallback(self) -> None:
-        expected = "tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)"
+        expected = _tile_map_data((0, 0, 9, 0, 0))
         for source in ('null', '[]', 'true', 'NaN', '"layout"', '{"out_columns":'):
             with self.subTest(source=source):
                 self._write_layout(source)
@@ -2771,6 +3507,11 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         with open(self.path, "wb") as stream:
             stream.write(b'\xef\xbb\xbf{}')
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 1', self._serialize_layout().node_lines)
+        self._write_layout(self.TILESET_WITH_SPRITE % 4)
+        with open(self.sprite_path, "wb") as stream:
+            stream.write(b"\xff")
+        with self.assertRaises(UnicodeDecodeError):
+            self._serialize_layout()
 
     def test_decoder_error_and_control_identity_keep_narrow_catch(self) -> None:
         self._write_layout('{}')
@@ -2793,17 +3534,12 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         self.assertEqual(caught.exception.source_path, self.path)
         self.assertEqual(caught.exception.field_path, ("unknown",))
 
-    def test_positive_columns_skip_unused_overflow_and_owner_fallback_remains(self) -> None:
-        self._write_layout('{"out_columns":"4.9","tile_count":Infinity}')
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0)",
-                      self._serialize_layout().node_lines)
-        self._write_layout('{"out_columns":false,"tile_count":null}')
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)",
-                      self._serialize_layout().node_lines)
-        self._write_layout('{"out_columns":0,"tile_count":Infinity}')
-        with self.assertRaises(OverflowError):
-            self._serialize_layout()
-
+    def test_unused_tileset_counts_are_never_coerced(self) -> None:
+        self._write_sprite('{"width":64,"height":48}')
+        self._write_layout(
+            '{"spriteId":{"name":"typed_sprite"},"tileWidth":16,"out_columns":Infinity,"tile_count":Infinity}'
+        )
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), self._serialize_layout().node_lines)
 
 
 class TestTypedRoomConsumerStages(unittest.TestCase):
@@ -2827,7 +3563,6 @@ class TestTypedRoomConsumerStages(unittest.TestCase):
             layer["x"] = 42
         result = serialize_room_layers(room, warn_callback=warn)
         self.assertEqual(len(messages), 1)
-        self.assertIn("position = Vector2(42, 0)", result.node_lines)
         self.assertIn("metadata/gamemaker_layer_x = 42", result.node_lines)
 
     def test_truthy_malformed_resource_type_fails_at_membership_after_name(self) -> None:
@@ -2866,9 +3601,31 @@ class TestTypedRoomConsumerStages(unittest.TestCase):
         self.assertEqual(calls, [("InstanceCreationCode_i.gml", "layers[].instances[].name")])
         self.assertIn("position = Vector2(18, 0)", result.node_lines)
 
+    def test_layer_depths_beyond_godot_range_keep_their_own_ordered_z_index(self) -> None:
+        # GameMaker draws every distinct layer depth separately; nested layers
+        # count too, and a fractional depth is truncated.
+        layers: list[JsonValue] = [
+            {"%Name": "Hud", "resourceType": "GMRInstanceLayer", "depth": -10001},
+            {"%Name": "Menu", "resourceType": "GMRInstanceLayer", "depth": -10000.7},
+            {
+                "%Name": "Scenery",
+                "resourceType": "GMRInstanceLayer",
+                "depth": 3300,
+                "layers": [{"%Name": "Far", "resourceType": "GMRInstanceLayer", "depth": 3320}],
+            },
+            {"%Name": "Parallax", "resourceType": "GMRInstanceLayer", "depth": 9900},
+            {"%Name": "Background", "resourceType": "GMRInstanceLayer", "depth": 10000},
+        ]
+        lines = serialize_room_layers(self.room(layers=layers)).node_lines
+        z_indices = [int(line.split(" = ")[1]) for line in lines if line.startswith("z_index = ")]
+        self.assertEqual(z_indices, [4096, 4095, -3300, -3320, -4095, -4096])
+        self.assertIn("metadata/gamemaker_layer_depth = -10000", lines)
+
     def test_coordinate_nonfinite_and_huge_int_policies_remain_distinct(self) -> None:
-        room = self.room(layers=[{"resourceType": "GMRInstanceLayer", "x": float("nan"), "y": -0.0}])
+        sprite: JsonObject = {"name": "a", "resourceType": "GMRSpriteGraphic"}
+        room = self.room(layers=[{"resourceType": "GMRAssetLayer", "x": float("nan"), "y": -0.0, "assets": [sprite]}])
         result = serialize_room_layers(room)
+        # The sprite element is drawn at the layer offset.
         self.assertIn("position = Vector2(nan, 0)", result.node_lines)
         with self.assertRaises(OverflowError):
             serialize_room_layers(self.room(layers=[{"x": 10 ** 5000}]))

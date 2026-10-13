@@ -4,6 +4,7 @@ import json
 import os
 import posixpath
 import re
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Literal, TypedDict
@@ -18,7 +19,16 @@ from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
 from src.conversion.json_values import JsonObject, JsonValue
+from src.conversion.object_variables import (
+    VariableDefinition,
+    parse_variable_definitions,
+    parse_variable_overrides,
+    variable_assignments_gml,
+    variable_value_gml,
+)
+from src.conversion.project_enums import collect_project_enum_values
 from src.conversion.project_godot import GodotProjectFile
+from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_source_paths import (
     ProjectSourcePathError,
     is_safe_project_source_component,
@@ -31,6 +41,11 @@ from src.conversion.room_creation_code import (
     instance_creation_order_names,
     resolve_instance_creation_code,
     resolve_room_creation_code,
+)
+from src.conversion.room_display import (
+    application_surface_display_settings,
+    application_surface_size,
+    room_view_entries,
 )
 from src.conversion.room_layers import godot_string, serialize_room_layers
 from src.conversion.room_metadata import (
@@ -64,6 +79,10 @@ def render_room_runtime_script() -> str:
         "extends Node2D\n\n"
         'const GMRuntime = preload("res://gm2godot/gml_runtime.gd")\n\n'
         f'const GM2GODOT_ROOM_ROOT_POLICY = "{ROOM_ROOT_POLICY_ID}"\n\n'
+        "func _enter_tree():\n"
+        "\tGMRuntime._gml_view_room_prepare(self)\n"
+        "\tGMRuntime.gml_room_prepare_scene(self)\n"
+        "\n\n"
         "func _ready():\n"
         "\tGMRuntime.gml_room_enter_scene(self)\n"
         "\n\n"
@@ -74,6 +93,14 @@ def render_room_runtime_script() -> str:
 
 class InstanceCreationCodeMethod(TypedDict):
     source_path: str
+    method_name: str
+    body: str
+
+
+class InstancePreCreateMethod(TypedDict):
+    """A placed instance's pre-creation code: its Room Editor variable overrides."""
+
+    instance_name: str
     method_name: str
     body: str
 
@@ -165,14 +192,18 @@ class RoomConverter(BaseConverter):
                   compact_logging: bool = False,
                   max_workers: int | None = None,
                   resource_index: GameMakerResourceIndex | None = None,
-                  diagnostics: DiagnosticCollector | None = None) -> None:
+                  diagnostics: DiagnosticCollector | None = None,
+                  macro_configuration: str | None = None) -> None:
         super().__init__(gm_project_path, godot_project_path, log_callback,
                          progress_callback, conversion_running,
                          update_log_callback, compact_logging,
                          max_workers=max_workers, diagnostics=diagnostics)
         self.godot_rooms_path = os.path.join(self.godot_project_path, "rooms")
         self.resource_index = resource_index
+        self.macro_configuration = macro_configuration
         self._asset_names_cache: set[str] | None = None
+        self._macro_values_cache: dict[str, str] | None = None
+        self._enum_values_cache: dict[str, dict[str, int]] | None = None
 
     def _build_resource_index(self) -> GameMakerResourceIndex:
         if self.resource_index is not None:
@@ -343,6 +374,7 @@ class RoomConverter(BaseConverter):
             f'metadata/gamemaker_inherit_creation_order = {json.dumps(room.inherit_creation_order)}',
             f'metadata/gamemaker_view_settings = {json.dumps(room.view_settings)}',
             f'metadata/gamemaker_view_count = {json.dumps(room_value_length(room.views))}',
+            f'metadata/gamemaker_views = {json.dumps(room_view_entries(room.views, room.room_settings, room.yy_path))}',
             f'metadata/gamemaker_physics_world = {json.dumps(physics_settings.physics_world)}',
             f'metadata/gamemaker_physics_gravity_x = {json.dumps(physics_settings.gravity_x)}',
             f'metadata/gamemaker_physics_gravity_y = {json.dumps(physics_settings.gravity_y)}',
@@ -399,7 +431,7 @@ class RoomConverter(BaseConverter):
         has_creation_code_blocker = False
         if room_creation_code.has_code:
             try:
-                self._require_creation_code_source(
+                if self._require_creation_code_source(
                     room_creation_code,
                     room_name=room.name,
                     event="room creation code",
@@ -407,14 +439,17 @@ class RoomConverter(BaseConverter):
                         "Warning: Missing GameMaker room creation code file for room "
                         f"{room.name}: {room_creation_code.source_path}"
                     ),
-                )
-                room_creation_body = self._transpile_creation_code(
-                    room_creation_code.source_path,
-                    room.name,
-                    "room creation code",
-                    asset_names=asset_names,
-                    top_level_global_scope=True,
-                )
+                ):
+                    room_creation_body = self._transpile_creation_code(
+                        room_creation_code.source_path,
+                        room.name,
+                        "room creation code",
+                        asset_names=asset_names,
+                        top_level_global_scope=True,
+                        # GameMaker runs room creation code with one stand-in
+                        # instance as both self and other.
+                        other_expression="self",
+                    )
             except _RoomCreationCodeBlocked:
                 has_creation_code_blocker = True
 
@@ -432,7 +467,7 @@ class RoomConverter(BaseConverter):
             instance_name = _instance_name(instance)
             event = f"instance creation code for {instance_name}"
             try:
-                self._require_creation_code_source(
+                if not self._require_creation_code_source(
                     creation_code,
                     room_name=room.name,
                     event=event,
@@ -441,14 +476,17 @@ class RoomConverter(BaseConverter):
                         f"room {room.name}, instance {instance_name}: "
                         f"{creation_code.source_path}"
                     ),
-                )
+                ):
+                    continue
                 body = self._transpile_creation_code(
                     creation_code.source_path,
                     room.name,
                     event,
                     asset_names=asset_names,
                     self_expression="_gm_instance",
-                    other_expression="GMRuntime.gml_instance_noone()",
+                    # Like its Create event, an instance's creation code runs
+                    # with the instance as both self and other.
+                    other_expression="_gm_instance",
                     instance_target="_gm_instance",
                 )
             except _RoomCreationCodeBlocked:
@@ -464,13 +502,164 @@ class RoomConverter(BaseConverter):
                 "body": body,
             })
 
+        pre_create_methods = self._instance_pre_create_methods(
+            room,
+            resource_index,
+            asset_names,
+        )
         if has_creation_code_blocker:
             raise _RoomCreationCodeBlocked(
                 f"Declared creation code blocked room {room.name}"
             )
-        if room_creation_body is None and not instance_methods:
+        if room_creation_body is None and not instance_methods and not pre_create_methods:
             return None
-        return self._render_room_script(room_creation_body, instance_methods)
+        return self._render_room_script(
+            room_creation_body,
+            instance_methods,
+            pre_create_methods,
+        )
+
+    def _instance_pre_create_methods(
+        self,
+        room: IndexedRoom,
+        resource_index: GameMakerResourceIndex | None,
+        asset_names: set[str],
+    ) -> list[InstancePreCreateMethod]:
+        """Return the pre-creation code of the room's instances.
+
+        A placed instance whose Variable Definitions were changed in the Room
+        Editor assigns the new values, in their .yy order, after its object's
+        definitions and before its Create event.
+        """
+        methods: list[InstancePreCreateMethod] = []
+        used_method_names: dict[str, int] = {}
+        seen_names: set[str] = set()
+        definitions_cache: dict[str, Mapping[str, VariableDefinition]] = {}
+        blocked = False
+        for instance in _iter_room_instances(room.layers):
+            overrides = parse_variable_overrides(RoomInstanceFields(instance, room.yy_path).properties)
+            instance_name = _instance_name(instance)
+            if not overrides or instance_name in seen_names:
+                continue
+            seen_names.add(instance_name)
+            source = variable_assignments_gml(
+                (
+                    override.name,
+                    variable_value_gml(
+                        override.value,
+                        self._object_variable_definitions(
+                            override.object_name,
+                            resource_index,
+                            definitions_cache,
+                        ).get(override.name),
+                    ),
+                )
+                for override in overrides
+            )
+            try:
+                body = self._transpile_pre_create_code(source, room, instance_name, asset_names)
+            except _RoomCreationCodeBlocked:
+                blocked = True
+                continue
+            methods.append({
+                "instance_name": instance_name,
+                "method_name": self._unique_instance_creation_method_name(
+                    instance_name,
+                    used_method_names,
+                    prefix="_gm2godot_instance_pre_create_",
+                ),
+                "body": body,
+            })
+        if blocked:
+            raise _RoomCreationCodeBlocked(
+                f"Room Editor variable overrides blocked room {room.name}"
+            )
+        return methods
+
+    def _object_variable_definitions(
+        self,
+        object_name: str | None,
+        resource_index: GameMakerResourceIndex | None,
+        cache: dict[str, Mapping[str, VariableDefinition]],
+    ) -> Mapping[str, VariableDefinition]:
+        """Return an object's Variable Definitions by name (empty when unreadable)."""
+        if object_name is None:
+            return {}
+        if object_name not in cache:
+            resource = (
+                resource_index.get_resource("objects", object_name)
+                if resource_index is not None
+                else None
+            )
+            yy_path = (
+                resource.yy_path
+                if resource is not None
+                else os.path.join(self.gm_project_path, "objects", object_name, object_name + ".yy")
+            )
+            data = self._read_yy_file(yy_path)
+            definitions = parse_variable_definitions(data.get("properties") if data is not None else None)
+            cache[object_name] = {definition.name: definition for definition in definitions}
+        return cache[object_name]
+
+    def _project_macro_values(self) -> dict[str, str]:
+        if self._macro_values_cache is None:
+            self._macro_values_cache = collect_project_macro_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._macro_values_cache
+
+    def _project_enum_values(self) -> dict[str, dict[str, int]]:
+        if self._enum_values_cache is None:
+            self._enum_values_cache = collect_project_enum_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._enum_values_cache
+
+    def _transpile_pre_create_code(
+        self,
+        source: str,
+        room: IndexedRoom,
+        instance_name: str,
+        asset_names: set[str],
+    ) -> str:
+        event = f"pre-creation code for {instance_name}"
+        try:
+            # Like its Create event, an instance's pre-creation code runs
+            # with the instance as both self and other.
+            return transpile_gml_code(
+                source,
+                asset_names=asset_names,
+                macro_configuration=self.macro_configuration,
+                source_path=room.yy_path,
+                event=event,
+                self_expression="_gm_instance",
+                other_expression="_gm_instance",
+                instance_target="_gm_instance",
+                enum_values=self._project_enum_values(),
+                macro_values=self._project_macro_values(),
+            )
+        except GMLTranspileError as exc:
+            message = (
+                "Warning: Could not transpile the Room Editor variable overrides "
+                f"({event}) for room {room.name}: {exc}"
+            )
+            if self.diagnostics is not None:
+                self.diagnostics.add_transpile_failure(
+                    message,
+                    source_path=room.yy_path,
+                    resource=room.name,
+                    resource_type="room",
+                    event=event,
+                    workaround=(
+                        "Rewrite the overridden variable values as GML expressions "
+                        "the converter supports, or add the missing runtime/API "
+                        "support tracked by the linked issue."
+                    ),
+                )
+            self._safe_log(message)
+            raise _RoomCreationCodeBlocked(message) from exc
 
     def _require_creation_code_source(
         self,
@@ -479,9 +668,15 @@ class RoomConverter(BaseConverter):
         room_name: str,
         event: str,
         missing_message: str,
-    ) -> None:
+    ) -> bool:
+        """Return whether declared creation code has a readable source file.
+
+        GameMaker runs a declared creation-code file that is absent on disk as
+        empty code, so the room still converts without it. Rejected (unsafe)
+        source paths still block the room.
+        """
         if metadata.exists:
-            return
+            return True
         if metadata.path_rejected:
             raise _RoomCreationCodeBlocked(
                 f"Rejected declared {event} source for room {room_name}"
@@ -496,12 +691,13 @@ class RoomConverter(BaseConverter):
                 resource_type="room",
                 event=event,
                 workaround=(
-                    "Restore the declared GameMaker creation-code source or remove "
-                    "the stale creation-code declaration before converting this room."
+                    "GameMaker runs a missing creation-code file as empty code, so the "
+                    "room was converted without it. Restore the source file if the "
+                    "creation code was not meant to be empty."
                 ),
             )
         self._safe_log(missing_message)
-        raise _RoomCreationCodeBlocked(missing_message)
+        return False
 
     def _transpile_creation_code(
         self,
@@ -550,12 +746,15 @@ class RoomConverter(BaseConverter):
                 source,
                 asset_names=asset_names,
                 top_level_global_scope=top_level_global_scope,
+                macro_configuration=self.macro_configuration,
                 source_path=source_path,
                 event=label,
                 preserve_source_comments=True,
                 self_expression=self_expression,
                 other_expression=other_expression,
                 instance_target=instance_target,
+                enum_values=self._project_enum_values(),
+                macro_values=self._project_macro_values(),
             )
         except GMLTranspileError as exc:
             message = (
@@ -588,8 +787,32 @@ class RoomConverter(BaseConverter):
         self,
         room_creation_body: str | None,
         instance_methods: list[InstanceCreationCodeMethod],
+        pre_create_methods: Sequence[InstancePreCreateMethod] = (),
     ) -> str:
         lines = [f'extends "{ROOM_SCRIPT_BASE_RESOURCE_PATH}"']
+        if pre_create_methods:
+            # The runtime calls it on the placed instance after its object's
+            # Variable Definitions (gml_instance_pre_create).
+            lines.extend([
+                "",
+                "func _gm2godot_run_instance_pre_create_code(_gm_instance):",
+                "\tif _gm_instance == null or not _gm_instance.has_meta(\"gamemaker_instance_name\"):",
+                "\t\treturn false",
+                "\tmatch str(_gm_instance.get_meta(\"gamemaker_instance_name\")):",
+            ])
+            for pre_create in pre_create_methods:
+                lines.extend([
+                    f"\t\t{json.dumps(pre_create['instance_name'])}:",
+                    f"\t\t\t{pre_create['method_name']}(_gm_instance)",
+                    "\t\t\treturn true",
+                ])
+            lines.append("\treturn false")
+            for pre_create in pre_create_methods:
+                lines.extend([
+                    "",
+                    f"func {pre_create['method_name']}(_gm_instance):",
+                    pre_create["body"],
+                ])
         if instance_methods:
             lines.extend([
                 "",
@@ -654,8 +877,9 @@ class RoomConverter(BaseConverter):
         self,
         instance_name: str,
         used_method_names: dict[str, int],
+        prefix: str = "_gm2godot_instance_creation_code_",
     ) -> str:
-        base = "_gm2godot_instance_creation_code_" + _gdscript_identifier_suffix(
+        base = prefix + _gdscript_identifier_suffix(
             instance_name,
             "instance",
         )
@@ -870,10 +1094,34 @@ class RoomConverter(BaseConverter):
                     scene_path=scene_path,
                 )
             )
+            self._set_application_surface_display(project_file, first_room)
         else:
             self._log_startup_warning(
                 "Warning: project.godot not found; could not set startup scene."
             )
+
+    def _set_application_surface_display(
+        self, project_file: GodotProjectFile, first_room: IndexedRoom
+    ) -> None:
+        """Size the root viewport like GameMaker's application surface.
+
+        GameMaker derives the application surface (and the initial window)
+        from the first room: the visible viewports' bounding box when views
+        are enabled, otherwise the room size. Later rooms are scaled onto
+        that fixed surface, which Godot's ``viewport`` stretch mode mirrors.
+        """
+        width, height = application_surface_size(
+            first_room.room_settings,
+            first_room.view_settings,
+            first_room.views,
+            first_room.yy_path,
+        )
+        for section, key, value in application_surface_display_settings(width, height):
+            project_file.set_setting(section, key, value)
+        self.log_callback(
+            "Set Godot viewport to the GameMaker application surface size "
+            f"{width}x{height} from first room {first_room.name}"
+        )
 
     @staticmethod
     def _clear_stale_managed_main_scene(

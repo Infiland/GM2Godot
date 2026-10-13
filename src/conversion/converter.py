@@ -1432,6 +1432,7 @@ class Converter:
                     compact_logging=context.compact_logging,
                     max_workers=context.max_workers,
                     diagnostics=context.diagnostics,
+                    macro_configuration=context.target_platform,
                 )
             ),
             "asset_registry": lambda: self._run_base_converter(

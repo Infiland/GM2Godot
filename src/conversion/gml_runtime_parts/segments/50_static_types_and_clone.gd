@@ -127,6 +127,14 @@ static func gml_shift_right(left, right):
 
 
 static func gml_eq(left, right):
+	# Two plain numbers (the common case) compare with GameMaker's epsilon and
+	# two strings by their text, exactly as the general checks below do.
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return _gml_compare_reals(float(left), float(right)) == 0
+	if left_type == TYPE_STRING and right_type == TYPE_STRING:
+		return left == right
 	if is_undefined(left) or is_undefined(right):
 		return is_undefined(left) and is_undefined(right)
 	if is_ptr(left) or is_ptr(right):
@@ -135,12 +143,18 @@ static func gml_eq(left, right):
 		return _gml_handle_eq(left, right)
 	if is_method(left) or is_method(right):
 		return _gml_method_same(left, right)
-	if is_nan_value(left) or is_nan_value(right):
-		return false
 	if is_numeric(left) and is_numeric(right):
-		return _to_real(left) == _to_real(right)
+		return _gml_compare_numeric(left, right) == 0
 	if _is_gml_reference_value(left) or _is_gml_reference_value(right):
 		return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)
+	if is_string(left) and is_string(right):
+		return str(left) == str(right)
+	if left == null or right == null:
+		return left == right
+	# Values of different GML types (a string and a number, say) are never
+	# equal; Godot would raise "Invalid operands" for such a comparison.
+	if typeof(left) != typeof(right):
+		return false
 	return left == right
 
 
@@ -148,41 +162,63 @@ static func gml_ne(left, right):
 	return not gml_eq(left, right)
 
 
+static func _gml_compare_numeric(left, right):
+	if is_int64(left) and is_int64(right):
+		return signi(left.value - right.value)
+	return _gml_compare_reals(_to_real(left), _to_real(right))
+
+
 static func gml_lt(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order < 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) < _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order < 0
 	if is_string(left) and is_string(right):
 		return str(left) < str(right)
 	return gml_unsupported_binary_type_error("GML less-than comparison", left, right)
 
 
 static func gml_lte(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order <= 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) <= _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order <= 0
 	if is_string(left) and is_string(right):
 		return str(left) <= str(right)
 	return gml_unsupported_binary_type_error("GML less-than-or-equal comparison", left, right)
 
 
 static func gml_gt(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order > 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) > _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order > 0
 	if is_string(left) and is_string(right):
 		return str(left) > str(right)
 	return gml_unsupported_binary_type_error("GML greater-than comparison", left, right)
 
 
 static func gml_gte(left, right):
-	if is_nan_value(left) or is_nan_value(right):
-		return false
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		var real_order = _gml_compare_reals(float(left), float(right))
+		return real_order != GML_COMPARE_UNORDERED and real_order >= 0
 	if _is_arithmetic_real_operand(left) and _is_arithmetic_real_operand(right):
-		return _to_real(left) >= _to_real(right)
+		var order = _gml_compare_numeric(left, right)
+		return order != GML_COMPARE_UNORDERED and order >= 0
 	if is_string(left) and is_string(right):
 		return str(left) >= str(right)
 	return gml_unsupported_binary_type_error("GML greater-than-or-equal comparison", left, right)
@@ -268,17 +304,57 @@ static func gml_string(value):
 
 
 static func gml_bool(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_BOOL:
+		return value
+	if value_type == TYPE_FLOAT or value_type == TYPE_INT:
+		return float(value) > 0.5
+	if value_type == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle:
+		# Most often an instance (or noone) from a query. A destroyed
+		# instance's id is still a positive number, so true.
+		return gml_handle_is_valid(value) or (value.kind == GML_INSTANCE_HANDLE_KIND and value.index >= 0)
 	if is_undefined(value):
 		return false
 	if is_ptr(value):
 		return not value.invalid and value.value != 0
-	if is_handle(value):
-		return gml_handle_is_valid(value)
 	if is_int64(value):
 		return float(value.value) > 0.5
 	if is_number(value):
 		return float(value) > 0.5
-	return bool(value)
+	return _gml_bool_other(value, value_type)
+
+
+# The rest of the runner's yyGetBool: an instance (a node here, even a freed
+# one, as a destroyed instance's id stays a number), a struct and a function
+# are true; "true", "false" and text that starts with a number read as such;
+# anything else (an array, other text) is an error, and false.
+static func _gml_bool_other(value, value_type):
+	if value_type == TYPE_NIL:
+		return false
+	if value_type == TYPE_OBJECT or value_type == TYPE_DICTIONARY or value_type == TYPE_CALLABLE:
+		return true
+	if value_type == TYPE_STRING or value_type == TYPE_STRING_NAME:
+		var text = str(value)
+		if text == "true":
+			return true
+		if text == "false":
+			return false
+		var matched = _gml_bool_number_pattern().search(text)
+		if matched != null:
+			return matched.get_string().to_float() > 0.5
+	gml_error("unable to convert " + gml_string(value) + " to a boolean")
+	return false
+
+
+static var _gml_bool_number_regex = null
+
+
+# The runner's g_NumberRE: a sign, digits with an optional fraction and an
+# exponent up to 29, at the start of the text.
+static func _gml_bool_number_pattern():
+	if _gml_bool_number_regex == null:
+		_gml_bool_number_regex = RegEx.create_from_string("^[-+]?(?:[0-9]{0,30}\\.)?[0-9]{1,30}(?:[Ee][-+]?[1-2]?[0-9])?")
+	return _gml_bool_number_regex
 
 
 static func gml_is_nullish(value):

@@ -137,7 +137,7 @@
     {
       "id": "collision",
       "expected_trace": ["place_meeting", "collision_rectangle", "collision_event"],
-      "assertion_paths": ["tests/test_collision_queries_godot.py::TestCollisionQueriesGodotSmoke.test_runtime_collision_queries_against_generated_shapes"]
+      "assertion_paths": ["tests/test_collision_queries_godot.py::TestCollisionQueriesGodot.test_collision_queries_follow_gamemaker_masks_and_modes"]
     },
     {
       "id": "draw_order",
@@ -182,7 +182,7 @@
       "id": "gui_scaling_cameras",
       "feature": "GUI size and view coordinate transforms",
       "pixel_check": false,
-      "assertion_paths": ["tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_multiview_viewport_state_and_diagnostics"]
+      "assertion_paths": ["tests/test_cameras_display_godot.py::TestCamerasDisplayGodotSmoke.test_views_cameras_window_gui_and_mouse"]
     },
     {
       "id": "tile_layer_data",

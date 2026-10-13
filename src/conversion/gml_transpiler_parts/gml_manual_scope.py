@@ -329,8 +329,15 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Fonts/Fonts.htm",
         ("Asset Management", "Drawing Sprites Text Fonts"),
-        ("tests/test_fonts.py", "tests/test_draw_sprite_text_godot.py"),
-        "Basic font conversion exists; glyph ranges, sprite fonts, SDF/MSDF, and exact text rendering remain open.",
+        (
+            "tests/test_fonts.py",
+            "tests/test_font_atlas.py",
+            "tests/test_font_text_godot.py",
+            "tests/test_font_view_render_godot.py",
+            "tests/test_draw_sprite_text_godot.py",
+        ),
+        "Baked font atlases convert to fixed-size bitmap fonts with GameMaker glyph metrics, kerning, and text layout; "
+        "sprite fonts, runtime font functions, and SDF effects remain open.",
     ),
     _entry(
         "reference_instances_objects",
@@ -371,8 +378,8 @@ _MANUAL_SCOPE_ENTRIES: tuple[GMLManualScopeEntry, ...] = (
         "compatibility_report",
         "GameMaker_Language/GML_Reference/Asset_Management/Paths/Paths.htm",
         ("Paths and Motion Planning", "Motion Helpers"),
-        ("tests/test_path_registry.py", "tests/test_paths_motion_godot.py"),
-        "Registry and path-follow subset exist; real Path2D/Curve2D and exact interpolation remain open.",
+        ("tests/test_path_registry.py", "tests/test_paths_godot.py", "tests/test_paths_motion_godot.py"),
+        "Path assets, path_add editing and path following match the runner; draw_path remains open.",
     ),
     _entry(
         "reference_rooms_layers",

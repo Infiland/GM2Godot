@@ -14,13 +14,12 @@ from src.conversion.gml_transpiler_parts.constants import (
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.json_values import JsonObject
 from src.conversion.object_metadata import gamemaker_event_integer
+from src.conversion.object_variables import VARIABLE_DEFINITIONS_FUNCTION
 
 _CodeBodies: TypeAlias = Mapping[str, str]
 _MapEvent: TypeAlias = Callable[[JsonObject], EventMapping | None]
 _IsInputEvent: TypeAlias = Callable[[JsonObject], bool]
-_GetAdditionalFunctions: TypeAlias = Callable[[set[str]], list[EventMapping]]
 _EmitPrelude: TypeAlias = Callable[[list[str], set[str]], None]
-_WrapBody: TypeAlias = Callable[[EventMapping, str, set[str]], str]
 
 _map_event: _MapEvent = map_event
 _map_input_event: _MapEvent = map_input_event
@@ -33,6 +32,7 @@ _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
 )
 _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "direction",
+    "drawn_by_sequence",
     "friction",
     "gravity",
     "gravity_direction",
@@ -45,10 +45,17 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "image_speed",
     "image_xscale",
     "image_yscale",
+    "in_sequence",
+    "layer",
+    "mask_index",
+    "path_endaction",
     "path_index",
+    "path_orientation",
     "path_position",
+    "path_positionprevious",
     "path_scale",
     "path_speed",
+    "sequence_instance",
     "solid",
     "speed",
     "sprite_index",
@@ -63,8 +70,16 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "yprevious",
     "ystart",
 })
+# Members the object runtime prelude declares for its own bookkeeping.
+_OBJECT_RUNTIME_MEMBER_NAMES = frozenset({
+    "_gm_collision_changed",
+    "_gm_collision_dirty",
+    "_gm_collision_state",
+    "_gm_constructed",
+    "_gm_depth",
+})
 _DRAW_RUNTIME_FUNCTIONS = frozenset({
-    "_draw",
+    "_on_draw",
     "_on_draw_begin",
     "_on_draw_end",
     "_on_draw_gui",
@@ -73,7 +88,7 @@ _DRAW_RUNTIME_FUNCTIONS = frozenset({
     "_on_post_draw",
     "_on_pre_draw",
 })
-_SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
+_SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | _OBJECT_RUNTIME_MEMBER_NAMES | frozenset({
     "AnimatedSprite2D",
     "CanvasItem",
     "Color",
@@ -90,6 +105,7 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | frozenset({
     "_gm_initialize_sprite_runtime",
     "_gm_room_colour_alpha",
     "_gm_sync_collision_mask_frame",
+    "_gm_sprite_visual_cache",
     "_gm_sprite_visual_node",
     "Vector2",
 })
@@ -145,7 +161,15 @@ class ObjectRuntimeConfig:
     solid: bool = False
     persistent: bool = False
     inherit_ready: bool = False
-    inherit_exit_tree: bool = False
+    # Input event methods (``_gm_input_*``) that ancestor objects define. An
+    # object with input events of its own lists them in its binding table
+    # too, because GameMaker runs inherited events the object does not
+    # override.
+    inherited_input_functions: tuple[str, ...] = ()
+    mask_sprite_name: str | None = None
+    # The object or an ancestor has Variable Definitions: its instances run
+    # them (and their Room Editor overrides) before the Create event.
+    runs_variable_definitions: bool = False
 
 
 def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
@@ -155,10 +179,14 @@ def _uses_gml_runtime(code_bodies: _CodeBodies | None) -> bool:
 def _uses_sprite_runtime(
     sprite_runtime: SpriteRuntimeConfig | None,
     code_bodies: _CodeBodies | None,
+    object_runtime: ObjectRuntimeConfig | None = None,
 ) -> bool:
     if sprite_runtime is None:
         return False
-    if sprite_runtime.initial_sprite_name is not None:
+    # Every GameMaker instance has sprite_index and the image_* variables,
+    # and another instance can set them (inst.sprite_index = spr, or inside a
+    # with block), so every object declares them.
+    if object_runtime is not None or sprite_runtime.initial_sprite_name is not None:
         return True
     return any(
         _SPRITE_RUNTIME_IDENTIFIER_RE.search(body) is not None
@@ -201,6 +229,7 @@ def _valid_instance_variables(instance_variables: Iterable[str] | None) -> list[
         name for name in instance_variables
         if _IDENTIFIER_RE.match(name) and name not in _SCRIPT_BUILTIN_VARIABLES
         and name not in _NATIVE_NODE2D_MEMBER_VARIABLES
+        and name not in _OBJECT_RUNTIME_MEMBER_NAMES
     )
 
 
@@ -226,14 +255,44 @@ def _extends_line(base_script_path: str | None = None) -> str:
     return f"extends {_gd_string(base_script_path)}\n"
 
 
+def _sprite_reference_expression(sprite_name: str) -> str:
+    return f"GMRuntime.gml_sprite_reference({_gd_string(sprite_name)})"
+
+
+def _collision_dirty_line(track_collision: bool) -> str:
+    # The runtime keeps an instance's collision state (its bounding box and
+    # mask) in _gm_collision_state until something the state depends on
+    # changes: the node's transform (reported by _notification) or one of
+    # the members whose setters call _gm_collision_changed.
+    return "\n\t\t_gm_collision_changed()" if track_collision else ""
+
+
+_LAYER_MOVE_EXIT_GUARD = '\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn'
+_COLLISION_NOTIFICATION_BODY = (
+    "\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
+    " or what == NOTIFICATION_EXIT_TREE:"
+    "\n\t\t_gm_collision_changed()"
+)
+
+
 def _emit_sprite_runtime_prelude(
     lines: list[str],
     sprite_runtime: SpriteRuntimeConfig,
     *,
     declare_members: bool,
+    track_collision: bool = False,
 ) -> None:
+    # Like GameMaker, an instance starts with its own object's sprite (-1 for
+    # none), not an ancestor's: every object script says which sprite that is,
+    # and the script that declares sprite_index starts it from there.
+    own_sprite = "-1"
+    if sprite_runtime.initial_sprite_name is not None:
+        own_sprite = _sprite_reference_expression(sprite_runtime.initial_sprite_name)
+    own_sprite_function = f"\n\nfunc _gm_object_sprite_index():\n\treturn {own_sprite}"
     if not declare_members:
+        lines.append(own_sprite_function + "\n")
         return
+    collision_dirty = _collision_dirty_line(track_collision)
 
     sprite_scene_paths = dict(sprite_runtime.sprite_scene_paths or {})
     sprite_constants = [
@@ -251,14 +310,13 @@ def _emit_sprite_runtime_prelude(
         lines.append(f"\n\t{_gd_string(sprite_name)}: preload({_gd_string(scene_path)}),")
     lines.append("\n}\n")
 
-    initial_sprite = "null"
-    if sprite_runtime.initial_sprite_name is not None:
-        initial_sprite = _gd_string(sprite_runtime.initial_sprite_name)
-
+    # Like GameMaker, sprite_index holds the sprite's asset index (-1 for no
+    # sprite), so it compares equal to the sprite constants in GML code.
     lines.append(
-        f"\nvar sprite_index = {initial_sprite}:"
+        "\nvar sprite_index = _gm_object_sprite_index():"
         "\n\tset(value):"
         "\n\t\tsprite_index = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_sprite_index()"
         "\n\nvar image_index = 0.0:"
         "\n\tset(value):"
@@ -266,17 +324,22 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t_gm_apply_image_index()"
         "\n\nvar image_number = 1"
         "\nvar image_speed = 1.0"
+        "\nvar _gm_sprite_visual_cache = null"
+        "\nvar _gm_sprite_runtime_started = false"
         "\nvar image_xscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_xscale = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_yscale = 1.0:"
         "\n\tset(value):"
         "\n\t\timage_yscale = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_angle = 0.0:"
         "\n\tset(value):"
         "\n\t\timage_angle = value"
+        f"{collision_dirty}"
         "\n\t\t_gm_apply_image_transform()"
         "\nvar image_blend = 0xffffff:"
         "\n\tset(value):"
@@ -286,7 +349,14 @@ def _emit_sprite_runtime_prelude(
         "\n\tset(value):"
         "\n\t\timage_alpha = value"
         "\n\t\t_gm_apply_image_transform()"
-        "\n\nfunc _gm_initialize_sprite_runtime():"
+        + own_sprite_function
+        # The instance's own _ready starts the sprite before its Create
+        # event; the ancestors' _ready that event_inherited() runs must not
+        # undo what that Create event set, so it starts only once.
+        + "\n\nfunc _gm_initialize_sprite_runtime():"
+        "\n\tif _gm_sprite_runtime_started:"
+        "\n\t\treturn"
+        "\n\t_gm_sprite_runtime_started = true"
         "\n\t_gm_apply_sprite_index()"
         "\n\tif has_meta(\"gamemaker_image_index\"):"
         "\n\t\timage_index = get_meta(\"gamemaker_image_index\")"
@@ -297,7 +367,7 @@ def _emit_sprite_runtime_prelude(
         "\n\tif has_meta(\"gamemaker_image_angle\"):"
         "\n\t\timage_angle = get_meta(\"gamemaker_image_angle\")"
         "\n\telse:"
-        "\n\t\timage_angle = rotation_degrees"
+        "\n\t\timage_angle = 0.0 - rotation_degrees"
         "\n\tif has_meta(\"gamemaker_image_xscale\"):"
         "\n\t\timage_xscale = get_meta(\"gamemaker_image_xscale\")"
         "\n\telse:"
@@ -320,10 +390,10 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t_gm_clear_current_sprite()"
         "\n\t\treturn"
         "\n\tvar sprite_index_type = typeof(sprite_index)"
-        "\n\tif (sprite_index_type == TYPE_INT or sprite_index_type == TYPE_FLOAT) and int(sprite_index) == -1:"
+        "\n\tif (sprite_index_type == TYPE_INT or sprite_index_type == TYPE_FLOAT) and sprite_index < 0:"
         "\n\t\t_gm_clear_current_sprite()"
         "\n\t\treturn"
-        "\n\tvar sprite_name = str(sprite_index)"
+        "\n\tvar sprite_name = GMRuntime.gml_sprite_asset_name(sprite_index)"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current != null and str(current.name) == sprite_name:"
         "\n\t\t_gm_apply_image_index()"
@@ -337,6 +407,7 @@ def _emit_sprite_runtime_prelude(
         "\n\tif current != null:"
         "\n\t\tremove_child(current)"
         "\n\t\tcurrent.queue_free()"
+        "\n\t_gm_sprite_visual_cache = null"
         "\n\tvar instance = scene.instantiate()"
         "\n\tinstance.name = sprite_name"
         "\n\tadd_child(instance)"
@@ -344,33 +415,46 @@ def _emit_sprite_runtime_prelude(
         "\n\t_gm_apply_image_index()"
         "\n\t_gm_apply_image_transform()"
         "\n\nfunc _gm_apply_image_index():"
+        # image_index keeps the value the game assigned; the visible frame
+        # is its integer part (truncated toward zero) wrapped into
+        # image_number, as GameMaker draws it. The instance's sprite never
+        # plays on its own: the step loop advances image_index instead.
+        # This runs every step for every animating instance, so the sprite
+        # node's frame count is read once per node (_gm_sprite_visual_node)
+        # and the collision mask follows only frame changes.
+        "\n\tvar sprite_index_type = typeof(sprite_index)"
+        "\n\tif (sprite_index_type == TYPE_INT or sprite_index_type == TYPE_FLOAT) and sprite_index < 0:"
+        "\n\t\timage_number = 0"
+        "\n\t\treturn"
         "\n\tvar sprite_node = _gm_sprite_visual_node()"
         "\n\tif sprite_node == null:"
+        "\n\t\timage_number = 0"
         "\n\t\treturn"
-        "\n\tvar frame_index = max(int(image_index), 0)"
         "\n\tif sprite_node is AnimatedSprite2D:"
-        "\n\t\tvar frame_count = 0"
-        "\n\t\tif sprite_node.sprite_frames != null and sprite_node.sprite_frames.has_animation(sprite_node.animation):"
-        "\n\t\t\tframe_count = sprite_node.sprite_frames.get_frame_count(sprite_node.animation)"
-        "\n\t\timage_number = max(frame_count, 1)"
-        "\n\t\tif frame_count > 0:"
-        "\n\t\t\tframe_index = min(frame_index, frame_count - 1)"
-        "\n\t\tsprite_node.frame = frame_index"
-        "\n\t\tsprite_node.frame_progress = 0.0"
-        "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
+        "\n\t\tif not sprite_node.is_inside_tree():"
+        "\n\t\t\tsprite_node.autoplay = \"\""
+        "\n\t\telif sprite_node.is_playing():"
+        "\n\t\t\tsprite_node.pause()"
+        "\n\tvar frame_count = int(image_number)"
+        "\n\tif frame_count <= 0:"
         "\n\t\treturn"
-        "\n\tif sprite_node is Sprite2D:"
-        "\n\t\tvar frame_count = sprite_node.hframes * sprite_node.vframes"
-        "\n\t\timage_number = max(frame_count, 1)"
-        "\n\t\tif frame_count > 1:"
-        "\n\t\t\tsprite_node.frame = min(frame_index, frame_count - 1)"
+        "\n\tvar frame_index = int(image_index) % frame_count"
+        "\n\tif frame_index < 0:"
+        "\n\t\tframe_index += frame_count"
+        "\n\tif sprite_node.frame != frame_index:"
+        "\n\t\tsprite_node.frame = frame_index"
         "\n\t\t_gm_sync_collision_mask_frame(frame_index)"
         "\n\nfunc _gm_sync_collision_mask_frame(frame_index):"
-        "\n\tvar current = _gm_current_sprite_scene_root()"
-        "\n\tif current != null and current.has_method(\"_gm_set_collision_frame\"):"
-        "\n\t\tcurrent.call(\"_gm_set_collision_frame\", frame_index)"
+        "\n\tvar current = _gm_sprite_visual_node()"
+        "\n\twhile current != null and current != self:"
+        "\n\t\tif current.has_method(\"_gm_set_collision_frame\"):"
+        "\n\t\t\tcurrent.call(\"_gm_set_collision_frame\", frame_index)"
+        "\n\t\t\treturn"
+        "\n\t\tcurrent = current.get_parent()"
         "\n\nfunc _gm_apply_image_transform():"
-        "\n\trotation_degrees = float(image_angle)"
+        # GameMaker angles turn counter-clockwise on screen; a positive Godot
+        # rotation turns clockwise (y points down).
+        "\n\trotation_degrees = -float(image_angle)"
         "\n\tscale = Vector2(float(image_xscale), float(image_yscale))"
         "\n\tvar sprite_node = _gm_sprite_visual_node()"
         "\n\tif sprite_node is CanvasItem:"
@@ -400,16 +484,30 @@ def _emit_sprite_runtime_prelude(
         "\n\t\t\treturn child"
         "\n\treturn null"
         "\n\nfunc _gm_sprite_visual_node():"
+        # The node showing the sprite, and image_number from its frames.
+        "\n\tif is_instance_valid(_gm_sprite_visual_cache) and is_ancestor_of(_gm_sprite_visual_cache):"
+        "\n\t\treturn _gm_sprite_visual_cache"
+        "\n\t_gm_sprite_visual_cache = null"
+        "\n\timage_number = 0"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current == null:"
         "\n\t\treturn null"
         "\n\tif current is AnimatedSprite2D or current is Sprite2D:"
-        "\n\t\treturn current"
-        "\n\tvar animated_sprite = current.find_child(\"AnimatedSprite2D\", true, false)"
-        "\n\tif animated_sprite != null:"
-        "\n\t\treturn animated_sprite"
-        "\n\treturn current.find_child(\"Sprite2D\", true, false)"
+        "\n\t\t_gm_sprite_visual_cache = current"
+        "\n\telse:"
+        "\n\t\t_gm_sprite_visual_cache = current.find_child(\"AnimatedSprite2D\", true, false)"
+        "\n\t\tif _gm_sprite_visual_cache == null:"
+        "\n\t\t\t_gm_sprite_visual_cache = current.find_child(\"Sprite2D\", true, false)"
+        "\n\tvar sprite_node = _gm_sprite_visual_cache"
+        "\n\tif sprite_node is AnimatedSprite2D:"
+        "\n\t\tif sprite_node.sprite_frames != null and sprite_node.sprite_frames.has_animation(sprite_node.animation):"
+        "\n\t\t\timage_number = sprite_node.sprite_frames.get_frame_count(sprite_node.animation)"
+        "\n\telif sprite_node is Sprite2D:"
+        "\n\t\timage_number = max(sprite_node.hframes * sprite_node.vframes, 1)"
+        "\n\treturn sprite_node"
         "\n\nfunc _gm_clear_current_sprite():"
+        "\n\t_gm_sprite_visual_cache = null"
+        "\n\timage_number = 0"
         "\n\tvar current = _gm_current_sprite_scene_root()"
         "\n\tif current != null:"
         "\n\t\tremove_child(current)"
@@ -417,17 +515,8 @@ def _emit_sprite_runtime_prelude(
     )
 
 
-def _prepend_sprite_runtime_ready_body(
-    body: str,
-    sprite_runtime: SpriteRuntimeConfig,
-    *,
-    inherited_runtime: bool,
-) -> str:
-    init_lines: list[str] = []
-    if inherited_runtime and sprite_runtime.initial_sprite_name is not None:
-        init_lines.append(f"\tsprite_index = {_gd_string(sprite_runtime.initial_sprite_name)}")
-    init_lines.append("\t_gm_initialize_sprite_runtime()")
-    init_body = "\n".join(init_lines)
+def _prepend_sprite_runtime_ready_body(body: str) -> str:
+    init_body = "\t_gm_initialize_sprite_runtime()"
     if body.strip() == "pass":
         return init_body
     return f"{init_body}\n{body}"
@@ -438,29 +527,59 @@ def _emit_object_runtime_prelude(
     object_runtime: ObjectRuntimeConfig,
     *,
     declare_members: bool,
+    sprite_construct_lines: Sequence[str] = (),
 ) -> None:
+    # other is the instance itself, except while a collision event runs
+    # (the dispatcher sets it) and inside with blocks (the transpiler passes
+    # the outer instance).
     member_lines = (
         "\n\nvar id = GMRuntime.gml_instance_noone()"
-        "\nvar other = GMRuntime.gml_instance_noone()"
+        "\nvar other = self"
         f"\nvar object_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
-        "\nvar depth = 0"
+        "\nvar _gm_depth = 0.0"
+        "\nvar depth:"
+        "\n\tget:"
+        "\n\t\treturn GMRuntime.gml_instance_depth_get(self, _gm_depth)"
+        "\n\tset(value):"
+        "\n\t\t_gm_depth = GMRuntime.gml_instance_depth_assign(self, value, _gm_depth)"
         f"\nvar solid = {str(object_runtime.solid).lower()}"
         f"\nvar persistent = {str(object_runtime.persistent).lower()}"
+        "\nvar mask_index = -1:"
+        "\n\tset(value):"
+        "\n\t\tmask_index = value"
+        f"{_collision_dirty_line(True)}"
+        "\nvar _gm_collision_state = null"
+        "\nvar _gm_collision_dirty = true"
+        "\nvar _gm_constructed = false"
+        "\n\nfunc _gm_collision_changed():"
+        "\n\tif not _gm_collision_dirty:"
+        "\n\t\t_gm_collision_dirty = true"
+        "\n\t\tGMRuntime._gml_collision_instance_changed(self)"
+        f"\n\nfunc _notification(what):\n{_COLLISION_NOTIFICATION_BODY}"
         if declare_members
         else ""
+    )
+    # Every instance starts with its own object's collision mask; -1 means
+    # the sprite is the mask.
+    initial_mask = (
+        f"GMRuntime.gml_asset_get_index({_gd_string(object_runtime.mask_sprite_name)})"
+        if object_runtime.mask_sprite_name
+        else "-1"
     )
     lines.append(
         member_lines
         + "\n\nfunc _gm_register_instance():"
-        "\n\tif GMRuntime.gml_handle_is_valid(id):"
+        # Registered already, or destroyed (never registered again).
+        "\n\tif GMRuntime.gml_handle_is_valid(id) or has_meta(\"_gm2godot_instance_destroyed\"):"
         "\n\t\treturn"
         f"\n\tid = GMRuntime.gml_instance_register(self, {_gd_string(object_runtime.object_name)}, {_gd_string_array(object_runtime.parent_object_names)})"
         f"\n\tobject_index = GMRuntime.gml_asset_get_index({_gd_string(object_runtime.object_name)})"
         f"\n\tsolid = {str(object_runtime.solid).lower()}"
         f"\n\tpersistent = {str(object_runtime.persistent).lower()}"
+        f"\n\tmask_index = {initial_mask}"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"id\", id)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"object_index\", object_index)"
-        "\n\tGMRuntime.gml_variable_instance_set(self, \"depth\", depth)"
+        "\n\t_gm_depth = GMRuntime.gml_instance_depth_initial(self, _gm_depth)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"solid\", solid)"
         "\n\tGMRuntime.gml_variable_instance_set(self, \"persistent\", persistent)"
         "\n\tset_meta(\"gamemaker_persistent\", persistent)"
@@ -471,7 +590,23 @@ def _emit_object_runtime_prelude(
         "\n\nfunc _gm_unregister_instance():"
         "\n\tif has_meta(\"_gm2godot_room_preserving_persistent\") and get_meta(\"_gm2godot_room_preserving_persistent\"):"
         "\n\t\treturn"
-        "\n\tGMRuntime.gml_instance_unregister(id)\n"
+        "\n\tGMRuntime.gml_instance_unregister(id)"
+        # GameMaker builds an instance once, before its Create event: it is
+        # registered, xstart/ystart and xprevious/yprevious take its
+        # position, and it gets its object's sprite and its room placement's
+        # image settings. Each object script has its own construction (the
+        # most derived one runs), and the Create events of parent objects,
+        # which event_inherited() runs, do not build the instance again.
+        # Placed instances are built when their room starts, before the
+        # first Create event (gml_room_prepare_scene).
+        "\n\nfunc _gm_construct_instance():"
+        "\n\tif _gm_constructed:"
+        "\n\t\treturn"
+        "\n\t_gm_constructed = true"
+        "\n\t_gm_register_instance()"
+        "\n\t_gm_initialize_motion_runtime()"
+        + "".join(f"\n{line}" for line in sprite_construct_lines)
+        + "\n"
     )
 
 
@@ -486,10 +621,13 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
         "\nvar friction = 0.0"
         "\nvar gravity = 0.0"
         "\nvar gravity_direction = 270.0"
-        "\nvar path_index = GMRuntime.gml_undefined()"
+        "\nvar path_index = -1"
         "\nvar path_position = 0.0"
+        "\nvar path_positionprevious = 0.0"
         "\nvar path_speed = 0.0"
         "\nvar path_scale = 1.0"
+        "\nvar path_orientation = 0.0"
+        "\nvar path_endaction = 0"
         "\nvar xprevious = 0.0"
         "\nvar yprevious = 0.0"
         "\nvar xstart = 0.0"
@@ -501,13 +639,68 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
         "\n\typrevious = position.y"
         "\n\tGMRuntime.gml_motion_sync_from_speed_direction(self)"
         "\n\nfunc _gm_apply_motion_step():"
-        "\n\tGMRuntime.gml_path_step(self)"
         "\n\tGMRuntime.gml_motion_step(self)\n"
     )
 
 
+def _emit_builtin_instance_variables_prelude(lines: list[str], *, declare_members: bool) -> None:
+    # Every GameMaker instance has these built-in variables, with the HTML5
+    # runner's defaults (yyInstance.js). The timeline step reads the
+    # timeline_* members; layer is the handle of the instance's layer, and
+    # assigning it moves the instance to that layer.
+    if not declare_members:
+        return
+    lines.append(
+        "\n\nvar timeline_index = -1"
+        "\nvar timeline_position = 0.0"
+        "\nvar timeline_speed = 1.0"
+        "\nvar timeline_running = false"
+        "\nvar timeline_loop = false"
+        "\nvar in_sequence = false"
+        "\nvar drawn_by_sequence = false"
+        "\nvar sequence_instance = GMRuntime.gml_undefined()"
+        "\nvar layer:"
+        "\n\tget:"
+        "\n\t\treturn GMRuntime.gml_instance_layer_get(self)"
+        "\n\tset(value):"
+        "\n\t\tGMRuntime.gml_instance_layer_set(self, value)\n"
+    )
+
+
+def _guard_create_event_body(body: str) -> str:
+    # GameMaker runs no Create event for an instance created after the
+    # current event requested a room change (unless the instance or room is
+    # persistent); the instance still exists until the room ends.
+    if body.strip() == "pass":
+        return body
+    return "\tif GMRuntime.gml_event_create_blocked(self):\n\t\treturn\n" + body
+
+
+def _run_variable_definitions_before_create(body: str) -> str:
+    # GameMaker assigns an instance's Variable Definitions (its object's
+    # Pre-Create event, then the values its room placement overrides) right
+    # before its Create event. The runtime runs them once per instance, so a
+    # parent's Create event run by event_inherited() does not run them again.
+    call = "\tGMRuntime.gml_instance_pre_create(self)"
+    if body.strip() == "pass":
+        return call
+    return f"{call}\n{body}"
+
+
+def _add_variable_definitions(
+    code_bodies: dict[str, str],
+    object_runtime: ObjectRuntimeConfig | None,
+) -> list[EventMapping]:
+    """Run Variable Definitions in _ready; return the function they need."""
+    if object_runtime is not None and object_runtime.runs_variable_definitions:
+        code_bodies["_ready"] = _run_variable_definitions_before_create(code_bodies["_ready"])
+    if VARIABLE_DEFINITIONS_FUNCTION in code_bodies:
+        return [EventMapping(VARIABLE_DEFINITIONS_FUNCTION, "", 0, "")]
+    return []
+
+
 def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    init_lines = ["\t_gm_register_instance()", "\t_gm_initialize_motion_runtime()"]
+    init_lines = ["\t_gm_construct_instance()"]
     should_call_parent_ready = object_runtime.inherit_ready
     if should_call_parent_ready and body.strip() == "pass":
         init_lines.append("\tsuper._ready()")
@@ -520,16 +713,6 @@ def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConf
     return wrapped_body
 
 
-def _wrap_object_runtime_exit_tree_body(body: str, object_runtime: ObjectRuntimeConfig) -> str:
-    cleanup_lines: list[str] = []
-    if object_runtime.inherit_exit_tree and body.strip() == "pass":
-        cleanup_lines.append("\tsuper._exit_tree()")
-    elif body.strip() != "pass":
-        cleanup_lines.append(body)
-    cleanup_lines.append("\t_gm_unregister_instance()")
-    return "\n".join(cleanup_lines)
-
-
 def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
     begin_line = f'\tGMRuntime.gml_draw_begin(self, {_gd_string(func.godot_func)})'
     end_line = "\tGMRuntime.gml_draw_end()"
@@ -538,10 +721,17 @@ def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
     return f"{begin_line}\n{body}\n{end_line}"
 
 
-def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -> str:
+def _render_input_event_bindings_body(
+    input_functions: Sequence[EventMapping],
+    inherited_input_functions: Iterable[str] = (),
+) -> str:
+    function_names = [func.godot_func for func in input_functions]
+    function_names += [
+        name for name in dict.fromkeys(inherited_input_functions) if name not in function_names
+    ]
     binding_lines = ["\treturn ["]
-    for func in input_functions:
-        match = re.match(r"^_gm_input_(keyboard|mouse|key_press|key_release|gesture)_(-?\d+)$", func.godot_func)
+    for function_name in function_names:
+        match = re.match(r"^_gm_input_(keyboard|mouse|key_press|key_release|gesture)_(-?\d+)$", function_name)
         if match is None:
             continue
         family = match.group(1)
@@ -554,7 +744,7 @@ def _render_input_event_bindings_body(input_functions: Sequence[EventMapping]) -
         }[family]
         event_num = int(match.group(2))
         binding_lines.append(
-            f'\t\t{{"event_type": {event_type}, "event_num": {event_num}, "method": {_gd_string(func.godot_func)}}},'
+            f'\t\t{{"event_type": {event_type}, "event_num": {event_num}, "method": {_gd_string(function_name)}}},'
         )
     binding_lines.append("\t]")
     return "\n".join(binding_lines)
@@ -606,7 +796,7 @@ def generate_script_content(
     Returns:
         Complete .gd file content as a string.
     """
-    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies)
+    uses_sprite_runtime = _uses_sprite_runtime(sprite_runtime, code_bodies, object_runtime)
     uses_object_runtime = _uses_object_runtime(object_runtime)
     uses_motion_runtime = _uses_motion_runtime(object_runtime)
     if not event_list and not uses_sprite_runtime and not uses_object_runtime:
@@ -644,7 +834,10 @@ def generate_script_content(
     if input_functions:
         effective_code_bodies.setdefault(
             "_gm_input_event_bindings",
-            _render_input_event_bindings_body(_deduplicate_functions(input_functions)),
+            _render_input_event_bindings_body(
+                _deduplicate_functions(input_functions),
+                object_runtime.inherited_input_functions if object_runtime is not None else (),
+            ),
         )
     if collision_bindings:
         effective_code_bodies.setdefault(
@@ -658,7 +851,8 @@ def generate_script_content(
         unique_functions = _deduplicate_functions(unique_functions + [EventMapping("_ready", "", 0, "")])
         function_names = {func.godot_func for func in unique_functions}
     if uses_object_runtime:
-        required_functions: list[EventMapping] = []
+        effective_code_bodies["_ready"] = _guard_create_event_body(effective_code_bodies.get("_ready", "\tpass"))
+        required_functions = _add_variable_definitions(effective_code_bodies, object_runtime)
         if "_ready" not in function_names:
             required_functions.append(EventMapping("_ready", "", 0, ""))
         if "_exit_tree" not in function_names:
@@ -667,21 +861,6 @@ def generate_script_content(
             unique_functions = _deduplicate_functions(unique_functions + required_functions)
             function_names = {func.godot_func for func in unique_functions}
     script_features = get_script_features()
-
-    for feature in script_features:
-        get_additional_functions = cast(
-            _GetAdditionalFunctions | None,
-            getattr(feature, "get_additional_functions", None),
-        )
-        if get_additional_functions is None:
-            continue
-
-        functions_to_add = get_additional_functions(function_names)
-        if not functions_to_add:
-            continue
-
-        unique_functions = _deduplicate_functions(unique_functions + functions_to_add)
-        function_names = {func.godot_func for func in unique_functions}
     uses_draw_runtime = _uses_draw_runtime(function_names)
 
     # Sort by sort_key, then alphabetically for same key
@@ -689,7 +868,13 @@ def generate_script_content(
 
     lines = [_extends_line(base_script_path)]
     runtime_const_inherited = base_script_path is not None and uses_object_runtime
-    if (_uses_gml_runtime(effective_code_bodies) or uses_object_runtime or uses_draw_runtime) and not runtime_const_inherited:
+    uses_runtime_const = (
+        _uses_gml_runtime(effective_code_bodies)
+        or uses_object_runtime
+        or uses_draw_runtime
+        or uses_sprite_runtime
+    )
+    if uses_runtime_const and not runtime_const_inherited:
         lines.append(f'\n\nconst GMRuntime = preload("{GML_RUNTIME_RESOURCE_PATH}")\n')
     for feature in script_features:
         emit_prelude = cast(_EmitPrelude | None, getattr(feature, "emit_prelude", None))
@@ -705,11 +890,24 @@ def generate_script_content(
             lines,
             sprite_runtime,
             declare_members=not inherited_sprite_runtime,
+            track_collision=uses_object_runtime,
         )
     if uses_object_runtime and object_runtime is not None:
+        # A child of an object with the sprite runtime starts with its own
+        # sprite (or none) even when its code never names a sprite member.
+        constructs_sprite = sprite_runtime is not None and (
+            uses_sprite_runtime or sprite_runtime.inherit_runtime is True
+        )
         _emit_object_runtime_prelude(
             lines,
             object_runtime,
+            declare_members=base_script_path is None,
+            # Its own object's sprite: _gm_object_sprite_index (virtual) starts
+            # sprite_index, and construction shows it.
+            sprite_construct_lines=("\t_gm_initialize_sprite_runtime()",) if constructs_sprite else (),
+        )
+        _emit_builtin_instance_variables_prelude(
+            lines,
             declare_members=base_script_path is None,
         )
     if uses_motion_runtime:
@@ -722,20 +920,16 @@ def generate_script_content(
 
     for func in unique_functions:
         body = _get_function_body(func, effective_code_bodies)
-        for feature in script_features:
-            wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
-            if wrap_body is not None:
-                body = wrap_body(func, body, function_names)
-        if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready":
-            body = _prepend_sprite_runtime_ready_body(
-                body,
-                sprite_runtime,
-                inherited_runtime=inherited_sprite_runtime,
-            )
+        if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready" and not uses_object_runtime:
+            body = _prepend_sprite_runtime_ready_body(body)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
             body = _wrap_object_runtime_ready_body(body, object_runtime)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_exit_tree":
-            body = _wrap_object_runtime_exit_tree_body(body, object_runtime)
+            # A node leaving the tree (freed, or moved as persistent
+            # instances are between rooms) only unregisters its instance; the
+            # runtime runs the Clean Up event (_on_clean_up) itself. An
+            # instance moving to another layer node stays registered.
+            body = f"{_LAYER_MOVE_EXIT_GUARD}\n\t_gm_unregister_instance()"
         if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")

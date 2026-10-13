@@ -23,19 +23,24 @@ from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.objects import ObjectConverter, ObjectProcessResult
 
 
+def _sprite_reference(sprite_name: str | None) -> str:
+    if sprite_name is None:
+        return "null"
+    return (
+        '{{"name": "{sprite_name}", '
+        '"path": "sprites/{sprite_name}/{sprite_name}.yy",}}'
+    ).format(sprite_name=sprite_name)
+
+
 def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             parent_path: str = "folders/Objects.yy",
                             event_list: list[JsonObject] | None = None,
                             parent_object_name: str | None = None,
-                            persistent: bool = False) -> str:
+                            persistent: bool = False,
+                            mask_sprite_name: str | None = None) -> str:
     """Build a GameMaker object .yy file string."""
-    if sprite_name is not None:
-        sprite_id = (
-            '{{"name": "{sprite_name}", '
-            '"path": "sprites/{sprite_name}/{sprite_name}.yy",}}'
-        ).format(sprite_name=sprite_name)
-    else:
-        sprite_id = "null"
+    sprite_id = _sprite_reference(sprite_name)
+    sprite_mask_id = _sprite_reference(mask_sprite_name)
 
     if parent_object_name is None:
         parent_object_id = "null"
@@ -86,12 +91,13 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "resourceVersion": "2.0",\n'
         '  "solid": false,\n'
         '  "spriteId": {sprite_id},\n'
-        '  "spriteMaskId": null,\n'
+        '  "spriteMaskId": {sprite_mask_id},\n'
         '  "visible": true,\n'
         '}}'
     ).format(
         name=name,
         sprite_id=sprite_id,
+        sprite_mask_id=sprite_mask_id,
         parent_path=parent_path,
         parent_object_id=parent_object_id,
         event_list_str=event_list_str,
@@ -120,6 +126,16 @@ def _make_sprite_yy_content(sprite_name: str, parent_path: str = "folders/Sprite
         '  "resourceType": "GMSprite",\n'
         '}}'
     ).format(name=sprite_name, parent_path=parent_path)
+
+
+# An object script builds its instance once, before its Create event, with
+# its own object's sprite (which _gm_object_sprite_index gives).
+_CONSTRUCTS_WITH_OWN_SPRITE = (
+    "\t_gm_constructed = true\n"
+    "\t_gm_register_instance()\n"
+    "\t_gm_initialize_motion_runtime()\n"
+    "\t_gm_initialize_sprite_runtime()\n"
+)
 
 
 class TestObjectConverterBasic(unittest.TestCase):
@@ -1088,10 +1104,8 @@ class TestObjectSourceContainment(unittest.TestCase):
         self.assertTrue(script.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('"target_object": "o_bullet"', script)
         self.assertIn("func _on_collision_o_bullet():", script)
-        self.assertIn(
-            'GMRuntime.gml_variable_instance_set(self, "safe_collision", true)',
-            script,
-        )
+        self.assertIn("\nvar safe_collision\n", script)
+        self.assertIn("\tsafe_collision = true", script)
         generated = self._all_generated_text()
         self.assertIn("res://sprites/s_real/s_real.tscn", generated)
         self.assertNotIn("UNTRUSTED_", generated)
@@ -1481,7 +1495,8 @@ class TestScriptGeneration(unittest.TestCase):
                       event_list: list[JsonObject] | None = None,
                       parent_object_name: str | None = None,
                       persistent: bool = False,
-                      create_empty_event_sources: bool = True) -> None:
+                      create_empty_event_sources: bool = True,
+                      mask_sprite_name: str | None = None) -> None:
         obj_dir = os.path.join(self.gm_dir, "objects", name)
         os.makedirs(obj_dir)
         yy_content = _make_object_yy_content(
@@ -1490,6 +1505,7 @@ class TestScriptGeneration(unittest.TestCase):
             event_list=event_list,
             parent_object_name=parent_object_name,
             persistent=persistent,
+            mask_sprite_name=mask_sprite_name,
         )
         with open(os.path.join(obj_dir, name + ".yy"), "w") as f:
             f.write(yy_content)
@@ -1622,8 +1638,12 @@ class TestScriptGeneration(unittest.TestCase):
             content = f.read()
         self.assertIn('const GMRuntime = preload("res://gm2godot/gml_runtime.gd")', content)
         self.assertIn('GMRuntime.gml_instance_register(self, "o_empty", [])', content)
-        self.assertIn("func _ready():\n\t_gm_register_instance()", content)
-        self.assertIn("func _exit_tree():\n\t_gm_unregister_instance()", content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()", content)
+        self.assertIn("\t_gm_constructed = true\n\t_gm_register_instance()", content)
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()',
+            content,
+        )
 
     def test_script_records_persistent_object_state(self):
         self._setup_object("o_persist", event_list=[], persistent=True)
@@ -1639,6 +1659,22 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('GMRuntime.gml_variable_instance_set(self, "persistent", persistent)', content)
         self.assertIn('set_meta("gamemaker_persistent", persistent)', content)
 
+    def test_script_starts_instances_with_the_object_collision_mask(self):
+        self._setup_object("o_masked", sprite_name="s_body", event_list=[], mask_sprite_name="s_hitbox")
+        self._setup_object("o_plain", sprite_name="s_body", event_list=[])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_masked", "o_masked.gd"), encoding="utf-8") as f:
+            masked = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_plain", "o_plain.gd"), encoding="utf-8") as f:
+            plain = f.read()
+
+        self.assertIn("\nvar mask_index = -1", masked)
+        self.assertIn('\tmask_index = GMRuntime.gml_asset_get_index("s_hitbox")', masked)
+        self.assertIn("\tmask_index = -1", plain)
+        self.assertNotIn("s_hitbox", plain)
+
     def test_script_registers_parent_object_chain(self):
         self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
         self._setup_object("o_child", event_list=[], parent_object_name="o_parent")
@@ -1651,9 +1687,169 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertTrue(content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
+
+    def _write_event_source(self, object_name: str, filename: str, source: str) -> None:
+        with open(os.path.join(self.gm_dir, "objects", object_name, filename), "w", encoding="utf-8") as f:
+            f.write(source)
+
+    def _unconverted_parent_diagnostics(self, diagnostics: DiagnosticCollector) -> dict[str, str]:
+        return {
+            str(diagnostic.resource): diagnostic.message
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-PARENT-NOT-CONVERTED"
+        }
+
+    def test_children_of_a_skipped_object_extend_the_nearest_converted_ancestor(self):
+        # o_b has no script (its Step code does not transpile). o_c and o_d
+        # below it must still load: they extend o_a, the nearest object with a
+        # script, and the events of o_b are not theirs to inherit.
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        step: JsonObject = {"eventType": 3, "eventNum": 0}
+        self._setup_object("o_a", event_list=[create])
+        self._setup_object("o_b", event_list=[step], parent_object_name="o_a")
+        self._setup_object("o_c", event_list=[create, step], parent_object_name="o_b")
+        self._setup_object("o_d", event_list=[], parent_object_name="o_c")
+        self._write_event_source("o_a", "Create_0.gml", "hp = 1;\n")
+        self._write_event_source("o_b", "Step_0.gml", "if (hp ==== 1 {\n")
+        self._write_event_source("o_c", "Create_0.gml", "event_inherited();\nmana = 2;\n")
+        self._write_event_source("o_c", "Step_0.gml", "event_inherited();\nmana += 1;\n")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd")))
+        scripts: dict[str, str] = {}
+        for name in ("o_a", "o_c", "o_d"):
+            with open(os.path.join(self.godot_dir, "objects", name, f"{name}.gd"), encoding="utf-8") as f:
+                scripts[name] = f.read()
+        self.assertTrue(scripts["o_c"].startswith('extends "res://objects/o_a/o_a.gd"'))
+        self.assertTrue(scripts["o_d"].startswith('extends "res://objects/o_c/o_c.gd"'))
+        # The instance is still an o_b to GameMaker.
+        self.assertIn('GMRuntime.gml_instance_register(self, "o_c", ["o_b", "o_a"])', scripts["o_c"])
+        # o_a has a Create event to inherit and no Step event.
+        self.assertIn("super._ready()", scripts["o_c"])
+        self.assertNotIn("super._on_step", scripts["o_c"])
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_c"])
+        self.assertIn("extends 'o_a'", self._unconverted_parent_diagnostics(diagnostics)["o_c"])
+
+    def test_children_of_a_skipped_root_object_become_roots(self):
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        self._setup_object("o_a", event_list=[create])
+        self._setup_object("o_b", event_list=[create], parent_object_name="o_a")
+        self._setup_object("o_c", event_list=[], parent_object_name="o_b")
+        self._write_event_source("o_a", "Create_0.gml", "hp = ;;\n")
+        self._write_event_source("o_b", "Create_0.gml", "event_inherited();\nmana = 2;\n")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "objects", "o_a", "o_a.gd")))
+        with open(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd"), encoding="utf-8") as f:
+            script = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_c", "o_c.gd"), encoding="utf-8") as f:
+            child_script = f.read()
+        # With no ancestor script o_b is the root script: it declares the
+        # members every instance has and what its own code assigns.
+        self.assertTrue(script.startswith("extends Node2D"))
+        self.assertIn("\nvar id = GMRuntime.gml_instance_noone()", script)
+        self.assertIn("\nvar mana", script)
+        self.assertNotIn("super._ready()", script)
+        self.assertTrue(child_script.startswith('extends "res://objects/o_b/o_b.gd"'))
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_b"])
+
+    def test_children_of_a_failed_object_load_too(self):
+        # An object whose .yy cannot be read produces no script either.
+        self._setup_object("o_a", event_list=[])
+        self._setup_object("o_b", event_list=[], parent_object_name="o_a")
+        with open(os.path.join(self.gm_dir, "objects", "o_a", "o_a.yy"), "w", encoding="utf-8") as f:
+            f.write("{ this is not json")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertTrue(script.startswith("extends Node2D"))
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_b"])
+
+    def test_object_without_sprite_or_sprite_code_declares_sprite_members(self):
+        # Every GameMaker instance has sprite_index and the image_* variables,
+        # and another instance can give it a sprite.
+        self._setup_object("o_empty", event_list=[])
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_empty", "o_empty.gd"), encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
+        self.assertIn("\nvar image_xscale = 1.0:", content)
+        self.assertIn("func _gm_initialize_sprite_runtime():", content)
+
+    def test_child_object_without_sprite_does_not_start_with_parent_sprite(self):
+        self._setup_object("o_parent", sprite_name="s_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_child", event_list=[], parent_object_name="o_parent")
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertNotIn("\nvar sprite_index =", content)
+        self.assertNotIn("\n\tsprite_index =", content)
+        self.assertIn("func _gm_object_sprite_index():\n\treturn -1\n", content)
+        self.assertIn(_CONSTRUCTS_WITH_OWN_SPRITE, content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
+
+    def test_leaf_object_keeps_its_sprite_under_a_middle_object_without_one(self):
+        # GameMaker starts every instance with its own object's sprite
+        # (yyInstance.js UpdateSpriteIndex(pObject.SpriteIndex)); the
+        # ancestors' Create events that run through event_inherited(), or
+        # because the leaf has no Create event, must not replace it.
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        self._setup_object("o_a", sprite_name="s_a", event_list=[create])
+        self._setup_object("o_b", event_list=[create], parent_object_name="o_a")
+        self._setup_object("o_c", sprite_name="s_c", event_list=[], parent_object_name="o_b")
+        self._setup_object("o_d", sprite_name="s_d", event_list=[create], parent_object_name="o_b")
+        for name, source in (
+            ("o_a", "hp = 1;\n"),
+            ("o_b", "event_inherited();\nmana = 2;\n"),
+            ("o_d", "event_inherited();\nshield = 3;\n"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", name, "Create_0.gml"), "w", encoding="utf-8") as f:
+                f.write(source)
+        converter = self._make_converter()
+        converter.convert_all()
+
+        scripts: dict[str, str] = {}
+        for name in ("o_a", "o_b", "o_c", "o_d"):
+            with open(os.path.join(self.godot_dir, "objects", name, f"{name}.gd"), encoding="utf-8") as f:
+                scripts[name] = f.read()
+
+        self.assertIn("\nvar sprite_index = _gm_object_sprite_index():", scripts["o_a"])
+        for name, own_sprite in (
+            ("o_a", 'GMRuntime.gml_sprite_reference("s_a")'),
+            ("o_b", "-1"),
+            ("o_c", 'GMRuntime.gml_sprite_reference("s_c")'),
+            ("o_d", 'GMRuntime.gml_sprite_reference("s_d")'),
+        ):
+            self.assertIn(f"func _gm_object_sprite_index():\n\treturn {own_sprite}\n", scripts[name])
+            # No _ready assigns it: the instance's own object starts it.
+            self.assertNotIn("\n\tsprite_index =", scripts[name])
+        self.assertIn(_CONSTRUCTS_WITH_OWN_SPRITE, scripts["o_c"])
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", scripts["o_c"])
         self.assertIn(
-            "func _ready():\n\t_gm_register_instance()\n\t_gm_initialize_motion_runtime()\n\tsuper._ready()",
-            content,
+            "func _ready():\n"
+            "\t_gm_construct_instance()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\tsuper._ready()",
+            scripts["o_d"],
+        )
+        self.assertIn(
+            "func _gm_initialize_sprite_runtime():\n"
+            "\tif _gm_sprite_runtime_started:\n"
+            "\t\treturn\n",
+            scripts["o_a"],
         )
 
     def test_child_object_reuses_inherited_sprite_runtime_members(self):
@@ -1681,7 +1877,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("\nvar sprite_index =", content)
         self.assertNotIn("\nvar image_index =", content)
         self.assertNotIn("func _gm_apply_sprite_index():", content)
-        self.assertIn("\tsprite_index = \"s_child\"\n\t_gm_initialize_sprite_runtime()", content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_child")\n', content)
+        self.assertIn(_CONSTRUCTS_WITH_OWN_SPRITE, content)
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
         self.assertIn("\tsuper._ready()", content)
 
     def test_script_event_sources_use_selected_macro_configuration(self):
@@ -1776,7 +1974,7 @@ class TestScriptGeneration(unittest.TestCase):
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
         self.assertIn("func _ready():", content)
-        self.assertIn("\t_gm_register_instance()", content)
+        self.assertIn("\t_gm_construct_instance()", content)
 
     def test_script_transpiles_create_event_gml_body(self):
         """Simple expression/operator GML bodies should populate event functions."""
@@ -2302,9 +2500,9 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
         self.assertIn(
-            '\tGMRuntime.gml_variable_instance_set(self, "child_before", true)\n'
+            "\tchild_before = true\n"
             "\tsuper._ready()\n"
-            '\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
+            "\tchild_after = true",
             child_content,
         )
 
@@ -2329,11 +2527,83 @@ class TestScriptGeneration(unittest.TestCase):
         with open(child_gd_path, "r", encoding="utf-8") as f:
             child_content = f.read()
 
-        self.assertIn(
-            '\tpass\n\tGMRuntime.gml_variable_instance_set(self, "child_after", true)',
-            child_content,
-        )
+        self.assertIn("\tpass\n\tchild_after = true", child_content)
         self.assertNotIn("super._ready()", child_content)
+
+    def test_events_inherited_past_a_parent_without_them_reach_the_grandparent(self):
+        """GameMaker walks up the whole ancestor chain for an event."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}], parent_object_name="o_grandparent")
+        self._setup_object("o_leaf", event_list=[], parent_object_name="o_parent")
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        with open(
+            os.path.join(self.gm_dir, "objects", "o_child", "Create_0.gml"),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write("event_inherited(); child_after = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_leaf", "o_leaf.gd"), encoding="utf-8") as f:
+            leaf_content = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), encoding="utf-8") as f:
+            child_content = f.read()
+
+        self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", leaf_content)
+        self.assertIn("\tsuper._ready()\n\tchild_after = true", child_content)
+
+    def test_child_input_bindings_include_inherited_input_events(self):
+        """A child with input events of its own still runs the ones it inherits."""
+        self._setup_object("o_grandparent", event_list=[{"eventType": 6, "eventNum": 11}])
+        self._setup_object(
+            "o_parent",
+            event_list=[{"eventType": 9, "eventNum": 89}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_grandparent",
+        )
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 9, "eventNum": 27}, {"eventType": 6, "eventNum": 4}],
+            parent_object_name="o_parent",
+        )
+        event_files = {
+            "o_grandparent": ("Mouse_11.gml",),
+            "o_parent": ("KeyPress_89.gml", "Mouse_4.gml"),
+            "o_child": ("KeyPress_27.gml", "Mouse_4.gml"),
+        }
+        for object_name, file_names in event_files.items():
+            for file_name in file_names:
+                with open(
+                    os.path.join(self.gm_dir, "objects", object_name, file_name),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    f.write("handled = true;")
+
+        converter = self._make_converter()
+        converter.convert_all()
+
+        child_gd_path = os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd")
+        with open(child_gd_path, "r", encoding="utf-8") as f:
+            child_content = f.read()
+        bindings = child_content[child_content.index("func _gm_input_event_bindings():"):]
+        bindings = bindings[: bindings.index("\t]")]
+        self.assertEqual(
+            [line.strip() for line in bindings.splitlines()[2:]],
+            [
+                '{"event_type": 9, "event_num": 27, "method": "_gm_input_key_press_27"},',
+                '{"event_type": 6, "event_num": 4, "method": "_gm_input_mouse_4"},',
+                '{"event_type": 9, "event_num": 89, "method": "_gm_input_key_press_89"},',
+                '{"event_type": 6, "event_num": 11, "method": "_gm_input_mouse_11"},',
+            ],
+        )
+        self.assertNotIn("func _gm_input_key_press_89", child_content)
+        self.assertNotIn("func _gm_input_mouse_11", child_content)
 
     def test_script_with_step_event(self):
         """eventType 3, eventNum 0 should produce the scheduler Step callback."""
@@ -2368,22 +2638,22 @@ class TestScriptGeneration(unittest.TestCase):
 
         self.assertIn("func _on_step():", content)
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "\tif GMRuntime.gml_keyboard_check(37):\n"
             "\t\tposition.x = GMRuntime.gml_sub(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "\tif GMRuntime.gml_keyboard_check(39):\n"
             "\t\tposition.x = GMRuntime.gml_add(position.x, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "\tif GMRuntime.gml_keyboard_check(38):\n"
             "\t\tposition.y = GMRuntime.gml_sub(position.y, 10)",
             content,
         )
         self.assertIn(
-            "\tif GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "\tif GMRuntime.gml_keyboard_check(40):\n"
             "\t\tposition.y = GMRuntime.gml_add(position.y, 10)",
             content,
         )
@@ -2418,7 +2688,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("var faster", content)
         self.assertIn("var superSpeed", content)
         self.assertIn("\tsuperSpeed = 0", content)
-        self.assertIn("\tif GMRuntime.gml_keyboard_check(KEY_SHIFT):", content)
+        self.assertIn("\tif GMRuntime.gml_keyboard_check(16):", content)
         self.assertIn("\tif GMRuntime.gml_eq(faster, true):", content)
         self.assertIn("\t\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)", content)
         self.assertNotIn("Could not transpile", "\n".join(str(msg) for msg in self.logs))
@@ -2653,12 +2923,20 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('const s_player = "s_player"', content)
         self.assertIn('"s_enemy": preload("res://sprites/s_enemy/s_enemy.tscn")', content)
         self.assertIn('"s_player": preload("res://sprites/s_player/s_player.tscn")', content)
-        self.assertIn('var sprite_index = "s_player":', content)
+        self.assertIn('var sprite_index = _gm_object_sprite_index():', content)
+        self.assertIn('func _gm_object_sprite_index():\n\treturn GMRuntime.gml_sprite_reference("s_player")\n', content)
         self.assertIn('var image_index = 0.0:', content)
         self.assertIn('func _gm_apply_sprite_index():', content)
         self.assertIn('func _gm_apply_image_index():', content)
         self.assertIn('if has_meta("gamemaker_image_index"):', content)
-        self.assertIn("\t_gm_initialize_sprite_runtime()\n\timage_index = 2", content)
+        self.assertIn("\t_gm_initialize_motion_runtime()\n\t_gm_initialize_sprite_runtime()\n", content)
+        self.assertIn(
+            "\t_gm_construct_instance()\n"
+            "\tif GMRuntime.gml_event_create_blocked(self):\n"
+            "\t\treturn\n"
+            "\timage_index = 2",
+            content,
+        )
         self.assertIn("\tsprite_index = s_enemy", content)
         self.assertNotIn("\n\nvar image_index\n", content)
         self.assertNotIn("\n\nvar sprite_index\n", content)
@@ -2676,7 +2954,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertNotIn("func _physics_process(delta):", content)
 
     def test_script_with_draw_event(self):
-        """eventType 8, eventNum 0 should produce func _draw()."""
+        """eventType 8, eventNum 0 should produce func _on_draw()."""
         self._setup_object("o_test", event_list=[{"eventType": 8, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2684,10 +2962,10 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _draw():", content)
+        self.assertIn("func _on_draw():", content)
 
     def test_script_with_cleanup_event(self):
-        """eventType 12 should produce func _exit_tree()."""
+        """eventType 12 should produce func _on_clean_up(); _exit_tree only unregisters."""
         self._setup_object("o_test", event_list=[{"eventType": 12, "eventNum": 0}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2695,7 +2973,11 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("func _exit_tree():", content)
+        self.assertIn("func _on_clean_up():", content)
+        self.assertIn(
+            'func _exit_tree():\n\tif has_meta("_gm2godot_moving_layers"):\n\t\treturn\n\t_gm_unregister_instance()\n',
+            content,
+        )
 
     def test_script_with_alarm_event(self):
         """eventType 2 should produce func _on_alarm_N()."""
@@ -2984,7 +3266,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _on_no_more_lives():", content)
 
     def test_script_with_close_button_event(self):
-        """eventType 7, eventNum 30 should generate close request handling."""
+        """eventType 7, eventNum 30 should generate the Close Button handler method."""
         self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 30}])
         converter = self._make_converter()
         converter.convert_all()
@@ -2992,9 +3274,9 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("get_tree().auto_accept_quit = false", content)
-        self.assertIn("func _notification(what):", content)
-        self.assertIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertIn("func _on_close_button():", content)
+        self.assertNotIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertNotIn("auto_accept_quit", content)
 
     def test_script_with_draw_gui_event(self):
         """eventType 8, eventNum 64 should produce func _on_draw_gui()."""
@@ -3249,6 +3531,9 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         calls: list[str] = []
         def reference(value: JsonValue, **kwargs: str) -> tuple[str, str] | None:
             calls.append(kwargs["field"])
+            if kwargs["field"] == "spriteMaskId":
+                self.assertIsNone(value)
+                return None
             if kwargs["field"] == "spriteId":
                 self.assertIs(value, sprite)
                 data["parentObjectId"] = {"name": "new_parent"}
@@ -3267,7 +3552,7 @@ class TestObjectTypedAcquisition(unittest.TestCase):
              patch.object(self.converter, "_sanitize_object_events", side_effect=sanitize):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(calls, ["spriteId", "parentObjectId", "eventList"])
+        self.assertEqual(calls, ["spriteId", "parentObjectId", "eventList", "spriteMaskId"])
         self.assertTrue(parsed["solid"])
         self.assertTrue(parsed["persistent"])
         self.assertEqual(parsed["parent_object_name"], "parent")
@@ -3310,7 +3595,10 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent"])
+        self.assertEqual(
+            trace,
+            ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "properties", "overriddenProperties", "spriteMaskId"],
+        )
         self.assertTrue(parsed["solid"])
         self.assertFalse(parsed["persistent"])
 

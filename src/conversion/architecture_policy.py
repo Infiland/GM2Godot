@@ -38,6 +38,8 @@ ROOM_ROOT_POLICY_ID = "gm_room_node2d"
 LAYER_HIERARCHY_POLICY_ID = "gm_layer_depth_node2d"
 GUI_LAYER_POLICY_ID = "gm_gui_canvas_layer"
 DEPTH_MAPPING_POLICY_ID = "gamemaker_depth_to_negative_z_index"
+# Godot's CanvasItem z_index range is -4096..4096.
+DEPTH_Z_LIMIT = 4096
 
 GODOT_ARCHITECTURE_SOURCES: JsonObject = {
     "autoload": "https://docs.godotengine.org/en/stable/getting_started/step_by_step/singletons_autoload.html",
@@ -381,12 +383,43 @@ def room_root_policy() -> JsonObject:
     }
 
 
+def gamemaker_depth_z_indices(depths: Iterable[int]) -> dict[int, int]:
+    """Return the absolute Godot z_index of each GameMaker depth in use.
+
+    GameMaker depths are integers (fractional depths are truncated toward
+    zero). Every distinct depth gets its own layer and layers draw from the
+    highest depth to the lowest, so two different depths never tie. Lower
+    GameMaker depths draw later and higher Godot z_index values draw later, so
+    the sign flips: while every depth fits Godot's +-4096 z_index range the
+    z_index is -depth. Otherwise each depth keeps -depth where the depths
+    around it leave room and is ranked into the range where they do not, which
+    keeps every distinct depth strictly ordered for up to 8193 depths. The
+    runtime ranks the depths in use the same way (_gml_depth_flush).
+    """
+    ordered = sorted(set(depths))
+    count = len(ordered)
+    if not ordered or (ordered[0] >= -DEPTH_Z_LIMIT and ordered[-1] <= DEPTH_Z_LIMIT):
+        return {depth: -depth for depth in ordered}
+    z_indices: dict[int, int] = {}
+    for index, depth in enumerate(ordered):
+        # index depths draw above this one and count - 1 - index below it.
+        lowest = -DEPTH_Z_LIMIT + count - 1 - index
+        highest = DEPTH_Z_LIMIT - index
+        z_index = lowest if -depth < lowest else min(-depth, highest)
+        z_indices[depth] = max(-DEPTH_Z_LIMIT, min(DEPTH_Z_LIMIT, z_index))
+    return z_indices
+
+
 def layer_hierarchy_policy() -> JsonObject:
     return {
         "id": LAYER_HIERARCHY_POLICY_ID,
         "layer_node": "Node2D",
         "depth_mapping": DEPTH_MAPPING_POLICY_ID,
-        "depth_expression": "Node2D.z_index = -GameMaker layer depth",
+        "depth_expression": (
+            "Node2D.z_index = -GameMaker layer depth (absolute z; when a depth in "
+            "use is beyond Godot's +-4096 range, the distinct depths in use are "
+            "ranked into it in depth order)"
+        ),
         "gui_layer": {
             "id": GUI_LAYER_POLICY_ID,
             "godot_node": "CanvasLayer",

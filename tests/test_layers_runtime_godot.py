@@ -112,7 +112,8 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_x(layer_id, 8) and GMRuntime.gml_layer_y(layer_id, 16), "layer position setters failed"):
         \t\treturn
-        \tif not _check(instances.position == Vector2(8, 16) and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
+        \t# An instance layer's offset does not move its instances.
+        \tif not _check(instances.position == Vector2.ZERO and GMRuntime.gml_layer_get_x(layer_id) == 8 and GMRuntime.gml_layer_get_y(layer_id) == 16, "layer position getters mismatch"):
         \t\treturn
         \tif not _check(GMRuntime.gml_layer_hspeed(layer_id, 2) and GMRuntime.gml_layer_vspeed(layer_id, -1), "layer speed setters failed"):
         \t\treturn
@@ -195,7 +196,9 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tvar tile_set = TileSet.new()
         \ttile_set.tile_size = Vector2i(16, 16)
         \ttile_set.add_source(atlas, 0)
-        \ttile_set.set_meta("gamemaker_tileset_out_columns", 2)
+        \t# out_columns describes the compiled texture page; tile numbers count in the
+        \t# sprite's own grid (2 columns here) whatever it says.
+        \ttile_set.set_meta("gamemaker_tileset_out_columns", 5)
         \tvar tile_set_id = GMRuntime.gml_asset_register_dynamic("ts_runtime", "tileset", tile_set)
         \tif not _check(not GMRuntime.gml_handle_is_valid(GMRuntime.gml_layer_tilemap_create(fx, 0, 0, -999, 1, 1)), "invalid tileset created a tilemap"):
         \t\treturn
@@ -244,7 +247,7 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\t\treturn
         \t\tif not _check(tilemap_node.get_cell_alternative_tile(coords) == expected_godot_transforms[transform_index], "tile transform orientation mismatch at " + str(transform_index)):
         \t\t\treturn
-        \tif not _check(tilemap_node.get_cell_source_id(Vector2i(0, 0)) == 0 and tilemap_node.get_cell_atlas_coords(Vector2i(0, 0)) == Vector2i(0, 0), "base tile atlas mapping mismatch"):
+        \tif not _check(tilemap_node.get_cell_source_id(Vector2i(0, 0)) == 0 and tilemap_node.get_cell_atlas_coords(Vector2i(0, 0)) == Vector2i(1, 0), "tile 1 is not cell 1 of the source grid"):
         \t\treturn
         \t# Authored room metadata preserves every non-rendering/custom tile-data bit.
         \ttilemap_node.set_meta("gamemaker_tile_raw_cells", {})
@@ -278,10 +281,15 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(not GMRuntime.gml_tilemap_set(tilemap, 99, 0, 0), "nonexistent atlas tile was accepted"):
         \t\treturn
+        \t# The atlas has cells 0 and 1 only: tile 2 is outside the tile count.
+        \tif not _check(not GMRuntime.gml_tilemap_set(tilemap, 2, 0, 0), "tile past the tile count was accepted"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_set(tilemap, 0, 1, 0) and tilemap_node.get_cell_source_id(Vector2i(1, 0)) == -1, "tile 0 was drawn"):
+        \t\treturn
         \tif not _check(not GMRuntime.gml_tilemap_set(-999, 1, 0, 0) and GMRuntime.gml_tilemap_get(-999, 0, 0) == -1, "invalid tilemap handle semantics mismatch"):
         \t\treturn
 
-        \t# Atlas-grid fallback must account for margins and separation.
+        \t# The atlas grid must account for margins and separation.
         \tvar spaced_image = Image.create(48, 44, false, Image.FORMAT_RGBA8)
         \tspaced_image.fill(Color.WHITE)
         \tvar spaced_atlas = TileSetAtlasSource.new()
@@ -302,7 +310,11 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_tilemap_set(spaced_tilemap, 3, 0, 0), "spaced atlas tilemap_set failed"):
         \t\treturn
         \tvar spaced_node = GMRuntime.gml_handle_resolve(spaced_tilemap)
-        \tif not _check(spaced_node.get_cell_atlas_coords(Vector2i.ZERO) == Vector2i(0, 1), "atlas grid fallback ignored margins/separation"):
+        \tif not _check(spaced_node.get_cell_atlas_coords(Vector2i.ZERO) == Vector2i(1, 1), "atlas grid ignored margins/separation"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_set(spaced_tilemap, 2, 0, 0) and spaced_node.get_cell_atlas_coords(Vector2i.ZERO) == Vector2i(0, 1), "spaced atlas tile 2 is not cell (0, 1)"):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_tilemap_get(spaced_tilemap, 0, 0) == 2, "tilemap_get did not read back the set tile"):
         \t\treturn
         \tif not _check(spaced_tile_set.has_meta("_gm2godot_tilemap_atlas_layout"), "atlas layout was not cached"):
         \t\treturn
@@ -310,6 +322,55 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tvar particles = GMRuntime.gml_part_system_create_layer(fx, false)
         \tvar particle_record = GMRuntime.gml_handle_resolve(particles)
         \tif not _check(particle_record["node"].get_parent() == fx_node, "particle layer resolver ignored layer handle"):
+        \t\treturn
+
+        \t# A layer offset places the layer's tilemaps, sprites and sequences,
+        \t# also ones added after the layer moved, but never its instances or
+        \t# particle systems; the layer node itself stays at the origin.
+        \tvar scrolled = GMRuntime.gml_layer_create(30, "Scrolled")
+        \tvar scrolled_node = GMRuntime.gml_handle_resolve(scrolled)
+        \tGMRuntime.gml_layer_x(scrolled, 10)
+        \tGMRuntime.gml_layer_y(scrolled, 20)
+        \tvar late_enemy_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_instance_create_layer(4, 5, scrolled, enemy_selector, self))
+        \tvar late_tilemap_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_layer_tilemap_create(scrolled, 3, 4, tile_set_id, 1, 1))
+        \tvar late_sequence = GMRuntime.gml_layer_sequence_create(scrolled, 1, 2, GMRuntime.gml_sequence_create())
+        \tvar late_sequence_node = GMRuntime.gml_handle_resolve(late_sequence)
+        \tvar late_particles_node = GMRuntime.gml_handle_resolve(GMRuntime.gml_part_system_create_layer(scrolled, false))["node"]
+        \tvar moved_sprite = Node2D.new()
+        \tmoved_sprite.name = "spr_moved"
+        \tmoved_sprite.set_meta("gamemaker_asset_name", "spr_moved")
+        \tmoved_sprite.set_meta("gamemaker_asset_type", "GMRSpriteGraphic")
+        \tmoved_sprite.position = Vector2(6, 7)
+        \tfx_node.add_child(moved_sprite)
+        \tvar moved_sprite_id = GMRuntime._gml_layer_element_register(moved_sprite)
+        \tif not _check(GMRuntime.gml_layer_element_move(moved_sprite_id, scrolled), "layer_element_move to the moved layer failed"):
+        \t\treturn
+        \tfor step in [[Vector2(10, 20), "after layer_x"], [Vector2(15, 20), "after scrolling"]]:
+        \t\tvar offset = step[0]
+        \t\tvar drawn = [
+        \t\t\tscrolled_node.global_position,
+        \t\t\tlate_enemy_node.global_position,
+        \t\t\tlate_tilemap_node.global_position,
+        \t\t\tlate_sequence_node.global_position,
+        \t\t\tmoved_sprite.global_position,
+        \t\t\tlate_particles_node.global_position,
+        \t\t]
+        \t\tvar expected = [
+        \t\t\tVector2.ZERO,
+        \t\t\tVector2(4, 5),
+        \t\t\tVector2(3, 4) + offset,
+        \t\t\tVector2(1, 2) + offset,
+        \t\t\tVector2(6, 7) + offset,
+        \t\t\tVector2.ZERO,
+        \t\t]
+        \t\tif not _check(drawn == expected, "layer offset placement " + step[1] + ": " + str(drawn) + " != " + str(expected)):
+        \t\t\treturn
+        \t\tGMRuntime.gml_layer_hspeed(scrolled, 5)
+        \t\tGMRuntime._gml_layer_step_scroll()
+        \t\tGMRuntime.gml_layer_hspeed(scrolled, 0)
+        \tif not _check(GMRuntime.gml_layer_element_move(moved_sprite_id, fx) and moved_sprite.global_position == Vector2(6, 7), "layer_element_move kept the old layer offset: " + str(moved_sprite.global_position)):
+        \t\treturn
+        \tif not _check(GMRuntime.gml_layer_destroy(scrolled), "layer_destroy of the moved layer failed"):
         \t\treturn
 
         \tif not _check(GMRuntime.gml_layer_destroy(fx), "layer_destroy returned false"):

@@ -128,6 +128,17 @@ class TestDSCollectionsGodotSmoke(unittest.TestCase):
             \tif not _check(map_keys.any(func(key): return is_same(key, cyclic_struct)), "Map keys did not preserve original struct reference"): return
             \tGMRuntime.gml_ds_map_delete(m2, cyclic_struct)
             \tif not _check(not GMRuntime.gml_ds_map_exists(m2, cyclic_struct), "Map cyclic struct key delete failed"): return
+            \t# Map keys match exactly (the comparison epsilon is not used), while
+            \t# 2 and 2.0 are the same real.
+            \tvar m3 = GMRuntime.gml_ds_map_create()
+            \tif not _check(GMRuntime.gml_ds_map_add(m3, 0.000001, "a"), "Map add of first close real key failed"): return
+            \tif not _check(GMRuntime.gml_ds_map_add(m3, 0.000002, "b"), "Map add of second close real key failed"): return
+            \tif not _check(GMRuntime.gml_ds_map_size(m3) == 2, "Close real keys collided"): return
+            \tif not _check(str(GMRuntime.gml_ds_map_find_value(m3, 0.000002)) == "b", "Close real key found the wrong entry"): return
+            \tif not _check(not GMRuntime.gml_ds_map_exists(m3, 0.0000015), "Map key matched within the epsilon"): return
+            \tGMRuntime.gml_ds_map_set(m3, 2, "two")
+            \tif not _check(str(GMRuntime.gml_ds_map_find_value(m3, GMRuntime.gml_div(4, 2))) == "two", "Map key 2 not found as 4 / 2"): return
+            \tif not _check(GMRuntime.gml_ds_map_size(m3) == 3, "Map size after whole-number key failed"): return
             	
             	# --- DS Grids ---
             	var g1 = GMRuntime.gml_ds_grid_create(2, 2)

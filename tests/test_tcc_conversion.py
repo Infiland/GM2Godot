@@ -94,15 +94,17 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # The 240 source conversion gaps remain. The asset-registry
-                # step now also skips its 166 object/room rows whose required
+                # The 39 source conversion gaps remain. The asset-registry
+                # step now also skips its 5 object rows whose required
                 # generated outputs are absent, plus the authored sequence whose
                 # embedded animation curve is intentionally diagnosed by #707.
-                # Eleven shaders fail closed for custom vertex data, reserved
-                # Godot globals, or unsupported scalar matrix constructors and
-                # are omitted once more from the registry.
-                completed=4957,
-                skipped=418,
+                # Rooms whose creation-code sidecars are missing convert as
+                # empty code, as GameMaker runs them. Eleven shaders fail
+                # closed for custom vertex data, reserved Godot globals, or
+                # unsupported scalar matrix constructors and are omitted once
+                # more from the registry.
+                completed=5319,
+                skipped=56,
                 failed=11,
             ),
         )
@@ -289,13 +291,13 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 191)
-        self.assertEqual(len(script_transpile_diagnostics), 74)
-        self.assertEqual(len(script_transpile_resources), 74)
-        self.assertEqual(len(object_transpile_diagnostics), 115)
-        self.assertEqual(len(object_transpile_resources), 100)
-        self.assertEqual(len(room_transpile_diagnostics), 2)
-        self.assertEqual(room_transpile_resources, {"r_donolvl1", "r_lvl1"})
+        self.assertEqual(len(all_transpile_diagnostics), 37)
+        self.assertEqual(len(script_transpile_diagnostics), 34)
+        self.assertEqual(len(script_transpile_resources), 34)
+        self.assertEqual(len(object_transpile_diagnostics), 3)
+        self.assertEqual(len(object_transpile_resources), 3)
+        self.assertEqual(len(room_transpile_diagnostics), 0)
+        self.assertEqual(room_transpile_resources, set())
 
         object_event_source_missing = [
             (
@@ -316,7 +318,7 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertEqual(
             object_event_source_missing,
-            [("o_animatedLEicon", "_draw")],
+            [("o_animatedLEicon", "_on_draw")],
         )
         self.assertEqual(
             object_collision_source_missing,
@@ -382,7 +384,7 @@ class TestTCCConversion(unittest.TestCase):
                 | {resource for resource, _event in object_event_source_missing}
                 | {resource for resource, _event in object_collision_source_missing}
             ),
-            "rooms": sorted(room_creation_missing_resources | room_transpile_resources),
+            "rooms": sorted(room_transpile_resources),
             "sequences": sorted(unsupported_sequence_keys),
             "shaders": sorted(unsupported_shaders),
         }

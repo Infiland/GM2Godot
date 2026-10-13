@@ -12,9 +12,22 @@ static func _gml_ds_map_find_internal_key(ds, key):
 		if stored_key is GMLDSMapReferenceKey:
 			if _is_gml_reference_value(key) and is_same(stored_key.value, key):
 				return stored_key
-		elif gml_eq(stored_key, key):
+		elif _gml_ds_map_keys_equal(stored_key, key):
 			return stored_key
 	return gml_undefined()
+
+
+# Map keys match exactly, as in the runner's JavaScript Map: real keys by
+# value without the comparison epsilon (so 2 and 2.0 are one key, and NaN
+# matches NaN), other values as == compares them.
+static func _gml_ds_map_keys_equal(stored_key, key):
+	var stored_type = typeof(stored_key)
+	var key_type = typeof(key)
+	if (stored_type == TYPE_FLOAT or stored_type == TYPE_INT) and (key_type == TYPE_FLOAT or key_type == TYPE_INT):
+		var stored_real = float(stored_key)
+		var key_real = float(key)
+		return stored_real == key_real or (is_nan(stored_real) and is_nan(key_real))
+	return gml_eq(stored_key, key)
 
 
 static func _gml_ds_map_internal_key_for_set(ds, key):

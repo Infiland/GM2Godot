@@ -3,6 +3,22 @@ const GML_SEQUENCE_TRACK_NODE_PREFIX = "GMSequenceTrack_"
 
 
 static func gml_sequence_timeline_scheduler_frame(delta_seconds = 0.0, delta_frames = 1, timeline_instances = null, frame = -1):
+	gml_sequence_scheduler_frame(delta_seconds, delta_frames)
+	gml_timeline_scheduler_frame(delta_frames, timeline_instances)
+	if frame >= 0:
+		_gml_event_scheduler_record_phase(
+			"sequences_timelines",
+			"gml_sequence_timeline_scheduler_frame",
+			null,
+			frame
+		)
+	return null
+
+
+static func gml_sequence_scheduler_frame(delta_seconds = 0.0, delta_frames = 1):
+	# Advances every playing sequence instance: by playbackSpeed per second of
+	# delta_seconds, or by playbackSpeed per frame for frames-per-game-frame
+	# sequences.
 	var sequence_indices = _gml_sequence_elements_by_index.keys()
 	sequence_indices.sort()
 	var frames = max(1, int(delta_frames))
@@ -38,6 +54,12 @@ static func gml_sequence_timeline_scheduler_frame(delta_seconds = 0.0, delta_fra
 			* float(instance.get("headDirection", 1))
 		)
 		_gml_sequence_advance_instance(instance, delta)
+	return null
+
+
+static func gml_timeline_scheduler_frame(delta_frames = 1, timeline_instances = null):
+	# Steps the running timeline of every instance once per frame.
+	var frames = max(1, int(delta_frames))
 	var targets = (
 		timeline_instances
 		if timeline_instances is Array
@@ -50,13 +72,6 @@ static func gml_sequence_timeline_scheduler_frame(delta_seconds = 0.0, delta_fra
 			if not bool(_gml_object_timeline_get(target, "timeline_running", false)):
 				continue
 			gml_timeline_step(target)
-	if frame >= 0:
-		_gml_event_scheduler_record_phase(
-			"sequences_timelines",
-			"gml_sequence_timeline_scheduler_frame",
-			null,
-			frame
-		)
 	return null
 
 
@@ -294,6 +309,7 @@ static func _gml_sequence_create_content(kind, keyframe, state):
 		content.visible = false
 	if kind == "instance":
 		content.set_meta("gamemaker_in_sequence", true)
+		_gml_sequence_instances_exist = true
 		var object_selector = asset_name
 		if entry != null and entry.has("id"):
 			object_selector = int(entry.get("id", -1))
@@ -1214,7 +1230,7 @@ static func _gml_sequence_cleanup_track(state):
 	for nested in state.get("nested", {}).values():
 		_gml_sequence_cleanup_instance(nested)
 	for content in state.get("contents", {}).values():
-		if content is Object and not is_instance_valid(content):
+		if typeof(content) == TYPE_OBJECT and not is_instance_valid(content):
 			continue
 		if content is AudioStreamPlayer2D:
 			content.stop()

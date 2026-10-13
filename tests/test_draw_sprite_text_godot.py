@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import base64
 import os
+import struct
 import subprocess
 import tempfile
 import textwrap
 import unittest
+import zlib
 from pathlib import Path
 
 from src.conversion.asset_registry import (
@@ -24,10 +25,17 @@ from tests.godot_test_support import (
     write_fixture_text as _write_text,
 )
 
-_PNG_1X1_WHITE = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8"
-    "/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-)
+
+def _solid_png(width: int, height: int) -> bytes:
+    """Encode an opaque white RGBA PNG."""
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        checksum = zlib.crc32(kind + data) & 0xFFFFFFFF
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+    rows = b"".join(b"\x00" + b"\xff\xff\xff\xff" * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 def _write_bytes(path: Path, content: bytes) -> None:
@@ -130,7 +138,7 @@ def _write_object(project_dir: Path, name: str) -> None:
         generate_script_content(
             [{"eventType": 8, "eventNum": 0}],
             code_bodies={
-                "_draw": transpile_gml_code(draw_source, asset_names={"spr_player"}),
+                "_on_draw": transpile_gml_code(draw_source, asset_names={"spr_player"}),
             },
             instance_variables={"draw_ok", "text_height", "text_width"},
             sprite_runtime=SpriteRuntimeConfig(
@@ -181,14 +189,26 @@ def _write_smoke_scene(project_dir: Path) -> None:
         \tif not _check(GMRuntime.gml_handle_is_valid(handle), "drawer was not created"):
         \t\treturn
         \tvar drawer = GMRuntime.gml_handle_resolve(handle)
-        \tdrawer.queue_redraw()
-        \tawait get_tree().process_frame
-        \tawait get_tree().process_frame
+        \tGMRuntime.gml_draw_event_dispatch_frame()
+        \tvar sink = GMRuntime.gm2godot_draw_debug_sink_for(drawer, "draw")
+        \tif not _check(int(sink.get("commands", 0)) >= 9, "sprite and text commands did not reach the draw sink: " + str(sink)):
+        \t\treturn
+        \tvar visual = drawer.find_child("Sprite2D", true, false)
+        \tif not _check(visual != null and not visual.visible, "the default sprite visual of an instance with a Draw event stayed visible"):
+        \t\treturn
         \tif not _check(int(drawer.draw_ok) == 2, "text alignment state was not preserved"):
         \t\treturn
         \tif not _check(float(drawer.text_width) > 0.0, "string_width did not use a font"):
         \t\treturn
         \tif not _check(float(drawer.text_height) > 0.0, "string_height_ext did not use a font"):
+        \t\treturn
+        \tvar sprite_id = GMRuntime.gml_asset_get_index("spr_player")
+        \tvar frame = GMRuntime._gml_draw_sprite_frame(sprite_id, 0)
+        \tif not _check(frame != null and is_same(frame, GMRuntime._gml_draw_sprite_frame(sprite_id, 0)), "sprite frame records were not reused"):
+        \t\treturn
+        \tGMRuntime.gml_sprite_set_offset(sprite_id, 3, 1)
+        \tvar moved = GMRuntime._gml_draw_sprite_frame(sprite_id, 0)
+        \tif not _check(moved != null and moved["origin"] == Vector2(3, 1), "sprite_set_offset did not reach later draws: " + str(moved)):
         \t\treturn
         \tprint("DRAW_SPRITE_TEXT_SMOKE_OK")
         \tget_tree().quit(0)
@@ -213,6 +233,8 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
         """\
         extends Node2D
 
+        const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
         func _check(condition, message):
         \tif not condition:
         \t\tpush_error(str(message))
@@ -225,7 +247,23 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
         \tawait get_tree().process_frame
         \tif not _check(abs(instance.image_angle - 90.0) < 0.01, "room rotation did not hydrate image_angle"):
         \t\treturn
-        \tif not _check(abs(instance.rotation_degrees - 90.0) < 0.01, "image_angle did not apply to node rotation"):
+        \t# GameMaker angles turn counter-clockwise on screen: at 90 degrees the
+        \t# sprite's +x axis points up the screen (towards -y).
+        \tif not _check(instance.transform.basis_xform(Vector2(1, 0)).distance_to(Vector2(0, -2)) < 0.01, "image_angle 90 did not turn the sprite counter-clockwise: " + str(instance.transform)):
+        \t\treturn
+        \tinstance.image_angle = 30.0
+        \tvar expected_axis = Vector2(cos(deg_to_rad(30.0)), -sin(deg_to_rad(30.0))) * 2.0
+        \tif not _check(instance.transform.basis_xform(Vector2(1, 0)).distance_to(expected_axis) < 0.01, "image_angle 30 did not turn the sprite counter-clockwise: " + str(instance.transform)):
+        \t\treturn
+        \tif not _check(abs(GMRuntime.gml_struct_get(instance, "image_angle") - 30.0) < 0.01, "image_angle did not read back"):
+        \t\treturn
+        \tinstance.image_angle = 90.0
+        \tvar plain = Node2D.new()
+        \tadd_child(plain)
+        \tGMRuntime.gml_struct_set(plain, "image_angle", 90)
+        \tif not _check(plain.transform.basis_xform(Vector2(1, 0)).distance_to(Vector2(0, -1)) < 0.01, "image_angle on a plain node did not turn it counter-clockwise: " + str(plain.transform)):
+        \t\treturn
+        \tif not _check(abs(GMRuntime.gml_struct_get(plain, "image_angle") - 90.0) < 0.01, "image_angle on a plain node did not read back"):
         \t\treturn
         \tif not _check(abs(instance.image_xscale - 2.0) < 0.01 and abs(instance.image_yscale - 0.5) < 0.01, "room scale did not hydrate image scale"):
         \t\treturn
@@ -256,7 +294,7 @@ def _write_transform_smoke_scene(project_dir: Path) -> None:
 
         [node name="inst_rotated" parent="." instance=ExtResource("2")]
         position = Vector2(100, 200)
-        rotation_degrees = 90
+        rotation_degrees = -90
         scale = Vector2(2, 0.5)
         metadata/gamemaker_image_angle = 90
         metadata/gamemaker_image_xscale = 2
@@ -287,7 +325,7 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
             _write_registry(project_dir)
             _write_bytes(
                 project_dir / "sprites" / "spr_player" / "spr_player.png",
-                base64.b64decode(_PNG_1X1_WHITE),
+                _solid_png(1, 1),
             )
             _write_text(project_dir / "sprites" / "spr_player" / "spr_player.tscn", _sprite_scene())
             _write_object(project_dir, "o_drawer")
@@ -295,6 +333,15 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
 
             godot_env = dict(os.environ)
             godot_env["HOME"] = str(project_dir)
+            import_result = subprocess.run(
+                [godot_binary, "--headless", "--recovery-mode", "--path", str(project_dir), "--import"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+                env=godot_env,
+            )
+            self.assertEqual(import_result.returncode, 0, import_result.stdout + import_result.stderr)
             result = subprocess.run(
                 [
                     godot_binary,
@@ -318,6 +365,8 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("DRAW_SPRITE_TEXT_SMOKE_OK", output)
+        self.assertNotIn("Drawing is only allowed", output)
+        self.assertNotIn("SCRIPT ERROR", output)
 
     def test_room_instance_transform_metadata_hydrates_sprite_runtime(self) -> None:
         godot_binary = _find_godot_binary()
@@ -334,7 +383,7 @@ class TestDrawSpriteTextGodotSmoke(unittest.TestCase):
             _write_registry(project_dir)
             _write_bytes(
                 project_dir / "sprites" / "spr_player" / "spr_player.png",
-                base64.b64decode(_PNG_1X1_WHITE),
+                _solid_png(1, 1),
             )
             _write_text(project_dir / "sprites" / "spr_player" / "spr_player.tscn", _sprite_scene())
             _write_transform_object(project_dir, "o_transform")

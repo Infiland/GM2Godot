@@ -1,6 +1,6 @@
 # Function complexity removal plan
 
-These source-reviewed boundaries describe how to remove existing complexity without changing behavior. The required C90 gate fixes the threshold at 15. Each of the 116 named tasks below corresponds to an individually reviewed existing function in `complexity-exceptions.json`; its measured score is also its ceiling. New or increased debt fails. Improvements must tighten both measured score and ceiling, and functions reduced to 15 or removed require deleting their exceptions and completed tasks. The policy and these removal boundaries fulfill the complexity baseline in [issue #795](https://github.com/Infiland/GM2Godot/issues/795).
+These source-reviewed boundaries describe how to remove existing complexity without changing behavior. The required C90 gate fixes the threshold at 15. Each of the 115 named tasks below corresponds to an individually reviewed existing function in `complexity-exceptions.json`; its measured score is also its ceiling. New or increased debt fails. Improvements must tighten both measured score and ceiling, and functions reduced to 15 or removed require deleting their exceptions and completed tasks. The policy and these removal boundaries fulfill the complexity baseline in [issue #795](https://github.com/Infiland/GM2Godot/issues/795).
 
 <a id="fn-a68fc18d29d2bd3f"></a>
 
@@ -1121,30 +1121,6 @@ Preserve: Retain sorted DFS/dedup, one resolved-entry map, metadata live read ti
 Removal: Extract directory entry collection and note asset assembly.
 
 Existing checks: `tests.test_notes.TestNoteConverterSourceContainment.test_rejects_external_companion_yy_without_reading_it`, `tests.test_notes.TestNoteConverterSourceContainment.test_final_pre_copy_check_rejects_late_note_symlink_swap`
-
-<a id="fn-aa2d274f778c8fdd"></a>
-
-## `src/conversion/objects.py::ObjectConverter.convert_objects`
-
-Plan object assets and consume parallel conversion outcomes.
-
-Preserve: Preserve manifest authority, initial runtime/context construction, as_completed order, first worker error after all results and sorted final accounting.
-
-Removal: Extract fallback discovery and completed/skipped/failed future accounting.
-
-Existing checks: `tests.test_objects.TestObjectConverterBasic.test_cancellation_leaves_objects_for_inherited_finalization`, `tests.test_objects.TestScriptGeneration.test_missing_event_source_skips_object_and_makes_conversion_partial`
-
-<a id="fn-34e1346ae3e0d615"></a>
-
-## `src/conversion/script_functions.py::modern_script_structure`
-
-Recognize modern script declarations and top-level constructor initialization.
-
-Preserve: Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.
-
-Removal: Extract declaration parsing and supported top-level initializer cases.
-
-Existing checks: `tests.test_scripts.TestScriptConverter.test_discovers_constructor_and_explicit_top_level_initialization`, `tests.test_scripts.TestScriptConverter.test_discovers_modern_functions_around_top_level_enum`
 
 <a id="fn-e47f1faeb860c46f"></a>
 

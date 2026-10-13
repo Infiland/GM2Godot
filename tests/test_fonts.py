@@ -14,20 +14,42 @@ from unittest.mock import MagicMock, Mock, patch
 if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from PIL import Image
+
 from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
 )
+from src.conversion.asset_registry import AssetRegistryConverter, AssetRegistryEntry
 from src.conversion.conversion_outcome import ConversionCounts
 from src.conversion.converter import Converter
 from src.conversion.diagnostics import ConversionDiagnostic, DiagnosticCollector
+from src.conversion.font_atlas import (
+    GameMakerFontAtlasPlan,
+    build_font_atlas_image,
+    parse_gamemaker_font_atlas_metadata,
+    plan_gamemaker_font_atlas,
+    render_bmfont_import_config,
+    render_bmfont_text,
+    render_skipped_import_config,
+)
 from src.conversion.font_metadata import (
     FontConversionFields,
     parse_gamemaker_font_metadata,
 )
 from src.conversion.fonts import FontConverter, FontData, _find_system_font
-from src.conversion.json_values import JsonObject, JsonValue, JsonValueError
+from src.conversion.json_values import (
+    JsonObject,
+    JsonValue,
+    JsonValueError,
+    validate_json_value,
+)
 from src.localization import get_localized
+from tests.gamemaker_font_reference import (
+    SyntheticFont,
+    write_font_project,
+    write_gamemaker_font,
+)
 
 FontYY: TypeAlias = dict[str, object]
 
@@ -1709,6 +1731,249 @@ class TestFontTypedMetadataBoundary(unittest.TestCase):
         with patch.object(self.converter, "_get_subfolder_from_yy", side_effect=AssertionError("fallback")):
             destination = self.converter._font_output_destination(self.yy_path, "OtherName", "other.tres")
         self.assertEqual(destination, os.path.join(self.godot_dir, "fonts", "planned", "font.tres"))
+
+
+def _atlas_plan(font: SyntheticFont) -> GameMakerFontAtlasPlan:
+    document = validate_json_value(font.document, source_path=font.yy_path)
+    assert isinstance(document, dict) and font.atlas_path is not None
+    metadata = parse_gamemaker_font_atlas_metadata(document)
+    assert metadata is not None
+    plan = plan_gamemaker_font_atlas(metadata, font.atlas_path)
+    assert plan is not None
+    return plan
+
+
+class TestFontConverterBakedAtlas(unittest.TestCase):
+    """Fonts with a baked GameMaker atlas become fixed-size BMFont files."""
+
+    def setUp(self) -> None:
+        self.gm_dir = tempfile.mkdtemp()
+        self.godot_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.gm_dir)
+        self.addCleanup(shutil.rmtree, self.godot_dir)
+        self.logs: list[str] = []
+        self.diagnostics = DiagnosticCollector()
+
+    def _convert(self) -> FontConverter:
+        converter = FontConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=self.logs.append,
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=self.diagnostics,
+        )
+        converter.convert_all()
+        return converter
+
+    def _output(self, *parts: str) -> str:
+        return os.path.join(self.godot_dir, "fonts", *parts)
+
+    def _read_text(self, *parts: str) -> str:
+        with open(self._output(*parts), encoding="utf-8") as output_file:
+            return output_file.read()
+
+    def _diagnostic_codes(self) -> list[str]:
+        return [diagnostic.code for diagnostic in self.diagnostics.diagnostics()]
+
+    def _registry_entry(self, font_name: str) -> AssetRegistryEntry:
+        entries = AssetRegistryConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda _message: None,
+            progress_callback=lambda _value: None,
+        ).build_entries()
+        return next(entry for entry in entries if entry.name == font_name)
+
+    def test_writes_bmfont_descriptor_page_and_import_settings(self) -> None:
+        font = write_gamemaker_font(
+            self.gm_dir,
+            "fnt_ui",
+            kerning=((65, 86, -2), (84, 111, -1)),
+            apply_kerning=True,
+            ascender=9,
+            ascender_offset=2,
+        )
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        converter = self._convert()
+
+        self.assertEqual(
+            sorted(os.listdir(self._output())),
+            ["fnt_ui.fnt", "fnt_ui.fnt.import", "fnt_ui.png", "fnt_ui.png.import"],
+        )
+        self.assertEqual(
+            self._read_text("fnt_ui.fnt"),
+            render_bmfont_text(_atlas_plan(font), "fnt_ui.png"),
+        )
+        self.assertEqual(
+            self._read_text("fnt_ui.fnt.import"),
+            render_bmfont_import_config("res://fonts/fnt_ui.fnt"),
+        )
+        self.assertEqual(self._read_text("fnt_ui.png.import"), render_skipped_import_config())
+        assert font.atlas_path is not None
+        with open(font.atlas_path, "rb") as source, open(self._output("fnt_ui.png"), "rb") as page:
+            self.assertEqual(page.read(), source.read())
+        self.assertIn(
+            get_localized("Console_Convertor_Fonts_Converted").format(
+                name="fnt_ui",
+                output_file="fnt_ui.fnt",
+            ),
+            self.logs,
+        )
+        self.assertFalse(any("must be set at the node/theme level" in log for log in self.logs))
+        self.assertEqual(self._diagnostic_codes(), [])
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, completed=1),
+        )
+
+    def test_registry_publishes_the_converted_bitmap_font(self) -> None:
+        write_gamemaker_font(
+            self.gm_dir,
+            "fnt_ui",
+            size=10.5,
+            overrides={"parent": {"name": "UI", "path": "folders/Fonts/UI.yy"}},
+        )
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        self._convert()
+        entry = self._registry_entry("fnt_ui")
+
+        self.assertEqual(entry.godot_path, "res://fonts/ui/fnt_ui.fnt")
+        self.assertTrue(os.path.isfile(resource_filesystem_path(self.godot_dir, entry.godot_path)))
+        self.assertEqual(
+            self._read_text("ui", "fnt_ui.fnt.import"),
+            render_bmfont_import_config("res://fonts/ui/fnt_ui.fnt"),
+        )
+        assert entry.metadata is not None
+        self.assertEqual(entry.metadata["bitmap"], True)
+        self.assertEqual(entry.metadata["size"], 10.5)
+        self.assertEqual(entry.metadata["font_name"], "Synthetic Sans")
+        self.assertEqual(entry.metadata["sdf"], False)
+
+    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    def test_missing_atlas_page_falls_back_to_system_font(self, _find_system_font: Mock) -> None:
+        write_gamemaker_font(self.gm_dir, "fnt_ui", write_atlas=False)
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        self._convert()
+        entry = self._registry_entry("fnt_ui")
+
+        self.assertEqual(entry.godot_path, "res://fonts/fnt_ui.tres")
+        self.assertTrue(os.path.isfile(self._output("fnt_ui.tres")))
+        self.assertFalse(os.path.exists(self._output("fnt_ui.fnt")))
+        assert entry.metadata is not None
+        self.assertEqual(entry.metadata["bitmap"], False)
+        self.assertEqual(entry.metadata["size"], 12.0)
+        self.assertTrue(
+            any(
+                log.startswith("Info: GameMaker font 'fnt_ui' has baked glyph data")
+                for log in self.logs
+            ),
+            self.logs,
+        )
+        self.assertTrue(any("must be set at the node/theme level" in log for log in self.logs))
+
+    def test_sdf_atlas_becomes_native_size_coverage_with_warning(self) -> None:
+        font = write_gamemaker_font(self.gm_dir, "fnt_sdf", uses_sdf=True, sdf_spread=4)
+        write_font_project(self.gm_dir, ["fnt_sdf"])
+
+        self._convert()
+
+        plan = _atlas_plan(font)
+        expected_page = build_font_atlas_image(plan)
+        assert expected_page is not None
+        with Image.open(self._output("fnt_sdf.png")) as page:
+            self.assertEqual(page.mode, "RGBA")
+            self.assertEqual(page.tobytes(), expected_page.tobytes())
+        self.assertEqual(self._read_text("fnt_sdf.fnt"), render_bmfont_text(plan, "fnt_sdf.png"))
+        self.assertEqual(self._diagnostic_codes(), ["GM2GD-FONT-SDF-BITMAP"])
+        diagnostic = self.diagnostics.diagnostics()[0]
+        self.assertEqual(diagnostic.severity, "warning")
+        self.assertEqual(diagnostic.resource, "fnt_sdf")
+
+    def test_glyphs_with_invalid_cells_are_dropped_with_warning(self) -> None:
+        font = write_gamemaker_font(self.gm_dir, "fnt_ui", codes=(65, 66))
+        glyphs = font.document["glyphs"]
+        assert isinstance(glyphs, dict)
+        document = dict(font.document)
+        document["glyphs"] = {
+            **glyphs,
+            "67": {"x": 4000, "y": 0, "w": 4, "h": 4, "shift": 5, "offset": 0},
+            "68": {"x": "left", "y": 0, "w": 4, "h": 4, "shift": 5, "offset": 0},
+        }
+        with open(font.yy_path, "w", encoding="utf-8") as yy_file:
+            json.dump(document, yy_file)
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        self._convert()
+
+        descriptor = self._read_text("fnt_ui.fnt")
+        self.assertIn("chars count=2\n", descriptor)
+        self.assertNotIn("char id=67 ", descriptor)
+        self.assertNotIn("char id=68 ", descriptor)
+        self.assertEqual(self._diagnostic_codes(), ["GM2GD-FONT-GLYPH-INVALID"])
+        self.assertIn("2 glyph table entries", self.diagnostics.diagnostics()[0].message)
+
+    def test_non_rgba_atlas_page_is_converted_to_rgba(self) -> None:
+        font = write_gamemaker_font(self.gm_dir, "fnt_ui")
+        assert font.atlas_path is not None
+        with Image.open(font.atlas_path) as atlas:
+            grey = atlas.convert("LA")
+        grey.save(font.atlas_path)
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        self._convert()
+
+        with Image.open(self._output("fnt_ui.png")) as page:
+            self.assertEqual(page.mode, "RGBA")
+            self.assertEqual(page.tobytes(), grey.convert("RGBA").tobytes())
+
+    def test_planned_bitmap_font_without_atlas_fails(self) -> None:
+        font = write_gamemaker_font(self.gm_dir, "fnt_ui")
+        write_font_project(self.gm_dir, ["fnt_ui"])
+        assert font.atlas_path is not None
+        os.remove(font.atlas_path)
+
+        with patch(
+            "src.conversion.asset_output_paths.build_asset_output_paths",
+            return_value={"fonts": {"fnt_ui": "res://fonts/fnt_ui.fnt"}},
+        ):
+            converter = self._convert()
+
+        self.assertFalse(os.path.exists(self._output("fnt_ui.fnt")))
+        self.assertTrue(
+            any(log.startswith("Error: GameMaker font 'fnt_ui' was planned") for log in self.logs),
+            self.logs,
+        )
+        self.assertEqual(
+            converter.conversion_step_result(finalize_unfinished_as=None).resources,
+            ConversionCounts(requested=1, executed=1, failed=1),
+        )
+
+    @patch("src.conversion.fonts._find_system_font", return_value=None)
+    def test_registry_fallback_plan_keeps_outputs_consistent(self, _find_system_font: Mock) -> None:
+        write_gamemaker_font(self.gm_dir, "fnt_ui")
+        write_font_project(self.gm_dir, ["fnt_ui"])
+
+        with patch(
+            "src.conversion.asset_output_paths.build_asset_output_paths",
+            return_value={"fonts": {"fnt_ui": "res://fonts/fnt_ui.tres"}},
+        ):
+            self._convert()
+
+        self.assertTrue(os.path.isfile(self._output("fnt_ui.tres")))
+        self.assertFalse(os.path.exists(self._output("fnt_ui.fnt")))
+
+    def test_fonts_without_glyph_data_keep_ttf_and_system_conversion(self) -> None:
+        _make_font_yy(self.gm_dir, "fnt_legacy", {"fontName": "NonExistentTestFont99999"})
+        _write_font_yyp(self.gm_dir, ["fnt_legacy"])
+
+        self._convert()
+
+        self.assertTrue(os.path.isfile(self._output("fnt_legacy.tres")))
+        self.assertEqual(self._registry_entry("fnt_legacy").godot_path, "res://fonts/fnt_legacy.tres")
 
 
 if __name__ == "__main__":

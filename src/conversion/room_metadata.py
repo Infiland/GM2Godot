@@ -615,15 +615,23 @@ class RoomAssetFields(RoomTransformFields):
 @dataclass(frozen=True)
 class RoomTileDataFields(_RoomRawFields):
     @property
+    def _data_key(self) -> str:
+        # Rooms saved before GameMaker 2022.8 keep every cell, uncompressed,
+        # under TileSerialiseData; later ones use TileCompressedData.
+        if "TileCompressedData" not in self.raw_data and "TileSerialiseData" in self.raw_data:
+            return "TileSerialiseData"
+        return "TileCompressedData"
+
+    @property
     def compressed_count(self) -> int:
-        value = self.raw_data.get("TileCompressedData") or []
+        value = self.raw_data.get(self._data_key) or []
         if isinstance(value, (str, dict, list)):
             return len(value)
         raise TypeError(f"object of type '{type(value).__name__}' has no len()")
 
     @property
     def compressed_data(self) -> JsonArray:
-        value = self.raw_data.get("TileCompressedData")
+        value = self.raw_data.get(self._data_key)
         return value if isinstance(value, list) else []
 
     @property
@@ -636,7 +644,9 @@ class RoomTileDataFields(_RoomRawFields):
 
     @property
     def data_format(self) -> JsonValue:
-        return self.raw_data.get('TileDataFormat', 1)
+        # TileSerialiseData is the uncompressed layout, format 0.
+        default = 0 if self._data_key == "TileSerialiseData" else 1
+        return self.raw_data.get('TileDataFormat', default)
 
 
 def room_inherited_reference_name(value: JsonValue) -> str:

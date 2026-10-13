@@ -4,6 +4,7 @@ const GML_AUDIO_QUEUE_HANDLE_KIND = "audio_queue"
 const GML_AUDIO_SYNC_GROUP_HANDLE_KIND = "audio_sync_group"
 const GML_AUDIO_MANAGER_NODE_NAME = "_GM2GodotAudioRuntime"
 const GML_AUDIO_MIN_PITCH = 0.0001
+const GML_AUDIO_MAX_LINEAR_GAIN = 1000.0
 const GML_AUDIO_DEFAULT_CHANNEL_COUNT = 128
 const GML_AUDIO_CHANNEL_MONO = 1
 const GML_AUDIO_CHANNEL_STEREO = 2
@@ -23,6 +24,9 @@ static var _gml_audio_queues = {}
 static var _gml_audio_sync_groups = {}
 static var _gml_audio_diagnostics = []
 static var _gml_audio_throw_on_error = false
+static var _gml_audio_gain_ramps = {}
+static var _gml_audio_gain_ramp_pump_connected = false
+static var _gml_audio_loop_streams = {}
 
 
 static func gml_audio_play_sound(sound, priority, loop, gain = null, offset = null, pitch = null, listener_mask = null):
@@ -112,21 +116,94 @@ static func gml_audio_is_paused(sound):
 
 
 static func gml_audio_sound_gain(sound, gain, time = 0):
-	var gain_value = max(_to_real(gain), 0.0)
+	# A sound instance fades its own gain; an asset fades the gain shared by
+	# every current and future instance of it. GameMaker ramps linearly over
+	# `time` milliseconds and allows gains above 1.
+	var gain_value = _gml_audio_gain_argument(gain)
+	var time_ms = _gml_audio_fade_time_argument(time)
 	var handle_entry = _gml_audio_handle_entry(sound)
 	if handle_entry != null:
-		handle_entry["instance_gain"] = gain_value
+		_gml_audio_gain_ramp_to(handle_entry, "instance_gain", "voice:" + str(handle_entry["handle"].index), gain_value, time_ms)
 		_gml_audio_apply_entry_volume(handle_entry)
 		return null
 	var sound_entry = _gml_audio_sound_entry(sound)
 	if sound_entry == null:
 		return null
 	var asset_state = _gml_audio_asset_state_for_entry(sound_entry)
-	asset_state["gain"] = gain_value
+	_gml_audio_gain_ramp_to(asset_state, "gain", "asset:" + str(int(sound_entry["id"])), gain_value, time_ms)
 	for entry in _gml_audio_entries_for_asset(int(sound_entry["id"])):
-		entry["asset_gain"] = gain_value
 		_gml_audio_apply_entry_volume(entry)
 	return null
+
+
+static func _gml_audio_gain_argument(gain):
+	var gain_value = _to_real(gain)
+	if is_nan(gain_value):
+		return 0.0
+	return max(gain_value, 0.0)
+
+
+static func _gml_audio_fade_time_argument(time):
+	if time == null:
+		return 0
+	var time_value = _to_real(time)
+	if is_nan(time_value) or time_value <= 0.0:
+		return 0
+	return int(time_value)
+
+
+static func _gml_audio_now_ms():
+	return float(Time.get_ticks_usec()) / 1000.0
+
+
+static func _gml_audio_gain_ramp_to(state, key, ramp_key, target, time_ms):
+	if int(time_ms) <= 0:
+		_gml_audio_gain_ramps.erase(ramp_key)
+		state[key] = target
+		return
+	var now = _gml_audio_now_ms()
+	_gml_audio_gain_ramps[ramp_key] = {
+		"state": state,
+		"key": key,
+		"origin": _to_real(state.get(key, target)),
+		"target": target,
+		"start_ms": now,
+		"end_ms": now + float(time_ms),
+	}
+	_gml_audio_ensure_gain_ramp_pump()
+
+
+static func _gml_audio_ensure_gain_ramp_pump():
+	if _gml_audio_gain_ramp_pump_connected:
+		return
+	var main_loop = Engine.get_main_loop()
+	if not (main_loop is SceneTree):
+		return
+	_gml_audio_gain_ramp_pump_connected = true
+	main_loop.process_frame.connect(func():
+		gml_audio_update_gain_ramps()
+	)
+
+
+static func gml_audio_update_gain_ramps():
+	if _gml_audio_gain_ramps.is_empty():
+		return
+	var now = _gml_audio_now_ms()
+	var finished = []
+	for ramp_key in _gml_audio_gain_ramps:
+		var ramp = _gml_audio_gain_ramps[ramp_key]
+		var value = ramp["target"]
+		if now < float(ramp["end_ms"]):
+			var duration = float(ramp["end_ms"]) - float(ramp["start_ms"])
+			var fraction = clampf((now - float(ramp["start_ms"])) / duration, 0.0, 1.0)
+			value = float(ramp["origin"]) + (float(ramp["target"]) - float(ramp["origin"])) * fraction
+		else:
+			finished.append(ramp_key)
+		ramp["state"][ramp["key"]] = value
+	for ramp_key in finished:
+		_gml_audio_gain_ramps.erase(ramp_key)
+	for entry in _gml_audio_instances.values():
+		_gml_audio_apply_entry_volume(entry)
 
 
 static func gml_audio_sound_get_gain(sound):
@@ -167,20 +244,39 @@ static func gml_audio_sound_get_pitch(sound):
 	return _to_real(_gml_audio_asset_state_for_entry(sound_entry).get("pitch", 1.0))
 
 
+# Only a sound instance has a loop flag: GameMaker ignores a sound asset
+# index here, and changing the flag leaves a paused voice paused.
 static func gml_audio_sound_loop(sound, loop):
-	for entry in _gml_audio_target_entries(sound):
-		entry["loop"] = bool(loop)
+	var entry = _gml_audio_handle_entry(sound)
+	if entry != null:
+		entry["loop"] = gml_bool(loop)
+		_gml_audio_swap_entry_stream(entry)
 	return null
+
+
+static func _gml_audio_swap_entry_stream(entry):
+	var player = entry["player"]
+	var base_stream = entry.get("base_stream", null)
+	if not _gml_audio_player_is_valid(player) or base_stream == null:
+		return
+	var wanted = _gml_audio_stream_for_playback(base_stream, entry["loop"])
+	if wanted == player.stream:
+		return
+	# A paused player reports playing as false; setting its stream stops it.
+	var was_paused = bool(player.stream_paused)
+	var was_active = bool(player.playing) or was_paused
+	var position = player.get_playback_position() if was_active else 0.0
+	player.stream = wanted
+	if was_active:
+		player.play(position)
+		if was_paused:
+			player.stream_paused = true
 
 
 static func gml_audio_sound_get_loop(sound):
 	var handle_entry = _gml_audio_handle_entry(sound)
 	if handle_entry != null:
 		return bool(handle_entry.get("loop", false))
-	var entries = _gml_audio_target_entries(sound)
-	for entry in entries:
-		if bool(entry.get("loop", false)):
-			return true
 	return false
 
 
@@ -215,18 +311,23 @@ static func gml_audio_channel_num(num_channels):
 
 
 static func gml_audio_master_gain(gain):
-	return gml_audio_set_master_gain(gain)
-
-
-static func gml_audio_set_master_gain(gain):
 	_gml_audio_master_gain = max(_to_real(gain), 0.0)
 	for entry in _gml_audio_instances.values():
 		_gml_audio_apply_entry_volume(entry)
 	return null
 
 
-static func gml_audio_get_master_gain():
-	return _gml_audio_master_gain
+static func gml_audio_set_master_gain(listener_index, gain):
+	# GameMaker only has the main listener 0; other listeners are ignored.
+	if int(_to_real(listener_index)) == 0:
+		gml_audio_master_gain(gain)
+	return null
+
+
+static func gml_audio_get_master_gain(listener_index):
+	if int(_to_real(listener_index)) == 0:
+		return _gml_audio_master_gain
+	return 0.0
 
 
 static func gml_audio_throw_on_error(enable):
@@ -256,6 +357,7 @@ static func gml_audio_emitter_free(emitter):
 		return false
 	var handle = entry["handle"]
 	_gml_audio_emitters.erase(handle.index)
+	_gml_audio_gain_ramps.erase("emitter:" + str(handle.index))
 	gml_handle_invalidate(handle)
 	return true
 
@@ -292,13 +394,14 @@ static func gml_audio_emitter_falloff(emitter, falloff_ref, falloff_max, falloff
 	return null
 
 
-static func gml_audio_emitter_gain(emitter, gain):
+static func gml_audio_emitter_gain(emitter, gain, time = 0):
+	# The emitter fades linearly over `time` milliseconds, like sound gains.
 	var entry = _gml_audio_emitter_entry(emitter)
 	if entry == null:
 		return null
-	entry["gain"] = max(_to_real(gain), 0.0)
-	for sound_entry in _gml_audio_entries_for_emitter(entry["handle"].index):
-		sound_entry["emitter_gain"] = entry["gain"]
+	var emitter_index = entry["handle"].index
+	_gml_audio_gain_ramp_to(entry, "gain", "emitter:" + str(emitter_index), _gml_audio_gain_argument(gain), _gml_audio_fade_time_argument(time))
+	for sound_entry in _gml_audio_entries_for_emitter(emitter_index):
 		_gml_audio_apply_entry_volume(sound_entry)
 	return null
 
@@ -687,6 +790,7 @@ static func _gml_audio_play_sound_instance(sound, priority, loop, gain = null, o
 		"emitter_gain": emitter_gain,
 		"emitter_pitch": emitter_pitch,
 		"spatial_state": _gml_clone_value(spatial_state, 8) if use_spatial else {},
+		"base_stream": stream,
 		"pending_play": not manager.is_inside_tree()
 	}
 	_gml_audio_instances[handle.index] = entry
@@ -858,10 +962,8 @@ static func gml_audio_group_set_gain(group_id, gain, time = 0):
 	if group == "" or not _gml_audio_group_exists(group):
 		return false
 	var state = _gml_audio_group_state_for_name(group)
-	var gain_value = max(_to_real(gain), 0.0)
-	state["gain"] = gain_value
+	_gml_audio_gain_ramp_to(state, "gain", "group:" + str(group), _gml_audio_gain_argument(gain), _gml_audio_fade_time_argument(time))
 	for entry in _gml_audio_entries_for_group(group):
-		entry["group_gain"] = gain_value
 		_gml_audio_apply_entry_volume(entry)
 	return true
 
@@ -918,7 +1020,48 @@ static func _gml_audio_stream_for_entry(sound_entry):
 
 
 static func _gml_audio_stream_for_playback(stream, loop):
-	return stream
+	# GameMaker loops seamlessly; restarting a player from its `finished`
+	# signal leaves an audible gap, so looping plays use a looping copy of the
+	# stream when the format supports it.
+	if not bool(loop) or stream == null:
+		return stream
+	var looped = _gml_audio_looping_stream(stream)
+	return looped if looped != null else stream
+
+
+static func _gml_audio_looping_stream(stream):
+	var key = stream.get_instance_id()
+	if _gml_audio_loop_streams.has(key) and is_instance_valid(_gml_audio_loop_streams[key]):
+		return _gml_audio_loop_streams[key]
+	var looped = null
+	if stream is AudioStreamMP3:
+		looped = AudioStreamMP3.new()
+		looped.data = stream.data
+		looped.loop = true
+	elif stream is AudioStreamOggVorbis:
+		looped = AudioStreamOggVorbis.new()
+		looped.packet_sequence = stream.packet_sequence
+		looped.loop = true
+	elif stream is AudioStreamWAV:
+		looped = AudioStreamWAV.new()
+		looped.format = stream.format
+		looped.mix_rate = stream.mix_rate
+		looped.stereo = stream.stereo
+		looped.data = stream.data
+		looped.loop_mode = AudioStreamWAV.LOOP_FORWARD
+		looped.loop_begin = 0
+		looped.loop_end = int(round(stream.get_length() * float(stream.mix_rate)))
+	if looped != null:
+		_gml_audio_loop_streams[key] = looped
+	return looped
+
+
+static func _gml_audio_stream_loops(stream):
+	if stream is AudioStreamMP3 or stream is AudioStreamOggVorbis:
+		return bool(stream.loop)
+	if stream is AudioStreamWAV:
+		return stream.loop_mode != AudioStreamWAV.LOOP_DISABLED
+	return false
 
 
 static func _gml_audio_bus_for_group(audio_group):
@@ -978,6 +1121,15 @@ static func _gml_audio_entries_for_asset(asset_id):
 
 
 static func _gml_audio_apply_entry_volume(entry):
+	var asset_state = _gml_audio_asset_state.get(int(entry["asset_id"]), null)
+	if typeof(asset_state) == TYPE_DICTIONARY:
+		entry["asset_gain"] = asset_state["gain"]
+	var group_state = _gml_audio_group_state.get(str(entry.get("audio_group", "audiogroup_default")), null)
+	if typeof(group_state) == TYPE_DICTIONARY:
+		entry["group_gain"] = group_state["gain"]
+	var emitter_state = _gml_audio_emitters.get(int(entry.get("emitter_index", -1)), null)
+	if typeof(emitter_state) == TYPE_DICTIONARY:
+		entry["emitter_gain"] = emitter_state["gain"]
 	var player = entry["player"]
 	if _gml_audio_player_is_valid(player):
 		player.volume_linear = _gml_audio_final_gain(
@@ -999,7 +1151,12 @@ static func _gml_audio_apply_entry_pitch(entry):
 
 
 static func _gml_audio_final_gain(asset_gain, group_gain, instance_gain, emitter_gain = 1.0):
-	return max(_to_real(asset_gain), 0.0) * max(_to_real(group_gain), 0.0) * max(_to_real(instance_gain), 0.0) * max(_to_real(emitter_gain), 0.0) * _gml_audio_master_gain
+	var final_gain = max(_to_real(asset_gain), 0.0) * max(_to_real(group_gain), 0.0) * max(_to_real(instance_gain), 0.0) * max(_to_real(emitter_gain), 0.0) * _gml_audio_master_gain
+	if is_nan(final_gain):
+		return 0.0
+	# A gain of infinity (for example 5 / 0) would feed non-finite samples to
+	# Godot's mixer; keep it loud but finite.
+	return min(final_gain, GML_AUDIO_MAX_LINEAR_GAIN)
 
 
 static func _gml_audio_final_pitch(asset_pitch, instance_pitch, emitter_pitch = 1.0):
@@ -1018,7 +1175,7 @@ static func _gml_audio_player_finished(instance_index):
 		return
 	var entry = _gml_audio_instances[instance_index]
 	var player = entry["player"]
-	if bool(entry["loop"]) and _gml_audio_player_is_valid(player):
+	if bool(entry["loop"]) and _gml_audio_player_is_valid(player) and not _gml_audio_stream_loops(player.stream):
 		player.play(0.0)
 		return
 	gml_async_enqueue_from_signal("audio_playback_ended", {
@@ -1036,6 +1193,7 @@ static func _gml_audio_unregister_instance(instance_index, stop_player):
 		return false
 	var entry = _gml_audio_instances[instance_index]
 	_gml_audio_instances.erase(instance_index)
+	_gml_audio_gain_ramps.erase("voice:" + str(instance_index))
 	var asset_id = int(entry["asset_id"])
 	if _gml_audio_instances_by_asset.has(asset_id):
 		_gml_audio_instances_by_asset[asset_id].erase(instance_index)

@@ -115,11 +115,27 @@ def _write_scripts(project_dir: Path) -> None:
         \t\treturn
         \tif not _check(get_tree().current_scene.find_child("PersistentProbe", true, false) != null, "persistent probe did not survive transition"):
         \t\treturn
+        \t# Room changes are recorded only while tracing is on (off by default).
+        \tif not _check(GMRuntime.gml_room_transition_log().is_empty(), "room change recorded with tracing off"):
+        \t\treturn
+        \tGMRuntime.gml_event_scheduler_set_tracing(true)
         \tif not _check(GMRuntime.gml_room_restart(), "room_restart failed"):
         \t\treturn
         \tawait get_tree().process_frame
         \tif not _check(get_tree().current_scene.name == "r_two", "restart changed room"):
         \t\treturn
+        \tvar transitions = GMRuntime.gml_room_transition_log()
+        \tif not _check(transitions == [{"room": "r_two", "room_id": GMRuntime.gml_asset_get_index("r_two"), "restart": true}], "room transition log: " + str(transitions)):
+        \t\treturn
+        \t# The log keeps only the latest room changes.
+        \tfor _restart in range(2 * GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT):
+        \t\tGMRuntime.gml_room_restart()
+        \t\tawait get_tree().process_frame
+        \tif not _check(GMRuntime.gml_room_transition_log().size() == GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT, "room transition log size " + str(GMRuntime.gml_room_transition_log().size())):
+        \t\treturn
+        \tif not _check(GMRuntime._gml_room_transition_log.size() < 2 * GMRuntime.GML_ROOM_TRANSITION_LOG_LIMIT, "room transition log kept growing"):
+        \t\treturn
+        \tGMRuntime.gml_event_scheduler_set_tracing(false)
         \tif not _check(GMRuntime.gml_room_goto_previous(), "room_goto_previous failed"):
         \t\treturn
         \tawait get_tree().process_frame
@@ -214,6 +230,8 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     """\
                     extends Node
 
+                    const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
                     func _ready():
                     \tcall_deferred("_run")
 
@@ -229,10 +247,17 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     \tawait get_tree().process_frame
                     \tvar room = get_parent()
                     \tvar camera = room.get_node("ViewCamera")
-                    \tvar background = room.get_node("Backgrounds/BackgroundVisual")
+                    \tvar layer = room.get_node("Backgrounds")
                     \tif not _check(abs(camera.position.x - 260.0) < 0.01, "Camera2D did not follow target on x"):
                     \t\treturn
-                    \tif not _check(background.scroll_offset.x > 0.0, "Background Parallax2D did not scroll"):
+                    \t# Each step scrolls the layer offset by its speed; the
+                    \t# background is drawn at the offset, the layer node stays.
+                    \tvar visual = layer.get_node("BackgroundVisual")
+                    \tvar before = visual.position
+                    \tGMRuntime.gml_event_scheduler_frame(0.0, 1)
+                    \tif not _check(visual.position - before == Vector2(2, 0) and layer.position == Vector2.ZERO, "Background layer did not scroll: " + str(visual.position) + " layer at " + str(layer.position)):
+                    \t\treturn
+                    \tif not _check(GMRuntime.gml_layer_get_x("Backgrounds") == visual.position.x, "layer_get_x does not follow the scroll"):
                     \t\treturn
                     \tprint("ROOM_RUNTIME_BEHAVIOR_SMOKE_OK")
                     \tget_tree().quit(0)
@@ -254,41 +279,26 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     metadata/gamemaker_room_width = 320
                     metadata/gamemaker_room_height = 180
                     metadata/gamemaker_room_persistent = false
+                    metadata/gamemaker_view_settings = {"enableViews": true}
+                    metadata/gamemaker_views = [{"visible": true, "xview": 0, "yview": 0, "wview": 100, "hview": 100, "xport": 0, "yport": 0, "wport": 100, "hport": 100, "object": "o_player", "hborder": 10, "vborder": 10, "hspeed": -1, "vspeed": -1}]
 
                     [node name="ViewCamera" type="Camera2D" parent="."]
                     position = Vector2(50, 50)
-                    enabled = true
+                    ignore_rotation = false
+                    limit_enabled = false
                     metadata/gamemaker_view_camera = true
-                    metadata/gamemaker_view_enabled_camera = true
-                    metadata/gamemaker_view_visible = true
-                    metadata/gamemaker_view_index = 0
-                    metadata/gamemaker_view_xview = 0
-                    metadata/gamemaker_view_yview = 0
-                    metadata/gamemaker_view_wview = 100
-                    metadata/gamemaker_view_hview = 100
-                    metadata/gamemaker_view_xport = 0
-                    metadata/gamemaker_view_yport = 0
-                    metadata/gamemaker_view_wport = 100
-                    metadata/gamemaker_view_hport = 100
-                    metadata/gamemaker_view_object_name = "o_player"
-                    metadata/gamemaker_view_hborder = 10
-                    metadata/gamemaker_view_vborder = 10
-                    metadata/gamemaker_view_hspeed = -1
-                    metadata/gamemaker_view_vspeed = -1
 
                     [node name="Backgrounds" type="Node2D" parent="."]
                     metadata/gamemaker_layer_name = "Backgrounds"
                     metadata/gamemaker_layer_type = "GMRBackgroundLayer"
+                    metadata/gamemaker_layer_hspeed = 2
 
-                    [node name="BackgroundVisual" type="Parallax2D" parent="Backgrounds"]
-                    repeat_size = Vector2(320, 0)
-                    repeat_times = 3
-                    scroll_offset = Vector2(0, 0)
+                    [node name="BackgroundVisual" type="Node2D" parent="Backgrounds"]
                     metadata/gamemaker_layer_element_type = "background"
                     metadata/gamemaker_background_visual = true
+                    metadata/gamemaker_background_htiled = true
                     metadata/gamemaker_background_hspeed = 2
                     metadata/gamemaker_background_vspeed = 0
-                    metadata/gamemaker_background_runtime_support = true
 
                     [node name="Target" type="Node2D" parent="."]
                     script = ExtResource("target")
@@ -507,11 +517,11 @@ class TestRoomGameFlowGodotSmoke(unittest.TestCase):
                     "--scene",
                     "res://rooms/r_one/r_one.tscn",
                     "--quit-after",
-                    "10",
+                    "400",
                 ],
                 capture_output=True,
                 text=True,
-                timeout=20,
+                timeout=60,
                 check=False,
                 env=godot_env,
             )

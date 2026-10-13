@@ -637,15 +637,18 @@ class SpriteConverter(BaseConverter):
         h = collision_data["height"]
         origin = collision_data["origin"]
 
-        origin_map: dict[int, tuple[float, float] | tuple[int, int]] = {
+        # GameMaker stores whole-pixel origins: the centre presets of an odd
+        # sized sprite round down (a 7 px wide "middle centre" sprite has
+        # xorigin 3, not 3.5).
+        origin_map: dict[int, tuple[int, int]] = {
             0: (0, 0),
-            1: (w / 2, 0),
+            1: (w // 2, 0),
             2: (w, 0),
-            3: (0, h / 2),
-            4: (w / 2, h / 2),
-            5: (w, h / 2),
+            3: (0, h // 2),
+            4: (w // 2, h // 2),
+            5: (w, h // 2),
             6: (0, h),
-            7: (w / 2, h),
+            7: (w // 2, h),
             8: (w, h),
         }
 

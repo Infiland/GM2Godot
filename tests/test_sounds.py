@@ -308,6 +308,44 @@ class TestSoundConverterFormats(unittest.TestCase):
         self.assertIn('type="AudioStreamOggVorbis"', content)
         self.assertIn('loop=false', content)
 
+    def _write_extensionless_sound(self, name: str, payload: bytes) -> None:
+        _make_sound_yy(self.gm_dir, name, overrides={"soundFile": name})
+        with open(os.path.join(self.gm_dir, "sounds", name, name), "wb") as f:
+            f.write(payload)
+
+    def test_extensionless_sound_files_get_their_container_extension(self):
+        cases = {
+            "snd_tagged": (b"ID3\x03\x00\x00\x00\x00\x00<TYER" + b"\x00" * 52, ".mp3", 'importer="mp3"'),
+            "snd_frames": (b"\xff\xfb\xe0d" + b"\x00" * 60, ".mp3", 'importer="mp3"'),
+            "snd_riff": (b"RIFF$\x00\x00\x00WAVEfmt " + b"\x00" * 48, ".wav", 'importer="wav"'),
+            "snd_vorbis": (b"OggS\x00\x02" + b"\x00" * 58, ".ogg", 'importer="oggvorbisstr"'),
+        }
+        for name, (payload, _extension, _importer) in cases.items():
+            self._write_extensionless_sound(name, payload)
+
+        self._make_converter().convert_all()
+
+        registry_paths = build_asset_output_paths(self.gm_dir, self.godot_dir)["sounds"]
+        for name, (payload, extension, importer) in cases.items():
+            with self.subTest(name=name):
+                output_path = os.path.join(self.godot_dir, "sounds", name, name + extension)
+                self.assertTrue(os.path.isfile(output_path), output_path)
+                with open(output_path, "rb") as f:
+                    self.assertEqual(f.read(), payload)
+                with open(output_path + ".import", "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.assertIn(importer, content)
+                self.assertIn(f'source_file="res://sounds/{name}/{name}{extension}"', content)
+                self.assertEqual(registry_paths[name], f"res://sounds/{name}/{name}{extension}")
+
+    def test_unrecognised_extensionless_sound_keeps_its_name(self):
+        self._write_extensionless_sound("snd_mystery", b"\x00" * 64)
+
+        self._make_converter().convert_all()
+
+        self.assertTrue(os.path.isfile(os.path.join(self.godot_dir, "sounds", "snd_mystery", "snd_mystery")))
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "sounds", "snd_mystery", "snd_mystery.import")))
+
 
 class TestSoundConverterMetadata(unittest.TestCase):
     """Test that sound metadata is logged correctly."""

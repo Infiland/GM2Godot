@@ -6,11 +6,16 @@ const GML_TILEMAP_ROTATE = 0x40000000
 const GML_TILEMAP_GODOT_FLIP_H = 1 << 12
 const GML_TILEMAP_GODOT_FLIP_V = 1 << 13
 const GML_TILEMAP_GODOT_TRANSPOSE = 1 << 14
+# A managed layer node holds the instances and particle systems GameMaker puts
+# on its managed layer at one depth; the room root lists them by depth.
+const GML_MANAGED_LAYER_DEPTH_META = &"_gm2godot_managed_layer_depth"
+const GML_MANAGED_LAYERS_META = &"_gm2godot_managed_layers"
 
 
 static func gml_layer_register_scene(scene, clear_existing = true):
 	if clear_existing:
 		_gml_layer_clear_registry()
+		_gml_depth_room_reset()
 	if not (scene is Node):
 		return false
 	for node in _gml_layer_tree_nodes(scene):
@@ -18,6 +23,8 @@ static func gml_layer_register_scene(scene, clear_existing = true):
 			continue
 		if _gml_layer_node_has_metadata(node):
 			_gml_layer_register_node(node)
+	if clear_existing:
+		_gml_depth_flush()
 	return true
 
 
@@ -92,9 +99,14 @@ static func gml_layer_depth(layer, depth):
 	var node = handle.reference
 	if not (node is CanvasItem):
 		return false
-	var resolved_depth = int(_to_real(depth))
-	node.z_index = -resolved_depth
+	var resolved_depth = gml_depth_truncate(depth)
+	# GameMaker leaves a layer already at that depth where it is; at another
+	# depth the layer goes behind the layers there (ChangeLayerDepth).
+	if node.has_meta("gamemaker_layer_depth") and gml_depth_truncate(node.get_meta("gamemaker_layer_depth")) == resolved_depth:
+		return true
 	node.set_meta("gamemaker_layer_depth", resolved_depth)
+	_gml_depth_track(node, resolved_depth)
+	_gml_room_place_layer_node(node.get_parent(), node)
 	return true
 
 
@@ -158,11 +170,10 @@ static func gml_layer_create(depth, layer_name = ""):
 	var parent = _gml_layer_current_scene()
 	if parent == null:
 		return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
-	var resolved_depth = int(_to_real(depth))
+	var resolved_depth = gml_depth_truncate(depth)
 	var name = _gml_layer_unique_name(str(layer_name))
 	var node = Node2D.new()
 	node.name = name
-	node.z_index = -resolved_depth
 	node.set_meta("gamemaker_layer_name", name)
 	node.set_meta("gamemaker_layer_node_name", name)
 	node.set_meta("gamemaker_layer_type", "runtime")
@@ -173,7 +184,7 @@ static func gml_layer_create(depth, layer_name = ""):
 	node.set_meta("gamemaker_layer_hspeed", 0)
 	node.set_meta("gamemaker_layer_vspeed", 0)
 	node.set_meta("gamemaker_placeholder", true)
-	parent.add_child(node)
+	_gml_room_add_layer_node(parent, node)
 	return _gml_layer_register_node(node)
 
 
@@ -185,10 +196,11 @@ static func gml_layer_destroy(layer):
 	if not (node is Node):
 		_gml_layer_unregister_handle(handle)
 		return false
+	# The instances on the layer are destroyed, as with instance_destroy (the
+	# runner's RemoveLayer calls RemoveInstanceElement for each one).
+	_gml_instances_destroy_under(node)
 	for child in _gml_layer_tree_nodes(node):
-		var instance_handle = _gml_instance_handle_for_node(child)
-		if gml_handle_is_valid(instance_handle):
-			gml_instance_unregister(instance_handle)
+		_gml_depth_forget(child.get_instance_id())
 		var element_handle = _gml_layer_element_handle_for_node(child)
 		if gml_handle_is_valid(element_handle):
 			_gml_layer_element_unregister_handle(element_handle)
@@ -219,11 +231,174 @@ static func gml_layer_add_instance(layer, instance):
 		return false
 	if instance_node.get_parent() == layer_node:
 		return true
-	if instance_node.get_parent() != null:
-		instance_node.reparent(layer_node, true)
-	else:
-		layer_node.add_child(instance_node)
+	_gml_instance_move_to_parent(instance_node, layer_node, true)
+	# The instance now has the layer's depth instead of one assigned earlier.
+	if instance_node.has_meta(GML_EXPLICIT_DEPTH_META):
+		instance_node.remove_meta(GML_EXPLICIT_DEPTH_META)
+		_gml_draw_pending_depths.erase(instance_node.get_instance_id())
+		_gml_depth_forget(instance_node.get_instance_id())
+		if instance_node is CanvasItem:
+			instance_node.z_as_relative = true
+			instance_node.z_index = 0
 	return true
+
+
+# --- Layer order at one depth and managed layers --------------------------------
+#
+# GameMaker keeps a room's layers in one list sorted by depth. A layer it adds
+# goes after every layer of the same depth (yyOList.Add, used by layer_create,
+# AddDynamicLayer and ChangeLayerDepth), and DrawRoomLayers and
+# ExecuteDrawEvent (yyRoom.js) walk that list from its end, so of the layers
+# that share a depth the one added last draws first, behind the others. Godot
+# draws canvas items that share a z_index in tree order, so a layer node added
+# at a depth goes before every room child at that depth.
+#
+# An instance or particle system that leaves its layer for a depth goes to the
+# room's managed layer at that depth (LayerManager.AddInstance and
+# AddNewElementAtDepth: GetLayerWithDepth looks at managed layers only, then
+# AddDynamicLayer). GameMaker keeps a managed layer, even empty, until the room
+# ends, so a later move to that depth joins it where it is. Here a managed layer
+# is a Node2D under the room root; what it holds draws at its depth's z_index.
+
+# The room's managed layer at a truncated depth, added when there is none.
+static func _gml_managed_layer(room_root, depth):
+	var layers = room_root.get_meta(GML_MANAGED_LAYERS_META, {})
+	var layer = layers.get(depth, null)
+	if is_instance_valid(layer):
+		return layer
+	layer = Node2D.new()
+	# Its depth can change (ChangeLayerDepth), so its name does not give one.
+	layer.name = "GMManagedLayer"
+	layer.set_meta(GML_MANAGED_LAYER_DEPTH_META, depth)
+	layers[depth] = layer
+	room_root.set_meta(GML_MANAGED_LAYERS_META, layers)
+	_gml_room_add_layer_node(room_root, layer)
+	return layer
+
+
+# Puts an instance or particle system on the room's managed layer at a
+# truncated depth, after what is already there. With alone_moves_layer, an
+# instance alone on its managed layer takes that layer to the new depth
+# instead (yyRoom.js ProcessDepthList2): ChangeLayerDepth puts the layer behind
+# every layer of that depth and merges the managed layer there into it.
+static func _gml_managed_layer_add(room_root, node, depth, alone_moves_layer = false):
+	var current = node.get_parent()
+	if alone_moves_layer and current != null and current.get_parent() == room_root and current.has_meta(GML_MANAGED_LAYER_DEPTH_META) and _gml_managed_layer_holds_only(current, node):
+		_gml_managed_layer_set_depth(room_root, current, depth)
+		return
+	var layer = _gml_managed_layer(room_root, depth)
+	if current != layer:
+		_gml_instance_move_to_parent(node, layer)
+
+
+static func _gml_managed_layer_holds_only(layer, node):
+	for child in layer.get_children():
+		if child != node and not child.is_queued_for_deletion():
+			return false
+	return true
+
+
+static func _gml_managed_layer_set_depth(room_root, layer, depth):
+	var layers = room_root.get_meta(GML_MANAGED_LAYERS_META, {})
+	var old_depth = int(layer.get_meta(GML_MANAGED_LAYER_DEPTH_META))
+	if old_depth == depth:
+		return
+	if layers.get(old_depth, null) == layer:
+		layers.erase(old_depth)
+	var merged = layers.get(depth, null)
+	layer.set_meta(GML_MANAGED_LAYER_DEPTH_META, depth)
+	layers[depth] = layer
+	room_root.set_meta(GML_MANAGED_LAYERS_META, layers)
+	_gml_room_place_layer_node(room_root, layer)
+	if is_instance_valid(merged) and merged != layer:
+		# The merged layer's nodes follow this layer's own, in their order.
+		for child in merged.get_children():
+			_gml_instance_move_to_parent(child, layer)
+		if merged.get_child_count() == 0:
+			merged.queue_free()
+
+
+# Adds a layer node to a room behind every room child at its depth. A room
+# still adding its own children takes it at the end of the frame.
+static func _gml_room_add_layer_node(room_root, node):
+	if room_root.is_node_ready():
+		room_root.add_child(node, true)
+		_gml_room_place_layer_node(room_root, node)
+		return
+	room_root.add_child.call_deferred(node, true)
+	(func(): _gml_room_place_layer_node(room_root, node, false)).call_deferred()
+
+
+# Moves a room's layer node before every other room child at its depth; a
+# room still adding its own children is reordered at the end of the frame.
+# Nested layers stay in their parent layer.
+static func _gml_room_place_layer_node(room_root, node, may_wait = true):
+	if not is_instance_valid(room_root) or not is_instance_valid(node) or node.get_parent() != room_root:
+		return
+	if room_root.has_meta(&"gamemaker_layer_depth"):
+		return
+	if not room_root.is_node_ready():
+		if may_wait:
+			(func(): _gml_room_place_layer_node(room_root, node, false)).call_deferred()
+		return
+	var depth = _gml_room_layer_node_depth(node)
+	if depth == null:
+		return
+	for child in room_root.get_children():
+		if child == node:
+			return
+		if _gml_room_child_has_depth(child, depth):
+			room_root.move_child(node, child.get_index())
+			return
+
+
+static func _gml_room_layer_node_depth(node):
+	if node.has_meta(GML_MANAGED_LAYER_DEPTH_META):
+		return int(node.get_meta(GML_MANAGED_LAYER_DEPTH_META))
+	if node.has_meta(&"gamemaker_layer_depth"):
+		return gml_depth_truncate(node.get_meta(&"gamemaker_layer_depth"))
+	return null
+
+
+# Whether a room child is, or nests, a layer at the depth.
+static func _gml_room_child_has_depth(node, depth):
+	var node_depth = _gml_room_layer_node_depth(node)
+	if node_depth == null:
+		return false
+	if node_depth == depth:
+		return true
+	if node.has_meta(GML_MANAGED_LAYER_DEPTH_META):
+		return false
+	for child in node.get_children():
+		if child.has_meta(&"gamemaker_layer_depth") and _gml_room_child_has_depth(child, depth):
+			return true
+	return false
+
+
+
+
+static func gml_instance_layer_get(instance):
+	# GameMaker's layer variable: the handle of the room or runtime layer the
+	# instance is on. An instance made with instance_create_depth, or given a
+	# depth of its own, is on a managed depth layer and reads -1 (an invalid
+	# layer handle).
+	if not (instance is Node) or instance.has_meta(GML_EXPLICIT_DEPTH_META):
+		return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+	var node = instance.get_parent()
+	while node != null:
+		if _gml_layer_node_has_metadata(node):
+			return _gml_layer_register_node(node)
+		if node.has_meta(&"gm2godot_room_root_policy"):
+			break
+		node = node.get_parent()
+	return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+
+
+static func gml_instance_layer_set(instance, layer):
+	# Assigning layer moves the instance to that layer, which gives it the
+	# layer's depth (HTML5 runner yyInstance.js layer setter).
+	gml_layer_add_instance(layer, instance)
+	return null
 
 
 static func gml_layer_get_all_elements(layer):
@@ -266,7 +441,7 @@ static func gml_layer_tilemap_create(layer, x, y, tileset, width, height):
 		return gml_handle_invalid(GML_LAYER_ELEMENT_HANDLE_KIND)
 	var node = TileMapLayer.new()
 	node.name = "TileMap"
-	node.position = Vector2(_to_real(x), _to_real(y))
+	node.position = Vector2(_to_real(x), _to_real(y)) + _gml_layer_node_offset(layer_node)
 	node.tile_set = tile_set
 	node.set_meta("gamemaker_layer_element_type", "tilemap")
 	node.set_meta("gamemaker_tile_layer", true)
@@ -296,10 +471,11 @@ static func gml_tilemap_set(tilemap_element_id, tiledata, xcell, ycell):
 	var layout = _gml_tilemap_atlas_layout(node.tile_set)
 	if layout.is_empty():
 		return false
-	var atlas_index = tile_index - 1
+	# Tile N is cell N of the tileset sprite's own grid; tile 0 is the empty
+	# top-left cell (tilemap_set rejects tile_index >= the tileset's tile count).
 	var atlas_coords = Vector2i(
-		atlas_index % int(layout["columns"]),
-		int(floor(float(atlas_index) / float(layout["columns"])))
+		tile_index % int(layout["columns"]),
+		int(floor(float(tile_index) / float(layout["columns"])))
 	)
 	var source = layout["source"]
 	if source is TileSetAtlasSource and not source.has_tile(atlas_coords):
@@ -332,7 +508,7 @@ static func gml_tilemap_get(tilemap_element_id, xcell, ycell):
 	if layout.is_empty():
 		return -1
 	var atlas_coords = node.get_cell_atlas_coords(coords)
-	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x + 1
+	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x
 	var alternative_tile = node.get_cell_alternative_tile(coords)
 	tile_value |= _gml_tilemap_transform_from_godot(alternative_tile)
 	return tile_value
@@ -361,12 +537,18 @@ static func gml_layer_element_move(element, layer):
 		return false
 	if not (element_node is Node) or not (layer_node is Node):
 		return false
-	if element_node.get_parent() == layer_node:
+	var old_layer = element_node.get_parent()
+	if old_layer == layer_node:
 		return true
-	if element_node.get_parent() != null:
-		element_node.reparent(layer_node, true)
+	# The element keeps its own position and is drawn at the new layer's
+	# offset instead of the old one.
+	var shift = _gml_layer_element_offset(layer_node, element_node) - _gml_layer_element_offset(old_layer, element_node)
+	if old_layer != null:
+		_gml_instance_reparent(element_node, layer_node)
 	else:
 		layer_node.add_child(element_node)
+	if element_node is Node2D:
+		element_node.position += shift
 	_gml_layer_element_register(element_node)
 	return true
 
@@ -375,6 +557,10 @@ static func gml_layer_get_element_type(element):
 	var node = _gml_layer_element_resolve_node(element)
 	if node == null:
 		return "undefined"
+	return _gml_layer_node_element_type(node)
+
+
+static func _gml_layer_node_element_type(node):
 	if node.has_meta("gamemaker_layer_element_type"):
 		return str(node.get_meta("gamemaker_layer_element_type"))
 	if (
@@ -469,6 +655,8 @@ static func _gml_layer_register_node(node):
 	var handle = gml_handle_register(GML_LAYER_HANDLE_KIND, node, _gml_layer_node_display_name(node))
 	_gml_layer_store_handle(handle)
 	node.set_meta("_gm2godot_layer_id", handle.index)
+	if node is CanvasItem and node.has_meta("gamemaker_layer_depth"):
+		_gml_depth_track(node, gml_depth_truncate(node.get_meta("gamemaker_layer_depth")))
 	return handle
 
 
@@ -557,13 +745,69 @@ static func _gml_layer_node_axis(node, axis):
 
 
 static func _gml_layer_set_node_axis(node, axis, value):
-	var key = "gamemaker_layer_" + str(axis)
-	if node is Node2D:
-		if str(axis) == "x":
-			node.position.x = value
-		else:
-			node.position.y = value
-	node.set_meta(key, value)
+	var offset = _gml_layer_node_offset(node)
+	if str(axis) == "x":
+		offset.x = value
+	else:
+		offset.y = value
+	_gml_layer_set_node_offset(node, offset)
+
+
+static func _gml_layer_node_offset(node):
+	return Vector2(_gml_layer_node_axis(node, "x"), _gml_layer_node_axis(node, "y"))
+
+
+# GameMaker draws a layer's backgrounds, sprites, tilemaps and sequences at
+# their own position plus the layer offset (yyRoom.js DrawLayer*Element add
+# m_xoffset/m_yoffset), but instances at their own x/y
+# (DrawLayerInstanceElement) and particle systems at their own position
+# (yyParticle.js ParticleSystem_Update). A layer node therefore stays at the
+# room origin, so whatever joins it later keeps its position, and each
+# element that follows the offset is placed at its own position plus the
+# offset.
+const GML_LAYER_OFFSET_ELEMENT_TYPES = ["background", "sprite", "tilemap", "sequence"]
+
+
+static func _gml_layer_set_node_offset(node, offset):
+	var delta = offset - _gml_layer_node_offset(node)
+	node.set_meta("gamemaker_layer_x", offset.x)
+	node.set_meta("gamemaker_layer_y", offset.y)
+	if delta == Vector2.ZERO:
+		return
+	for child in node.get_children():
+		if _gml_layer_element_follows_offset(child):
+			child.position += delta
+
+
+static func _gml_layer_element_follows_offset(element):
+	# Nested layers have offsets of their own.
+	return (
+		element is Node2D
+		and not _gml_layer_node_has_metadata(element)
+		and GML_LAYER_OFFSET_ELEMENT_TYPES.has(_gml_layer_node_element_type(element))
+	)
+
+
+# How far `element` on `layer_node` is drawn from its own position.
+static func _gml_layer_element_offset(layer_node, element):
+	if _gml_layer_node_has_metadata(layer_node) and _gml_layer_element_follows_offset(element):
+		return _gml_layer_node_offset(layer_node)
+	return Vector2.ZERO
+
+
+static func _gml_layer_step_scroll():
+	# GameMaker's LayerManager.UpdateLayers (Function_Layers.js), run each
+	# step after the instances' images update and before Begin Step: every
+	# layer's offset moves by its speed (layer_hspeed/layer_vspeed, which
+	# start at the Room Editor's speed of a background layer).
+	for handle in _gml_layer_handles_by_index.values():
+		if not gml_handle_is_valid(handle) or not (handle.reference is Node):
+			continue
+		var node = handle.reference
+		var speed = Vector2(_gml_layer_node_speed(node, "h"), _gml_layer_node_speed(node, "v"))
+		if speed != Vector2.ZERO:
+			_gml_layer_set_node_offset(node, _gml_layer_node_offset(node) + speed)
+	return null
 
 
 static func _gml_layer_node_speed(node, axis):
@@ -837,12 +1081,14 @@ static func _gml_tilemap_atlas_layout(tile_set):
 	var source = tile_set.get_source(source_id)
 	if not (source is TileSetAtlasSource):
 		return {}
-	var columns = int(tile_set.get_meta("gamemaker_tileset_out_columns", 0))
+	# GameMaker numbers tiles by cell of the tileset sprite's own grid, which is
+	# the converted atlas's grid. The tileset's out_columns describe the compiled
+	# texture page tileset_get_info reports, not the numbering.
+	var columns = int(source.get_atlas_grid_size().x)
 	if columns <= 0:
-		var grid_size = source.get_atlas_grid_size()
-		if grid_size.x <= 0:
-			return {}
-		columns = grid_size.x
+		columns = int(tile_set.get_meta("gamemaker_tileset_source_columns", 0))
+	if columns <= 0:
+		return {}
 	var layout = {
 		"source_id": source_id,
 		"source": source,
@@ -873,3 +1119,202 @@ static func _gml_layer_background_color(color):
 		float((value >> 16) & 0xff) / 255.0,
 		1.0
 	)
+
+
+# --- Drawing background layer elements -----------------------------------
+#
+# GameMaker draws every background element each frame over the part of the
+# room being drawn (yyRoom.js DrawLayerBackgroundElement). A colour fills
+# that area whatever the layer offset. A sprite is drawn from its top-left
+# corner (backgrounds ignore the sprite origin) at the layer offset, scaled
+# by the element's xscale/yscale, or by room size / sprite size when it is
+# stretched, and along each tiled axis it repeats every scaled sprite width
+# or height across the area (yyWebGL.js WebGL_TextureDrawTiled_RELEASE). A
+# converted colour element is a ColorRect kept over the visible area; a
+# sprite element draws the current frame of its hidden sprite scene through
+# the region of a repeating Sprite2D (one quad, however many tiles).
+
+const GML_BACKGROUND_PARTS_META = "_gm2godot_background_parts"
+
+static var _gml_background_scene_id = 0
+static var _gml_background_nodes = []
+
+
+# The background elements of a room scene, found once per scene.
+static func _gml_layer_background_nodes(scene):
+	var scene_id = scene.get_instance_id()
+	if scene_id == _gml_background_scene_id:
+		var valid = true
+		for node in _gml_background_nodes:
+			if not is_instance_valid(node):
+				valid = false
+				break
+		if valid:
+			return _gml_background_nodes
+	_gml_background_scene_id = scene_id
+	_gml_background_nodes = []
+	for node in _gml_layer_tree_nodes(scene):
+		if node != scene and node is CanvasItem and _gml_layer_node_is_background(node):
+			_gml_background_nodes.append(node)
+	return _gml_background_nodes
+
+
+static func _gml_layer_background_draw(node):
+	if not node.is_visible_in_tree():
+		return
+	if node is Control:
+		_gml_layer_background_fill(node)
+		return
+	var parts = _gml_layer_background_parts(node)
+	if not parts.is_empty():
+		_gml_layer_background_tile(node, parts)
+
+
+# The viewport's visible area in `item`'s local coordinates (the bounding box
+# when the view is rotated).
+static func _gml_layer_background_visible_region(item):
+	var viewport = item.get_viewport()
+	if viewport == null:
+		return Rect2()
+	var transform = item.get_global_transform_with_canvas()
+	if absf(transform.determinant()) <= 0.0000001:
+		return Rect2()
+	var rect = viewport.get_visible_rect()
+	var to_local = transform.affine_inverse()
+	var region = Rect2(to_local * rect.position, Vector2.ZERO)
+	region = region.expand(to_local * Vector2(rect.end.x, rect.position.y))
+	region = region.expand(to_local * rect.end)
+	return region.expand(to_local * Vector2(rect.position.x, rect.end.y))
+
+
+static func _gml_layer_background_fill(rect_node):
+	var region = _gml_layer_background_visible_region(rect_node)
+	if not region.has_area():
+		return
+	var start = (rect_node.position + region.position).floor()
+	var size = (rect_node.position + region.end).ceil() - start
+	if rect_node.position != start:
+		rect_node.position = start
+	if rect_node.size != size:
+		rect_node.size = size
+
+
+# [tiles Sprite2D, frame source (Sprite2D or AnimatedSprite2D), sprite scene].
+static func _gml_layer_background_parts(node):
+	if node.has_meta(GML_BACKGROUND_PARTS_META):
+		var cached = node.get_meta(GML_BACKGROUND_PARTS_META)
+		if is_instance_valid(cached[0]) and is_instance_valid(cached[1]) and is_instance_valid(cached[2]):
+			return cached
+	var tiles = null
+	var scene = null
+	for child in node.get_children():
+		if child is Sprite2D and child.has_meta("gamemaker_background_tiles"):
+			tiles = child
+		elif child.has_meta("gamemaker_background_frames"):
+			scene = child
+	if tiles == null or scene == null:
+		return []
+	var source = scene if (scene is Sprite2D or scene is AnimatedSprite2D) else scene.find_child("AnimatedSprite2D", true, false)
+	if source == null:
+		source = scene.find_child("Sprite2D", true, false)
+	if source == null:
+		return []
+	var parts = [tiles, source, scene]
+	node.set_meta(GML_BACKGROUND_PARTS_META, parts)
+	return parts
+
+
+static func _gml_layer_background_tile(node, parts):
+	var tiles = parts[0]
+	var texture = _gml_layer_background_frame_texture(parts[1])
+	var size = Vector2.ZERO
+	if texture != null:
+		var scene = parts[2]
+		size = Vector2(
+			_to_real(scene.get_meta("gamemaker_width", texture.get_width())),
+			_to_real(scene.get_meta("gamemaker_height", texture.get_height()))
+		)
+	var scale = _gml_layer_background_scale(node, size)
+	var region = _gml_layer_background_visible_region(node)
+	var across = _gml_layer_background_axis(bool(node.get_meta("gamemaker_background_htiled", false)), size.x, scale.x, region.position.x, region.end.x)
+	var down = _gml_layer_background_axis(bool(node.get_meta("gamemaker_background_vtiled", false)), size.y, scale.y, region.position.y, region.end.y)
+	if texture == null or across.is_empty() or down.is_empty() or not region.has_area():
+		tiles.visible = false
+		return
+	if tiles.texture != texture:
+		tiles.texture = texture
+	var source = Rect2(Vector2.ZERO, size * Vector2(across[1], down[1]))
+	if tiles.region_rect != source:
+		tiles.region_rect = source
+	var position = Vector2(across[0], down[0])
+	if tiles.position != position:
+		tiles.position = position
+	if tiles.scale != scale:
+		tiles.scale = scale
+	tiles.visible = true
+
+
+static func _gml_layer_background_frame_texture(source):
+	if source is AnimatedSprite2D:
+		var frames = source.sprite_frames
+		if frames == null or not frames.has_animation(source.animation):
+			return null
+		if frames.get_frame_count(source.animation) <= 0:
+			return null
+		return frames.get_frame_texture(source.animation, source.frame)
+	if source is Sprite2D:
+		return source.texture
+	return null
+
+
+static func _gml_layer_background_scale(node, size):
+	if bool(node.get_meta("gamemaker_background_stretch", false)) and size.x > 0.0 and size.y > 0.0:
+		var room_size = Vector2(
+			_to_real(_gml_builtin_globals.get("room_width", 0)),
+			_to_real(_gml_builtin_globals.get("room_height", 0))
+		)
+		if room_size.x > 0.0 and room_size.y > 0.0:
+			return room_size / size
+	return Vector2(
+		_to_real(node.get_meta("gamemaker_background_xscale", 1.0)),
+		_to_real(node.get_meta("gamemaker_background_yscale", 1.0))
+	)
+
+
+# [position, copies] of the strip along one axis: the sprite once from the
+# element's origin, or, when tiled, the copies on the grid anchored at the
+# origin that cover [low, high]. A negative scale mirrors each copy towards
+# lower coordinates, so the strip then starts from its far end.
+static func _gml_layer_background_axis(tiled, size, scale, low, high):
+	var step = absf(size * scale)
+	if step <= 0.0:
+		return []
+	if not tiled:
+		return [0.0, 1]
+	var start = floor(low / step) * step
+	var copies = maxi(int(ceil((high - start) / step)), 1)
+	return [start + copies * step if scale < 0.0 else start, copies]
+
+
+# --- Sprite elements on asset layers -------------------------------------
+
+static func _gml_layer_is_sprite_element(node):
+	return node.has_meta("gamemaker_layer_element_type") and str(node.get_meta("gamemaker_layer_element_type")) == "sprite"
+
+
+static func _gml_layer_sprite_element_start(node):
+	# A sprite placed in the Room Editor starts at its initial frame
+	# (headPosition) and plays at its animation speed times the sprite's
+	# (Function_Layers.js: NewSprite.m_imageIndex = sImageIndex,
+	# m_imageSpeed = sImageSpeed). The head wraps into the sprite's frames
+	# like a looping sprite sequence (yySequence.js HandleSequenceWrapping),
+	# so -1 is the last frame.
+	var visual = node.get_node_or_null("AnimatedSprite2D")
+	if not (visual is AnimatedSprite2D) or visual.sprite_frames == null:
+		return
+	var count = visual.sprite_frames.get_frame_count(visual.animation)
+	if count <= 0:
+		return
+	var head = _to_real(node.get_meta("gamemaker_asset_head_position", 0))
+	visual.frame = posmod(int(floor(head)), count)
+	visual.speed_scale = _to_real(node.get_meta("gamemaker_asset_animation_speed", 1))

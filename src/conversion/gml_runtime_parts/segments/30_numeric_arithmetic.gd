@@ -1,20 +1,29 @@
+# The operators below start with the common case of two plain numbers (int
+# or float, not bool), which they handle exactly as the general code further
+# down does, without its type checks.
+
 static func gml_div(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return _gml_real_divide(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
-	if _returns_int64_arithmetic_result(left, right):
+	if is_int64(left) and is_int64(right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
-		return GMLInt64.new(int(_to_int64_value(left) / right_int))
-	if _returns_int32_arithmetic_result(left, right):
-		var right_int = _to_int32_value(right)
-		if right_int == 0:
-			return gml_error("GML int32 division by zero")
-		return int(_to_int32_value(left) / right_int)
+		return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))
+	# GML `/` is always real division, even when both operands hold whole
+	# numbers (5 / 2 == 2.5); only int64 / int64 keeps integer semantics
+	# (the runner's yyfdivide turns an int64 divided by, or dividing, any
+	# other number into a real).
 	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML divide", left, right)
-	var left_value = _to_real(left)
-	var right_value = _to_real(right)
+	return _gml_real_divide(_to_real(left), _to_real(right))
+
+
+static func _gml_real_divide(left_value, right_value):
 	if right_value == 0.0:
 		if left_value == 0.0:
 			return NAN
@@ -23,19 +32,73 @@ static func gml_div(left, right):
 
 
 static func gml_int_div(left, right):
-	if _returns_int64_arithmetic_result(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_INT and right_type == TYPE_INT and _gml_int32_pair(left, right):
+		if right == 0:
+			return gml_error("GML int32 division by zero")
+		return int(left / right)
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		return _gml_real_int_div(float(left), float(right))
+	if is_ptr(left) or is_ptr(right):
+		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
+	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
+		return gml_unsupported_binary_type_error("GML integer divide", left, right)
+	# The runner's yyfdiv: an int64 dividend keeps int64 integer division
+	# (the divisor truncated to an integer); otherwise both operands are
+	# reals.
+	if is_int64(left):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
 			return gml_error("GML int64 division by zero")
-		return GMLInt64.new(int(_to_int64_value(left) / right_int))
-	if _returns_int32_arithmetic_result(left, right):
-		var right_int = _to_int32_value(right)
-		if right_int == 0:
-			return gml_error("GML int32 division by zero")
-		return int(_to_int32_value(left) / right_int)
-	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
-		return gml_unsupported_binary_type_error("GML integer divide", left, right)
-	return int(_to_real(left) / _to_real(right))
+		return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))
+	return _gml_real_int_div(_to_real(left), _to_real(right))
+
+
+const GML_INT64_MIN = -9223372036854775807 - 1
+const GML_INT64_MAX = 9223372036854775807
+
+
+# An int64 quotient as the runner's Long.div gives it: the most negative
+# int64 divided by -1 is itself (Godot's int division crashes the game there).
+static func _gml_int64_quotient(left_int, right_int):
+	if right_int == -1 and left_int == GML_INT64_MIN:
+		return left_int
+	return left_int / right_int
+
+
+# `div` on reals, as the runner's yyfdiv: a zero divisor is an error, NaN
+# and equal operands have fixed results, and otherwise both operands are
+# truncated to integers before the integer division (so 7 div 2.5 == 3; a
+# divisor that truncates to 0 gives 0).
+static func _gml_real_int_div(left_value, right_value):
+	if right_value == 0.0:
+		return gml_error("GML div by zero")
+	var left_nan = is_nan(left_value)
+	var right_nan = is_nan(right_value)
+	if left_nan or right_nan:
+		if left_nan and right_nan:
+			return 1
+		if left_nan:
+			return left_value if is_finite(right_value) else 1
+		return right_value if is_finite(left_value) else 1
+	if left_value == right_value:
+		return 1
+	var divisor = _gml_truncate_real(right_value)
+	if divisor == 0.0:
+		return 0
+	# The truncated operands stay reals, so a value beyond the int64 range
+	# cannot overflow; the quotient is an int only when an int64 holds it.
+	var quotient = _gml_truncate_real(left_value) / divisor
+	return _gml_whole_real(quotient - fmod(quotient, 1.0))
+
+
+# A real truncated toward zero to a whole real; infinities give 0, as the
+# runner's ~~ does.
+static func _gml_truncate_real(value):
+	if is_inf(value):
+		return 0.0
+	return value - fmod(value, 1.0)
 
 
 static func gml_real(value):
@@ -68,11 +131,31 @@ static func gml_sqrt(value):
 		return gml_unsupported_type_error("GML sqrt", value)
 	var real_value = _to_real(value)
 	if real_value < 0.0:
+		# Like comparisons, sqrt uses math_set_epsilon: a negative value no
+		# further from 0 than the epsilon counts as 0.
+		if real_value >= -_gml_math_epsilon:
+			return 0.0
 		return NAN
 	return sqrt(real_value)
 
 
+# Whether two ints are both int32 values, which GML adds, subtracts,
+# multiplies and divides as int32 (other numbers as reals).
+static func _gml_int32_pair(left, right):
+	return left >= -2147483648 and left <= 2147483647 and right >= -2147483648 and right <= 2147483647
+
+
 static func gml_add(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left + float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left + right if _gml_int32_pair(left, right) else float(left) + float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) + right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
@@ -93,6 +176,16 @@ static func gml_add(left, right):
 
 
 static func gml_sub(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left - float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left - right if _gml_int32_pair(left, right) else float(left) - float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) - right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
@@ -105,11 +198,23 @@ static func gml_sub(left, right):
 
 
 static func gml_mul(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_FLOAT:
+		if right_type == TYPE_FLOAT or right_type == TYPE_INT:
+			return left * float(right)
+	elif left_type == TYPE_INT:
+		if right_type == TYPE_INT:
+			return left * right if _gml_int32_pair(left, right) else float(left) * float(right)
+		if right_type == TYPE_FLOAT:
+			return float(left) * right
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if is_string(right):
 		if is_number(left):
-			return str(right).repeat(max(0, int(_to_real(left))))
+			# The runner's number * string adds the string while the number
+			# counts down to 0.
+			return _gml_repeat_string(str(right), _to_real(left), "GML multiply")
 		return gml_unsupported_binary_type_error("GML multiply", left, right)
 	if is_string(left):
 		return gml_unsupported_binary_type_error("GML multiply", left, right)
@@ -122,21 +227,46 @@ static func gml_mul(left, right):
 	return _to_real(left) * _to_real(right)
 
 
+# The runner's yyfmod raises this for any divisor that is zero once it is a
+# real (0, 0.0, -0.0, false, int64(0)) unless both operands are int64.
+const GML_MOD_BY_ZERO_MESSAGE = "unable to mod with zero"
+
+
 static func gml_mod(left, right):
+	var left_type = typeof(left)
+	var right_type = typeof(right)
+	if left_type == TYPE_INT and right_type == TYPE_INT and _gml_int32_pair(left, right):
+		if right == 0:
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
+		return left % right
+	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		if right == 0.0:
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
+		return fmod(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
-			return gml_error("GML int64 modulo by zero")
+			# Only two int64 values take the Long.mod path of the runner,
+			# which fails in its division; with any other number the int64
+			# is turned into a real first and yyfmod rejects the zero.
+			if is_int64(left) and is_int64(right):
+				return gml_error("GML int64 modulo by zero")
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
+		# Any int64 modulo -1 is 0, as the runner's Long.mod gives it
+		# (Godot's int % crashes the game on the most negative int64).
+		if right_int == -1:
+			return GMLInt64.new(0)
 		return GMLInt64.new(_to_int64_value(left) % right_int)
 	if _returns_int32_arithmetic_result(left, right):
 		var right_int = _to_int32_value(right)
 		if right_int == 0:
-			return gml_error("GML int32 modulo by zero")
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
 		return _to_int32_value(left) % right_int
 	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML modulo", left, right)
-	return fmod(_to_real(left), _to_real(right))
-
-
+	var right_real = _to_real(right)
+	if right_real == 0.0:
+		return gml_error(GML_MOD_BY_ZERO_MESSAGE)
+	return fmod(_to_real(left), right_real)

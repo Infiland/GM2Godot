@@ -2222,8 +2222,23 @@ class TestGenerateSpriteScene(unittest.TestCase):
         # Full bbox on 32x32: bbox_center = (0+31+1)/2 = 16, sprite_center = 16
         # offset = (0, 0) → no position line needed (but code still writes it)
         self.assertIn("position = Vector2(0.0, 0.0)", content)
-        self.assertIn("metadata/gamemaker_origin_x = 16.0", content)
-        self.assertIn("metadata/gamemaker_origin_y = 16.0", content)
+        self.assertIn("metadata/gamemaker_origin_x = 16\n", content)
+        self.assertIn("metadata/gamemaker_origin_y = 16\n", content)
+
+    def test_centre_origin_of_odd_sized_sprite_rounds_down_like_gamemaker(self):
+        # GameMaker stores whole-pixel origins: "middle centre" on 7x5 is (3, 2).
+        data = self._make_collision_data(collision_kind=1, origin=4, width=7, height=5,
+                                          bbox_left=0, bbox_right=6, bbox_top=0, bbox_bottom=4)
+        self.converter._generate_sprite_scene("spr_odd", data, 1)
+
+        tscn_path = os.path.join(self.godot_dir, "sprites", "spr_odd", "spr_odd.tscn")
+        with open(tscn_path, "r") as f:
+            content = f.read()
+
+        self.assertIn("metadata/gamemaker_origin_x = 3\n", content)
+        self.assertIn("metadata/gamemaker_origin_y = 2\n", content)
+        # Visual and collision centres sit half a pixel right/below the origin.
+        self.assertIn("position = Vector2(0.5, 0.5)", content)
 
     def test_top_left_origin_offsets_visual_and_collision_together(self):
         data = self._make_collision_data(

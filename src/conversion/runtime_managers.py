@@ -197,6 +197,10 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
     if definition.name == "GMRuntime":
         lines.append("\tGMRuntimeFacade.gml_included_file_integrity_prewarm()")
         lines.append("\tGMRuntimeFacade.gml_script_registry_entries()")
+    if definition.frame_pump:
+        # GameMaker frame timing: latched input, deferred room changes and
+        # async delivery inside the step.
+        lines.append("\tGMRuntimeFacade.gml_event_scheduler_pump_attach()")
     lines.extend([
         "",
         "",
@@ -207,13 +211,19 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
             "\tGMRuntimeFacade.gm2godot_runtime_shutdown()",
             "",
             "",
+            # Closing the window runs the Close Button event of the instances
+            # that have it; without one the game ends, and every instance
+            # runs its Clean Up event first.
+            "func _notification(what):",
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:",
+            "\t\tGMRuntimeFacade.gml_game_window_close_request()",
+            "",
+            "",
         ])
     if definition.frame_pump:
         lines.extend([
             "func _process(delta):",
-            "\tGMRuntimeFacade.gml_input_dispatch_frame()",
-            "\tGMRuntimeFacade.gml_event_scheduler_frame(float(delta), 1)",
-            "\tGMRuntimeFacade.gml_input_end_frame()",
+            "\tGMRuntimeFacade.gml_event_scheduler_game_frame(float(delta))",
             "",
             "",
         ])
@@ -225,16 +235,22 @@ def render_runtime_manager_script(definition: RuntimeManagerDefinition) -> str:
             "",
         ])
     if definition.draw_pump:
+        # A room change requested by a Draw event happens right after the
+        # draw; the new room then steps and draws in the same frame.
         lines.extend([
             "func _process(_delta):",
+            "\tif not GMRuntimeFacade.gml_event_scheduler_frame_drawable():",
+            "\t\treturn",
             "\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
+            "\twhile GMRuntimeFacade.gml_event_scheduler_after_draw():",
+            "\t\tGMRuntimeFacade.gml_draw_event_dispatch_frame()",
             "",
             "",
         ])
     if definition.async_pump:
         lines.extend([
             "func _process(_delta):",
-            "\tGMRuntimeFacade.gml_async_queue_flush()",
+            "\tGMRuntimeFacade.gml_async_frame_pump()",
             "",
             "",
         ])

@@ -8,11 +8,11 @@ The generated autoloads are:
 - `GMAssets`: asset registry, texture groups, audio groups, and dynamic assets.
 - `GMRooms`: room order, current room, transitions, and layers.
 - `GMInstances`: live instances, handles, object indices, and creation order.
-- `GMEvents`: frame events, alarms, timelines, and sequences. This manager owns the generated `_process` frame pump, dispatches queued GMInput events, calls `GMRuntime.gml_event_scheduler_frame()`, then clears one-frame input edges so Step phases do not depend on individual node callback order.
-- `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases.
-- `GMInput`: keyboard, mouse, gamepad, and gesture state. This manager owns the generated `_input(event)` capture hook; converted object scripts expose `_gm_input_event_bindings()` plus `_gm_input_*` methods for deterministic frame dispatch.
+- `GMEvents`: frame events, alarms, timelines, and sequences. This manager owns the generated `_process` frame pump: its `_ready()` calls `GMRuntime.gml_event_scheduler_pump_attach()` and every frame calls `GMRuntime.gml_event_scheduler_game_frame(delta)`, which runs one GameMaker step in GameMaker's phase order (including keyboard and mouse events), so Step phases do not depend on individual node callback order.
+- `GMDraw`: draw state, surfaces, shader cache, and texture-group state. This manager owns the generated draw-phase pump for Pre Draw, Draw Begin, Draw, Draw End, Post Draw, and GUI phases. It skips the frame when `GMRuntime.gml_event_scheduler_frame_drawable()` is false, because GameMaker does not draw a step that ended with a room change, `game_restart()` or `game_end()`. After drawing it calls `GMRuntime.gml_event_scheduler_after_draw()`, which carries out a room change requested by a Draw event right away; the new room then steps and is drawn in the same frame, as in GameMaker.
+- `GMInput`: keyboard, mouse, gamepad, and gesture state. This manager owns the generated `_input(event)` capture hook, which translates Godot keys and mouse buttons into GameMaker key and button codes; converted object scripts expose `_gm_input_event_bindings()` (including the input events inherited from parent objects) plus `_gm_input_*` methods, which `GMRuntime.gml_input_dispatch_frame()` runs in GameMaker's keyboard and mouse event order.
 - `GMAudio`: audio instances, groups, emitters, and listeners.
-- `GMAsync`: async_load, HTTP, buffer, networking, platform, and extension queues. This manager owns the generated async queue pump so callback delivery is FIFO and `async_load` is scoped to each Async event.
+- `GMAsync`: async_load, HTTP, buffer, networking, platform, and extension queues. This manager owns the generated async queue pump (`GMRuntime.gml_async_frame_pump()`) so callback delivery is FIFO and `async_load` is scoped to each Async event. While the `GMEvents` frame pump is attached, Async events are delivered in the step's async phase instead.
 - `GMPlatform`: service hooks, extension callback schemas, OS/debug, and GC state.
 
 `project.godot` registers the managers in that order in `[autoload]`. Godot loads autoload nodes before the main scene and evaluates them in project order, which gives the runtime a stable startup sequence for later event, room, draw, input, audio, async, and platform migrations.
@@ -41,11 +41,74 @@ Projects can remove or override the generated `GM*` autoloads while keeping the 
 
 GameMaker event order is coordinated through `GMEvents` and generated object
 methods rather than relying on individual Godot node callback order. The runtime
-dispatches Create/room-enter behavior during room scene setup, then uses the
-frame pump for Begin Step, Step, End Step, alarm processing, collision dispatch,
-timelines/sequences, input edge clearing, draw phases, GUI phases, and queued
-async delivery. Tests that depend on these phases should assert the generated
-method names or manager queues rather than incidental node order.
+dispatches Create/room-enter behavior during room scene setup, then every frame
+runs one GameMaker step in the order of the GameMaker runner
+(`GML_EVENT_PHASE_ORDER`): input latch, `xprevious`/`yprevious` and image
+animation with Animation End, layer scrolling (each layer's offset moves by its
+`layer_hspeed`/`layer_vspeed`), Begin Step, Async events, timelines, time sources,
+alarms, keyboard events, mouse events, sequences, Step, motion/paths, Outside
+Room/Intersect Boundary/view events, collisions and End Step, followed by the
+draw phases. Keyboard and mouse pressed/released states are latched at the start
+of the step and stay valid until the next step, including in Draw and Draw GUI.
+
+`room_goto()`, `room_goto_next()`, `room_goto_previous()`, `room_restart()`,
+`game_restart()` and `game_end()` only record the request while the frame pump
+is attached. The current event finishes and that step is not drawn. No further
+events run, apart from the Create, Destroy, Alarm and Other events of
+persistent instances or of a persistent room: instances created after the
+request get no Create event (generated Create code asks
+`GMRuntime.gml_event_create_blocked()`), and `instance_destroy()` runs no
+Destroy event.
+The change happens at the end of the step, or right after the draw when a Draw
+event requested it; after a room switch the new room steps and draws in the same
+frame. Without the frame pump (tests and tools that call
+the static runtime directly) these functions act immediately and input edges
+last until `gml_input_end_frame()`. Tests that depend on these phases should
+assert the generated method names or manager queues rather than incidental
+node order.
+
+A step keeps one list of live instances in creation order, carried over from
+the previous step: instances created during a phase join it before the next
+phase, destroyed instances are skipped. Which events, alarms, input bindings
+and Other events an object has is looked up once per object script. The
+scheduler records the events it runs (`gml_event_scheduler_trace()`), the
+input runtime its input events (`gml_input_dispatch_trace()`), the collision
+runtime its collision events (`gml_collision_event_trace()`), `GMAsync` the
+async events it delivers (`gml_async_event_log()`) and the room runtime its
+room changes (`gml_room_transition_log()`) only while
+`gml_event_scheduler_set_tracing(true)` is in effect; each keeps only its
+latest records.
+
+Draw phases run once per frame from `GMRuntime.gml_draw_event_dispatch_frame()`:
+Pre Draw, Draw Begin, Draw, Draw End, Post Draw, Draw GUI Begin, Draw GUI and
+Draw GUI End, each over the visible instances from the highest depth to the
+lowest. Generated draw events are the `_on_pre_draw`, `_on_draw_begin`,
+`_on_draw`, `_on_draw_end`, `_on_post_draw`, `_on_draw_gui_begin`,
+`_on_draw_gui` and `_on_draw_gui_end` methods; Godot's own `_draw` callback is
+not used. An instance without a Draw event (own or inherited) is drawn by its
+generated sprite node, which is hidden for instances that have one. Draw calls
+add commands to runtime-owned `RenderingServer` canvas items that are cleared
+and refilled every frame and freed with their instance or room: Draw output is
+parented under the instance's canvas item so it sorts at the instance's depth;
+Draw Begin and Draw End use room-space `CanvasLayer`s at -1 and 1 (behind and in
+front of the room's layers); Pre Draw and Post Draw use layers at -2 and 999
+whose coordinates are window pixels, as in GameMaker, mapped onto the stretched
+root viewport (they are rasterised at the application surface's resolution, so
+detail finer than one application surface pixel is lost when the window is
+larger); GUI phases draw into the room's `GMGUI` layer (1000). A blend mode,
+shader, shader uniform, texture filter or texture repeat change starts a new
+canvas item so earlier commands keep the state they were drawn with. Draw state
+set with `draw_set_*`, `gpu_set_*` and `shader_set` persists across instances,
+events and frames. A `depth` assigned inside a draw event takes effect after
+the frame's draw events, as GameMaker updates its layer lists after drawing.
+Known draw deviations: instances at the same depth draw in scene-tree order
+(GameMaker does not guarantee one); `bm_max` and `bm_min` use the nearest
+Godot canvas blend mode (add and multiply) and `bm_reverse_subtract` draws
+with normal blending; the alpha test compares each draw call's alpha rather
+than each pixel; partial `gpu_set_colourwriteenable` masks are approximated
+through the draw colour; Draw Begin, Draw and Draw End run once per frame
+rather than once per enabled view; surfaces are CPU images, so while a
+surface target is set only clears and surface copies reach it.
 
 Supported authored sequences are normalized into managed descriptors and advanced
 by `GMEvents` using either frames-per-second or frames-per-game-frame speed.

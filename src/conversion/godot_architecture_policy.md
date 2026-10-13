@@ -8,7 +8,27 @@ choices used for a project.
 
 - Rooms use `Node2D` roots with `res://gm2godot/gml_room_node.gd`.
 - The first GameMaker `RoomOrderNodes` entry becomes `run/main_scene`.
-- GameMaker layers become `Node2D` children with `z_index = -depth`.
+- GameMaker layers become `Node2D` children with an absolute
+  (`z_as_relative = false`) `z_index = -depth`. Depth is an integer:
+  fractional depths are truncated toward zero. GameMaker gives every distinct
+  depth its own layer, so no two depths may share a `z_index`: when a depth in
+  use is beyond Godot's ±4096 `z_index` range, the distinct depths in use are
+  ranked into that range in depth order (depths with room around them keep
+  `-depth`). The converter ranks a room's layer depths; the runtime ranks
+  every depth in use (layers, `layer_create`/`layer_depth`, instance `depth`
+  assignments and `part_system_depth`) again whenever a new one appears. The
+  order is exact for up to 8193 distinct depths in use at once.
+- Assigning an instance a `depth` that does not truncate to its room layer's
+  depth, or creating it with `instance_create_depth`, puts the instance node on
+  the room's managed layer node for that depth (GameMaker's managed layer, kept
+  until the room ends), keeping `x`/`y`; a moved instance stays the same live
+  instance, so no CleanUp event runs for the move. Particle systems share these
+  managed layers: `part_system_create` without a layer starts on the one at
+  depth 0 and `part_system_depth` moves the system to the one at its depth;
+  `part_system_layer` puts it back on a layer, drawing with that layer.
+- Layers sharing a depth draw in GameMaker's order: a layer added at a depth
+  already in use (a managed layer, `layer_create`, `layer_depth`) draws behind
+  the layers already there, so its node goes before theirs in the room.
 - Every generated room has a `GMGUI` `CanvasLayer` reserved for Draw GUI phases.
 - Tile layers use Godot 4 `TileMapLayer` when the source tile data can be decoded.
 - Native Godot callbacks and signals do not define GameMaker event order; runtime
@@ -19,7 +39,7 @@ choices used for a project.
 - Renderer mode is selected from project features:
   - `godot_node_scene` for projects without explicit Draw or surface code.
   - `central_canvas_draw_manager` when Draw, shader, GPU state, or effect-layer
-    code needs ordered `CanvasItem` dispatch.
+    code needs the ordered draw-phase dispatch through `GMDraw`.
   - `surface_viewport` when surface/application-surface APIs require a
     `SubViewport`/`ViewportTexture` path.
 - Collision mode is selected from room, script, and sprite features:

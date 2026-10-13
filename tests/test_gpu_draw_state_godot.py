@@ -35,21 +35,43 @@ class TestGPUDrawStateGodotSmoke(unittest.TestCase):
             func _ready():
             \tcall_deferred("_run")
 
+            func _segments():
+            \treturn GMRuntime.gm2godot_draw_debug_sink_for(self, "draw").get("segments", [])
+
+            func _last_segment():
+            \tvar segments = _segments()
+            \tif segments.is_empty():
+            \t\treturn {}
+            \treturn segments[segments.size() - 1]
+
             func _run():
             \tGMRuntime.gml_draw_begin(self, "_draw")
+            \tGMRuntime.gml_draw_rectangle(0, 0, 4, 4, false)
             \tGMRuntime.gml_gpu_set_blendmode(1)
             \tif not _check(GMRuntime.gml_gpu_get_blendmode() == 1, "blend mode getter failed"):
             \t\treturn
-            \tif not _check(material is CanvasItemMaterial, "CanvasItemMaterial was not installed"):
+            \tGMRuntime.gml_draw_rectangle(0, 0, 4, 4, false)
+            \tvar segments = _segments()
+            \tif not _check(segments.size() == 2 and segments[0]["material"] == "none", "blend change did not start a new canvas item segment: " + str(segments)):
             \t\treturn
-            \tif not _check(material.blend_mode == CanvasItemMaterial.BLEND_MODE_ADD, "blend mode was not applied"):
+            \tif not _check(segments[1]["material"] == "canvas_item" and segments[1]["blend_mode"] == CanvasItemMaterial.BLEND_MODE_ADD, "additive blend was not applied to the segment: " + str(segments)):
             \t\treturn
 
             \tGMRuntime.gml_gpu_set_texfilter(true)
             \tGMRuntime.gml_gpu_set_texrepeat(true)
-            \tif not _check(texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR, "texture filter was not applied"):
+            \tGMRuntime.gml_draw_rectangle(0, 0, 4, 4, false)
+            \tif not _check(_last_segment().get("texture_filter", -1) == RenderingServer.CANVAS_ITEM_TEXTURE_FILTER_LINEAR, "texture filter was not applied: " + str(_segments())):
             \t\treturn
-            \tif not _check(texture_repeat == CanvasItem.TEXTURE_REPEAT_ENABLED, "texture repeat was not applied"):
+            \tif not _check(_last_segment().get("texture_repeat", -1) == RenderingServer.CANVAS_ITEM_TEXTURE_REPEAT_ENABLED, "texture repeat was not applied: " + str(_segments())):
+            \t\treturn
+            \tGMRuntime.gml_gpu_set_blendmode(0)
+            \tGMRuntime.gml_gpu_set_texfilter(false)
+            \tGMRuntime.gml_gpu_set_texrepeat(false)
+            \tGMRuntime.gml_draw_rectangle(0, 0, 4, 4, false)
+            \tvar reset_segment = _last_segment()
+            \tif not _check(reset_segment.get("material", "") == "none" and reset_segment.get("texture_filter", -1) == RenderingServer.CANVAS_ITEM_TEXTURE_FILTER_NEAREST, "GPU state reset did not reach the next segment: " + str(_segments())):
+            \t\treturn
+            \tif not _check(_segments().size() == 4, "unexpected segment count: " + str(_segments())):
             \t\treturn
 
             \tGMRuntime.gml_gpu_set_colorwriteenable(true, false, true, false)
@@ -57,8 +79,20 @@ class TestGPUDrawStateGodotSmoke(unittest.TestCase):
             \tif not _check(writes[0] and not writes[1] and writes[2] and not writes[3], "color write state failed"):
             \t\treturn
             \tvar color = GMRuntime._gml_draw_modulate(0xffffff, 1)
-            \tif not _check(color.g == 0.0 and color.a == 0.0, "color write mask was not reflected in modulate"):
+            \tif not _check(color.g == 0.0 and color.r == 1.0 and color.a == 1.0, "color write mask was not reflected in modulate: " + str(color)):
             \t\treturn
+            \tGMRuntime.gml_gpu_set_colorwriteenable(false, false, false, true)
+            \tif not _check(GMRuntime._gml_draw_modulate(0xffffff, 1).a == 0.0, "disabling every colour channel still drew"):
+            \t\treturn
+            \tGMRuntime.gml_gpu_set_colorwriteenable([false, true, false, true])
+            \tvar array_writes = GMRuntime.gml_gpu_get_colorwriteenable()
+            \tif not _check(not array_writes[0] and array_writes[1] and not array_writes[2] and array_writes[3], "array colour write state failed: " + str(array_writes)):
+            \t\treturn
+            \tGMRuntime.gml_gpu_set_colorwriteenable(writes)
+            \tvar restored = GMRuntime.gml_gpu_get_colorwriteenable()
+            \tif not _check(restored[0] and not restored[1] and restored[2] and not restored[3], "restoring a saved colour write array failed: " + str(restored)):
+            \t\treturn
+            \tGMRuntime.gml_gpu_set_colorwriteenable(true, true, true, true)
 
             \tGMRuntime.gml_gpu_set_alphatestenable(true)
             \tGMRuntime.gml_gpu_set_alphatestref(128)

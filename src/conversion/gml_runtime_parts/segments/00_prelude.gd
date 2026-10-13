@@ -13,6 +13,10 @@ const GML_TYPE_STRUCT = "struct"
 const GML_TYPE_METHOD = "method"
 const GML_TYPE_HANDLE = "ref"
 const GML_TYPE_UNKNOWN = "unknown"
+# GameMaker sets debug_mode only when the IDE runs the game in its debugger;
+# a normal run and every build read false. Every run from the Godot editor is
+# a debug build, so the value comes from this project setting instead.
+const GML_DEBUG_MODE_SETTING = "application/config/gm2godot_debug_mode"
 const GML_ARRAY_COPY_ON_WRITE_ENABLED = false
 const GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC = "Legacy GML array copy-on-write mode is not supported by GM2Godot"
 const GML_HANDLE_TYPE_SHIFT = 32
@@ -50,7 +54,22 @@ class GMLInt64:
 		if initial_value is GMLInt64:
 			_value = int(initial_value.value)
 		else:
-			_value = int(initial_value)
+			_value = GMLInt64.saturate(initial_value)
+
+	# A number as the runner's Long.fromNumber makes it an int64: NaN gives
+	# 0, a real of 2^63 or more (an infinity too) the largest int64, one of
+	# -2^63 or less the smallest, and any other real is truncated toward
+	# zero. A bare int() gives INT64_MIN for all the out-of-range reals and
+	# for NaN.
+	static func saturate(value):
+		if typeof(value) == TYPE_FLOAT:
+			if is_nan(value):
+				return 0
+			if value >= 9223372036854775808.0:
+				return GML_INT64_MAX
+			if value <= -9223372036854775808.0:
+				return GML_INT64_MIN
+		return int(value)
 
 
 class GMLPointer:
@@ -84,6 +103,8 @@ class GMLHandle:
 const GML_RECEIVER_ARGUMENTS_NONE = 0
 const GML_RECEIVER_ARGUMENTS_SELF = 1
 const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
+# The most static structs a variable lookup follows (guards a cyclic chain).
+const GML_STATIC_CHAIN_LIMIT = 256
 
 
 class GMLMethod:
@@ -122,6 +143,12 @@ class GMLMethod:
 			if receiver_argument_count == GML_RECEIVER_ARGUMENTS_SELF_OTHER:
 				call_args.append(method_other)
 			call_args.append_array(args)
+			# A GML call may pass more arguments than the function declares
+			# (array_foreach and array_find_index pass the index too); the
+			# GDScript callable takes only those it declares.
+			var declared_count = function_value.get_argument_count()
+			if call_args.size() > declared_count:
+				call_args.resize(declared_count)
 			return function_value.callv(call_args)
 		if bound_self is Object and typeof(function_value) == TYPE_CALLABLE and function_value.is_standard():
 			var method_name = function_value.get_method()
@@ -150,8 +177,11 @@ static var _gml_handle_type_ids = {}
 static var _gml_handle_next_type_id = 1
 static var _gml_instance_entries = {}
 static var _gml_instance_handles_by_node_id = {}
-static var _gml_instance_ids_by_object = {}
-static var _gml_instance_ids_by_object_name = {}
+# Registered instances in creation order, as GameMaker keeps its instance
+# lists: all of them, and by object id and object name (children included).
+static var _gml_instance_live_order = []
+static var _gml_instance_live_by_object = {}
+static var _gml_instance_live_by_object_name = {}
 static var _gml_instance_creation_counter = 0
 static var _gml_layer_handles_by_index = {}
 static var _gml_layer_handles_by_node_id = {}
@@ -164,6 +194,8 @@ static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_static_cursor = 0
+static var _gml_static_structs = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {
@@ -177,12 +209,14 @@ static var _gml_builtin_globals = {
 	"argument": [],
 	"argument_count": 0,
 	"async_load": {},
+	"delta_time": 0,
 	"display_aa": 0,
 	"event_data": {},
 	"instance_count": 0,
 	"room": _gml_undefined,
 	"room_height": 0,
-	"room_speed": 0,
+	# The game speed, seeded from the project's Game Options.
+	"room_speed": _gml_game_speed_project_fps(),
 	"room_width": 0
 }
 
@@ -226,9 +260,13 @@ static func gml_builtin_global(name):
 	if key == "keyboard_string":
 		return _gml_input_keyboard_string
 	if key == "mouse_x":
-		return gml_display_mouse_get_x()
+		return gml_window_views_mouse_get_x()
 	if key == "mouse_y":
-		return gml_display_mouse_get_y()
+		return gml_window_views_mouse_get_y()
+	if key == "view_enabled":
+		return gml_view_get_enabled()
+	if key == "view_current":
+		return gml_view_get_current()
 	if key == "mouse_wheel_up":
 		return _gml_input_mouse_wheel_up
 	if key == "mouse_wheel_down":
@@ -252,7 +290,7 @@ static func gml_builtin_global(name):
 	if key == "current_second":
 		return int(Time.get_datetime_dict_from_system().get("second", 0))
 	if key == "debug_mode":
-		return OS.is_debug_build()
+		return bool(ProjectSettings.get_setting(GML_DEBUG_MODE_SETTING, false))
 	if key == "fps":
 		return int(Engine.get_frames_per_second())
 	if key == "fps_real":
@@ -271,13 +309,29 @@ static func gml_builtin_global(name):
 		return gml_os_type()
 	if key == "os_version":
 		return gml_os_version()
+	if key == "room_speed":
+		return gml_game_speed_fps()
 	if _gml_builtin_globals.has(key):
 		return _gml_builtin_globals[key]
 	return gml_undefined()
 
 
+static func gml_builtin_global_set(name, value):
+	# Assigns a global built-in the runtime owns. room_speed sets the game
+	# speed, as GameMaker's set_room_speed does (yyBuiltIn.js).
+	var key = str(name)
+	if key == "room_speed":
+		_gml_game_speed_set(_to_real(value))
+	else:
+		_gml_builtin_globals[key] = value
+	return value
+
+
+# The `is` checks below first make sure the value is a live object: GML code
+# can still hold an instance after its node was freed, and `is` on a freed
+# object is a script error.
 static func is_undefined(value):
-	return value is GMLUndefined
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLUndefined
 
 
 static func is_bool(value):
@@ -303,15 +357,15 @@ static func is_int32(value):
 
 
 static func is_int64(value):
-	return value is GMLInt64
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLInt64
 
 
 static func is_ptr(value):
-	return value is GMLPointer
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLPointer
 
 
 static func is_handle(value):
-	return value is GMLHandle
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLHandle
 
 
 static func is_numeric(value):
@@ -323,11 +377,13 @@ static func is_array(value):
 
 
 static func is_struct(value):
-	return typeof(value) == TYPE_DICTIONARY or typeof(value) == TYPE_OBJECT
+	return typeof(value) == TYPE_DICTIONARY or (typeof(value) == TYPE_OBJECT and is_instance_valid(value))
 
 
 static func is_method(value):
-	return value is GMLMethod or typeof(value) == TYPE_CALLABLE
+	if typeof(value) == TYPE_CALLABLE:
+		return true
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLMethod
 
 
 static func is_callable(value):
@@ -335,7 +391,7 @@ static func is_callable(value):
 
 
 static func is_gml_exception(value):
-	return value is GMLException
+	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLException
 
 
 static func is_nan_value(value):

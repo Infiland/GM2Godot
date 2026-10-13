@@ -1,23 +1,23 @@
 {
   "files": {
-    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_callable(),\n\t\t\t\"scoped_callable\": preload(\"res://scripts/game/scr_add.gd\").new().gm2godot_scoped_callable(),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_callable(),\n\t\t\t\"scoped_callable\": preload(\"res://scripts/game/scr_stats.gd\").new().gm2godot_scoped_callable(),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
+    "gm2godot/gml_script_registry.gd": "extends RefCounted\n\nstatic func _gm_script_owner(resource_path):\n\tvar script = load(resource_path)\n\tif script == null or not script.can_instantiate():\n\t\treturn null\n\treturn script.new()\n\n\nstatic func _gm_script_method(owner, method_name):\n\tif owner == null or not owner.has_method(method_name):\n\t\treturn null\n\treturn Callable(owner, method_name)\n\n\nstatic func _gm_script_callable(resource_path, accessor_name):\n\tvar owner = _gm_script_owner(resource_path)\n\tif owner == null or not owner.has_method(accessor_name):\n\t\treturn null\n\treturn owner.call(accessor_name)\n\n\nstatic func gml_script_registry_entries():\n\treturn [\n\t\t{\n\t\t\t\"id\": 179646376,\n\t\t\t\"name\": \"scr_add\",\n\t\t\t\"callable\": _gm_script_callable(\"res://scripts/game/scr_add.gd\", \"gm2godot_callable\"),\n\t\t\t\"scoped_callable\": _gm_script_callable(\"res://scripts/game/scr_add.gd\", \"gm2godot_scoped_callable\"),\n\t\t\t\"legacy_arguments\": true,\n\t\t},\n\t\t{\n\t\t\t\"id\": 950140064,\n\t\t\t\"name\": \"scr_stats\",\n\t\t\t\"callable\": _gm_script_callable(\"res://scripts/game/scr_stats.gd\", \"gm2godot_callable\"),\n\t\t\t\"scoped_callable\": _gm_script_callable(\"res://scripts/game/scr_stats.gd\", \"gm2godot_scoped_callable\"),\n\t\t\t\"legacy_arguments\": false,\n\t\t},\n\t]\n",
     "project.godot": "[application]\nconfig/name=\"Golden Fixture\"\n\n[autoload]\nGMRuntime=\"*res://gm2godot/managers/gm_runtime_manager.gd\"\nGMAssets=\"*res://gm2godot/managers/gm_assets.gd\"\nGMRooms=\"*res://gm2godot/managers/gm_rooms.gd\"\nGMInstances=\"*res://gm2godot/managers/gm_instances.gd\"\nGMEvents=\"*res://gm2godot/managers/gm_events.gd\"\nGMDraw=\"*res://gm2godot/managers/gm_draw.gd\"\nGMInput=\"*res://gm2godot/managers/gm_input.gd\"\nGMAudio=\"*res://gm2godot/managers/gm_audio.gd\"\nGMAsync=\"*res://gm2godot/managers/gm_async.gd\"\nGMPlatform=\"*res://gm2godot/managers/gm_platform.gd\"\n",
     "scripts/game/scr_add.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_add/scr_add.gml\n# GM2Godot event: script:scr_add\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call():\n\treturn _gm_script_call_scoped(self, self)\n\nfunc _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null):\n\tif _gml_script_self == null or GMRuntime.is_undefined(_gml_script_self): _gml_script_self = self\n\tif _gml_script_other == null or GMRuntime.is_undefined(_gml_script_other): _gml_script_other = _gml_script_self\n\treturn GMRuntime.gml_add(GMRuntime.gml_argument(0), GMRuntime.gml_argument(1))\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n\nfunc gm2godot_scoped_callable():\n\treturn GMRuntime.gml_receiver_method(\n\t\tGMRuntime.gml_undefined(),\n\t\tCallable(self, \"_gm_script_call_scoped\")\n\t)\n",
     "scripts/game/scr_stats.gd": "extends RefCounted\n\n# GM2Godot source: <GM_PROJECT>/scripts/scr_stats/scr_stats.gml\n# GM2Godot event: script:scr_stats\n\nconst GMRuntime = preload(\"res://gm2godot/gml_runtime.gd\")\n\nfunc _gm_script_call(a = null, b = null):\n\treturn _gm_script_call_scoped(self, self, a, b)\n\nfunc _gm_script_call_scoped(_gml_script_self = null, _gml_script_other = null, a = null, b = null):\n\tif _gml_script_self == null or GMRuntime.is_undefined(_gml_script_self): _gml_script_self = self\n\tif _gml_script_other == null or GMRuntime.is_undefined(_gml_script_other): _gml_script_other = _gml_script_self\n\tif a == null: a = GMRuntime.gml_undefined()\n\tif b == null or GMRuntime.is_undefined(b): b = 4\n\tvar values = [a]\n\tGMRuntime.gml_array_push(values, [GMRuntime.gml_min([4, 1, 2]), GMRuntime.gml_max([4, 1, 2]), GMRuntime.gml_choose([7, 8, 9])])\n\treturn GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_array_get(values, 0), GMRuntime.gml_array_get(values, 1)), GMRuntime.gml_array_get(values, 2)), b)\n\treturn GMRuntime.gml_undefined()\n\nfunc gm2godot_callable():\n\treturn GMRuntime.gml_method(self, Callable(self, \"_gm_script_call\"))\n\nfunc gm2godot_scoped_callable():\n\treturn GMRuntime.gml_receiver_method(\n\t\tGMRuntime.gml_undefined(),\n\t\tCallable(self, \"_gm_script_call_scoped\")\n\t)\n"
   },
   "fixture": "basic_scripts",
   "hashes": {
-    "gm2godot/gml_runtime.gd": "sha256:ed3a4ab21ad46e9ffab1d33953267fc7cc93cadcfa2bd16b370e1242867edbaa",
+    "gm2godot/gml_runtime.gd": "sha256:848f6b06568f152973a02a0168b14e26c7c9ce1b348d7f81e0fc9db8b2997767",
     "gm2godot/managers/gm_assets.gd": "sha256:4121345bd843a0bb3487fcba4756a3b2f18700685f5858db5f62f8992d96a76f",
-    "gm2godot/managers/gm_async.gd": "sha256:d0a73997476f0e889892f85a6c343fc5b44fecdf9fa547e943902632aedf9df3",
+    "gm2godot/managers/gm_async.gd": "sha256:221d93ad94b3fde5728602622c34c9b17089d65c6b466344cad2db2fb2bfaff8",
     "gm2godot/managers/gm_audio.gd": "sha256:995a1df58e7f8ad03fa8ed7e9a195cdcfcf256643d73ac06a88bb6bbec82fba4",
-    "gm2godot/managers/gm_draw.gd": "sha256:390049a3117db736130690888f5453174bf1b30d7e4f2375c8ddbde1de6ff010",
-    "gm2godot/managers/gm_events.gd": "sha256:7dadbcc0c5dc7feedb9845c2cd017c1d316abd602831d5c3749d5d1e0849a79c",
+    "gm2godot/managers/gm_draw.gd": "sha256:8e2bbb563464c6808008240d876a7c665b94be2da324b8b5e899b945cc1edc6e",
+    "gm2godot/managers/gm_events.gd": "sha256:f354e3a5809e26ecb6214a522b72cdc4f739078e9ded5ba47c59fbfe66a3f0d6",
     "gm2godot/managers/gm_input.gd": "sha256:89c6730cad86822e7eef95fe51b649eaa3feb75d30381c8705cdd152bc0e276e",
     "gm2godot/managers/gm_instances.gd": "sha256:a9aa134e11c2defab7a74277614b0365f5852c725414365ff7123de88ae2fa3c",
     "gm2godot/managers/gm_platform.gd": "sha256:cde24c6189462db519eca853affd94375ec8363153b733679a27eb0d1b6183f1",
     "gm2godot/managers/gm_rooms.gd": "sha256:455aa5d05589673425845dcbbbab8a8b32cfd88b9244abb864d288af751cd3f9",
-    "gm2godot/managers/gm_runtime_manager.gd": "sha256:fbbc79f40807ffa7c2ecbf57d90c1f8b91affa693a0850d358296c0cfe7c63e3"
+    "gm2godot/managers/gm_runtime_manager.gd": "sha256:1dbdb504ab8a19a9278f75d7dda37e66a3a05964f6004f3503d157b465786b61"
   },
   "json_files": {
     "gm2godot/architecture_policy.json": {
@@ -74,7 +74,7 @@
       },
       "format_version": 1,
       "layer_hierarchy": {
-        "depth_expression": "Node2D.z_index = -GameMaker layer depth",
+        "depth_expression": "Node2D.z_index = -GameMaker layer depth (absolute z; when a depth in use is beyond Godot's +-4096 range, the distinct depths in use are ranked into it in depth order)",
         "depth_mapping": "gamemaker_depth_to_negative_z_index",
         "gui_layer": {
           "godot_node": "CanvasLayer",

@@ -18,6 +18,7 @@ from src.conversion.atomic_generated_text import (
     generated_path_is_redirected as _path_is_redirected,
     verify_open_generated_output_directory as _verify_open_asset_output_directory,
 )
+from src.conversion.audio_file_formats import godot_audio_filename
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.extension_registry import (
@@ -26,6 +27,14 @@ from src.conversion.extension_registry import (
     extension_entry_metadata,
     extension_stub_resource_path,
     write_extension_compatibility_outputs,
+)
+from src.conversion.font_atlas import (
+    BMFONT_EXTENSION,
+    GameMakerFontAtlasPlan,
+    font_atlas_image_name,
+    font_registry_metadata,
+    parse_gamemaker_font_atlas_metadata,
+    plan_gamemaker_font_atlas,
 )
 from src.conversion.font_metadata import (
     capture_font_registry_bundle_fields,
@@ -62,6 +71,8 @@ from src.conversion.particle_assets import (
     render_particle_system_resource,
 )
 from src.conversion.path_registry import write_path_registry
+from src.conversion.project_enums import collect_project_enum_values
+from src.conversion.project_macros import collect_project_macro_values
 from src.conversion.project_manifest import (
     GameMakerProjectManifest,
     ProjectManifestDiagnostic,
@@ -87,6 +98,7 @@ from src.conversion.sound_metadata import (
     capture_sound_registry_file,
     capture_sound_registry_metadata,
 )
+from src.conversion.sprite_metadata import sprite_animation_registry_metadata
 from src.conversion.timeline_metadata import (
     TimelineMomentFields,
     capture_timeline_action_fields,
@@ -663,8 +675,11 @@ class AssetRegistryConverter(BaseConverter):
             self.gm_project_path
         )
         self._system_font_paths: dict[str, str | None] = {}
+        self._font_atlas_plans: dict[tuple[str, str, str], GameMakerFontAtlasPlan | None] = {}
         self._timeline_action_source_failures: set[tuple[str, str]] = set()
         self._sequence_incomplete_resources: set[tuple[str, str]] = set()
+        self._project_macro_values_cache: dict[str, str] | None = None
+        self._project_enum_values_cache: dict[str, dict[str, int]] | None = None
 
     def build_entries(self) -> tuple[AssetRegistryEntry, ...]:
         resources = self._ordered_project_resources()
@@ -2910,6 +2925,22 @@ class AssetRegistryConverter(BaseConverter):
         except (OSError, GMLTranspileError):
             return ()
 
+    def _project_macro_values(self) -> dict[str, str]:
+        if self._project_macro_values_cache is None:
+            self._project_macro_values_cache = collect_project_macro_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._project_macro_values_cache
+
+    def _project_enum_values(self) -> dict[str, dict[str, int]]:
+        if self._project_enum_values_cache is None:
+            self._project_enum_values_cache = collect_project_enum_values(
+                self.gm_project_path,
+                macro_configuration=self.macro_configuration,
+            )
+        return self._project_enum_values_cache
+
     def _included_files_from_disk(self) -> tuple[_ProjectResource, ...]:
         datafiles_source = self._resolve_discovered_project_source(
             os.path.join(self.gm_project_path, "datafiles"),
@@ -3134,7 +3165,7 @@ class AssetRegistryConverter(BaseConverter):
         )
         if sound_source is None:
             return ""
-        sound_filename = os.path.basename(sound_source.filesystem_path)
+        sound_filename = godot_audio_filename(sound_source.filesystem_path)
 
         parts = ["sounds"]
         if self.organize_sounds_by_audio_group:
@@ -3186,11 +3217,24 @@ class AssetRegistryConverter(BaseConverter):
                 stub_path=godot_path or None,
             )
 
+        if resource.kind == "sprites":
+            return self._sprite_metadata(resource)
+
         if resource.kind in {"sprites", "fonts", "tilesets"}:
             texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
-            if texture_group:
-                return self._texture_group_asset_metadata(texture_group)
-            return {}
+            metadata: JsonObject = (
+                self._texture_group_asset_metadata(texture_group)
+                if texture_group
+                else {}
+            )
+            if resource.kind == "fonts":
+                metadata.update(
+                    font_registry_metadata(
+                        resource.raw_data,
+                        bitmap=godot_path.endswith(BMFONT_EXTENSION),
+                    )
+                )
+            return metadata
 
         if resource.kind != "sounds":
             return {}
@@ -3205,6 +3249,14 @@ class AssetRegistryConverter(BaseConverter):
             "compression": sound.compression,
             "type": sound.sound_type,
         }
+
+    def _sprite_metadata(self, resource: _ProjectResource) -> JsonObject:
+        metadata: JsonObject = {}
+        texture_group = self._reference_name(resource.raw_data.get("textureGroupId"))
+        if texture_group:
+            metadata.update(self._texture_group_asset_metadata(texture_group))
+        metadata.update(sprite_animation_registry_metadata(resource.raw_data))
+        return metadata
 
     def _texture_group_asset_metadata(self, texture_group: str) -> JsonObject:
         metadata: JsonObject = {"texture_group": texture_group}
@@ -3874,12 +3926,17 @@ class AssetRegistryConverter(BaseConverter):
             body = transpile_gml_code(
                 source,
                 asset_names=asset_names,
+                macro_configuration=self.macro_configuration,
                 source_path=gm_source_path,
                 event=f"timeline moment {frame}",
                 preserve_source_comments=True,
                 self_expression="_gm_instance",
-                other_expression="GMRuntime.gml_instance_noone()",
+                # GameMaker runs timeline moments with the instance as both
+                # self and other.
+                other_expression="_gm_instance",
                 instance_target="_gm_instance",
+                enum_values=self._project_enum_values(),
+                macro_values=self._project_macro_values(),
             )
         except GMLTranspileError as exc:
             message = (
@@ -3969,8 +4026,39 @@ class AssetRegistryConverter(BaseConverter):
                 ordered.append(name)
         return {name: index for index, name in enumerate(ordered)}
 
+    def _font_atlas_plan(self, resource: _ProjectResource) -> GameMakerFontAtlasPlan | None:
+        """Mirror the font converter's baked-atlas decision for one font."""
+        cache_key = self._resource_key(resource)
+        if cache_key in self._font_atlas_plans:
+            return self._font_atlas_plans[cache_key]
+        plan: GameMakerFontAtlasPlan | None = None
+        metadata = parse_gamemaker_font_atlas_metadata(resource.raw_data)
+        if metadata is not None and resource.yy_path:
+            resolved_image = self._resolve_project_source(
+                font_atlas_image_name(resource.yy_path),
+                owner_source_path=resource.source_path,
+                resource=resource.name,
+                resource_type="font",
+                field="atlas image",
+            )
+            if resolved_image is not None:
+                plan = plan_gamemaker_font_atlas(
+                    metadata,
+                    resolved_image.filesystem_path,
+                )
+        self._font_atlas_plans[cache_key] = plan
+        return plan
+
     def _font_godot_path(self, resource: _ProjectResource, *, suffix: str = "") -> str:
         subfolder = self._get_subfolder_from_resource(resource)
+        if self._font_atlas_plan(resource) is not None:
+            return self._flat_resource_path(
+                "fonts",
+                subfolder,
+                resource.name,
+                BMFONT_EXTENSION,
+                suffix=suffix,
+            )
         bundle = capture_font_registry_bundle_fields(resource.raw_data)
         ttf_name = bundle.ttf_name
         if bundle.include_ttf and ttf_name:

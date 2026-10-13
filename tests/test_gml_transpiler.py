@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -156,6 +157,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 with self.assertRaises(GMLTranspileError):
                     transpile_gml_expression(source)
 
+    def test_grey_and_gray_colour_constants_share_gamemaker_values(self):
+        # GameMaker defines both spellings: c_grey = c_gray = 8421504,
+        # c_dkgrey = c_dkgray = 4210752, c_ltgrey = c_ltgray = 12632256.
+        cases = (
+            ("c_grey", "c_gray", 8421504),
+            ("c_dkgrey", "c_dkgray", 4210752),
+            ("c_ltgrey", "c_ltgray", 12632256),
+        )
+        for british, american, value in cases:
+            with self.subTest(constant=british):
+                emitted = transpile_gml_expression(british)
+                self.assertEqual(emitted, transpile_gml_expression(american))
+                self.assertEqual(int(emitted, 16), value)
+
     def test_preserves_hex_literals_as_numeric_values(self):
         self.assertEqual(
             transpile_gml_expression("$2c8e + 10"),
@@ -173,6 +188,59 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("real($2c8e)"),
             "GMRuntime.gml_real(0x2c8e)",
         )
+
+    def test_writes_hex_literals_of_two_to_the_63_or_more_as_signed_int64(self):
+        # GDScript clamps an integer literal beyond the int64 range to
+        # INT64_MAX ("Cannot represent ... as a 64-bit signed integer"). In
+        # GML a hex literal is an int64 with that bit pattern, so
+        # 0xFFFFFFFFFFFFFFFF == -1.
+        smallest = "(-9223372036854775807 - 1)"
+        cases = (
+            ("0x8000000000000000", smallest),
+            ("$8000000000000000", smallest),
+            ("0xFFFFFFFFFFFFFFFF", "(-1)"),
+            ("$FFFFFFFFFFFFFFFF", "(-1)"),
+            ("0xffff_ffff_ffff_ffff", "(-1)"),
+            ("0x8000000000000001", "(-9223372036854775807)"),
+            ("0xCBF29CE484222325", "(-3750763034362895579)"),
+            ("0b" + "1" * 64, "(-1)"),
+            ("0b1" + "0" * 63, smallest),
+            ("0x7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("$7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("0xFFFFFFFF", "0xFFFFFFFF"),
+            ("0b" + "1" * 63, "0b" + "1" * 63),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
+        self.assertEqual(
+            transpile_gml_expression("x & $FFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_and(position.x, (-1))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("~0xFFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_not((-1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("var mask = 0x8000000000000000;", indent=""),
+            f"var mask = {smallest}",
+        )
+
+    def test_writes_decimal_integer_literals_beyond_int64_as_reals(self):
+        # GML reads a decimal literal beyond the int64 range as a real; as an
+        # integer literal GDScript would clamp it to INT64_MAX.
+        cases = (
+            ("9223372036854775807", "9223372036854775807"),
+            ("9223372036854775808", "9223372036854775808.0"),
+            ("18446744073709551615", "18446744073709551615.0"),
+            ("9_223_372_036_854_775_808", "9223372036854775808.0"),
+            ("9223372036854775808.5", "9223372036854775808.5"),
+            ("12345", "12345"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
 
     def test_hash_color_literal_parity_examples(self):
         cases = (
@@ -1085,6 +1153,111 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "return [_gml_method_self, _gml_method_other])",
         )
 
+    def test_method_locals_get_their_own_names_beside_enclosing_locals(self):
+        # A method's locals are its own (manual: Local Variables); GDScript
+        # rejects a lambda local that reuses an enclosing local or parameter.
+        code = transpile_gml_code(
+            "function outer(_name) {\n"
+            "    var n = 1;\n"
+            "    var f = function() {\n"
+            "        var n = 2;\n"
+            "        var _name = \"n\";\n"
+            "        var g = function() { var n = 4; return n; };\n"
+            "        for (var _i = 0; _i < 2; _i += 1) { n += _i; }\n"
+            "        return n + other.n + _name;\n"
+            "    };\n"
+            "    return f() + n;\n"
+            "}\n"
+        )
+
+        self.assertIn("\t\tvar n = 1\n", code)
+        self.assertIn("\t\t\tvar _gml_local_n_2 = 2\n", code)
+        self.assertIn('\t\t\tvar _gml_local__name = "n"\n', code)
+        self.assertIn("\t\t\t\tvar _gml_local_n = 4\n\t\t\t\treturn _gml_local_n\n", code)
+        self.assertIn("_gml_local_n_2 = GMRuntime.gml_add(_gml_local_n_2, _i)", code)
+        self.assertIn(
+            'return GMRuntime.gml_add(GMRuntime.gml_add(_gml_local_n_2, '
+            'GMRuntime.gml_selector_get(_gml_method_other, "n")), _gml_local__name)',
+            code,
+        )
+        self.assertIn('GMRuntime.gml_call_value(f, [], _gml_method_self, _gml_method_other, "f"), n)', code)
+        # A local that reuses no enclosing name keeps its own name.
+        self.assertIn("\t\t\tvar _i = 0\n", code)
+
+    def test_method_temporaries_are_named_apart_from_the_enclosing_code(self):
+        # switch, try, with and repeat declare temporaries. A method is a
+        # GDScript lambda inside the enclosing code, where GDScript rejects
+        # redeclaring a name already in scope, so a method (or a method in a
+        # method) using the same constructs needs temporaries of its own.
+        code = transpile_gml_code(
+            "switch (a) { case 1: b = 1; break; }\n"
+            "try { b = 2; } catch (_e) { b = 3; }\n"
+            "repeat (2) { b += 1; }\n"
+            "with (obj_thing) {\n"
+            "    f = function(_k) {\n"
+            "        switch (_k) { case 2: return 2; }\n"
+            "        try { throw 1; } catch (_e) { _k = 0; }\n"
+            "        repeat (2) { _k += 1; }\n"
+            "        with (obj_thing) { y = 1; }\n"
+            "        var g = function() { switch (a) { default: return 0; } };\n"
+            "        return g();\n"
+            "    };\n"
+            "}\n"
+        )
+
+        declared = re.findall(r"\b(?:var|for)\s+(_gml_\w+)", code)
+        for prefix in ("_gml_switch_value_", "_gml_try_control_", "_gml_repeat_index_", "_gml_with_target_"):
+            self.assertGreaterEqual(sum(name.startswith(prefix) for name in declared), 2, code)
+        self.assertEqual(len(declared), len(set(declared)), code)
+
+    def test_increments_inside_methods_stay_in_the_method_body(self):
+        # A method's ++ and -- run each time the method is called, not where
+        # the method is declared.
+        code = transpile_gml_code(
+            "var f = function() {\n"
+            "    var _n = 0;\n"
+            "    for (var _i = 0; _i < 3; _i++) { _n++; }\n"
+            "    return [_n--, ++_n];\n"
+            "};\n"
+            "var g = [function(a) { a--; return a; }, j++];\n"
+        )
+
+        self.assertEqual(
+            code,
+            "\tvar f = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _n = 0\n"
+            "\t\tvar _i = 0\n"
+            "\t\twhile GMRuntime.gml_lt(_i, 3):\n"
+            "\t\t\t_n = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t\t_i = GMRuntime.gml_add(_i, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_0 = _n\n"
+            "\t\t_n = GMRuntime.gml_sub(_gm2gd_mutation_value_0, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_1 = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t_n = _gm2gd_mutation_value_1\n"
+            "\t\treturn [_gm2gd_mutation_value_0, _gm2gd_mutation_value_1]\n"
+            "\t)\n"
+            "\tvar _gm2gd_mutation_value_2 = j\n"
+            "\tj = GMRuntime.gml_add(_gm2gd_mutation_value_2, 1)\n"
+            "\tvar g = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null, a = null):\n"
+            "\t\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\t\ta = GMRuntime.gml_sub(a, 1)\n"
+            "\t\treturn a\n"
+            "\t), _gm2gd_mutation_value_2]",
+        )
+
+    def test_struct_literals_may_repeat_a_variable_name(self):
+        # Every value is evaluated in order and the last one wins; a GDScript
+        # dictionary literal cannot repeat a key.
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: f(), a: 3, c: 4, b: 5, a: 6}"),
+            'GMRuntime.gml_struct_repeated_fields([{"a": 1, "b": GMRuntime.gml_call_named("f", [], self, other)}, '
+            '{"a": 3, "c": 4, "b": 5}, {"a": 6}])',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: 2}"),
+            'GMRuntime.gml_struct({"a": 1, "b": 2})',
+        )
+
     def test_method_rebinding_resolves_script_asset_callable_metadata(self):
         self.assertEqual(
             transpile_gml_expression(
@@ -1214,6 +1387,91 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 indent="",
             ),
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
+        )
+
+    def test_folds_enum_div_and_mod_with_gml_integer_semantics(self):
+        # mod and div truncate toward zero (GML gives -5 mod 3 == -2, where
+        # Python's floor modulo gives 1), and the folding is exact beyond
+        # 2^53, where a float quotient is not. Results wrap around 2^64 like
+        # an int64, and a shift count is taken modulo 64 like the runner's Long.
+        source = (
+            "enum FOLD {\n"
+            "    NEG_MOD = -5 mod 3,\n"
+            "    NEG_PERCENT = -5 % 3,\n"
+            "    NEG_DIVISOR_MOD = 5 mod -3,\n"
+            "    BOTH_NEG_MOD = -5 % -3,\n"
+            "    EXACT_MOD = 6 mod 3,\n"
+            "    NEG_DIV = -7 div 2,\n"
+            "    NEG_DIVISOR_DIV = 7 div -2,\n"
+            "    BOTH_NEG_DIV = -7 div -2,\n"
+            "    SLASH = 7 / 2,\n"
+            "    HUGE_DIV = 9007199254740993 div 1,\n"
+            "    PRECISE_DIV = 9223372036854775807 div 3,\n"
+            "    PRECISE_MOD = 18014398509481985 mod 10,\n"
+            "    SMALLEST_DIV = 0x8000000000000000 div -1,\n"
+            "    SHIFTED = 1 << 63,\n"
+            "    SHIFT_WRAPS = 1 << 64,\n"
+            "    SHIFT_RIGHT = -8 >> 1,\n"
+            "    OVERFLOW = 0x7FFFFFFFFFFFFFFF + 1,\n"
+            "    NEGATED = -0x8000000000000000,\n"
+            "    AFTER_LARGEST = 0x7FFFFFFFFFFFFFFE,\n"
+            "    NEXT,\n"
+            "}\n"
+        )
+        expected_values = {
+            "NEG_MOD": -2,
+            "NEG_PERCENT": -2,
+            "NEG_DIVISOR_MOD": 2,
+            "BOTH_NEG_MOD": -2,
+            "EXACT_MOD": 0,
+            "NEG_DIV": -3,
+            "NEG_DIVISOR_DIV": -3,
+            "BOTH_NEG_DIV": 3,
+            "SLASH": 3,
+            "HUGE_DIV": 9007199254740993,
+            "PRECISE_DIV": 3074457345618258602,
+            "PRECISE_MOD": 5,
+            "SMALLEST_DIV": -9223372036854775808,
+            "SHIFTED": -9223372036854775808,
+            "SHIFT_WRAPS": 1,
+            "SHIFT_RIGHT": -4,
+            "OVERFLOW": -9223372036854775808,
+            "NEGATED": -9223372036854775808,
+            "AFTER_LARGEST": 9223372036854775806,
+            "NEXT": 9223372036854775807,
+        }
+        emitted = transpile_gml_code(source, indent="")
+        fields = ", ".join(
+            f'"{name}": ' + ("(-9223372036854775807 - 1)" if value == -9223372036854775808 else str(value))
+            for name, value in expected_values.items()
+        )
+        self.assertEqual(emitted, f"var FOLD = GMRuntime.gml_enum({{{fields}}})")
+
+    def test_rejects_enum_division_by_zero(self):
+        for source in ("enum BAD { A = 5 div 0 }", "enum BAD { A = 5 mod 0 }", "enum BAD { A = 5 % 0 }"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "integer compile-time constants"):
+                    transpile_gml_code(source, indent="")
+
+    def test_wraps_hex_enum_values_of_two_to_the_63_or_more_to_signed_int64(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "enum MASK { ALL = 0xFFFFFFFFFFFFFFFF, TOP = $8000000000000000, LOW = 0xFF }\n"
+                "a = MASK.ALL;\n"
+                "b = MASK.TOP;",
+                indent="",
+            ),
+            'var MASK = GMRuntime.gml_enum({"ALL": -1, "TOP": (-9223372036854775807 - 1), "LOW": 255})\n'
+            "a = -1\n"
+            "b = (-9223372036854775807 - 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "result = MASK.TOP;",
+                indent="",
+                enum_values={"MASK": {"TOP": -9223372036854775808}},
+            ),
+            "result = (-9223372036854775807 - 1)",
         )
 
     def test_lowers_project_global_enum_members_to_integer_constants(self):
@@ -1421,6 +1679,46 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn("#macro VALUE 7", result.source)
         self.assertNotIn("#region", result.source)
 
+    def test_macros_used_as_statements_run_their_statements(self):
+        # A macro is text substitution (manual: Constants, Macros): its value
+        # may be several statements, and it may be used on its own as a
+        # statement.
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro SET_FONT var _data = load(_name);\\\n"
+                "    _data.ready = true;\\\n"
+                "    if (_data.missing) return false;\\\n"
+                "    ++_count;\n"
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": SET_FONT; break;\n"
+                "        case \"b\": SET_FONT break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+            transpile_gml_code(
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count;; break;\n"
+                "        case \"b\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count; break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+        )
+        self.assertEqual(transpile_gml_code("#macro SET_X x = 5\nSET_X;", indent=""), "position.x = 5")
+        self.assertEqual(
+            transpile_gml_code("#macro LOG show_debug_message\nLOG(\"hi\");", indent=""),
+            'GMRuntime.gml_show_debug_message("hi", [])',
+        )
+
     def test_rejects_recursive_macros(self):
         with self.assertRaisesRegex(GMLTranspileError, "Recursive macro"):
             transpile_gml_code("#macro LOOP LOOP\nvalue = LOOP", indent="")
@@ -1485,7 +1783,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("project_choose(items[index + 1], other.value)"),
             "GMRuntime.gml_call_named("
             '"project_choose", [GMRuntime.gml_array_get(items, GMRuntime.gml_add(index, 1)), '
-            "other.value], self, other)",
+            'GMRuntime.gml_selector_get(other, "value")], self, other)',
         )
 
     def test_parses_array_literals(self):
@@ -1668,7 +1966,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             transpile_gml_expression("mystruct[$ key_name]"),
             "GMRuntime.gml_struct_get(mystruct, key_name)",
         )
-        self.assertEqual(transpile_gml_expression("other.value"), "other.value")
+        self.assertEqual(
+            transpile_gml_expression("other.value"),
+            'GMRuntime.gml_selector_get(other, "value")',
+        )
 
     def test_transpiles_struct_variable_functions_through_runtime(self):
         self.assertEqual(
@@ -2074,7 +2375,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn('"Point"', output)
         self.assertIn(
             '["make", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self, func(_gml_method_self = null, "
+            "GMRuntime.gml_undefined(), func(_gml_method_self = null, "
             "_gml_method_other = null): return 1)]",
             output,
         )
@@ -2090,12 +2391,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
         self.assertIn(
             '["operate", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
             '["invert", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
@@ -2104,6 +2405,38 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertNotIn('gml_call_named("operate"', output)
         self.assertNotIn("Unexpected token", output)
+
+    def test_member_calls_pass_the_target_as_the_receiver_of_unbound_methods(self):
+        self.assertEqual(
+            transpile_gml_expression("point.describe(1, 2)"),
+            'GMRuntime.gml_call_member(point, "describe", [1, 2], self, other)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("make().go()"),
+            "GMRuntime.gml_call_member("
+            'GMRuntime.gml_call_named("make", [], self, other), "go", [], self, other)',
+        )
+        # self.name() calls a method of the running instance itself.
+        self.assertEqual(
+            transpile_gml_expression("self.go()"),
+            "GMRuntime.gml_call_value(self.go, [], self, other)",
+        )
+
+    def test_constructor_static_functions_are_unbound(self):
+        output = transpile_gml_expression(
+            "function Point() constructor { static make = function() { return 1; }; "
+            "static pair = (function() { return 2; }); static count = 0; }"
+        )
+
+        self.assertIn(
+            '["make", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn(
+            '["pair", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn('["count", func(): return 0]', output)
 
     def test_nested_callback_in_constructor_static_switch_keeps_lambda_indentation(self):
         output = transpile_gml_expression(
@@ -2241,6 +2574,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             ("argument", 'GMRuntime.gml_builtin_global("argument")'),
             ("argument_count", 'GMRuntime.gml_builtin_global("argument_count")'),
             ("view_xport[1]", 'GMRuntime.gml_array_get(GMRuntime.gml_builtin_array("view_xport"), 1)'),
+            ("view_enabled", 'GMRuntime.gml_builtin_global("view_enabled")'),
+            ("view_current", 'GMRuntime.gml_builtin_global("view_current")'),
         )
 
         for source, expected in cases:
@@ -2251,9 +2586,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_rejects_writes_to_read_only_builtin_variables(self):
         for source in (
             "bbox_left = 0",
+            "sprite_width = 16",
+            "sprite_yoffset += 1",
             "image_number += 1",
             "room++",
             "view_current[0] = 1",
+            "view_current = 1",
             "delete object_index",
         ):
             with self.subTest(source=source):
@@ -2268,6 +2606,10 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'GMRuntime.gml_array_set(GMRuntime.gml_builtin_array("view_xview"), 0, position.x)',
         )
         self.assertEqual(transpile_gml_code("var bbox_left = 1; bbox_left += 1", indent=""), "var bbox_left = 1\nbbox_left = GMRuntime.gml_add(bbox_left, 1)")
+        self.assertEqual(
+            transpile_gml_code("view_enabled = true", indent=""),
+            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "view_enabled", true)',
+        )
 
     def test_instance_target_preserves_direct_names_and_dynamic_fallback(self):
         output = transpile_gml_code(
@@ -2284,6 +2626,45 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_variable_instance_set(self, \"draw\", score)\n"
             "score = GMRuntime.gml_variable_instance_get(self, \"draw\")",
         )
+
+    def test_with_bodies_use_the_with_instance_for_the_scripts_own_members(self):
+        # The calling object's script declares hp, yet inside with GameMaker
+        # reads and writes the with instance's hp; locals stay locals.
+        output = transpile_gml_code(
+            "var bonus = 2; hp = 1; with (all) { hp += bonus; other.seen = hp; with (other) hp = 7; } hp += 1;",
+            indent="",
+            instance_target="self",
+            direct_instance_names={"hp"},
+        )
+
+        self.assertEqual(
+            output,
+            "var bonus = 2\n"
+            "hp = 1\n"
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"), bonus))\n'
+            '\tGMRuntime.gml_selector_set(self, "seen", GMRuntime.gml_variable_instance_get(_gml_with_target_0, "hp"))\n'
+            "\tfor _gml_with_target_1 in GMRuntime.gml_with_targets(self, _gml_with_target_0, self):\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_with_target_1, "hp", 7)\n'
+            "hp = GMRuntime.gml_add(hp, 1)",
+        )
+
+    def test_functions_use_their_receiver_for_the_scripts_own_members(self):
+        # A method reads its receiver's variables and a constructor sets the
+        # new struct's, even where the declaring object's script declares a
+        # member of the same name.
+        output = transpile_gml_code(
+            "get_hp = function() { return hp; }; Point = function(px) constructor { hp = px; };",
+            indent="",
+            instance_target="self",
+            direct_instance_names={"hp", "get_hp", "Point"},
+        )
+
+        self.assertIn('return GMRuntime.gml_variable_instance_get(_gml_method_self, "hp")', output)
+        self.assertIn('\tGMRuntime.gml_variable_instance_set(_gml_constructor_self, "hp", px)', output)
+        self.assertTrue(output.startswith("get_hp = GMRuntime.gml_receiver_method(self, "), output)
+        self.assertNotIn("\thp = px", output)
 
     def test_transpiles_multidimensional_array_access(self):
         self.assertEqual(
@@ -2328,7 +2709,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("function() { return; }"),
             "GMRuntime.gml_receiver_method(self, func("
-            "_gml_method_self = null, _gml_method_other = null): return)",
+            "_gml_method_self = null, _gml_method_other = null): return GMRuntime.gml_undefined())",
         )
         self.assertEqual(
             transpile_gml_expression("function() { return score + bonus; }"),
@@ -2337,6 +2718,61 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_method_self, "score"), '
             'GMRuntime.gml_variable_instance_get(_gml_method_self, "bonus")))',
         )
+
+    def test_transpiles_named_function_declaration_as_a_method_variable(self):
+        output = transpile_gml_code(
+            "function ev_helper3(_q) { return _q * 2; }\nscore = ev_helper3(3);",
+            indent="",
+        )
+
+        self.assertTrue(
+            output.startswith(
+                "ev_helper3 = GMRuntime.gml_receiver_method(self, func ev_helper3("
+                "_gml_method_self = null, _gml_method_other = null, _q = null):"
+            ),
+            output,
+        )
+        self.assertIn('GMRuntime.gml_call_named("ev_helper3", [3], self, other)', output)
+
+    def test_named_function_declarations_are_available_before_their_statement(self):
+        output = transpile_gml_code(
+            "score = early(4);\nfunction early(_q) { return _q + 1; }\n",
+            indent="",
+        )
+
+        self.assertLess(output.index("early = GMRuntime.gml_receiver_method("), output.index('"early", [4]'))
+
+    def test_function_expressions_are_not_declarations(self):
+        output = transpile_gml_code(
+            "var _f = function named() { return 1; };\nhandler = function other_named() { return 2; };",
+            indent="",
+        )
+
+        self.assertIn("var _f = GMRuntime.gml_receiver_method(self, func named(", output)
+        self.assertNotIn("\nnamed = ", "\n" + output)
+        self.assertNotIn("\nother_named = ", "\n" + output)
+
+    def test_named_function_inside_a_function_belongs_to_that_function_receiver(self):
+        output = transpile_gml_code(
+            "function outer() {\n"
+            "    var _first = inner(1);\n"
+            "    function inner(_q) { return _q + 1; }\n"
+            "    return _first;\n"
+            "}\n",
+            indent="",
+        )
+
+        declaration = output.index('GMRuntime.gml_variable_instance_set(_gml_method_self, "inner", ')
+        call = output.index('GMRuntime.gml_call_named("inner", [1], _gml_method_self, _gml_method_other)')
+        self.assertLess(declaration, call)
+
+    def test_named_function_declared_in_a_block_stays_in_the_block(self):
+        output = transpile_gml_code(
+            "if (ready) {\n    function guarded() { return 1; }\n}\nscore = 2;",
+            indent="",
+        )
+
+        self.assertLess(output.index("if GMRuntime.gml_bool("), output.index("guarded = GMRuntime.gml_receiver_method("))
 
     def test_rejects_return_outside_functions_and_methods(self):
         for source in ("return;", "return score + bonus;", "if ready begin return score; end"):
@@ -2357,10 +2793,67 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_receiver_method(self, func("
             "_gml_method_self = null, _gml_method_other = null):\n"
             '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
-            "\t\treturn\n"
+            "\t\treturn GMRuntime.gml_undefined()\n"
             '\treturn GMRuntime.gml_variable_instance_get(_gml_method_self, "score")\n'
             ")",
         )
+
+    def test_function_without_a_return_value_gives_undefined(self):
+        # A GDScript function that ends without a return gives null, which is
+        # not a GML value: GML gives undefined.
+        self.assertEqual(
+            transpile_gml_expression("function() { }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null): return GMRuntime.gml_undefined())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("function() { score += 1; }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_method_self, "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_method_self, "score"), 1))\n'
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        # A variable whose name starts with return is not a return statement.
+        self.assertEqual(
+            transpile_gml_expression("function(returned) { returned = 1; }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null, returned = null):\n"
+            "\tif returned == null: returned = GMRuntime.gml_undefined()\n"
+            "\treturned = 1\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        self.assertEqual(
+            transpile_gml_expression("function() { if done { return 1; } }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
+            "\t\treturn 1\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+
+    def test_exit_in_a_function_gives_undefined_also_from_nested_blocks(self):
+        # Outside a function an exit is a plain return.
+        self.assertEqual(
+            transpile_gml_expression("function() { with (o_enemy) { exit; } }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            "\tfor _gml_with_target_0 in GMRuntime.gml_with_targets("
+            'GMRuntime.gml_variable_instance_get(_gml_method_self, "o_enemy"), '
+            "_gml_method_self, _gml_method_other):\n"
+            "\t\treturn GMRuntime.gml_undefined()\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        function_with_try = transpile_gml_expression("function() { try { exit; } catch (e) { } }")
+        self.assertIn(
+            '_gml_try_control_0["kind"] == "exit":\n\t\treturn GMRuntime.gml_undefined()\n',
+            function_with_try,
+        )
+        self.assertNotIn("\treturn\n", function_with_try)
 
     def test_exit_aborts_later_generated_event_code(self):
         self.assertEqual(
@@ -2425,6 +2918,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
 
+    def test_methods_with_several_lines_stay_inside_the_catch_body(self):
+        # A method is a GDScript lambda: every line of it has to move in with
+        # the catch body, or GDScript finds no indented block under it.
+        output = transpile_gml_code(
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n",
+            indent="",
+        )
+
+        self.assertIn(
+            "\twhile true:\n"
+            "\t\t_u = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\t\tvar _a = 1\n"
+            "\t\t\treturn _a\n"
+            "\t\t)\n"
+            '\t\tposition.x = GMRuntime.gml_call_value(_u, [], self, other, "_u")\n'
+            "\t\tbreak\n",
+            output,
+        )
+
     def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
         output = transpile_gml_code(
             "try { value = real(text); } catch (_) {}",
@@ -2436,6 +2951,45 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
         self.assertNotIn("var _ =", output)
+
+    def test_a_method_in_a_do_until_condition_or_case_label_keeps_its_body_indented(self):
+        # The test lines of these statements are built by the statement
+        # parser; a multi-line method inside them is indented with the line.
+        until_output = transpile_gml_code(
+            "do { n++; continue; } until (is_method(function() { var _a = 1; return _a; }));",
+            indent="",
+        )
+        until_check = (
+            "\tif GMRuntime.is_method(GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _a = 1\n"
+            "\t\treturn _a\n"
+            "\t)):\n"
+            "\t\tbreak"
+        )
+        # The check ends the loop body and also runs before the continue.
+        self.assertEqual(
+            until_output,
+            "while true:\n"
+            "\tn = GMRuntime.gml_add(n, 1)\n"
+            f"{until_check}\n"
+            "\tcontinue\n"
+            f"{until_check}",
+        )
+
+        switch_output = transpile_gml_code(
+            "switch (a) { case (function() { var _c = 1; return _c; })(): b = 1; break; }",
+            indent="",
+        )
+        self.assertIn(
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, "
+            "GMRuntime.gml_call_value((GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _c = 1\n"
+            "\t\treturn _c\n"
+            "\t)), [], self, other)):\n"
+            "\t\t_gml_switch_matched_1 = true\n",
+            switch_output,
+        )
 
     def test_transpiles_try_finally_blocks(self):
         output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
@@ -2917,9 +3471,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             ),
             'var _gml_switch_value_0 = GMRuntime.gml_builtin_global("keyboard_key")\n'
             "var _gml_switch_matched_1 = false\n"
-            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT) or GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A"))\n'
+            'var _gml_switch_has_case_2 = GMRuntime.gml_eq(_gml_switch_value_0, 37) or GMRuntime.gml_eq(_gml_switch_value_0, GMRuntime.gml_ord("A"))\n'
             "while true:\n"
-            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, KEY_LEFT):\n"
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, 37):\n"
             "\t\t_gml_switch_matched_1 = true\n"
             "\tif _gml_switch_matched_1:\n"
             "\t\tpass\n"
@@ -2973,6 +3527,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\ttotal = GMRuntime.gml_add(total, i)\n"
             "\ti = GMRuntime.gml_add(i, 1)",
         )
+
+    def test_for_loop_header_may_end_with_a_semicolon(self):
+        # The manual's form is for (<assignment>; <expression>; <operation>;).
+        for source in (
+            "for (var i = 0; i < 3; i++;) total += i;",
+            "for (var i = 0; i < 3; i++;\n) total += i;",
+        ):
+            self.assertEqual(
+                transpile_gml_code(source, indent=""),
+                transpile_gml_code("for (var i = 0; i < 3; i++) total += i;", indent=""),
+            )
+        with self.assertRaisesRegex(GMLTranspileError, "Expected for initializer"):
+            transpile_gml_code("for (var i = 0; i < 3; i++; i++) total += i;", indent="")
 
     def test_for_continue_runs_operation_clause(self):
         self.assertEqual(
@@ -3114,6 +3681,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)",
         )
 
+    def test_chained_nullish_assignment_keeps_a_multi_line_method_inside_its_block(self):
+        self.assertEqual(
+            transpile_gml_code("a = b ??= [function() { return 1; }, function() { var c = 2; return c; }];", indent=""),
+            "var _gml_assignment_value_0 = b\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null): return 1), "
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar c = 2\n"
+            "\t\treturn c\n"
+            "\t)]\n"
+            "\tb = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
+        )
+
     def test_rejects_invalid_local_var_names(self):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code("var 6fish;", indent="")
@@ -3193,8 +3774,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_asset_get_index("o_enemy"), self)',
         )
         self.assertEqual(
+            transpile_gml_expression("instance_create_depth(0, 0, -1, o_enemy, { hp: 3 })", asset_names=asset_names),
+            'GMRuntime.gml_instance_create_depth(0, 0, -1, GMRuntime.gml_asset_get_index("o_enemy"), self, '
+            'GMRuntime.gml_struct({"hp": 3}))',
+        )
+        self.assertEqual(
             transpile_gml_expression("instance_destroy()"),
             "GMRuntime.gml_instance_destroy(self)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_destroy(o_enemy, false)", asset_names=asset_names),
+            'GMRuntime.gml_instance_destroy(GMRuntime.gml_asset_get_index("o_enemy"), false)',
         )
         self.assertEqual(
             transpile_gml_code("with (o_enemy) hp = 0;", indent="", asset_names=asset_names),
@@ -3290,6 +3880,87 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_collision_circle_list(self, 4, 5, 8, GMRuntime.gml_asset_get_index("o_wall"), false, false, hits, true)',
         )
 
+    def test_free_empty_list_and_ellipse_collision_queries_pass_self(self):
+        asset_names = {"o_wall"}
+
+        self.assertEqual(
+            transpile_gml_expression("place_free(x + 1, y)"),
+            "GMRuntime.gml_place_free(self, GMRuntime.gml_add(position.x, 1), position.y)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("place_empty(x, y)"),
+            "GMRuntime.gml_place_empty(self, position.x, position.y)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("place_empty(x, y, o_wall)", asset_names=asset_names),
+            'GMRuntime.gml_place_empty(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_wall"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("position_empty(mouse_x, mouse_y)"),
+            'GMRuntime.gml_position_empty(self, GMRuntime.gml_builtin_global("mouse_x"), '
+            'GMRuntime.gml_builtin_global("mouse_y"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("distance_to_point(10, 20)"),
+            "GMRuntime.gml_distance_to_point(self, 10, 20)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("collision_ellipse(0, 0, 10, 8, o_wall, true, true)", asset_names=asset_names),
+            'GMRuntime.gml_collision_ellipse(self, 0, 0, 10, 8, GMRuntime.gml_asset_get_index("o_wall"), true, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "collision_ellipse_list(0, 0, 10, 8, o_wall, false, true, hits, true)",
+                asset_names=asset_names,
+            ),
+            'GMRuntime.gml_collision_ellipse_list(self, 0, 0, 10, 8, GMRuntime.gml_asset_get_index("o_wall"), false, true, hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_place_list(x, y, o_wall, hits, true)", asset_names=asset_names),
+            'GMRuntime.gml_instance_place_list(self, position.x, position.y, GMRuntime.gml_asset_get_index("o_wall"), hits, true)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("instance_position_list(4, 5, all, hits, false)"),
+            "GMRuntime.gml_instance_position_list(self, 4, 5, GMRuntime.gml_instance_all(), hits, false)",
+        )
+
+    def test_builtin_instance_members_use_runtime_lookups(self):
+        self.assertEqual(
+            transpile_gml_expression("bbox_bottom <= platform.bbox_top"),
+            'GMRuntime.gml_lte(GMRuntime.gml_struct_get(self, "bbox_bottom"), '
+            'GMRuntime.gml_selector_get(platform, "bbox_top"))',
+        )
+        self.assertEqual(
+            transpile_gml_expression("x + sprite_width - other.sprite_xoffset"),
+            'GMRuntime.gml_sub(GMRuntime.gml_add(position.x, GMRuntime.gml_struct_get(self, "sprite_width")), '
+            'GMRuntime.gml_selector_get(other, "sprite_xoffset"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) h = sprite_height + sprite_yoffset;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "h", GMRuntime.gml_add('
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_height"), '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_yoffset")))',
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) left = bbox_left;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "left", '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "bbox_left"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("other.hp -= 1; x = other.x; other.speed = 3;", indent=""),
+            'GMRuntime.gml_selector_update(other, "hp", func(_gml_selector_value_0): '
+            "return GMRuntime.gml_sub(_gml_selector_value_0, 1))\n"
+            'position.x = GMRuntime.gml_selector_get(other, "x")\n'
+            'GMRuntime.gml_selector_set(other, "speed", 3)',
+        )
+        self.assertEqual(
+            transpile_gml_code("self.speed = 3; total = self.hp;", indent=""),
+            'GMRuntime.gml_selector_set(self, "speed", 3)\n'
+            "total = self.hp",
+        )
+
     def test_motion_helpers_pass_self_and_sync_motion_assignments(self):
         self.assertEqual(
             transpile_gml_expression("motion_set(180, 4)"),
@@ -3316,6 +3987,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_place_snapped(self, 16, 16)",
         )
         self.assertEqual(
+            transpile_gml_expression("move_outside_solid(90, -1)"),
+            "GMRuntime.gml_move_outside_solid(self, 90, -1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_outside_all(180, 8)"),
+            "GMRuntime.gml_move_outside_all(self, 180, 8)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("move_wrap(true, false, sprite_get_width(spr))"),
+            "GMRuntime.gml_move_wrap(self, true, false, GMRuntime.gml_sprite_get_width(spr))",
+        )
+        self.assertEqual(
             transpile_gml_code("speed = 5; direction = 90; hspeed += 2; vspeed--;", indent=""),
             "GMRuntime.gml_motion_set_speed(self, 5)\n"
             "GMRuntime.gml_motion_set_direction(self, 90)\n"
@@ -3326,6 +4009,42 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("with (all) speed = 3;", indent=""),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
             "\tGMRuntime.gml_motion_set_speed(_gml_with_target_0, 3)",
+        )
+
+    def test_move_and_collide_and_mp_steps_lower_to_runtime_motion_calls(self):
+        asset_names = {"o_wall", "o_block"}
+        cases = (
+            (
+                "hits = move_and_collide(hspd, vspd, o_wall)",
+                'hits = GMRuntime.gml_move_and_collide(self, hspd, vspd, GMRuntime.gml_asset_get_index("o_wall"))',
+            ),
+            (
+                "move_and_collide(4, 0, all, 8, 0, 1, 2, 2)",
+                "GMRuntime.gml_move_and_collide(self, 4, 0, GMRuntime.gml_instance_all(), 8, 0, 1, 2, 2)",
+            ),
+            ("mp_linear_step(gx, gy, 4, false)", "GMRuntime.gml_mp_linear_step(self, gx, gy, 4, false)"),
+            (
+                "mp_linear_step_object(gx, gy, 4, o_block)",
+                'GMRuntime.gml_mp_linear_step_object(self, gx, gy, 4, GMRuntime.gml_asset_get_index("o_block"))',
+            ),
+            ("mp_potential_step(gx, gy, 4, true)", "GMRuntime.gml_mp_potential_step(self, gx, gy, 4, true)"),
+            (
+                "mp_potential_step_object(gx, gy, 4, all)",
+                "GMRuntime.gml_mp_potential_step_object(self, gx, gy, 4, GMRuntime.gml_instance_all())",
+            ),
+            ("mp_potential_settings(45, 15, 2, false)", "GMRuntime.gml_mp_potential_settings(self, 45, 15, 2, false)"),
+            (
+                "mp_grid_add_instances(grid, o_wall, false)",
+                'GMRuntime.gml_mp_grid_add_instances(grid, GMRuntime.gml_asset_get_index("o_wall"), false)',
+            ),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source + ";", indent="", asset_names=asset_names), expected)
+        self.assertEqual(
+            transpile_gml_code("with (o_block) mp_linear_step(0, 0, 2, true);", indent="", asset_names=asset_names),
+            'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_block"), self, other):\n'
+            "\tGMRuntime.gml_mp_linear_step(_gml_with_target_0, 0, 0, 2, true)",
         )
 
     def test_path_and_mp_grid_helpers_lower_asset_arguments(self):
@@ -3339,10 +4058,65 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_expression("path_end()"),
             "GMRuntime.gml_path_end(self)",
         )
+        # The Path End Action constants are GameMaker's 0..3.
+        self.assertEqual(
+            transpile_gml_expression("path_start(path_patrol, 4, path_action_reverse, false)", asset_names=asset_names),
+            'GMRuntime.gml_path_start(self, GMRuntime.gml_asset_get_index("path_patrol"), 4, 3, false)',
+        )
+        self.assertEqual(
+            [
+                transpile_gml_expression(name)
+                for name in ("path_action_stop", "path_action_restart", "path_action_continue", "path_action_reverse")
+            ],
+            ["0", "1", "2", "3"],
+        )
         self.assertEqual(
             transpile_gml_expression("path_get_length(path_patrol)", asset_names=asset_names),
             'GMRuntime.gml_path_get_length(GMRuntime.gml_asset_get_index("path_patrol"))',
         )
+        for name, arguments in (
+            ("path_exists", ""),
+            ("path_get_name", ""),
+            ("path_get_kind", ""),
+            ("path_get_closed", ""),
+            ("path_get_precision", ""),
+            ("path_get_number", ""),
+            ("path_get_point_x", ", 1"),
+            ("path_get_point_y", ", 1"),
+            ("path_get_point_speed", ", 1"),
+            ("path_get_x", ", 0.5"),
+            ("path_get_y", ", 0.5"),
+            ("path_get_speed", ", 0.5"),
+            ("path_delete", ""),
+            ("path_duplicate", ""),
+            ("path_clear_points", ""),
+            ("path_reverse", ""),
+            ("path_flip", ""),
+            ("path_mirror", ""),
+            ("path_add_point", ", 10, 20, 100"),
+            ("path_insert_point", ", 1, 10, 20, 100"),
+            ("path_change_point", ", 1, 10, 20, 100"),
+            ("path_delete_point", ", 1"),
+            ("path_set_kind", ", 1"),
+            ("path_set_closed", ", false"),
+            ("path_set_precision", ", 8"),
+            ("path_shift", ", 5, -5"),
+            ("path_rescale", ", 2, 0.5"),
+            ("path_rotate", ", 90"),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol{arguments})", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"){arguments})',
+                )
+        self.assertEqual(transpile_gml_expression("path_add()"), "GMRuntime.gml_path_add()")
+        for name in ("path_assign", "path_append"):
+            with self.subTest(name=name):
+                self.assertEqual(
+                    transpile_gml_expression(f"{name}(path_patrol, path_patrol)", asset_names=asset_names),
+                    f'GMRuntime.gml_{name}(GMRuntime.gml_asset_get_index("path_patrol"), '
+                    'GMRuntime.gml_asset_get_index("path_patrol"))',
+                )
         self.assertEqual(
             transpile_gml_expression("mp_grid_create(0, 0, 4, 4, 16, 16)"),
             "GMRuntime.gml_mp_grid_create(0, 0, 4, 4, 16, 16)",
@@ -3735,6 +4509,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\targument0 = 2\n"
+            "\treturn GMRuntime.gml_undefined()\n"
             ")\n"
             "value = 1\n"
             'GMRuntime.gml_call_value(try_to_modify_value, [value], self, other, "try_to_modify_value")\n'
@@ -3753,6 +4528,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\tGMRuntime.gml_array_push(argument0, [2])\n"
+            "\treturn GMRuntime.gml_undefined()\n"
             ")\n"
             "items = [1]\n"
             'GMRuntime.gml_call_value(try_to_modify_array, [items], self, other, "try_to_modify_array")\n'
@@ -3891,12 +4667,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("found = array_contains(arr, 42);", indent=""),
             "found = GMRuntime.gml_array_contains(arr, 42)",
         )
-
-    def test_transpiles_array_find_index(self):
         self.assertEqual(
-            transpile_gml_code("idx = array_find_index(arr, 42);", indent=""),
-            "idx = GMRuntime.gml_array_find_index(arr, 42)",
+            transpile_gml_code("found = array_contains(arr, 42, -1, -3);", indent=""),
+            "found = GMRuntime.gml_array_contains(arr, 42, -1, -3)",
         )
+
+    def test_transpiles_array_get_index(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42)",
+        )
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42, 2, 3);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42, 2, 3)",
+        )
+
+    def test_transpiles_array_find_index_with_a_predicate(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, is_big);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, 0, null, self, other)",
+        )
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, is_big, -1, -4);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, -1, -4, self, other)",
+        )
+        inline = transpile_gml_code(
+            "idx = array_find_index(arr, function(_e, _i) { return _e > 1; });",
+            indent="",
+        )
+        self.assertTrue(
+            inline.startswith(
+                "idx = GMRuntime.gml_array_find_index("
+                "arr, GMRuntime.gml_receiver_method(self, "
+            )
+        )
+        self.assertTrue(inline.endswith("), 0, null, self, other)"))
 
     def test_transpiles_array_foreach(self):
         self.assertEqual(
@@ -3989,6 +4794,63 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tvar _gm2gd_mutation_value_0 = count\n"
             "\tcount = GMRuntime.gml_add(_gm2gd_mutation_value_0, 1)\n"
             "\tscore = _gm2gd_mutation_value_0",
+        )
+
+    def test_statements_end_where_their_expression_ends(self):
+        # GameMaker needs no semicolons and treats line breaks as white space:
+        # a statement ends before the first token that cannot continue it
+        # (manual: If Else and Conditional Operators).
+        cases = {
+            "a = 2 trace(a);": 'a = 2\nGMRuntime.gml_call_named("trace", [a], self, other)',
+            "instance_destroy(o) exit": "GMRuntime.gml_instance_destroy(o)\nreturn",
+            "{onice = false onGround = true}": "onice = false\nonGround = true",
+            "var s = 1, t = 2 u = 3": "var s = 1\nvar t = 2\nu = 3",
+            "total = a +\n    b;": "total = GMRuntime.gml_add(a, b)",
+            "total = a\n    + b;": "total = GMRuntime.gml_add(a, b)",
+            "total = ready\n    ? a\n    : b;": "total = a if GMRuntime.gml_bool(ready) else b",
+            "count++ total = 1": "count = GMRuntime.gml_add(count, 1)\ntotal = 1",
+            'lang = "english" set_language(0);': 'lang = "english"\nGMRuntime.gml_call_named("set_language", [0], self, other)',
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
+    def test_conditions_without_parentheses_end_before_their_body(self):
+        cases = {
+            "if f(v) g()": (
+                'if GMRuntime.gml_bool(GMRuntime.gml_call_named("f", [v], self, other)):\n'
+                '\tGMRuntime.gml_call_named("g", [], self, other)'
+            ),
+            "if a == 1\n    b = 1;": "if GMRuntime.gml_eq(a, 1):\n\tb = 1",
+            "if test == true variable = false else variable = true;": (
+                "if GMRuntime.gml_eq(test, true):\n\tvariable = false\nelse:\n\tvariable = true"
+            ),
+            "if ready then go = 1 else { go = 2 }": (
+                "if GMRuntime.gml_bool(ready):\n\tgo = 1\nelse:\n\tgo = 2"
+            ),
+            "if (a) ++b;": "if GMRuntime.gml_bool(a):\n\tb = GMRuntime.gml_add(b, 1)",
+            "while i < 3 i += 1": "while GMRuntime.gml_lt(i, 3):\n\ti = GMRuntime.gml_add(i, 1)",
+            "with o_thing instance_destroy()": (
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(o_thing, self, other):\n"
+                "\tGMRuntime.gml_instance_destroy(_gml_with_target_0)"
+            ),
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+        self.assertEqual(
+            transpile_gml_code("function loc(p) {\n    if !file_exists(p) return false;\n    return true;\n}", indent=""),
+            transpile_gml_code("function loc(p) {\n    if (!file_exists(p)) { return false; }\n    return true;\n}", indent=""),
+        )
+
+    def test_case_bodies_and_methods_split_statements_without_semicolons(self):
+        self.assertEqual(
+            transpile_gml_code('switch (k) { case("40"): r = 1 break; default: v = 5 break }', indent=""),
+            transpile_gml_code('switch (k) { case("40"): r = 1; break; default: v = 5; break; }', indent=""),
+        )
+        self.assertEqual(
+            transpile_gml_code("fn = function() {\n    a = 1\n    b = 2\n}", indent=""),
+            transpile_gml_code("fn = function() {\n    a = 1;\n    b = 2;\n}", indent=""),
         )
 
     def test_transpiles_increment_decrement_statements(self):
@@ -4142,7 +5004,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(
             transpile_gml_code("var x = 1; self.x += x;", indent=""),
-            "var x = 1\nself.x = GMRuntime.gml_add(self.x, x)",
+            "var x = 1\n"
+            'GMRuntime.gml_selector_update(self, "x", func(_gml_selector_value_0): '
+            "return GMRuntime.gml_add(_gml_selector_value_0, x))",
         )
 
     def test_transpiles_if_blocks(self):
@@ -4190,7 +5054,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
     def test_transpiles_shift_keyboard_check(self):
         self.assertEqual(
             transpile_gml_code("if keyboard_check(vk_shift) { faster = true }", indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n\tfaster = true",
+            "if GMRuntime.gml_keyboard_check(16):\n\tfaster = true",
         )
 
     def test_input_bridge_helpers_lower_to_runtime(self):
@@ -4213,11 +5077,11 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 "gamepad_set_vibration(0, 1, 0.5); gamepad_set_color(0, c_blue);",
                 indent="",
             ),
-            "pressed = GMRuntime.gml_keyboard_check_pressed(KEY_SPACE)\n"
-            "released = GMRuntime.gml_keyboard_check_released(KEY_ESCAPE)\n"
-            "GMRuntime.gml_keyboard_key_press(KEY_LEFT)\n"
-            "GMRuntime.gml_keyboard_key_release(KEY_LEFT)\n"
-            "GMRuntime.gml_keyboard_clear(0)\n"
+            "pressed = GMRuntime.gml_keyboard_check_pressed(32)\n"
+            "released = GMRuntime.gml_keyboard_check_released(27)\n"
+            "GMRuntime.gml_keyboard_key_press(37)\n"
+            "GMRuntime.gml_keyboard_key_release(37)\n"
+            "GMRuntime.gml_keyboard_clear(1)\n"
             "mouse_down = GMRuntime.gml_mouse_check_button(MOUSE_BUTTON_LEFT)\n"
             "mouse_pressed = GMRuntime.gml_mouse_check_button_pressed(MOUSE_BUTTON_RIGHT)\n"
             "mouse_released = GMRuntime.gml_mouse_check_button_released(MOUSE_BUTTON_MIDDLE)\n"
@@ -4303,6 +5167,30 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_audio_destroy_sync_group(group)",
         )
 
+    def test_master_and_emitter_gain_take_gamemaker_arguments(self):
+        # Manual: audio_set_master_gain(listenerIndex, gain),
+        # audio_get_master_gain(listenerIndex) and
+        # audio_emitter_gain(emitter, gain, [time]).
+        self.assertEqual(
+            transpile_gml_code(
+                "audio_set_master_gain(0, 0.5);"
+                "g = audio_get_master_gain(0);"
+                "audio_emitter_gain(e, 0.5);"
+                "audio_emitter_gain(e, 0, 1000);"
+                "audio_master_gain(0.25);",
+                indent="",
+            ),
+            "GMRuntime.gml_audio_set_master_gain(0, 0.5)\n"
+            "g = GMRuntime.gml_audio_get_master_gain(0)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0.5)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0, 1000)\n"
+            "GMRuntime.gml_audio_master_gain(0.25)",
+        )
+        for source in ("audio_set_master_gain(0.5);", "g = audio_get_master_gain();"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "argument"):
+                    transpile_gml_code(source, indent="")
+
     def test_audio_group_helpers_lower_to_runtime_and_group_constants(self):
         self.assertEqual(
             transpile_gml_code(
@@ -4355,9 +5243,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_room_goto_previous()\n"
             "GMRuntime.gml_room_restart()\n"
             "GMRuntime.gml_game_set_speed(60, 0)\n"
-            'GMRuntime.gml_struct_set(GMRuntime.gml_global_scope(), "room_speed", 60)\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", 60)\n'
             "GMRuntime.gml_game_restart()\n"
             "GMRuntime.gml_game_end()",
+        )
+
+    def test_room_speed_reads_and_writes_go_through_the_game_speed(self):
+        # room_speed is the game speed (yyBuiltIn.js get_room_speed and
+        # set_room_speed), so every write reaches the runtime's setter.
+        self.assertEqual(
+            transpile_gml_code(
+                "room_speed += 5; room_speed++; room_speed ??= 30;"
+                "steps = room_speed * 10;"
+                "speed_fps = game_get_speed(gamespeed_fps); mpf = game_get_speed(gamespeed_microseconds);",
+                indent="",
+            ),
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("room_speed"), 5))\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_add(GMRuntime.gml_builtin_global("room_speed"), 1))\n'
+            'if GMRuntime.gml_is_nullish(GMRuntime.gml_builtin_global("room_speed")):\n'
+            '\tGMRuntime.gml_builtin_global_set("room_speed", 30)\n'
+            'steps = GMRuntime.gml_mul(GMRuntime.gml_builtin_global("room_speed"), 10)\n'
+            "speed_fps = GMRuntime.gml_game_get_speed(0)\n"
+            "mpf = GMRuntime.gml_game_get_speed(1)",
+        )
+        self.assertEqual(
+            transpile_gml_code("x = room_speed--;", indent=""),
+            'var _gml_increment_value_0 = GMRuntime.gml_builtin_global("room_speed")\n'
+            'GMRuntime.gml_builtin_global_set("room_speed", '
+            'GMRuntime.gml_sub(GMRuntime.gml_builtin_global("room_speed"), 1))\n'
+            "position.x = _gml_increment_value_0",
+        )
+        self.assertEqual(
+            transpile_gml_code("var room_speed = 3; room_speed = 9;", indent=""),
+            "var room_speed = 3\nroom_speed = 9",
         )
 
     def test_layer_helpers_lower_to_runtime(self):
@@ -4799,7 +5719,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
                 asset_names={"spr_player"},
             ),
             "GMRuntime.gml_gpu_set_blendmode(1)\n"
-            "GMRuntime.gml_draw_set_blend_mode(2)\n"
+            "GMRuntime.gml_draw_set_blend_mode(3)\n"
             "GMRuntime.gml_gpu_set_texfilter(true)\n"
             "GMRuntime.gml_texture_set_repeat(false)\n"
             "GMRuntime.gml_gpu_set_colorwriteenable(true, false, true, true)\n"
@@ -4830,9 +5750,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "texturegroup_sprites = GMRuntime.gml_texturegroup_get_sprites('Characters')",
         )
 
+    def test_gpu_state_aliases_and_colour_write_array_lower_to_runtime(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "gpu_set_tex_filter(true);"
+                "old = gpu_get_tex_filter();"
+                "gpu_set_tex_repeat(false);"
+                "mask = gpu_get_colourwriteenable();"
+                "gpu_set_colourwriteenable(true, true, true, false);"
+                "gpu_set_colourwriteenable(mask);",
+                indent="",
+            ),
+            "GMRuntime.gml_gpu_set_texfilter(true)\n"
+            "old = GMRuntime.gml_gpu_get_texfilter()\n"
+            "GMRuntime.gml_gpu_set_texrepeat(false)\n"
+            "mask = GMRuntime.gml_gpu_get_colorwriteenable()\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(true, true, true, false)\n"
+            "GMRuntime.gml_gpu_set_colorwriteenable(mask)",
+        )
+
     def test_gpu_helper_arity_errors_are_deterministic(self):
-        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 4.*got 3"):
-            transpile_gml_code("gpu_set_colorwriteenable(true, true, true);", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "gpu_set_colorwriteenable.*expects 1 to 4.*got 5"):
+            transpile_gml_code("gpu_set_colorwriteenable(true, true, true, true, true);", indent="")
         with self.assertRaisesRegex(GMLTranspileError, "texturegroup_set_mode.*1 to 3.*got 4"):
             transpile_gml_code("texturegroup_set_mode(true, false, spr_player, 0);", indent="", asset_names={"spr_player"})
 
@@ -5064,10 +6003,90 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         with self.assertRaisesRegex(GMLTranspileError, "flexpanel_calculate_layout.*expects 4.*got 3"):
             transpile_gml_code("flexpanel_calculate_layout(root, 320, 180);", indent="")
 
+    def test_delta_time_and_get_timer_read_the_runtime_clock(self):
+        self.assertEqual(
+            transpile_gml_expression("delta_time / 1000000"),
+            'GMRuntime.gml_div(GMRuntime.gml_builtin_global("delta_time"), 1000000)',
+        )
+        self.assertEqual(transpile_gml_expression("get_timer()"), "GMRuntime.gml_get_timer()")
+        with self.assertRaisesRegex(GMLTranspileError, "delta_time"):
+            transpile_gml_code("delta_time = 5;", indent="")
+        with self.assertRaisesRegex(GMLTranspileError, "get_timer.*expects 0.*got 1"):
+            transpile_gml_code("t = get_timer(1);", indent="")
+
+    def test_time_source_constants_and_functions_use_gamemaker_values(self):
+        # yyTime.js: time_source_global 0, time_source_game 1, units seconds
+        # 0 and frames 1, expiry nearest 0 and after 1, states 0 to 3.
+        self.assertEqual(
+            transpile_gml_expression(
+                "time_source_create(time_source_game, 1, time_source_units_seconds, f, [], -1, time_source_expire_after)"
+            ),
+            "GMRuntime.gml_time_source_create(1, 1, 0, f, [], -1, 1)",
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "call_later(2, time_source_units_frames, f) + time_source_global + time_source_expire_nearest"
+            ),
+            "GMRuntime.gml_add(GMRuntime.gml_add(GMRuntime.gml_call_later(2, 1, f), 0), 0)",
+        )
+        self.assertEqual(
+            transpile_gml_expression(
+                "[time_source_state_initial, time_source_state_active, time_source_state_paused, time_source_state_stopped]"
+            ),
+            "[0, 1, 2, 3]",
+        )
+        self.assertEqual(
+            transpile_gml_expression("time_source_destroy(ts, true)"),
+            "GMRuntime.gml_time_source_destroy(ts, true)",
+        )
+        self.assertEqual(
+            transpile_gml_expression("[time_source_exists(ts), time_source_get_children(time_source_game)]"),
+            "[GMRuntime.gml_time_source_exists(ts), GMRuntime.gml_time_source_get_children(1)]",
+        )
+
+    def test_os_type_and_browser_constants_are_gamemaker_numbers(self):
+        # os_type and os_browser hold numbers in GameMaker. The HTML5 runner's
+        # Globals.js gives the desktop, mobile, unknown and browser values.
+        cases = {
+            "os_unknown": -1,
+            "os_windows": 0,
+            "os_macosx": 1,
+            "os_ios": 3,
+            "os_android": 4,
+            "os_linux": 6,
+            "os_winphone": 7,
+            "os_win8native": 9,
+            "os_ps4": 14,
+            "os_xboxone": 15,
+            "os_uwp": 18,
+            "os_tvos": 20,
+            "os_switch": 21,
+            "os_ps5": 22,
+            "os_gxgames": 23,
+            "os_operagx": 23,
+            "os_gdk": 24,
+            "os_xboxseriesxs": 24,
+            "browser_not_a_browser": -1,
+            "browser_unknown": 0,
+            "browser_ie": 1,
+            "browser_firefox": 2,
+            "browser_chrome": 3,
+            "browser_safari": 4,
+            "browser_safari_mobile": 5,
+            "browser_opera": 6,
+            "browser_windows_store": 8,
+            "browser_tizen": 9,
+            "browser_ie_mobile": 10,
+            "browser_edge": 11,
+        }
+        for name, value in cases.items():
+            with self.subTest(constant=name):
+                self.assertEqual(transpile_gml_expression(name), str(value))
+
     def test_os_debug_gc_helpers_lower_to_runtime_and_builtins(self):
         self.assertEqual(
             transpile_gml_expression("os_type == os_macosx"),
-            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), "macosx")',
+            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), 1)',
         )
         self.assertEqual(
             transpile_gml_expression("fps_real"),
@@ -5284,13 +6303,13 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "if GMRuntime.gml_keyboard_check(37):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "if GMRuntime.gml_keyboard_check(39):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "if GMRuntime.gml_keyboard_check(38):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, 10)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "if GMRuntime.gml_keyboard_check(40):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, 10)",
         )
 
@@ -5344,6 +6363,32 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertEqual(instance_variables, set())
 
+    def test_mask_index_is_a_builtin_instance_variable(self):
+        instance_variables: set[str] = set()
+
+        self.assertEqual(
+            transpile_gml_code(
+                "mask_index = s_hitbox; if (mask_index == -1) mask_index = sprite_index;",
+                indent="",
+                asset_names={"s_hitbox"},
+                instance_variables=instance_variables,
+            ),
+            'mask_index = GMRuntime.gml_asset_get_index("s_hitbox")\n'
+            "if GMRuntime.gml_eq(mask_index, -1):\n"
+            "\tmask_index = sprite_index",
+        )
+        self.assertEqual(instance_variables, set())
+        self.assertEqual(
+            transpile_gml_code("other.mask_index = s_hitbox", indent="", asset_names={"s_hitbox"}),
+            'GMRuntime.gml_selector_set(other, "mask_index", GMRuntime.gml_asset_get_index("s_hitbox"))',
+        )
+
+    def test_sprite_get_name_reads_the_asset_registry(self):
+        self.assertEqual(
+            transpile_gml_expression("sprite_get_name(sprite_index)"),
+            "GMRuntime.gml_sprite_get_name(sprite_index)",
+        )
+
     def test_path_builtins_are_predeclared_instance_state(self):
         instance_variables: set[str] = set()
 
@@ -5357,7 +6402,17 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "path_scale = GMRuntime.gml_mul(path_scale, 2)\n"
             "path_speed = speed",
         )
-        self.assertEqual(instance_variables, set())
+        self.assertEqual(
+            transpile_gml_code(
+                "path_orientation = 90; path_endaction = path_action_reverse; last = path_positionprevious;",
+                indent="",
+                instance_variables=instance_variables,
+            ),
+            "path_orientation = 90\n"
+            "path_endaction = 3\n"
+            "last = path_positionprevious",
+        )
+        self.assertEqual(instance_variables, {"last"})
 
     def test_transpiles_current_simple_topdown_step_body(self):
         source = """
@@ -5389,19 +6444,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
 
         self.assertEqual(
             transpile_gml_code(source, indent=""),
-            "if GMRuntime.gml_keyboard_check(KEY_SHIFT):\n"
+            "if GMRuntime.gml_keyboard_check(16):\n"
             "\tfaster = true\n"
             "else:\n"
             "\tfaster = false\n"
             "if GMRuntime.gml_eq(faster, true):\n"
             "\tsuperSpeed = 20\n"
-            "if GMRuntime.gml_keyboard_check(KEY_LEFT):\n"
+            "if GMRuntime.gml_keyboard_check(37):\n"
             "\tposition.x = GMRuntime.gml_sub(position.x, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_RIGHT):\n"
+            "if GMRuntime.gml_keyboard_check(39):\n"
             "\tposition.x = GMRuntime.gml_add(position.x, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_UP):\n"
+            "if GMRuntime.gml_keyboard_check(38):\n"
             "\tposition.y = GMRuntime.gml_sub(position.y, superSpeed)\n"
-            "if GMRuntime.gml_keyboard_check(KEY_DOWN):\n"
+            "if GMRuntime.gml_keyboard_check(40):\n"
             "\tposition.y = GMRuntime.gml_add(position.y, superSpeed)\n"
             "superSpeed = 10",
         )

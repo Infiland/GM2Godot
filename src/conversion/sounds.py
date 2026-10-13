@@ -12,6 +12,7 @@ from src.conversion.asset_output_paths import (
     build_asset_output_paths,
     resource_filesystem_path,
 )
+from src.conversion.audio_file_formats import godot_audio_filename
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gamemaker_json import decode_gamemaker_json
@@ -630,7 +631,7 @@ class SoundConverter(BaseConverter):
                 name=sound_name, sound_file=sound_file_reference))
             return {'success': False, 'name': sound_name, 'audio_group': audio_group}
 
-        sound_file = os.path.basename(audio_path)
+        sound_file = godot_audio_filename(audio_path)
         resource_path = self._sound_output_paths.get(sound_name, "")
         if resource_path:
             dest_path = resource_filesystem_path(self.godot_project_path, resource_path)

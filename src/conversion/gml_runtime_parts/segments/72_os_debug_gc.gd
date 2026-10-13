@@ -1,16 +1,20 @@
-const GML_OS_WINDOWS = "windows"
-const GML_OS_GXGAMES = "gxgames"
-const GML_OS_LINUX = "linux"
-const GML_OS_MACOSX = "macosx"
-const GML_OS_IOS = "ios"
-const GML_OS_TVOS = "tvos"
-const GML_OS_ANDROID = "android"
-const GML_OS_PS4 = "ps4"
-const GML_OS_PS5 = "ps5"
-const GML_OS_GDK = "gdk"
-const GML_OS_SWITCH = "switch"
-const GML_OS_UNKNOWN = "unknown"
-const GML_BROWSER_NOT_A_BROWSER = "not_a_browser"
+# GameMaker's os_type and os_browser constants are numbers. The desktop,
+# mobile, unknown and browser values are the ones the HTML5 runner returns
+# (Globals.js); the console and GX.games values follow GameMaker's constants.
+const GML_OS_WINDOWS = 0
+const GML_OS_GXGAMES = 23
+const GML_OS_LINUX = 6
+const GML_OS_MACOSX = 1
+const GML_OS_IOS = 3
+const GML_OS_TVOS = 20
+const GML_OS_ANDROID = 4
+const GML_OS_PS4 = 14
+const GML_OS_PS5 = 22
+const GML_OS_GDK = 24
+const GML_OS_SWITCH = 21
+const GML_OS_UNKNOWN = -1
+const GML_BROWSER_NOT_A_BROWSER = -1
+const GML_BROWSER_UNKNOWN = 0
 const GML_DEVICE_IOS_UNKNOWN = "ios_unknown"
 const GML_WEAK_REF_MARKER = "__gm2godot_weak_ref"
 
@@ -40,7 +44,7 @@ static func gml_os_type():
 
 
 static func gml_os_browser():
-	return GML_BROWSER_NOT_A_BROWSER if not OS.has_feature("web") else "unknown"
+	return GML_BROWSER_NOT_A_BROWSER if not OS.has_feature("web") else GML_BROWSER_UNKNOWN
 
 
 static func gml_os_device():

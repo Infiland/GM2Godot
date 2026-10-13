@@ -90,7 +90,7 @@ class TestMapEventStatic(unittest.TestCase):
 
     def test_draw_event(self):
         m = map_event({"eventType": 8, "eventNum": 0})
-        self.assertEqual(m.godot_func, "_draw")
+        self.assertEqual(m.godot_func, "_on_draw")
         self.assertEqual(m.sort_key, 3)
         self.assertEqual(m.gml_filename, "Draw_0.gml")
 
@@ -129,14 +129,14 @@ class TestMapEventStatic(unittest.TestCase):
 
     def test_close_button_event(self):
         m = map_event({"eventType": 7, "eventNum": 30})
-        self.assertEqual(m.godot_func, "_notification")
-        self.assertEqual(m.params, "what")
+        self.assertEqual(m.godot_func, "_on_close_button")
+        self.assertEqual(m.params, "")
         self.assertEqual(m.sort_key, 6)
         self.assertEqual(m.gml_filename, "Other_30.gml")
 
     def test_cleanup_event(self):
         m = map_event({"eventType": 12, "eventNum": 0})
-        self.assertEqual(m.godot_func, "_exit_tree")
+        self.assertEqual(m.godot_func, "_on_clean_up")
         self.assertEqual(m.sort_key, 5)
         self.assertEqual(m.gml_filename, "CleanUp_0.gml")
 
@@ -200,9 +200,9 @@ class TestMapEventDynamic(unittest.TestCase):
         self.assertEqual(m.godot_func, "_on_destroy")
 
     def test_cleanup_nonzero_eventnum(self):
-        """eventType 12 with any eventNum should still map to _exit_tree."""
+        """eventType 12 with any eventNum should still map to _on_clean_up."""
         m = map_event({"eventType": 12, "eventNum": 5})
-        self.assertEqual(m.godot_func, "_exit_tree")
+        self.assertEqual(m.godot_func, "_on_clean_up")
 
 
 class TestMapEventInputReturnsNone(unittest.TestCase):

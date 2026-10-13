@@ -68,6 +68,13 @@ class TestAsyncQueueGodotSmoke(unittest.TestCase):
             \tcall_deferred("_run")
 
             func _run():
+            \t# Exercises the async queue directly: without the GameMaker frame
+            \t# pump, gml_async_dispatch() delivers immediately.
+            \tGMRuntime.gml_event_scheduler_pump_detach()
+            \tif not _check(not GMRuntime.gml_event_scheduler_tracing(), "tracing is on by default"):
+            \t\treturn
+            \t# The async event log is a trace: it records only while tracing is on.
+            \tGMRuntime.gml_event_scheduler_set_tracing(true)
             \tGMRuntime.gml_async_event_log_clear()
             \tvar first = _listener("A")
             \tvar second = _listener("B")
@@ -133,6 +140,27 @@ class TestAsyncQueueGodotSmoke(unittest.TestCase):
             \tif not _check(diagnostic_event["payload"]["status"] == -1, "diagnostic status mismatch"):
             \t\treturn
             \tif not _check(diagnostic_event["handler"] == "_on_async_cloud_save", "diagnostic handler mismatch"):
+            \t\treturn
+
+            \t# The log keeps only the latest events.
+            \tfor index in range(2 * GMRuntime.GML_ASYNC_EVENT_LOG_LIMIT):
+            \t\tGMRuntime.gml_async_dispatch("http", {"id": 1000 + index, "status": 200, "result": "", "url": "/many"})
+            \tlog = GMRuntime.gml_async_event_log()
+            \tif not _check(log.size() == GMRuntime.GML_ASYNC_EVENT_LOG_LIMIT, "async event log size " + str(log.size())):
+            \t\treturn
+            \tif not _check(log[-1]["payload"]["id"] == 999 + 2 * GMRuntime.GML_ASYNC_EVENT_LOG_LIMIT, "async event log lost the latest event"):
+            \t\treturn
+            \tif not _check(GMRuntime._gml_async_event_log.size() < 2 * GMRuntime.GML_ASYNC_EVENT_LOG_LIMIT, "async event log kept growing"):
+            \t\treturn
+
+            \t# GameMaker keeps no record of the async events it delivers: with
+            \t# tracing off nothing is logged.
+            \tGMRuntime.gml_event_scheduler_set_tracing(false)
+            \tGMRuntime.gml_async_event_log_clear()
+            \tGMRuntime.gml_async_dispatch("http", {"id": 104, "status": 200, "result": "untraced", "url": "/untraced"})
+            \tif not _check(legacy_order[-1] == "legacy:104", "untraced async event was not delivered"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_async_event_log().is_empty(), "async event logged with tracing off"):
             \t\treturn
 
             \tprint("ASYNC_QUEUE_SMOKE_OK")

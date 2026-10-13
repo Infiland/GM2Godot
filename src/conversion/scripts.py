@@ -122,6 +122,12 @@ def _script_scope_lines() -> list[str]:
     ]
 
 
+def _indent_function_body_line(text: str) -> str:
+    # Emitted code may span several lines (a method written in place is a
+    # GDScript lambda with its own body); every one of them is indented.
+    return "\n".join(f"\t{line}" if line else "" for line in text.split("\n"))
+
+
 def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_method: str) -> str:
     args = [
         "self",
@@ -153,10 +159,32 @@ def _is_script_function_entry(entry: AssetRegistryEntry) -> bool:
     return bool(metadata.get("script_function"))
 
 
+# Each script loads on its own (load, not preload): a script Godot cannot
+# load leaves only its own entries without a callable, instead of stopping
+# the registry, and with it every script call, from loading.
+_SCRIPT_REGISTRY_LOADERS = (
+    "static func _gm_script_owner(resource_path):\n"
+    "\tvar script = load(resource_path)\n"
+    "\tif script == null or not script.can_instantiate():\n"
+    "\t\treturn null\n"
+    "\treturn script.new()\n\n\n"
+    "static func _gm_script_method(owner, method_name):\n"
+    "\tif owner == null or not owner.has_method(method_name):\n"
+    "\t\treturn null\n"
+    "\treturn Callable(owner, method_name)\n\n\n"
+    "static func _gm_script_callable(resource_path, accessor_name):\n"
+    "\tvar owner = _gm_script_owner(resource_path)\n"
+    "\tif owner == null or not owner.has_method(accessor_name):\n"
+    "\t\treturn null\n"
+    "\treturn owner.call(accessor_name)\n\n\n"
+)
+
+
 def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str:
     entry_list = list(entries)
     lines = [
         "extends RefCounted\n\n",
+        _SCRIPT_REGISTRY_LOADERS,
         "static func gml_script_registry_entries():\n",
     ]
     constructor_variables: dict[int, str] = {}
@@ -170,14 +198,14 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
             constructor_variables[index] = variable_name
             lines.append(
                 f"\tvar {variable_name} = "
-                f"preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}()\n"
+                f"_gm_script_callable({json.dumps(entry.resource_path)}, {json.dumps(entry.callable_method)})\n"
             )
         if entry.initializer_method is not None:
             owner_variable_name = f"_gm_initializer_owner_{index}"
             initializer_owner_variables[index] = owner_variable_name
             lines.append(
                 f"\tvar {owner_variable_name} = "
-                f"preload({json.dumps(entry.resource_path)}).new()\n"
+                f"_gm_script_owner({json.dumps(entry.resource_path)})\n"
             )
     lines.append("\treturn [\n")
     for index, entry in enumerate(entry_list):
@@ -185,14 +213,14 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
         callable_expression = (
             constructor_variable
             if constructor_variable is not None
-            else f"preload({json.dumps(entry.resource_path)}).new().{entry.callable_method}()"
+            else f"_gm_script_callable({json.dumps(entry.resource_path)}, {json.dumps(entry.callable_method)})"
         )
         scoped_callable_expression = (
             constructor_variable
             if constructor_variable is not None
             else (
-                f"preload({json.dumps(entry.resource_path)}).new()."
-                f"{entry.scoped_callable_method}()"
+                f"_gm_script_callable({json.dumps(entry.resource_path)}, "
+                f"{json.dumps(entry.scoped_callable_method)})"
             )
         )
         lines.extend(
@@ -208,7 +236,7 @@ def render_script_registry_script(entries: Iterable[ScriptRegistryEntry]) -> str
             initializer_owner = initializer_owner_variables[index]
             lines.append(
                 f"\t\t\t\"initializer_owner\": {initializer_owner},\n"
-                f"\t\t\t\"initializer\": Callable({initializer_owner}, "
+                f"\t\t\t\"initializer\": _gm_script_method({initializer_owner}, "
                 f"{json.dumps(entry.initializer_method)}),\n"
             )
         lines.extend(
@@ -543,9 +571,13 @@ class ScriptConverter(BaseConverter):
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
+            # A default that is a multi-line method spans several lines, all
+            # of which belong inside the function body.
             lines.append(
-                f"\tif {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
-                f"{parameter_name} = {default_value}"
+                _indent_function_body_line(
+                    f"if {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
+                    f"{parameter_name} = {default_value}"
+                )
             )
         if declaration.parent_constructor is not None:
             outer_scope = ScopeContext(
@@ -572,12 +604,13 @@ class ScriptConverter(BaseConverter):
                 scope_context=outer_scope,
             )
             lines.append(
-                "\t"
-                + emit_constructor_inheritance_line(
-                    parent_expression,
-                    local_names,
-                    constructor_scope,
-                    outer_scope,
+                _indent_function_body_line(
+                    emit_constructor_inheritance_line(
+                        parent_expression,
+                        local_names,
+                        constructor_scope,
+                        outer_scope,
+                    )
                 )
             )
         result = transpile_gml_code_with_source_map(
@@ -597,7 +630,7 @@ class ScriptConverter(BaseConverter):
             source_path=source_path,
             event=f"script:{declaration.name}",
             preserve_source_comments=True,
-            generated_line_offset=generated_line_offset + len(lines),
+            generated_line_offset=generated_line_offset + sum(line.count("\n") + 1 for line in lines),
         )
         lines.append(result.code)
         return (

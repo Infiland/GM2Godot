@@ -22,10 +22,14 @@ static func gml_abs(value):
 		return GMLInt64.new(abs(value.value))
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML abs", value)
-	var real_value = _to_real(value)
 	if typeof(value) == TYPE_INT:
-		return abs(int(real_value))
-	return abs(real_value)
+		# A whole number stays one: a round trip through a real turns
+		# 2^63 - 1 into INT64_MIN, and the magnitude of INT64_MIN is 2^63,
+		# which only a real holds.
+		if value == GML_INT64_MIN:
+			return -float(value)
+		return abs(value)
+	return abs(_to_real(value))
 
 
 static func gml_sign(value):
@@ -103,8 +107,10 @@ static func _gml_compare_reals(left_value, right_value):
 static func gml_frac(value):
 	if not _is_real_convertible(value):
 		return gml_unsupported_type_error("GML frac", value)
+	# The runner's frac is x - ~~x. The truncation stays a real (an int
+	# overflows past 2^63), and an infinity truncates to 0, as ~~ does.
 	var real_value = _to_real(value)
-	return real_value - int(real_value)
+	return real_value - _gml_truncate_real(real_value)
 
 
 static func gml_sqr(value):

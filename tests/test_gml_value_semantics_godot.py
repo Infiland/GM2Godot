@@ -222,6 +222,43 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_INT64_SATURATION_OK",
         )
 
+    def test_frac_and_abs_do_not_overflow_integers(self) -> None:
+        # The runner's frac is x - ~~x. The truncation must stay a real: an
+        # int() of a real beyond 2^63 is INT64_MIN, which made frac(1e20)
+        # 1.0922e20. ~~ gives 0 for an infinity, so frac(infinity) is
+        # infinity (the runner's ~~ also wraps at 32 bits, which this runtime
+        # does not copy, as with div). abs of a whole number goes through no
+        # real, which cannot hold every int64.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("frac(1e20)", GMRuntime.gml_frac(1e20), 0.0)
+            _expect("frac(-1e20)", GMRuntime.gml_frac(-1e20), 0.0)
+            _expect("frac(2^63)", GMRuntime.gml_frac(9223372036854775808.0), 0.0)
+            _expect("frac(-2^63)", GMRuntime.gml_frac(-9223372036854775808.0), 0.0)
+            _expect("frac(5000000000.5)", GMRuntime.gml_frac(5000000000.5), 0.5)
+            _expect("frac(-5.25)", GMRuntime.gml_frac(-5.25), -0.25)
+            _expect("frac(2.75)", GMRuntime.gml_frac(2.75), 0.75)
+            _expect("frac(3)", GMRuntime.gml_frac(3), 0.0)
+            _expect("frac(infinity)", GMRuntime.gml_frac(INF), INF)
+            _expect("frac(-infinity)", GMRuntime.gml_frac(-INF), -INF)
+            _expect("frac(NaN)", GMRuntime.gml_frac(NAN), NAN)
+            # GDScript merges the constants 0.0 and -0.0 (and folds fmod of
+            # constants), so -0 is computed from a variable.
+            var one = 1.0
+            var negative_zero = fmod(-one, one)
+            _expect("-0 setup", 1.0 / negative_zero, -INF)
+            _expect("frac(-0)", 1.0 / GMRuntime.gml_frac(negative_zero), -INF)
+            _expect("abs(2^63 - 1)", GMRuntime.gml_abs(9223372036854775807) == 9223372036854775807, true)
+            _expect("abs(-(2^63 - 1))", GMRuntime.gml_abs(-9223372036854775807) == 9223372036854775807, true)
+            _expect("abs(2^53 + 1)", GMRuntime.gml_abs(-9007199254740993) == 9007199254740993, true)
+            _expect("abs(-2^63) is 2^63", GMRuntime.gml_abs(-9223372036854775807 - 1) == 9223372036854775808.0, true)
+            _expect("abs(-5)", GMRuntime.gml_abs(-5), 5)
+            _expect("abs(-5.5)", GMRuntime.gml_abs(-5.5), 5.5)
+            """,
+            "GML_FRAC_ABS_OK",
+        )
+
     def test_comparisons_use_gamemaker_epsilon(self) -> None:
         _run_runtime_checks(
             self,

@@ -59,6 +59,11 @@ trace("(1 << 63) div 1e20", smallest div power(10, 20));
 trace("(1 << 63) div infinity", smallest div infinity);
 trace("(1 << 63) div NaN", smallest div NaN);
 trace("1e19 & 255", huge & 255);
+// frac is x - ~~x, and an integer must not overflow on the way.
+trace("frac(1e20)", frac(power(10, 20)));
+trace("frac(-5.25)", frac(-5.25));
+trace("frac(infinity)", frac(infinity));
+trace("abs(0x7FFFFFFFFFFFFFFF)", abs(0x7FFFFFFFFFFFFFFF));
 """
 
 _EXPECTED_TRACE = [
@@ -80,6 +85,10 @@ _EXPECTED_TRACE = [
     "(1 << 63) div infinity:-1",
     "(1 << 63) div NaN:error",
     "1e19 & 255:255",
+    "frac(1e20):0",
+    "frac(-5.25):-0.25",
+    "frac(infinity):infinity",
+    "abs(0x7FFFFFFFFFFFFFFF):9223372036854775807",
 ]
 
 _PROJECT = GameMakerProject(

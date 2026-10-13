@@ -54,7 +54,22 @@ class GMLInt64:
 		if initial_value is GMLInt64:
 			_value = int(initial_value.value)
 		else:
-			_value = int(initial_value)
+			_value = GMLInt64.saturate(initial_value)
+
+	# A number as the runner's Long.fromNumber makes it an int64: NaN gives
+	# 0, a real of 2^63 or more (an infinity too) the largest int64, one of
+	# -2^63 or less the smallest, and any other real is truncated toward
+	# zero. A bare int() gives INT64_MIN for all the out-of-range reals and
+	# for NaN.
+	static func saturate(value):
+		if typeof(value) == TYPE_FLOAT:
+			if is_nan(value):
+				return 0
+			if value >= 9223372036854775808.0:
+				return GML_INT64_MAX
+			if value <= -9223372036854775808.0:
+				return GML_INT64_MIN
+		return int(value)
 
 
 class GMLPointer:
@@ -88,6 +103,8 @@ class GMLHandle:
 const GML_RECEIVER_ARGUMENTS_NONE = 0
 const GML_RECEIVER_ARGUMENTS_SELF = 1
 const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
+# The most static structs a variable lookup follows (guards a cyclic chain).
+const GML_STATIC_CHAIN_LIMIT = 256
 
 
 class GMLMethod:
@@ -177,6 +194,8 @@ static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_static_cursor = 0
+static var _gml_static_structs = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {

@@ -2369,7 +2369,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if not constructor.is_constructor:", GML_RUNTIME_SCRIPT)
         self.assertIn("var instance = gml_struct({})", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
-        self.assertIn("gml_static_set(instance, constructor_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_link_new(instance, constructor_static)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_constructor_invoke(", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(instance)", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(constructor_other)", GML_RUNTIME_SCRIPT)
@@ -2396,11 +2396,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_exception_value(exception):", GML_RUNTIME_SCRIPT)
         self.assertIn("if exception is GMLException:\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_undefined()", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_exception_struct(exception):", GML_RUNTIME_SCRIPT)
+        # catch receives a thrown value unchanged (the runner's
+        # __yy__processException); only a runtime error becomes a struct.
+        self.assertIn(
+            "static func gml_exception_struct(exception):\n"
+            "\tif exception is GMLException:\n"
+            "\t\treturn exception.value\n",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn('"message": gml_string(exception)', GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_struct(exception.value):\n\t\treturn exception.value", GML_RUNTIME_SCRIPT)
-        self.assertIn("var message = gml_string(exception.value)", GML_RUNTIME_SCRIPT)
-        self.assertIn('"longMessage": message', GML_RUNTIME_SCRIPT)
+        self.assertIn('"longMessage": gml_string(exception)', GML_RUNTIME_SCRIPT)
         self.assertIn('"script": ""', GML_RUNTIME_SCRIPT)
         self.assertIn('"stacktrace": []', GML_RUNTIME_SCRIPT)
 
@@ -2452,7 +2457,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if text.to_lower().is_valid_hex_number(true):", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(_gml_hex_string_to_int(text))", GML_RUNTIME_SCRIPT)
         self.assertIn("if text.is_valid_float():\n\t\treturn text.to_float()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if text.is_valid_float():\n\t\treturn int(text.to_float())", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.is_valid_float():\n\t\treturn GMLInt64.saturate(text.to_float())", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML real conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_hex_string_to_int(value):", GML_RUNTIME_SCRIPT)
@@ -2545,7 +2550,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return fmod(_to_real(left), right_real)", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_repeat_count_preserves_gml_rounding(self):
@@ -3211,6 +3216,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_static_same(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left == right", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_statics_are_members_of_the_structs_made_by_new(self):
+        self.assertIn("static func _gml_static_chain_owner(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_link_new(value, static_struct):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_chain_owner(struct_value, key) != null", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_call_member(target, member_name, args = [], caller_self = null, caller_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if member is GMLMethod and not member.has_bound_self:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)",
+            GML_RUNTIME_SCRIPT,
+        )
+
     def test_runtime_constructor_identity_uses_static_chain(self):
         self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)
         self.assertIn("if not is_struct(struct_value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
@@ -3226,7 +3248,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var constructor_name = _gml_static_name(static_struct)", GML_RUNTIME_SCRIPT)
         self.assertIn("if constructor_name != \"\":\n\t\treturn constructor_name", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_name(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn('entry.has("constructor_name")', GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_static_registry[index].has("constructor_name")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)
@@ -3326,7 +3348,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return int(left / right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) % right_int", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int32 division by zero")', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML int32 modulo by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_error(GML_MOD_BY_ZERO_MESSAGE)", GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_MOD_BY_ZERO_MESSAGE = "unable to mod with zero"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)

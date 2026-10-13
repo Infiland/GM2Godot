@@ -8,7 +8,9 @@ from .emitter import emit_gml_expression
 from .expression_models import (
     Call as _Call,
     Expression as _Expression,
+    FunctionLiteral as _FunctionLiteral,
     GMLExpression,
+    Grouped as _Grouped,
 )
 from .expression_parser import parse_gml_expression
 from .shared_models import (
@@ -42,16 +44,39 @@ def _emit_static_initialization_lines(
             macro_values=macro_values,
             scope_context=scope_context,
         )
-        value = emit_gml_expression(
-            value_expr,
-            initializer_names,
-            scope_context=scope_context,
-        ).text
+        value = _emit_static_value(value_expr, initializer_names, scope_context)
         initializers.append(f"[{json.dumps(declaration.name)}, func(): return {value}]")
     return [
         f"var {static_scope_name} = GMRuntime.gml_static_scope({json.dumps(static_scope_id)})",
         f"GMRuntime.gml_static_initialize({static_scope_name}, [{', '.join(initializers)}])",
     ]
+
+
+def _emit_static_value(
+    value_expr: _Expression,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    # A static function belongs to the constructor, not to the struct that
+    # happened to be built first: it is unbound, so the struct it is called
+    # through (inst.method()) is its self, as in the runner's static_get.
+    unwrapped = value_expr
+    while isinstance(unwrapped, _Grouped):
+        unwrapped = unwrapped.expr
+    if not isinstance(unwrapped, _FunctionLiteral):
+        return emit_gml_expression(
+            value_expr,
+            local_names,
+            scope_context=scope_context,
+        ).text
+    function_literal = emit_gml_expression(
+        unwrapped,
+        local_names,
+        bind_function_literals=False,
+        scope_context=scope_context,
+    ).text
+    helper = "gml_receiver_constructor" if unwrapped.is_constructor else "gml_receiver_method"
+    return f"GMRuntime.{helper}(GMRuntime.gml_undefined(), {function_literal})"
 
 
 def _emit_constructor_inheritance_line(

@@ -55,6 +55,53 @@ def normalize_local_names(local_names: Iterable[str] | None) -> frozenset[str]:
     return _normalize_local_names(local_names)
 
 
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
+
+
+def wrap_int64(value: int) -> int:
+    """Return the signed 64-bit integer that holds the low 64 bits of value."""
+    return ((value - _INT64_MIN) & ((1 << 64) - 1)) + _INT64_MIN
+
+
+def int64_literal_source(value: int) -> str:
+    """Return the GDScript source for a signed 64-bit integer value.
+
+    The magnitude of INT64_MIN has no integer literal to negate, so it is
+    written as a difference.
+    """
+    if value == _INT64_MIN:
+        return f"({_INT64_MIN + 1} - 1)"
+    return str(value)
+
+
+def number_literal_source(text: str, is_float_like: bool) -> str:
+    """Return the GDScript source for a GML number literal.
+
+    GDScript clamps an integer literal beyond the int64 range to INT64_MAX
+    and logs "Cannot represent ... as a 64-bit signed integer". A hex or
+    binary literal of 2^63 or more is an int64 in GML with that bit pattern
+    (0xFFFFFFFFFFFFFFFF == -1), so it is written as the signed value. A
+    decimal integer literal of 2^63 or more is a real in GML, so it is
+    written as a float literal.
+    """
+    if is_float_like:
+        return text
+    if text[:2] in ("0x", "0X", "0b", "0B"):
+        try:
+            value = int(text, 0)
+        except ValueError:
+            return text
+        if value <= _INT64_MAX:
+            return text
+        wrapped = wrap_int64(value)
+        source = int64_literal_source(wrapped)
+        return f"({source})" if wrapped < 0 and wrapped != _INT64_MIN else source
+    if text.isdecimal() and int(text) > _INT64_MAX:
+        return f"{text}.0"
+    return text
+
+
 def _tokens_to_source(tokens: Iterable[_Token]) -> str:
     return " ".join(token.value for token in tokens if token.kind not in ("EOF", "NEWLINE"))
 
@@ -118,7 +165,7 @@ def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable
         stripped = line.lstrip("\t")
         if stripped == "continue":
             indentation = line[: len(line) - len(stripped)]
-            result.extend(f"{indentation}{inserted_line}" for inserted_line in inserted)
+            result.extend(_prefix_multiline(inserted_line, indentation) for inserted_line in inserted)
         result.append(line)
     return result
 
@@ -136,7 +183,7 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
         stripped = line.lstrip("\t")
         if stripped == "continue":
             indentation = line[: len(line) - len(stripped)]
-            result.append(f"{indentation}if {condition}:")
+            result.append(_prefix_multiline(f"if {condition}:", indentation))
             result.append(f"{indentation}\tbreak")
         result.append(line)
     return result

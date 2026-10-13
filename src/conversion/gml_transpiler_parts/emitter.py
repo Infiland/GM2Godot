@@ -78,8 +78,10 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
 )
 from .utils import (
+    int64_literal_source as _int64_literal_source,
     normalize_local_names as _normalize_local_names,
     normalize_scope_context as _normalize_scope_context,
+    number_literal_source as _number_literal_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
 )
 
@@ -289,6 +291,12 @@ def _is_alarm_array_access(
     )
 
 
+def _emit_literal(expr: _Literal | _StringLiteral | _NumberLiteral) -> str:
+    if isinstance(expr, _NumberLiteral):
+        return _number_literal_source(expr.value, expr.is_float_like)
+    return expr.value
+
+
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
@@ -298,9 +306,9 @@ def _emit_expression(
     local_names = _normalize_local_names(local_names)
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
-        return expr.value, PRIMARY_PRECEDENCE
+        return _emit_literal(expr), PRIMARY_PRECEDENCE
     if isinstance(expr, _EnumMember):
-        return str(expr.value), PRIMARY_PRECEDENCE
+        return _int64_literal_source(expr.value), PRIMARY_PRECEDENCE
     if isinstance(expr, _TemplateStringLiteral):
         return _emit_template_string(expr, local_names, scope_context)
     if isinstance(expr, _NameOf):
@@ -400,15 +408,8 @@ def _emit_expression(
                 f"{scope_context.other_expression}, {json.dumps(expr.callee.value)})",
                 POSTFIX_PRECEDENCE,
             )
-        callee = _emit_child(
-            expr.callee,
-            POSTFIX_PRECEDENCE,
-            local_names=local_names,
-            scope_context=scope_context,
-        )
         return (
-            "GMRuntime.gml_call_value("
-            f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})",
+            _emit_value_call(expr.callee, args, local_names, scope_context),
             POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _ArrayLiteral):
@@ -580,6 +581,41 @@ def uses_direct_member_access(
     scope_context: ScopeContext | None = None,
 ) -> bool:
     return _uses_direct_member_access(expr, scope_context=scope_context)
+
+
+def _emit_value_call(
+    callee_expr: _Expression,
+    args: str,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    """A call of the value an expression produces: inst.method(args), f()(args)."""
+    if isinstance(callee_expr, _Member) and not _uses_direct_member_access(
+        callee_expr,
+        scope_context=scope_context,
+    ):
+        # A method that is not bound to a struct runs with the struct it is
+        # called through as self.
+        member_target = _emit_instance_keyword_argument(
+            callee_expr.target,
+            local_names,
+            scope_context=scope_context,
+        )
+        return (
+            "GMRuntime.gml_call_member("
+            f"{member_target}, {json.dumps(callee_expr.member)}, [{args}], "
+            f"{scope_context.self_expression}, {scope_context.other_expression})"
+        )
+    callee = _emit_child(
+        callee_expr,
+        POSTFIX_PRECEDENCE,
+        local_names=local_names,
+        scope_context=scope_context,
+    )
+    return (
+        "GMRuntime.gml_call_value("
+        f"{callee}, [{args}], {scope_context.self_expression}, {scope_context.other_expression})"
+    )
 
 
 def _emit_function_literal(

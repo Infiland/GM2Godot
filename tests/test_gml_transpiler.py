@@ -189,6 +189,59 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_real(0x2c8e)",
         )
 
+    def test_writes_hex_literals_of_two_to_the_63_or_more_as_signed_int64(self):
+        # GDScript clamps an integer literal beyond the int64 range to
+        # INT64_MAX ("Cannot represent ... as a 64-bit signed integer"). In
+        # GML a hex literal is an int64 with that bit pattern, so
+        # 0xFFFFFFFFFFFFFFFF == -1.
+        smallest = "(-9223372036854775807 - 1)"
+        cases = (
+            ("0x8000000000000000", smallest),
+            ("$8000000000000000", smallest),
+            ("0xFFFFFFFFFFFFFFFF", "(-1)"),
+            ("$FFFFFFFFFFFFFFFF", "(-1)"),
+            ("0xffff_ffff_ffff_ffff", "(-1)"),
+            ("0x8000000000000001", "(-9223372036854775807)"),
+            ("0xCBF29CE484222325", "(-3750763034362895579)"),
+            ("0b" + "1" * 64, "(-1)"),
+            ("0b1" + "0" * 63, smallest),
+            ("0x7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("$7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("0xFFFFFFFF", "0xFFFFFFFF"),
+            ("0b" + "1" * 63, "0b" + "1" * 63),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
+        self.assertEqual(
+            transpile_gml_expression("x & $FFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_and(position.x, (-1))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("~0xFFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_not((-1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("var mask = 0x8000000000000000;", indent=""),
+            f"var mask = {smallest}",
+        )
+
+    def test_writes_decimal_integer_literals_beyond_int64_as_reals(self):
+        # GML reads a decimal literal beyond the int64 range as a real; as an
+        # integer literal GDScript would clamp it to INT64_MAX.
+        cases = (
+            ("9223372036854775807", "9223372036854775807"),
+            ("9223372036854775808", "9223372036854775808.0"),
+            ("18446744073709551615", "18446744073709551615.0"),
+            ("9_223_372_036_854_775_808", "9223372036854775808.0"),
+            ("9223372036854775808.5", "9223372036854775808.5"),
+            ("12345", "12345"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_hash_color_literal_parity_examples(self):
         cases = (
             ("#dd8e2c == $2c8edd", "0x2c8edd == 0x2c8edd"),
@@ -1336,6 +1389,91 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
         )
 
+    def test_folds_enum_div_and_mod_with_gml_integer_semantics(self):
+        # mod and div truncate toward zero (GML gives -5 mod 3 == -2, where
+        # Python's floor modulo gives 1), and the folding is exact beyond
+        # 2^53, where a float quotient is not. Results wrap around 2^64 like
+        # an int64, and a shift count is taken modulo 64 like the runner's Long.
+        source = (
+            "enum FOLD {\n"
+            "    NEG_MOD = -5 mod 3,\n"
+            "    NEG_PERCENT = -5 % 3,\n"
+            "    NEG_DIVISOR_MOD = 5 mod -3,\n"
+            "    BOTH_NEG_MOD = -5 % -3,\n"
+            "    EXACT_MOD = 6 mod 3,\n"
+            "    NEG_DIV = -7 div 2,\n"
+            "    NEG_DIVISOR_DIV = 7 div -2,\n"
+            "    BOTH_NEG_DIV = -7 div -2,\n"
+            "    SLASH = 7 / 2,\n"
+            "    HUGE_DIV = 9007199254740993 div 1,\n"
+            "    PRECISE_DIV = 9223372036854775807 div 3,\n"
+            "    PRECISE_MOD = 18014398509481985 mod 10,\n"
+            "    SMALLEST_DIV = 0x8000000000000000 div -1,\n"
+            "    SHIFTED = 1 << 63,\n"
+            "    SHIFT_WRAPS = 1 << 64,\n"
+            "    SHIFT_RIGHT = -8 >> 1,\n"
+            "    OVERFLOW = 0x7FFFFFFFFFFFFFFF + 1,\n"
+            "    NEGATED = -0x8000000000000000,\n"
+            "    AFTER_LARGEST = 0x7FFFFFFFFFFFFFFE,\n"
+            "    NEXT,\n"
+            "}\n"
+        )
+        expected_values = {
+            "NEG_MOD": -2,
+            "NEG_PERCENT": -2,
+            "NEG_DIVISOR_MOD": 2,
+            "BOTH_NEG_MOD": -2,
+            "EXACT_MOD": 0,
+            "NEG_DIV": -3,
+            "NEG_DIVISOR_DIV": -3,
+            "BOTH_NEG_DIV": 3,
+            "SLASH": 3,
+            "HUGE_DIV": 9007199254740993,
+            "PRECISE_DIV": 3074457345618258602,
+            "PRECISE_MOD": 5,
+            "SMALLEST_DIV": -9223372036854775808,
+            "SHIFTED": -9223372036854775808,
+            "SHIFT_WRAPS": 1,
+            "SHIFT_RIGHT": -4,
+            "OVERFLOW": -9223372036854775808,
+            "NEGATED": -9223372036854775808,
+            "AFTER_LARGEST": 9223372036854775806,
+            "NEXT": 9223372036854775807,
+        }
+        emitted = transpile_gml_code(source, indent="")
+        fields = ", ".join(
+            f'"{name}": ' + ("(-9223372036854775807 - 1)" if value == -9223372036854775808 else str(value))
+            for name, value in expected_values.items()
+        )
+        self.assertEqual(emitted, f"var FOLD = GMRuntime.gml_enum({{{fields}}})")
+
+    def test_rejects_enum_division_by_zero(self):
+        for source in ("enum BAD { A = 5 div 0 }", "enum BAD { A = 5 mod 0 }", "enum BAD { A = 5 % 0 }"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "integer compile-time constants"):
+                    transpile_gml_code(source, indent="")
+
+    def test_wraps_hex_enum_values_of_two_to_the_63_or_more_to_signed_int64(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "enum MASK { ALL = 0xFFFFFFFFFFFFFFFF, TOP = $8000000000000000, LOW = 0xFF }\n"
+                "a = MASK.ALL;\n"
+                "b = MASK.TOP;",
+                indent="",
+            ),
+            'var MASK = GMRuntime.gml_enum({"ALL": -1, "TOP": (-9223372036854775807 - 1), "LOW": 255})\n'
+            "a = -1\n"
+            "b = (-9223372036854775807 - 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "result = MASK.TOP;",
+                indent="",
+                enum_values={"MASK": {"TOP": -9223372036854775808}},
+            ),
+            "result = (-9223372036854775807 - 1)",
+        )
+
     def test_lowers_project_global_enum_members_to_integer_constants(self):
         enum_values = {
             "AddingOperator": {
@@ -2237,7 +2375,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn('"Point"', output)
         self.assertIn(
             '["make", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self, func(_gml_method_self = null, "
+            "GMRuntime.gml_undefined(), func(_gml_method_self = null, "
             "_gml_method_other = null): return 1)]",
             output,
         )
@@ -2253,12 +2391,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
         self.assertIn(
             '["operate", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
             '["invert", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
@@ -2267,6 +2405,38 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertNotIn('gml_call_named("operate"', output)
         self.assertNotIn("Unexpected token", output)
+
+    def test_member_calls_pass_the_target_as_the_receiver_of_unbound_methods(self):
+        self.assertEqual(
+            transpile_gml_expression("point.describe(1, 2)"),
+            'GMRuntime.gml_call_member(point, "describe", [1, 2], self, other)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("make().go()"),
+            "GMRuntime.gml_call_member("
+            'GMRuntime.gml_call_named("make", [], self, other), "go", [], self, other)',
+        )
+        # self.name() calls a method of the running instance itself.
+        self.assertEqual(
+            transpile_gml_expression("self.go()"),
+            "GMRuntime.gml_call_value(self.go, [], self, other)",
+        )
+
+    def test_constructor_static_functions_are_unbound(self):
+        output = transpile_gml_expression(
+            "function Point() constructor { static make = function() { return 1; }; "
+            "static pair = (function() { return 2; }); static count = 0; }"
+        )
+
+        self.assertIn(
+            '["make", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn(
+            '["pair", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn('["count", func(): return 0]', output)
 
     def test_nested_callback_in_constructor_static_switch_keeps_lambda_indentation(self):
         output = transpile_gml_expression(
@@ -2549,6 +2719,61 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_instance_get(_gml_method_self, "bonus")))',
         )
 
+    def test_transpiles_named_function_declaration_as_a_method_variable(self):
+        output = transpile_gml_code(
+            "function ev_helper3(_q) { return _q * 2; }\nscore = ev_helper3(3);",
+            indent="",
+        )
+
+        self.assertTrue(
+            output.startswith(
+                "ev_helper3 = GMRuntime.gml_receiver_method(self, func ev_helper3("
+                "_gml_method_self = null, _gml_method_other = null, _q = null):"
+            ),
+            output,
+        )
+        self.assertIn('GMRuntime.gml_call_named("ev_helper3", [3], self, other)', output)
+
+    def test_named_function_declarations_are_available_before_their_statement(self):
+        output = transpile_gml_code(
+            "score = early(4);\nfunction early(_q) { return _q + 1; }\n",
+            indent="",
+        )
+
+        self.assertLess(output.index("early = GMRuntime.gml_receiver_method("), output.index('"early", [4]'))
+
+    def test_function_expressions_are_not_declarations(self):
+        output = transpile_gml_code(
+            "var _f = function named() { return 1; };\nhandler = function other_named() { return 2; };",
+            indent="",
+        )
+
+        self.assertIn("var _f = GMRuntime.gml_receiver_method(self, func named(", output)
+        self.assertNotIn("\nnamed = ", "\n" + output)
+        self.assertNotIn("\nother_named = ", "\n" + output)
+
+    def test_named_function_inside_a_function_belongs_to_that_function_receiver(self):
+        output = transpile_gml_code(
+            "function outer() {\n"
+            "    var _first = inner(1);\n"
+            "    function inner(_q) { return _q + 1; }\n"
+            "    return _first;\n"
+            "}\n",
+            indent="",
+        )
+
+        declaration = output.index('GMRuntime.gml_variable_instance_set(_gml_method_self, "inner", ')
+        call = output.index('GMRuntime.gml_call_named("inner", [1], _gml_method_self, _gml_method_other)')
+        self.assertLess(declaration, call)
+
+    def test_named_function_declared_in_a_block_stays_in_the_block(self):
+        output = transpile_gml_code(
+            "if (ready) {\n    function guarded() { return 1; }\n}\nscore = 2;",
+            indent="",
+        )
+
+        self.assertLess(output.index("if GMRuntime.gml_bool("), output.index("guarded = GMRuntime.gml_receiver_method("))
+
     def test_rejects_return_outside_functions_and_methods(self):
         for source in ("return;", "return score + bonus;", "if ready begin return score; end"):
             with self.subTest(source=source):
@@ -2693,6 +2918,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
 
+    def test_methods_with_several_lines_stay_inside_the_catch_body(self):
+        # A method is a GDScript lambda: every line of it has to move in with
+        # the catch body, or GDScript finds no indented block under it.
+        output = transpile_gml_code(
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n",
+            indent="",
+        )
+
+        self.assertIn(
+            "\twhile true:\n"
+            "\t\t_u = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\t\tvar _a = 1\n"
+            "\t\t\treturn _a\n"
+            "\t\t)\n"
+            '\t\tposition.x = GMRuntime.gml_call_value(_u, [], self, other, "_u")\n'
+            "\t\tbreak\n",
+            output,
+        )
+
     def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
         output = transpile_gml_code(
             "try { value = real(text); } catch (_) {}",
@@ -2704,6 +2951,45 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
         self.assertNotIn("var _ =", output)
+
+    def test_a_method_in_a_do_until_condition_or_case_label_keeps_its_body_indented(self):
+        # The test lines of these statements are built by the statement
+        # parser; a multi-line method inside them is indented with the line.
+        until_output = transpile_gml_code(
+            "do { n++; continue; } until (is_method(function() { var _a = 1; return _a; }));",
+            indent="",
+        )
+        until_check = (
+            "\tif GMRuntime.is_method(GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _a = 1\n"
+            "\t\treturn _a\n"
+            "\t)):\n"
+            "\t\tbreak"
+        )
+        # The check ends the loop body and also runs before the continue.
+        self.assertEqual(
+            until_output,
+            "while true:\n"
+            "\tn = GMRuntime.gml_add(n, 1)\n"
+            f"{until_check}\n"
+            "\tcontinue\n"
+            f"{until_check}",
+        )
+
+        switch_output = transpile_gml_code(
+            "switch (a) { case (function() { var _c = 1; return _c; })(): b = 1; break; }",
+            indent="",
+        )
+        self.assertIn(
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, "
+            "GMRuntime.gml_call_value((GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _c = 1\n"
+            "\t\treturn _c\n"
+            "\t)), [], self, other)):\n"
+            "\t\t_gml_switch_matched_1 = true\n",
+            switch_output,
+        )
 
     def test_transpiles_try_finally_blocks(self):
         output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
@@ -3393,6 +3679,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var _gml_assignment_value_1 = c\n"
             "b = _gml_assignment_value_1\n"
             "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)",
+        )
+
+    def test_chained_nullish_assignment_keeps_a_multi_line_method_inside_its_block(self):
+        self.assertEqual(
+            transpile_gml_code("a = b ??= [function() { return 1; }, function() { var c = 2; return c; }];", indent=""),
+            "var _gml_assignment_value_0 = b\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null): return 1), "
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar c = 2\n"
+            "\t\treturn c\n"
+            "\t)]\n"
+            "\tb = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
         )
 
     def test_rejects_invalid_local_var_names(self):

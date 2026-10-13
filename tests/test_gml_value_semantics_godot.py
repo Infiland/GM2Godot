@@ -63,7 +63,7 @@ _SMOKE_PRELUDE = textwrap.dedent(
 )
 
 
-def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> None:
+def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> str:
     godot_binary = _find_godot_binary()
     if godot_binary is None:
         test.skipTest("Godot binary not available")
@@ -79,6 +79,7 @@ def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> None
     test.assertEqual(result.returncode, 0, result.stdout)
     test.assertIn(marker, result.stdout)
     test.assertNotIn("SCRIPT ERROR", result.stdout)
+    return result.stdout
 
 
 class TestGMLValueSemanticsGodot(unittest.TestCase):
@@ -147,6 +148,115 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             _expect("-5 mod 3", GMRuntime.gml_mod(-5, 3), -2)
             """,
             "GML_DIVISION_OK",
+        )
+
+    def test_modulo_by_zero_raises_like_the_runner(self) -> None:
+        # The runner's yyfmod raises "unable to mod with zero" when the
+        # divisor is zero once it is a real (0, 0.0, -0.0, false, int64(0)),
+        # even for a real dividend; only two int64 values go through Long.mod,
+        # which fails in its own division. A NaN divisor is no zero: the
+        # result is NaN.
+        output = _run_runtime_checks(
+            self,
+            """\
+            _expect("5.5 mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, 0)), true)
+            _expect("5 mod 0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, 0.0)), true)
+            _expect("5.5 mod -0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, -0.0)), true)
+            _expect("5 mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, 0)), true)
+            _expect("5 mod false is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, false)), true)
+            _expect("true mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(true, 0)), true)
+            _expect("5.5 mod int64(0) is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, GMRuntime.gml_int64(0))), true)
+            _expect("int64(5) mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0)), true)
+            _expect("int64(5) mod 0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0.0)), true)
+            _expect("int64(5) mod int64(0) is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), GMRuntime.gml_int64(0))), true)
+            var counter = 7.5
+            counter = GMRuntime.gml_mod(counter, 0)
+            _expect("counter %= 0 is an error", GMRuntime.is_undefined(counter), true)
+            _expect("5 mod NaN", GMRuntime.gml_mod(5, NAN), NAN)
+            _expect("5 mod inf", GMRuntime.gml_mod(5, INF), 5.0)
+            _expect("5.5 mod 2", GMRuntime.gml_mod(5.5, 2), 1.5)
+            _expect("-5.5 mod 2", GMRuntime.gml_mod(-5.5, 2), -1.5)
+            _expect("5 mod 0.5", GMRuntime.gml_mod(5, 0.5), 0.0)
+            _expect("int64(5) mod 0.5", GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0.5), 0.0)
+            """,
+            "GML_MOD_ZERO_OK",
+        )
+        self.assertEqual(output.count("GML runtime error: unable to mod with zero"), 10, output)
+        self.assertEqual(output.count("GML runtime error: GML int64 modulo by zero"), 1, output)
+
+    def test_int64_conversion_saturates_like_the_runner(self) -> None:
+        # The runner makes an int64 of a real with Long.fromNumber: NaN is 0,
+        # a real of 2^63 or more (and infinity) the largest int64, one of
+        # -2^63 or less (and -infinity) the smallest, any other is truncated.
+        # A bare int() gives INT64_MIN for all of the first four on x86.
+        # Comparisons below are exact: the checker's tolerance would read the
+        # largest int64 and the largest real below 2^63 as the same number.
+        _run_runtime_checks(
+            self,
+            """\
+            var int64_max = 9223372036854775807
+            var int64_min = -9223372036854775807 - 1
+            _expect("int64(NaN)", GMRuntime.gml_int64(NAN).value == 0, true)
+            _expect("int64(1e19)", GMRuntime.gml_int64(1e19).value == int64_max, true)
+            _expect("int64(2^63)", GMRuntime.gml_int64(9223372036854775808.0).value == int64_max, true)
+            _expect("int64(inf)", GMRuntime.gml_int64(INF).value == int64_max, true)
+            _expect("int64(-inf)", GMRuntime.gml_int64(-INF).value == int64_min, true)
+            _expect("int64(-1e19)", GMRuntime.gml_int64(-1e19).value == int64_min, true)
+            _expect("int64(-2^63)", GMRuntime.gml_int64(-9223372036854775808.0).value == int64_min, true)
+            _expect("int64(2^63 - 1024)", GMRuntime.gml_int64(9223372036854774784.0).value == 9223372036854774784, true)
+            _expect("int64(3.9)", GMRuntime.gml_int64(3.9).value == 3, true)
+            _expect("int64(-3.9)", GMRuntime.gml_int64(-3.9).value == -3, true)
+            _expect("int64(12345678901)", GMRuntime.gml_int64(12345678901).value == 12345678901, true)
+            _expect("int64('1e20')", GMRuntime.gml_int64("1e20").value == int64_max, true)
+            _expect("int64('-1e20')", GMRuntime.gml_int64("-1e20").value == int64_min, true)
+            _expect("1e19 & 255", GMRuntime.gml_bit_and(1e19, 255).value == 255, true)
+            _expect("NaN | 5", GMRuntime.gml_bit_or(NAN, 5).value == 5, true)
+            _expect("-inf >> 62", GMRuntime.gml_shift_right(-INF, 62).value == -2, true)
+            var smallest = GMRuntime.gml_shift_left(1, 63)
+            _expect("MIN div 1e20", GMRuntime.gml_int_div(smallest, 1e20).value == -1, true)
+            _expect("MIN div inf", GMRuntime.gml_int_div(smallest, INF).value == -1, true)
+            _expect("MIN div -inf", GMRuntime.gml_int_div(smallest, -INF).value == 1, true)
+            _expect("MIN div NaN is an error", GMRuntime.is_undefined(GMRuntime.gml_int_div(smallest, NAN)), true)
+            _expect("int64(5) div NaN is an error", GMRuntime.is_undefined(GMRuntime.gml_int_div(GMRuntime.gml_int64(5), NAN)), true)
+            """,
+            "GML_INT64_SATURATION_OK",
+        )
+
+    def test_frac_and_abs_do_not_overflow_integers(self) -> None:
+        # The runner's frac is x - ~~x. The truncation must stay a real: an
+        # int() of a real beyond 2^63 is INT64_MIN, which made frac(1e20)
+        # 1.0922e20. ~~ gives 0 for an infinity, so frac(infinity) is
+        # infinity (the runner's ~~ also wraps at 32 bits, which this runtime
+        # does not copy, as with div). abs of a whole number goes through no
+        # real, which cannot hold every int64.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("frac(1e20)", GMRuntime.gml_frac(1e20), 0.0)
+            _expect("frac(-1e20)", GMRuntime.gml_frac(-1e20), 0.0)
+            _expect("frac(2^63)", GMRuntime.gml_frac(9223372036854775808.0), 0.0)
+            _expect("frac(-2^63)", GMRuntime.gml_frac(-9223372036854775808.0), 0.0)
+            _expect("frac(5000000000.5)", GMRuntime.gml_frac(5000000000.5), 0.5)
+            _expect("frac(-5.25)", GMRuntime.gml_frac(-5.25), -0.25)
+            _expect("frac(2.75)", GMRuntime.gml_frac(2.75), 0.75)
+            _expect("frac(3)", GMRuntime.gml_frac(3), 0.0)
+            _expect("frac(infinity)", GMRuntime.gml_frac(INF), INF)
+            _expect("frac(-infinity)", GMRuntime.gml_frac(-INF), -INF)
+            _expect("frac(NaN)", GMRuntime.gml_frac(NAN), NAN)
+            # GDScript merges the constants 0.0 and -0.0 (and folds fmod of
+            # constants), so -0 is computed from a variable.
+            var one = 1.0
+            var negative_zero = fmod(-one, one)
+            _expect("-0 setup", 1.0 / negative_zero, -INF)
+            _expect("frac(-0)", 1.0 / GMRuntime.gml_frac(negative_zero), -INF)
+            _expect("abs(2^63 - 1)", GMRuntime.gml_abs(9223372036854775807) == 9223372036854775807, true)
+            _expect("abs(-(2^63 - 1))", GMRuntime.gml_abs(-9223372036854775807) == 9223372036854775807, true)
+            _expect("abs(2^53 + 1)", GMRuntime.gml_abs(-9007199254740993) == 9007199254740993, true)
+            _expect("abs(-2^63) is 2^63", GMRuntime.gml_abs(-9223372036854775807 - 1) == 9223372036854775808.0, true)
+            _expect("abs(-5)", GMRuntime.gml_abs(-5), 5)
+            _expect("abs(-5.5)", GMRuntime.gml_abs(-5.5), 5.5)
+            """,
+            "GML_FRAC_ABS_OK",
         )
 
     def test_comparisons_use_gamemaker_epsilon(self) -> None:

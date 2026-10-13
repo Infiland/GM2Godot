@@ -2399,12 +2399,47 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_undefined(),",
             output,
         )
+        # A static method reaches its sibling through self and the static
+        # chain, so a child constructor's override is the one that runs.
         self.assertIn(
-            'GMRuntime.gml_struct_get(_gml_static_scope_',
+            'GMRuntime.gml_call_named("operate", [-value, 0], '
+            "_gml_method_self, _gml_method_other)",
             output,
         )
-        self.assertNotIn('gml_call_named("operate"', output)
+        self.assertNotIn("gml_struct_get(_gml_static_scope_", output)
         self.assertNotIn("Unexpected token", output)
+
+    def test_statics_are_read_lexically_only_in_the_function_that_declares_them(self):
+        output = transpile_gml_expression(
+            "function Item() constructor {\n"
+            "    static kind = function() { return 1; };\n"
+            "    static total = 0;\n"
+            "    total++;\n"
+            "    static who = function() { return kind() + total; };\n"
+            "    peek = function() { return total; };\n"
+            "    static rank = function() { static seen = 0; seen++; return seen; };\n"
+            "}"
+        )
+
+        # The declaring body reads and writes its own static struct.
+        self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", output)
+        # who and peek are other functions: kind, total are looked up on self.
+        self.assertIn(
+            'return GMRuntime.gml_add(GMRuntime.gml_call_named("kind", [], '
+            '_gml_method_self, _gml_method_other), '
+            'GMRuntime.gml_variable_instance_get(_gml_method_self, "total"))',
+            output,
+        )
+        self.assertIn(
+            'return GMRuntime.gml_variable_instance_get(_gml_method_self, "total")',
+            output,
+        )
+        # rank declares seen itself, so it keeps its own static struct.
+        self.assertEqual(output.count("GMRuntime.gml_static_scope("), 2)
+        self.assertIn(
+            "GMRuntime.gml_struct_set(_gml_static_scope_",
+            output.split('["rank"', 1)[1],
+        )
 
     def test_member_calls_pass_the_target_as_the_receiver_of_unbound_methods(self):
         self.assertEqual(

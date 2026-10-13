@@ -738,6 +738,61 @@ class TestScriptConverter(unittest.TestCase):
         )
         self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", script)
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", script)
+        # static_get(scr_modern) and scr_modern.total find the function's
+        # static variables.
+        self.assertIn(
+            'return GMRuntime.gml_method(self, GMRuntime.gml_static_bind(Callable(self, "_gm_script_call"), '
+            '"scr_modern.scr_modern:<anonymous>:0:',
+            script,
+        )
+
+    def test_script_function_without_statics_is_not_bound_to_a_static_struct(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(delta)\n{\n    return delta + 1;\n}\n",
+        )
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'return GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))',
+            script,
+        )
+        self.assertNotIn("gml_static_bind", script)
+
+    def test_legacy_script_body_with_statics_is_bound_to_its_static_struct(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "static total = 0;\ntotal += 1;\nreturn total;\n",
+        )
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'return GMRuntime.gml_method(self, GMRuntime.gml_static_bind(Callable(self, "_gm_script_call"), '
+            '"scr_modern.script:',
+            script,
+        )
 
     def test_modern_script_verbatim_default_ignores_literal_delimiters(self) -> None:
         self._write_project()

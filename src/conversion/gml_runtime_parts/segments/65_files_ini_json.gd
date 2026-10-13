@@ -1016,7 +1016,7 @@ static func _gml_json_compatible(value):
 		return arr
 	if value_type == TYPE_DICTIONARY:
 		var result = {}
-		for key in value.keys():
+		for key in _gml_struct_visible_keys(value):
 			result[gml_string(key)] = _gml_json_compatible(value[key])
 		return result
 	if value_type == TYPE_OBJECT:

@@ -105,6 +105,17 @@ const GML_RECEIVER_ARGUMENTS_SELF = 1
 const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
 # The most static structs a variable lookup follows (guards a cyclic chain).
 const GML_STATIC_CHAIN_LIMIT = 256
+# Members a struct keeps for the runtime and GML code never sees (the runner
+# keeps them on the struct's prototype and __type, outside its variable
+# names): the struct's static struct, the constructor's name a static struct
+# stands for, the type name static_set leaves in place, and the flag that a
+# static struct is initialised. A struct that holds any of them holds the
+# link, so that is the one to look for first.
+const GML_STATIC_LINK_KEY = "\u0001static"
+const GML_STATIC_NAME_KEY = "\u0001name"
+const GML_STATIC_TYPE_KEY = "\u0001type"
+const GML_STATIC_INITIALIZED_KEY = "\u0001init"
+const GML_STATIC_OTHER_HIDDEN_KEYS = [GML_STATIC_NAME_KEY, GML_STATIC_TYPE_KEY, GML_STATIC_INITIALIZED_KEY]
 
 
 class GMLMethod:
@@ -193,9 +204,11 @@ static var _gml_sequence_elements_by_index = {}
 static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
 static var _gml_static_root = {}
-static var _gml_static_registry = []
-static var _gml_static_cursor = 0
-static var _gml_static_structs = []
+# The static struct of each function (a constructor, a function with static
+# variables), by the function's Callable.
+static var _gml_static_functions = {}
+# The constructors new and an inheriting constructor are running, innermost last.
+static var _gml_constructor_stack = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {

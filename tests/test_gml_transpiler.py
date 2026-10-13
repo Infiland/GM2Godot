@@ -2549,6 +2549,61 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_variable_instance_get(_gml_method_self, "bonus")))',
         )
 
+    def test_transpiles_named_function_declaration_as_a_method_variable(self):
+        output = transpile_gml_code(
+            "function ev_helper3(_q) { return _q * 2; }\nscore = ev_helper3(3);",
+            indent="",
+        )
+
+        self.assertTrue(
+            output.startswith(
+                "ev_helper3 = GMRuntime.gml_receiver_method(self, func ev_helper3("
+                "_gml_method_self = null, _gml_method_other = null, _q = null):"
+            ),
+            output,
+        )
+        self.assertIn('GMRuntime.gml_call_named("ev_helper3", [3], self, other)', output)
+
+    def test_named_function_declarations_are_available_before_their_statement(self):
+        output = transpile_gml_code(
+            "score = early(4);\nfunction early(_q) { return _q + 1; }\n",
+            indent="",
+        )
+
+        self.assertLess(output.index("early = GMRuntime.gml_receiver_method("), output.index('"early", [4]'))
+
+    def test_function_expressions_are_not_declarations(self):
+        output = transpile_gml_code(
+            "var _f = function named() { return 1; };\nhandler = function other_named() { return 2; };",
+            indent="",
+        )
+
+        self.assertIn("var _f = GMRuntime.gml_receiver_method(self, func named(", output)
+        self.assertNotIn("\nnamed = ", "\n" + output)
+        self.assertNotIn("\nother_named = ", "\n" + output)
+
+    def test_named_function_inside_a_function_belongs_to_that_function_receiver(self):
+        output = transpile_gml_code(
+            "function outer() {\n"
+            "    var _first = inner(1);\n"
+            "    function inner(_q) { return _q + 1; }\n"
+            "    return _first;\n"
+            "}\n",
+            indent="",
+        )
+
+        declaration = output.index('GMRuntime.gml_variable_instance_set(_gml_method_self, "inner", ')
+        call = output.index('GMRuntime.gml_call_named("inner", [1], _gml_method_self, _gml_method_other)')
+        self.assertLess(declaration, call)
+
+    def test_named_function_declared_in_a_block_stays_in_the_block(self):
+        output = transpile_gml_code(
+            "if (ready) {\n    function guarded() { return 1; }\n}\nscore = 2;",
+            indent="",
+        )
+
+        self.assertLess(output.index("if GMRuntime.gml_bool("), output.index("guarded = GMRuntime.gml_receiver_method("))
+
     def test_rejects_return_outside_functions_and_methods(self):
         for source in ("return;", "return score + bonus;", "if ready begin return score; end"):
             with self.subTest(source=source):

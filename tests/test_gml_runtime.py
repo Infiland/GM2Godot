@@ -3226,7 +3226,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return _gml_struct_visible_keys(struct_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("for key in _gml_struct_visible_keys(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("count -= 1", GML_RUNTIME_SCRIPT)
-        self.assertIn("clone[key] = value[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn("clone[key] = member", GML_RUNTIME_SCRIPT)
 
     def test_runtime_statics_are_members_of_the_structs_made_by_new(self):
         self.assertIn("static func _gml_static_chain_owner(static_struct, member_name):", GML_RUNTIME_SCRIPT)
@@ -3321,14 +3321,26 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_variable_clone_preserves_documented_depth_behavior(self):
         self.assertIn("static func gml_variable_clone(value, depth = 128):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_clone_value(value, max(0, int(_to_real(depth))))", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func _gml_clone_value(value, depth):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_clone_value(value, depth, owners = null):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn value", GML_RUNTIME_SCRIPT)
         self.assertIn("if value_type == TYPE_ARRAY:", GML_RUNTIME_SCRIPT)
-        self.assertIn("if value_type == TYPE_DICTIONARY:", GML_RUNTIME_SCRIPT)
-        self.assertIn("clone.append(_gml_clone_value(element, depth - 1) if depth > 0 else element)", GML_RUNTIME_SCRIPT)
-        self.assertIn("clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]", GML_RUNTIME_SCRIPT)
+        self.assertIn("if value_type == TYPE_DICTIONARY:\n\t\treturn _gml_clone_struct(value, depth, owners)", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "array_clone.append(_gml_clone_value(element, depth - 1, owners) if depth > 0 else element)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "clone[key] = _gml_clone_value(member, depth - 1, owners) if depth > 0 else member",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertNotIn(".duplicate(", GML_RUNTIME_SCRIPT)
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
+
+    def test_runtime_variable_clone_rebinds_methods_bound_to_a_cloned_struct(self):
+        self.assertIn("static func _gml_clone_method(method, owners):", GML_RUNTIME_SCRIPT)
+        self.assertIn("elif member is GMLMethod:\n\t\t\tclone[key] = _gml_clone_method(member, owners)", GML_RUNTIME_SCRIPT)
+        self.assertIn("if is_same(owners[index][0], method.bound_self):", GML_RUNTIME_SCRIPT)
+        self.assertIn("owners[index][1],\n\t\t\t\tmethod.function_value,", GML_RUNTIME_SCRIPT)
 
     def test_runtime_represents_explicit_int64_values(self):
         self.assertIn("const GML_TYPE_INT64", GML_RUNTIME_SCRIPT)

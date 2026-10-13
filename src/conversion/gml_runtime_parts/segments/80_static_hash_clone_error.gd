@@ -90,27 +90,61 @@ static func _gml_hash_string(value):
 	return hash
 
 
-static func _gml_clone_value(value, depth):
+# A copy of a value: arrays and structs are copied down to the given depth
+# (the runner's __internal_variable_clone), everything else is shared. owners
+# lists the structs being cloned above this value as pairs of the original and
+# its clone, outermost first.
+static func _gml_clone_value(value, depth, owners = null):
 	if is_handle(value):
 		return value
 	var value_type = typeof(value)
+	if owners == null:
+		owners = []
 	if value_type == TYPE_ARRAY:
-		var clone = []
+		var array_clone = []
 		for element in value:
-			clone.append(_gml_clone_value(element, depth - 1) if depth > 0 else element)
-		return clone
+			array_clone.append(_gml_clone_value(element, depth - 1, owners) if depth > 0 else element)
+		return array_clone
 	if value_type == TYPE_DICTIONARY:
-		var clone = {}
-		var has_hidden = value.has(GML_STATIC_LINK_KEY)
-		for key in value.keys():
-			if has_hidden and _gml_static_is_hidden_key(key):
-				# The clone shares the original's static chain, as the runner's
-				# clone keeps the struct's prototype.
-				clone[key] = value[key]
-			else:
-				clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]
-		return clone
+		return _gml_clone_struct(value, depth, owners)
 	return value
+
+
+static func _gml_clone_struct(value, depth, owners):
+	var clone = {}
+	var has_hidden = value.has(GML_STATIC_LINK_KEY)
+	owners.append([value, clone])
+	for key in value.keys():
+		var member = value[key]
+		if has_hidden and _gml_static_is_hidden_key(key):
+			# The clone shares the original's static chain, as the runner's
+			# clone keeps the struct's prototype.
+			clone[key] = member
+		elif member is GMLMethod:
+			clone[key] = _gml_clone_method(member, owners)
+		else:
+			clone[key] = _gml_clone_value(member, depth - 1, owners) if depth > 0 else member
+	owners.pop_back()
+	return clone
+
+
+# A method bound to a struct that is being cloned (the struct that holds it, or
+# one above it) is bound to that struct's clone in the clone, so a clone's
+# methods work on the clone (manual: variable_clone, Usage Notes). A method
+# bound to anything else keeps its original self.
+static func _gml_clone_method(method, owners):
+	if not method.has_bound_self or typeof(method.bound_self) != TYPE_DICTIONARY:
+		return method
+	for index in range(owners.size() - 1, -1, -1):
+		if is_same(owners[index][0], method.bound_self):
+			return GMLMethod.new(
+				owners[index][1],
+				method.function_value,
+				method.is_constructor,
+				method.receiver_argument_count,
+				true
+			)
+	return method
 
 
 static func gml_error(message):

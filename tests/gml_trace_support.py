@@ -74,12 +74,15 @@ def run_gml_trace(
     objects: tuple[GameMakerObject, ...] = (),
     probe: str | None = None,
     timeout: float = 120,
+    output_lines: list[str] | None = None,
 ) -> list[str]:
     """Convert and run a project; return what the GML traced, in order.
 
     ``events`` belong to the object ``o_main``, which is the only instance in
     the first room. ``objects`` are further objects the project defines.
-    ``probe`` replaces the probe autoload (see ``trace_probe``).
+    ``probe`` replaces the probe autoload (see ``trace_probe``). A list passed
+    as ``output_lines`` receives everything the run printed (what
+    show_debug_message wrote, say).
     """
     godot_binary = find_smoke_godot_binary()
     if godot_binary is None:
@@ -103,6 +106,8 @@ def run_gml_trace(
         add_probe_autoload(root / "godot", probe or _PROBE)
         result = run_converted_project(godot_binary, root / "godot", timeout=timeout)
     output = result.stdout + result.stderr
+    if output_lines is not None:
+        output_lines.extend(output.splitlines())
     test_case.assertEqual([line for line in logs if "Could not" in line], [])
     test_case.assertEqual(result.returncode, 0, output)
     test_case.assertNotIn("SCRIPT ERROR", output)

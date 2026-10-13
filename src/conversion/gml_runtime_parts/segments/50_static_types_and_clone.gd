@@ -237,7 +237,12 @@ static func _gml_values_equal_for_array(left, right):
 	return gml_eq(left, right)
 
 
+# The runner's typeof: every number is "number", whether Godot holds it as an
+# int or a float; the manual's "int32" is not supported on HTML5.
 static func gml_typeof(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_INT or value_type == TYPE_FLOAT:
+		return GML_TYPE_NUMBER
 	if is_undefined(value):
 		return GML_TYPE_UNDEFINED
 	if value == null:
@@ -248,13 +253,8 @@ static func gml_typeof(value):
 		return GML_TYPE_INT64
 	if is_ptr(value):
 		return GML_TYPE_POINTER
-	var value_type = typeof(value)
 	if value_type == TYPE_BOOL:
 		return GML_TYPE_BOOL
-	if is_int32(value):
-		return GML_TYPE_INT32
-	if value_type == TYPE_INT or value_type == TYPE_FLOAT:
-		return GML_TYPE_NUMBER
 	if value_type == TYPE_STRING or value_type == TYPE_STRING_NAME:
 		return GML_TYPE_STRING
 	if value_type == TYPE_ARRAY:

@@ -991,6 +991,10 @@ static func _gml_json_compatible(value):
 		return result
 	if value_type == TYPE_OBJECT:
 		return gml_string(value)
+	if value_type == TYPE_FLOAT and value == floor(value) and abs(value) < 9.0e18:
+		# JavaScript's JSON.stringify writes 7 for the real 7.0 (as for the
+		# int 7); Godot's would write 7.0.
+		return int(value)
 	return value
 
 

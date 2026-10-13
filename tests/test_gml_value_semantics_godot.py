@@ -547,6 +547,73 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_TRUTHINESS_OK",
         )
 
+    def test_typeof_calls_every_number_a_number(self) -> None:
+        # The manual's typeof page: "number" is a real, and "int32" is not
+        # supported on HTML5. The runner's typeof gives "number" for every
+        # JavaScript number, so a Godot int (a literal, array_length, div, an
+        # array index) and a Godot float are both "number".
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("5", GMRuntime.gml_typeof(5), "number")
+            _expect("5.0", GMRuntime.gml_typeof(5.0), "number")
+            _expect("2.5", GMRuntime.gml_typeof(2.5), "number")
+            _expect("-1", GMRuntime.gml_typeof(-1), "number")
+            _expect("2147483648", GMRuntime.gml_typeof(2147483648), "number")
+            _expect("NaN", GMRuntime.gml_typeof(NAN), "number")
+            _expect("infinity", GMRuntime.gml_typeof(INF), "number")
+            _expect("array_length", GMRuntime.gml_typeof(GMRuntime.gml_array_length([1, 2, 3])), "number")
+            _expect("7 div 2", GMRuntime.gml_typeof(GMRuntime.gml_int_div(7, 2)), "number")
+            _expect("7 / 2", GMRuntime.gml_typeof(GMRuntime.gml_div(7, 2)), "number")
+            _expect("a number in an array", GMRuntime.gml_typeof([4, 5][1]), "number")
+            _expect("true", GMRuntime.gml_typeof(true), "bool")
+            _expect("int64", GMRuntime.gml_typeof(GMRuntime.gml_int64(5)), "int64")
+            _expect("string", GMRuntime.gml_typeof("5"), "string")
+            _expect("array", GMRuntime.gml_typeof([5]), "array")
+            _expect("undefined", GMRuntime.gml_typeof(GMRuntime.gml_undefined()), "undefined")
+            _expect("pointer", GMRuntime.gml_typeof(GMRuntime.gml_pointer_null()), "ptr")
+            """,
+            "GML_TYPEOF_NUMBER_OK",
+        )
+
+    def test_whole_numbers_read_the_same_whether_godot_holds_an_int_or_a_float(self) -> None:
+        # The runner keeps every number as one JavaScript number: is_int32 is
+        # `~~x === x`, and JSON.stringify writes the real 7.0 as 7. Godot's
+        # int/float split must not show through.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("is_int32(7)", GMRuntime.is_int32(7), true)
+            _expect("is_int32(7.0)", GMRuntime.is_int32(7.0), true)
+            _expect("is_int32(-2147483648.0)", GMRuntime.is_int32(-2147483648.0), true)
+            _expect("is_int32(2147483647)", GMRuntime.is_int32(2147483647), true)
+            _expect("is_int32(2147483648)", GMRuntime.is_int32(2147483648), false)
+            _expect("is_int32(2147483648.0)", GMRuntime.is_int32(2147483648.0), false)
+            _expect("is_int32(7.5)", GMRuntime.is_int32(7.5), false)
+            _expect("is_int32(NaN)", GMRuntime.is_int32(NAN), false)
+            _expect("is_int32(infinity)", GMRuntime.is_int32(INF), false)
+            _expect("is_int32(true)", GMRuntime.is_int32(true), false)
+            _expect("is_int32(string)", GMRuntime.is_int32("7"), false)
+            _expect("is_real(7)", GMRuntime.is_real(7), true)
+            _expect("is_real(7.0)", GMRuntime.is_real(7.0), true)
+            _expect("is_numeric(7)", GMRuntime.is_numeric(7), true)
+            _expect("is_numeric(7.0)", GMRuntime.is_numeric(7.0), true)
+            _expect("string(7)", GMRuntime.gml_string(7), "7")
+            _expect("string(7.0)", GMRuntime.gml_string(7.0), "7")
+            _expect(
+                "json_stringify of whole reals",
+                GMRuntime.gml_json_stringify([7, 7.0, 2.5, -0.0, GMRuntime.gml_div(14, 2)]),
+                "[7,7,2.5,0,7]",
+            )
+            _expect(
+                "json_stringify of a struct",
+                GMRuntime.gml_json_stringify({"hp": GMRuntime.gml_div(10, 5), "name": "x"}),
+                '{"hp":2,"name":"x"}',
+            )
+            """,
+            "GML_WHOLE_NUMBERS_OK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

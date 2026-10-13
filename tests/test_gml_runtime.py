@@ -2465,7 +2465,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
 
     def test_runtime_undefined_truthiness_and_conversions(self):
         self.assertIn(
-            "static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED",
+            "\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED\n\tif value == null:\n\t\treturn GML_TYPE_NULL",
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn(
@@ -2508,7 +2508,6 @@ class TestGMLRuntimeScript(unittest.TestCase):
             'const GML_TYPE_NULL = "null"',
             'const GML_TYPE_BOOL = "bool"',
             'const GML_TYPE_NUMBER = "number"',
-            'const GML_TYPE_INT32 = "int32"',
             'const GML_TYPE_INT64 = "int64"',
             'const GML_TYPE_POINTER = "ptr"',
             'const GML_TYPE_STRING = "string"',
@@ -2525,11 +2524,17 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "if is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED\n\tif value == null:\n\t\treturn GML_TYPE_NULL\n\tif is_handle(value):",
             GML_RUNTIME_SCRIPT,
         )
+        # typeof never says "int32": the runner has one number type.
+        self.assertNotIn("GML_TYPE_INT32", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_typeof(value):\n\tvar value_type = typeof(value)\n"
+            "\tif value_type == TYPE_INT or value_type == TYPE_FLOAT:\n\t\treturn GML_TYPE_NUMBER",
+            GML_RUNTIME_SCRIPT,
+        )
         self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_handle(value):\n\t\treturn GML_TYPE_HANDLE\n\tif is_int64(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if value_type == TYPE_ARRAY:\n\t\treturn GML_TYPE_ARRAY\n\tif is_method(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_int64(value):\n\t\treturn GML_TYPE_INT64", GML_RUNTIME_SCRIPT)
-        self.assertIn("if is_int32(value):\n\t\treturn GML_TYPE_INT32", GML_RUNTIME_SCRIPT)
         self.assertIn("return GML_TYPE_NUMBER", GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_real_operations_as_float_helpers(self):
@@ -2747,7 +2752,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_undefined():\n\treturn _gml_undefined", GML_RUNTIME_SCRIPT)
         self.assertIn("static func is_undefined(value):\n\treturn typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is GMLUndefined", GML_RUNTIME_SCRIPT)
         self.assertIn("if is_undefined(left) or is_undefined(right):\n\t\treturn is_undefined(left) and is_undefined(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("static func gml_typeof(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
+        self.assertIn("\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED\n\tif value == null:\n\t\treturn GML_TYPE_NULL", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_string(value):\n\tif is_undefined(value):\n\t\treturn GML_TYPE_UNDEFINED", GML_RUNTIME_SCRIPT)
         self.assertIn("\tif is_undefined(value):\n\t\treturn false\n\tif is_ptr(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn gml_undefined()", GML_RUNTIME_SCRIPT)
@@ -3334,13 +3339,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return GMLInt64.new(_to_int64_value(left) - _to_int64_value(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLInt64.new(_to_int64_value(left) * _to_int64_value(right))", GML_RUNTIME_SCRIPT)
         self.assertIn("return GMLInt64.new(_to_int64_value(left) % right_int)", GML_RUNTIME_SCRIPT)
-        self.assertIn("(is_int64(left) and (is_int64(right) or is_int32(right)))", GML_RUNTIME_SCRIPT)
-        self.assertIn("or (is_int64(right) and is_int32(left))", GML_RUNTIME_SCRIPT)
+        self.assertIn("(is_int64(left) and (is_int64(right) or _is_godot_int32(right)))", GML_RUNTIME_SCRIPT)
+        self.assertIn("or (is_int64(right) and _is_godot_int32(left))", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 modulo by zero")', GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_int32_arithmetic_results(self):
         self.assertIn("static func _returns_int32_arithmetic_result(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return is_int32(left) and is_int32(right)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _is_godot_int32(left) and _is_godot_int32(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _to_int32_value(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) + _to_int32_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) - _to_int32_value(right)", GML_RUNTIME_SCRIPT)
@@ -3361,10 +3366,16 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var quotient = _gml_truncate_real(left_value) / divisor", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_whole_real(quotient - fmod(quotient, 1.0))", GML_RUNTIME_SCRIPT)
 
-    def test_runtime_checks_int32_range_over_godot_ints(self):
+    def test_runtime_checks_int32_range_over_whole_numbers(self):
+        # is_int32 is the runner's `~~x === x`: a whole number in the int32
+        # range, whether Godot holds it as an int or a float.
         self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)
         self.assertIn(
-            "return typeof(value) == TYPE_INT and int(value) >= -2147483648 and int(value) <= 2147483647",
+            "if value_type == TYPE_FLOAT:\n\t\treturn value >= -2147483648.0 and value <= 2147483647.0 and value == floor(value)",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "static func _is_godot_int32(value):\n\treturn typeof(value) == TYPE_INT and value >= -2147483648 and value <= 2147483647",
             GML_RUNTIME_SCRIPT,
         )
 

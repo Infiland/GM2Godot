@@ -230,6 +230,145 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["gray:4:rgbG:3"])
 
+    def test_methods_with_several_lines_inside_catch_and_finally_blocks(self) -> None:
+        # A method is a GDScript lambda whose body is indented from the line
+        # that declares it, so every line of it moves in with the catch body.
+        scripts = {
+            "scr_ok": "function ok_value() { return 7; }\n",
+            "scr_catching": (
+                "function catching(_k) {\n"
+                "    var _r = 0;\n"
+                "    try { throw _k; }\n"
+                "    catch (_e) {\n"
+                "        var _u = function() { var _a = 2; return _a * 3; };\n"
+                "        _r = _u();\n"
+                "    }\n"
+                "    finally {\n"
+                "        var _v = function() { var _b = 10; return _b; };\n"
+                "        _r += _v();\n"
+                "    }\n"
+                "    return _r;\n"
+                "}\n"
+            ),
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("catching:" + string(catching(1)));\n'
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n"
+            'trace("event:" + string(x));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "catching:16", "event:1"])
+
+    def test_script_parameter_default_may_be_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_defaults": (
+                "function c13(_cb = function() { switch (1) { case 1: return \"d\"; } return \"z\"; }) {\n"
+                "    return _cb();\n"
+                "}\n"
+                "\n"
+                "function Holder(_first = 1, _cb = function() { var _a = 5; return _a; }) constructor {\n"
+                "    first = _first;\n"
+                "    value = _cb();\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("default:" + c13());\n'
+            'trace("given:" + c13(function() { return "g"; }));\n'
+            "var _holder = new Holder();\n"
+            'trace("constructor:" + string(_holder.first) + string(_holder.value));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "default:d", "given:g", "constructor:15"])
+
+    def test_constructor_parent_arguments_may_be_methods_with_several_lines(self) -> None:
+        scripts = {
+            "scr_parent": "function Parent(_cb) constructor { cb = _cb; }\n",
+            "scr_child": (
+                "function Child() : Parent(function() { var _a = 4; return _a; }) constructor {\n"
+                "    extra = 1;\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            "var _child = new Child();\n"
+            'trace("child:" + string(_child.cb()) + string(_child.extra));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "child:41"])
+
+    def test_loop_condition_and_case_label_may_contain_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_flow": (
+                "function until_value() {\n"
+                "    var _n = 0;\n"
+                "    do {\n"
+                "        _n++;\n"
+                "        if (_n < 3) continue;\n"
+                "    } until (_n >= (function() { var _t = 3; return _t; })());\n"
+                "    return _n;\n"
+                "}\n"
+                "\n"
+                "function label_value() {\n"
+                "    switch (2) {\n"
+                "        case (function() { var _c = 1; return _c; })(): return \"one\";\n"
+                "        case (function() { var _c = 2; return _c; })(): return \"two\";\n"
+                "        default: return \"none\";\n"
+                "    }\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("until:" + string(until_value()));\n'
+            'trace("label:" + label_value());\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "until:3", "label:two"])
+
+    def test_chained_nullish_assignment_may_hold_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_chain": (
+                "function chained() {\n"
+                "    var _z;\n"
+                "    var _q = 0;\n"
+                "    _q = _z ??= { f: function() { var _a = 8; return _a; } };\n"
+                "    return _q.f() + _z.f();\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("chained:" + string(chained()));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "chained:16"])
+
     def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
         scripts = {
             "scr_ok": "function ok_value() { return 7; }\n",

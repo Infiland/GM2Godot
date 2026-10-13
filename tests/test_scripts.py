@@ -774,6 +774,83 @@ class TestScriptConverter(unittest.TestCase):
             script,
         )
 
+    def test_modern_script_multi_line_method_default_stays_inside_the_function(self) -> None:
+        # A parameter default that is a method with several lines is a GDScript
+        # lambda; its body is indented from the line that declares it.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(value, callback = function() { switch (1) { case 1: return 5; } return 0; })\n"
+            "{\n"
+            "    var marker = callback();\n"
+            "    return marker + value;\n"
+            "}\n",
+        )
+
+        self._converter().convert_all()
+
+        script_path = self.godot_dir / "scripts" / "game" / "scr_modern.gd"
+        script_lines = script_path.read_text(encoding="utf-8").splitlines()
+        header_index = next(
+            index
+            for index, line in enumerate(script_lines)
+            if line.startswith("\tif callback == null or GMRuntime.is_undefined(callback): callback = ")
+        )
+        self.assertTrue(script_lines[header_index].endswith("):"))
+        self.assertEqual(
+            script_lines[header_index + 1],
+            "\t\tvar _gml_switch_value_0 = 1",
+        )
+        closing_index = next(
+            index
+            for index in range(header_index + 1, len(script_lines))
+            if script_lines[index] == "\t)"
+        )
+        self.assertEqual(
+            script_lines[closing_index + 1].strip(),
+            "var marker = GMRuntime.gml_call_value(callback, [], _gml_script_self, _gml_script_other, \"callback\")",
+        )
+        source_map = cast(
+            dict[str, object],
+            json.loads(script_path.with_name("scr_modern.gd.gmlmap.json").read_text(encoding="utf-8")),
+        )
+        marker_entries = [
+            entry
+            for entry in cast(list[dict[str, object]], source_map["entries"])
+            if cast(str, entry["source_text"]).startswith("var marker")
+        ]
+        self.assertEqual(len(marker_entries), 1)
+        self.assertEqual(
+            script_lines[cast(int, marker_entries[0]["generated_line"]) - 1].strip(),
+            marker_entries[0]["generated_text"],
+        )
+
+    def test_modern_script_multi_line_method_in_parent_constructor_arguments(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function Parent(callback) constructor {}\n"
+            "function Child() : Parent(function() { var seed = 4; return seed; }) constructor\n"
+            "{\n"
+            "    extra = 1;\n"
+            "}\n",
+        )
+
+        self._converter().convert_all()
+
+        script_lines = (
+            (self.godot_dir / "scripts" / "game" / "scr_modern.gd")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
+        header_index = next(
+            index
+            for index, line in enumerate(script_lines)
+            if line.startswith("\tGMRuntime.gml_constructor_inherit(") and "func(" in line
+        )
+        self.assertTrue(script_lines[header_index].endswith("):"))
+        self.assertEqual(script_lines[header_index + 1], "\t\tvar seed = 4")
+
     def test_discovers_constructor_and_explicit_top_level_initialization(self) -> None:
         structure = modern_script_structure(
             "function Adding() constructor {\n"

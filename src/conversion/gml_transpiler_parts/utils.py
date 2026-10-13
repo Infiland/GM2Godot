@@ -165,7 +165,7 @@ def _insert_lines_before_continue(lines: Iterable[str], inserted_lines: Iterable
         stripped = line.lstrip("\t")
         if stripped == "continue":
             indentation = line[: len(line) - len(stripped)]
-            result.extend(f"{indentation}{inserted_line}" for inserted_line in inserted)
+            result.extend(_prefix_multiline(inserted_line, indentation) for inserted_line in inserted)
         result.append(line)
     return result
 
@@ -183,7 +183,7 @@ def _insert_until_check_before_continue(lines: Iterable[str], condition: str) ->
         stripped = line.lstrip("\t")
         if stripped == "continue":
             indentation = line[: len(line) - len(stripped)]
-            result.append(f"{indentation}if {condition}:")
+            result.append(_prefix_multiline(f"if {condition}:", indentation))
             result.append(f"{indentation}\tbreak")
         result.append(line)
     return result

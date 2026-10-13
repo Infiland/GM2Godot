@@ -2774,6 +2774,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
 
+    def test_methods_with_several_lines_stay_inside_the_catch_body(self):
+        # A method is a GDScript lambda: every line of it has to move in with
+        # the catch body, or GDScript finds no indented block under it.
+        output = transpile_gml_code(
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n",
+            indent="",
+        )
+
+        self.assertIn(
+            "\twhile true:\n"
+            "\t\t_u = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\t\tvar _a = 1\n"
+            "\t\t\treturn _a\n"
+            "\t\t)\n"
+            '\t\tposition.x = GMRuntime.gml_call_value(_u, [], self, other, "_u")\n'
+            "\t\tbreak\n",
+            output,
+        )
+
     def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
         output = transpile_gml_code(
             "try { value = real(text); } catch (_) {}",
@@ -2785,6 +2807,45 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
         self.assertNotIn("var _ =", output)
+
+    def test_a_method_in_a_do_until_condition_or_case_label_keeps_its_body_indented(self):
+        # The test lines of these statements are built by the statement
+        # parser; a multi-line method inside them is indented with the line.
+        until_output = transpile_gml_code(
+            "do { n++; continue; } until (is_method(function() { var _a = 1; return _a; }));",
+            indent="",
+        )
+        until_check = (
+            "\tif GMRuntime.is_method(GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _a = 1\n"
+            "\t\treturn _a\n"
+            "\t)):\n"
+            "\t\tbreak"
+        )
+        # The check ends the loop body and also runs before the continue.
+        self.assertEqual(
+            until_output,
+            "while true:\n"
+            "\tn = GMRuntime.gml_add(n, 1)\n"
+            f"{until_check}\n"
+            "\tcontinue\n"
+            f"{until_check}",
+        )
+
+        switch_output = transpile_gml_code(
+            "switch (a) { case (function() { var _c = 1; return _c; })(): b = 1; break; }",
+            indent="",
+        )
+        self.assertIn(
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, "
+            "GMRuntime.gml_call_value((GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _c = 1\n"
+            "\t\treturn _c\n"
+            "\t)), [], self, other)):\n"
+            "\t\t_gml_switch_matched_1 = true\n",
+            switch_output,
+        )
 
     def test_transpiles_try_finally_blocks(self):
         output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
@@ -3474,6 +3535,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "var _gml_assignment_value_1 = c\n"
             "b = _gml_assignment_value_1\n"
             "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)",
+        )
+
+    def test_chained_nullish_assignment_keeps_a_multi_line_method_inside_its_block(self):
+        self.assertEqual(
+            transpile_gml_code("a = b ??= [function() { return 1; }, function() { var c = 2; return c; }];", indent=""),
+            "var _gml_assignment_value_0 = b\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null): return 1), "
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar c = 2\n"
+            "\t\treturn c\n"
+            "\t)]\n"
+            "\tb = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
         )
 
     def test_rejects_invalid_local_var_names(self):

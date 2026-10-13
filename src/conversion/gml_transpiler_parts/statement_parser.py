@@ -571,8 +571,7 @@ class _StatementParser:
         body_lines = insert_until_check_before_continue(body_lines, condition)
         lines = ["while true:"]
         lines.extend(indent_lines(body_lines or ["pass"]))
-        lines.append(f"\tif {condition}:")
-        lines.append("\t\tbreak")
+        lines.extend(indent_lines([f"if {condition}:", "\tbreak"]))
         return lines
 
     def _parse_switch_statement(self) -> list[str]:
@@ -617,15 +616,21 @@ class _StatementParser:
         ])
         for section_kind, section_value, section_lines in sections:
             if section_kind == "case":
-                lines.append(
-                    f"\tif not {switch_matched} and GMRuntime.gml_eq({switch_value}, {section_value}):"
+                section_test = (
+                    f"if not {switch_matched} and "
+                    f"GMRuntime.gml_eq({switch_value}, {section_value}):"
                 )
-                lines.append(f"\t\t{switch_matched} = true")
             else:
-                lines.append(f"\tif not {switch_matched} and not {switch_has_case}:")
-                lines.append(f"\t\t{switch_matched} = true")
-
-            lines.append(f"\tif {switch_matched}:")
+                section_test = f"if not {switch_matched} and not {switch_has_case}:"
+            lines.extend(
+                indent_lines(
+                    [
+                        section_test,
+                        f"\t{switch_matched} = true",
+                        f"if {switch_matched}:",
+                    ]
+                )
+            )
             lines.extend(indent_lines(indent_lines(section_lines or ["pass"])))
         lines.append("\tbreak")
         if switch_capture is not None:
@@ -802,7 +807,7 @@ class _StatementParser:
                 f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
                 f"\t{control_name} = GMRuntime.gml_undefined()",
                 "\twhile true:",
-                *[f"\t\t{line}" if line else "" for line in (catch_lines or ["pass"])],
+                *indent_lines(indent_lines(catch_lines or ["pass"])),
                 "\t\tbreak",
             ])
 

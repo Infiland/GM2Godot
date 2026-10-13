@@ -322,31 +322,18 @@ class TestTCCConversion(unittest.TestCase):
             },
             {"show_message_async"},
         )
-        # Events that read the instance after instance_change, which the
-        # converted game carries out once the event returns.
-        deferred_instance_changes = sorted(
-            (
-                str(diagnostic.get("resource", "")),
-                str(diagnostic.get("event", "")),
-                int(diagnostic.get("line") or 0),
-            )
+        # instance_change in a Create, Step, Alarm, collision or input event, or in
+        # an instance's creation code, runs the rest of the code on the new
+        # object, as GameMaker does: the o_box* Mouse events, the o_spike Create
+        # event, the o_torch collision event and the r_lvl50 creation code all
+        # convert so, and none of the project's code after an instance_change
+        # waits for the object to change.
+        deferred_instance_changes = [
+            diagnostic
             for diagnostic in diagnostic_entries
             if diagnostic.get("code") == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
-        )
-        self.assertEqual(
-            deferred_instance_changes,
-            [
-                ("o_box", "_gm_input_mouse_0", 2),
-                ("o_boxLE", "_gm_input_mouse_0", 2),
-                ("o_boxwithammo", "_gm_input_mouse_0", 2),
-                ("o_boxwithammoLE", "_gm_input_mouse_0", 2),
-                ("o_boxwithinfiniteammo", "_gm_input_mouse_0", 2),
-                ("o_boxwithinfiniteammoLE", "_gm_input_mouse_0", 2),
-                ("o_spike", "_ready", 14),
-                ("o_spike", "_ready", 19),
-                ("o_torch", "_on_collision_o_player", 17),
-            ],
-        )
+        ]
+        self.assertEqual(deferred_instance_changes, [])
 
         object_event_source_missing = [
             (

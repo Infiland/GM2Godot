@@ -8,13 +8,16 @@ yyInstance.js), keeping its id, variables, position, depth, image values and
 xstart/ystart; with perf true the new object's Create event runs last.
 
 A converted object's events are its node's script, and Godot cannot replace
-the script of a node while one of its methods runs. So the switch, and the
-new object's Create event, happen as soon as the event that called
-instance_change returns to the runtime: the rest of that event still sees the
-old object (the "after change", "with pending" and "after o_a" lines below; in
-GameMaker they would come after the new Create event and print false or o_b).
-What the rest of the event assigns is assigned again after the Create event,
-and its instance_change and instance_destroy calls wait for the first change.
+the script of a node while a method of that script that uses the node's
+members runs. An instance_change statement of a Create, Step, Alarm,
+collision or input event is therefore converted with the rest of the event as
+a function, which the runtime runs after the change and the new Create event,
+as GameMaker does. Any other instance_change (in a script function, a with
+block, creation code, or below an event_inherited) changes the object once the
+event returns: the rest of that event still sees the old object (the "with
+pending" and "after o_a" lines below), what it assigns is assigned again after
+the Create event, and its instance_change and instance_destroy calls wait for
+the first change.
 """
 from __future__ import annotations
 
@@ -177,16 +180,18 @@ _EXPECTED_TRACE = [
     "from step 11",
     "from destroy 11",
     "from cleanup 11",
-    "after change 11 true",
     "to create 11 hp=3 other=true",
+    # The rest of the event runs on the new object.
+    "after change 11 false",
     # perf false: no Destroy, Clean Up or Create event.
     "from step 21",
     "from step 31",
     "to step 40 hp=3",
     "spawn create",
-    "spawn after change",
     "to create 50 hp=7 other=true",
+    "spawn after change",
     "created is o_to true count 4",
+    # A with block changes the object once the event returns.
     "from destroy 31",
     "from cleanup 31",
     "with pending true",
@@ -221,6 +226,7 @@ _COLLISION_PROJECT = GameMakerProject(
                 EVENT_DRAW: 'draw_self();\ntrace("wall draw");\n',
                 collision_event("o_ball"): (
                     'trace("wall hit " + string(object_index == o_wall));\ninstance_change(o_brick, true);\n'
+                    'trace("wall after " + string(object_index == o_brick) + " " + string(instance_exists(other)));\n'
                 ),
             },
             sprite="s_wall",
@@ -376,12 +382,10 @@ _ORDER_PROJECT = GameMakerProject(
 )
 
 
-# Code after instance_change in the same event. In GameMaker it runs after
-# the change and the new object's Create event; in the converted game it runs
-# first, on the old object, but what it assigns is assigned again after the
-# Create event, and the Create event sees the values from before the call.
-# An instance whose Create event changes it runs its creation code as the new
-# object.
+# Code after instance_change in the same event, or in an instance's creation
+# code, runs after the change and the new object's Create event; the Create
+# event sees the values from before the call. An instance whose Create event
+# changes it runs its creation code as the new object.
 _AFTER_A_STEP = """\
 if (global.phase == 1) {
     instance_change(o_b, true);
@@ -453,11 +457,201 @@ _AFTER_PROJECT = GameMakerProject(
                             0,
                             creation_code='tag = "code";\ninstance_change(o_b, true);\nsprite_index = s_c;\nhp = 77;\n',
                         ),
+                        RoomInstance(
+                            "inst_keep",
+                            "o_n",
+                            40,
+                            0,
+                            creation_code=(
+                                'tag = "keep";\nvar _s = sprite_index;\ninstance_change(o_b, true);\n'
+                                "sprite_index = _s;\nhp = hp + 1;\n"
+                            ),
+                        ),
                         RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
                     ),
                 ),
             ),
-            creation_order=("inst_step", "inst_create", "inst_code", "inst_ctrl"),
+            creation_order=("inst_step", "inst_create", "inst_code", "inst_keep", "inst_ctrl"),
+        ),
+    ),
+)
+
+# The rest of an event after instance_change runs on the new object, after
+# its Create event, so that what the event assigns wins, also an assignment of
+# the value the variable had at the call (the common "keep the sprite" idiom),
+# and what it reads comes from the new object.
+_RUN_STEP = """\
+steps += 1;
+if (steps != 1) exit;
+if (mode == 1) {
+    var _s = sprite_index;
+    var _i = image_index;
+    instance_change(o_d1, false);
+    sprite_index = _s;
+    image_index = _i;
+    trace("m1 " + sprite_get_name(sprite_index) + " " + object_get_name(object_index));
+} else if (mode == 2) {
+    hp = 3;
+    speed = 0;
+    visible = true;
+    instance_change(o_d2, true);
+    hp = 3;
+    speed = 0;
+    visible = true;
+    trace("m2 hp=" + string(hp) + " speed=" + string(speed) + " visible=" + string(visible));
+} else if (mode == 3) {
+    list = [1];
+    var _l = list;
+    instance_change(o_d3, true);
+    list = _l;
+    array_push(list, 3);
+    trace("m3 " + string(array_length(list)) + " " + string(list[0]) + " " + string(list[1]));
+} else if (mode == 4) {
+    instance_change(o_d4, true);
+    trace("m4 " + object_get_name(object_index) + " " + string(instance_number(o_d4)) + " "
+        + string(instance_exists(o_d4)));
+    hp = 99;
+    sprite_index = s_c;
+    x += 5;
+    y -= 8;
+    alarm[1] = 30;
+    dst_only += 1;
+    trace("m4 hp=" + string(hp) + " " + sprite_get_name(sprite_index) + " x=" + string(x) + " y=" + string(y)
+        + " alarm=" + string(alarm[1]) + " dst_only=" + string(dst_only));
+} else if (mode == 5) {
+    instance_change(o_d5, true);
+    instance_destroy();
+    trace("m5 " + string(instance_exists(id)));
+} else if (mode >= 6 and mode <= 8) {
+    if (mode == 6) { instance_change(o_d6a, true); }
+    if (mode == 7) { instance_change(o_d6b, true); }
+    hp = 7;
+    trace("m" + string(mode) + " " + object_get_name(object_index) + " hp=" + string(hp));
+} else if (mode == 9) {
+    scr_become(o_d9);
+    y -= 8;
+} else if (mode == 10) {
+    // Two changes in a row: the second one is made on the first one's object.
+    instance_change(o_d10a, false);
+    trace("m10 " + object_get_name(object_index));
+    instance_change(o_d10b, true);
+}
+"""
+_RUN_BECOME = """\
+function scr_become(_object) {
+    instance_change(_object, true);
+}
+"""
+_PARENT_STEP = """\
+if (steps == 0) {
+    steps = 1;
+    instance_change(o_d11, true);
+    hp = 1;
+}
+"""
+_CHILD_STEP = """\
+event_inherited();
+trace("child ran");
+"""
+_CONTINUE_CTRL_STEP = """\
+global.ctrl_step += 1;
+if (global.ctrl_step == 3) {
+    with (all) {
+        if (variable_instance_exists(id, "report")) trace(report + " " + object_get_name(object_index)
+            + " " + sprite_get_name(sprite_index) + " hp=" + string(hp) + " speed=" + string(speed)
+            + " visible=" + string(visible) + " x=" + string(x) + " y=" + string(y)
+            + " n=" + (variable_instance_exists(id, "list") ? string(array_length(list)) : "-"));
+    }
+    global.done = true;
+}
+"""
+
+
+def _continue_target(name: str, create: str, *, visible: bool = True) -> GameMakerObject:
+    return GameMakerObject(
+        name,
+        {
+            EVENT_CREATE: create + f'trace("{name} create");\n',
+            EVENT_DESTROY: f'trace("{name} destroy");\n',
+        },
+        sprite="s_b",
+        visible=visible,
+    )
+
+
+_CONTINUE_PROJECT = GameMakerProject(
+    name="InstanceChangeContinue",
+    scripts={"scr_trace": _SCRIPT, "scr_become": _RUN_BECOME},
+    sprites=tuple(
+        GameMakerSprite(name, 2, 2, frames=_frames(colour, 2))
+        for name, colour in (("s_a", _RED), ("s_b", _GREEN), ("s_c", _BLUE))
+    ),
+    objects=(
+        GameMakerObject(
+            "o_run",
+            {EVENT_CREATE: "steps = 0;\nhp = 0;\nimage_speed = 0;\n", EVENT_STEP: _RUN_STEP},
+            sprite="s_a",
+        ),
+        _continue_target("o_d1", ""),
+        _continue_target("o_d2", "hp = 10;\nspeed = 5;\n", visible=False),
+        _continue_target("o_d3", "list = [];\n"),
+        _continue_target("o_d4", "hp = 10;\nx = 0;\nalarm[1] = 60;\ndst_only = 5;\n"),
+        _continue_target("o_d5", ""),
+        _continue_target("o_d6a", "hp = 1;\n"),
+        _continue_target("o_d6b", "hp = 2;\n"),
+        _continue_target("o_d9", "x = 0;\nhp = 3;\n"),
+        _continue_target("o_d10a", ""),
+        _continue_target("o_d10b", ""),
+        _continue_target("o_d11", "hp = 11;\n"),
+        _continue_target("o_d12", "hp = 10;\n"),
+        _continue_target("o_d13", ""),
+        GameMakerObject("o_parent", {EVENT_CREATE: "steps = 0;\nhp = 0;\n", EVENT_STEP: _PARENT_STEP}, sprite="s_a"),
+        GameMakerObject("o_child", {EVENT_STEP: _CHILD_STEP}, parent="o_parent", sprite="s_a"),
+        GameMakerObject(
+            "o_creating",
+            {
+                EVENT_CREATE: (
+                    "hp = 4;\ninstance_change(o_d12, true);\nhp = hp + 1;\n"
+                    'trace("creating " + object_get_name(object_index) + " hp=" + string(hp));\n'
+                )
+            },
+        ),
+        GameMakerObject(
+            "o_alarm",
+            {
+                EVENT_CREATE: "alarm[0] = 1;\n",
+                (2, 0): 'instance_change(o_d13, true);\ntrace("alarm " + object_get_name(object_index));\n',
+            },
+        ),
+        GameMakerObject("o_ctrl", {EVENT_CREATE: "global.ctrl_step = 0;\n", EVENT_STEP: _CONTINUE_CTRL_STEP}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    tuple(
+                        RoomInstance(
+                            f"inst_{mode}",
+                            "o_run",
+                            100,
+                            50,
+                            creation_code=f"mode = {mode};\n" + (f'report = "r{mode}";\n' if mode in (1, 2, 3, 4, 9) else ""),
+                        )
+                        for mode in range(1, 11)
+                    )
+                    + (
+                        RoomInstance("inst_child", "o_child", 0, 0, creation_code='report = "child";\n'),
+                        RoomInstance("inst_creating", "o_creating", 0, 0),
+                        RoomInstance("inst_alarm", "o_alarm", 0, 0),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=tuple(f"inst_{mode}" for mode in range(1, 11))
+            + ("inst_child", "inst_creating", "inst_alarm", "inst_ctrl"),
         ),
     ),
 )
@@ -542,7 +736,8 @@ class TestInstanceChangeGodot(unittest.TestCase):
     def test_instance_change_in_a_collision_event(self) -> None:
         trace, node = self._run(_COLLISION_PROJECT, _COLLISION_PROBE)
 
-        self.assertEqual(trace, ["wall hit true", "brick create true", "brick hit"])
+        # (The rest of the Collision event runs on the brick, with its other.)
+        self.assertEqual(trace, ["wall hit true", "brick create true", "wall after true true", "brick hit"])
         # The brick has no Draw event, so its sprite shows again.
         self.assertEqual(node, ["o_brick.gd", [["s_brick", True]]])
 
@@ -577,17 +772,80 @@ class TestInstanceChangeGodot(unittest.TestCase):
                 "b create hp=4 gone=false",
                 "code o_b hp=10",
                 # The creation code changes o_n to o_b and assigns sprite_index
-                # and hp after the call.
+                # and hp after the call, on o_b.
                 "b create hp=5 gone=false",
-                # In GameMaker "b create hp=3 gone=false" would come first and
-                # the rest of the event would see o_b.
-                "after o_a",
+                # The same, keeping the sprite the instance had: the value is
+                # the old one, but the assignment still wins, and hp is read
+                # from the new object.
+                "b create hp=5 gone=false",
+                # The rest of the event runs on o_b, after its Create event.
                 "b create hp=3 gone=false",
+                "after o_b",
                 "step o_b s_c hp=99 maxhp=6 x=70 visible=false",
                 # A variable called name is the game's own too.
                 "name bob",
                 "create o_b s_b2 hp=50 maxhp=8 x=5 visible=true",
                 "code o_b s_c hp=77 maxhp=10 x=5 visible=true",
+                "keep o_b s_a hp=11 maxhp=10 x=5 visible=true",
+            ],
+        )
+
+    def test_the_rest_of_the_event_runs_on_the_new_object(self) -> None:
+        trace, _nodes = self._run(_CONTINUE_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                # o_creating's Create event: hp is the new Create event's, then
+                # the event's own assignment.
+                "o_d12 create",
+                "creating o_d12 hp=11",
+                # The Alarm event of o_alarm.
+                "o_d13 create",
+                "alarm o_d13",
+                # Keeping the sprite: an assignment of the value the variable
+                # had before the call still wins over the new object's.
+                "m1 s_a o_d1",
+                # Assignments of the values the variables had before the call
+                # win over the new Create event and the object's visible flag.
+                "o_d2 create",
+                "m2 hp=3 speed=0 visible=true",
+                "o_d3 create",
+                "m3 2 1 3",
+                # Reads come from the new object; the new Create event
+                # assigned x and alarm[1] and defined dst_only.
+                "o_d4 create",
+                "m4 o_d4 1 true",
+                "m4 hp=99 s_c x=5 y=42 alarm=30 dst_only=6",
+                # instance_destroy runs the new object's Destroy event at once.
+                "o_d5 create",
+                "o_d5 destroy",
+                "m5 false",
+                # Two statements in a row, the rest of the event after them.
+                "o_d6a create",
+                "m6 o_d6a hp=7",
+                "o_d6b create",
+                "m7 o_d6b hp=7",
+                "m8 o_run hp=7",
+                # In a script function the object changes once the event
+                # returns: x stays 0 from the new Create event, y follows
+                # the event.
+                "o_d9 create",
+                # A second change of the event runs on the first one's object.
+                "m10 o_d10a",
+                "o_d10a destroy",
+                "o_d10b create",
+                # Below event_inherited the change also waits for the event to
+                # return, so the child event runs first.
+                "child ran",
+                "o_d11 create",
+                # What the instances ended up as.
+                "r1 o_d1 s_a hp=0 speed=0 visible=true x=100 y=50 n=-",
+                "r2 o_d2 s_b hp=3 speed=0 visible=true x=100 y=50 n=-",
+                "r3 o_d3 s_b hp=0 speed=0 visible=true x=100 y=50 n=2",
+                "r4 o_d4 s_c hp=99 speed=0 visible=true x=5 y=42 n=-",
+                "r9 o_d9 s_b hp=3 speed=0 visible=true x=0 y=42 n=-",
+                "child o_d11 s_b hp=1 speed=0 visible=true x=0 y=0 n=-",
             ],
         )
 

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import json
-from typing import Iterable, Mapping, MutableMapping, MutableSet
+from dataclasses import dataclass, field
+from typing import Final, Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import BINARY_PRECEDENCE, EOF
 from .expression_api import (
@@ -45,6 +46,33 @@ from .utils import (
     tokens_to_source,
 )
 
+# An instance_change statement of an object event is compiled to a call that
+# changes the object and then runs the rest of the event as a function (see
+# the runtime's 76_instance_change.gd). The statement parser leaves a marker
+# line where the call goes and fills it in once it has the rest of the event.
+_CONTINUATION_MARKER: Final = "\0instance_change_continuation:"
+# The block of an `if (x) statement` without braces.
+_SINGLE_STATEMENT_BLOCK: Final = "\0single statement"
+# The continuation's names for the instance, its other and itself.
+_CONTINUATION_SELF: Final = "_gml_change_self"
+_CONTINUATION_OTHER: Final = "_gml_change_other"
+_CONTINUATION_FUNCTION: Final = "_gml_change_continue"
+_CONTINUATION_REJECTED_VALUES: Final = frozenset(
+    {"++", "--", "=", ":=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "??=", "function"}
+)
+
+
+@dataclass
+class _InstanceChangeContinuation:
+    object_source: str
+    perf_source: str
+    # The instance and the other instance, as the code around the call names them.
+    self_source: str
+    other_source: str
+    # The statements that follow the call, in the name-based form: the rest of
+    # its block, then the rest of each enclosing block.
+    body: list[str] = field(default_factory=lambda: list[str]())
+
 
 class _StatementParser:
     def __init__(
@@ -72,6 +100,7 @@ class _StatementParser:
         extension_functions: Mapping[str, GMLExtensionFunction] | None = None,
         extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
         control_flow_capture: ControlFlowCapture | None = None,
+        instance_change_continuations: bool = False,
     ) -> None:
         self.tokens = tokens
         self.position = 0
@@ -121,16 +150,42 @@ class _StatementParser:
             macro_priorities if macro_priorities is not None else {}
         )
         self.macro_configuration = macro_configuration
+        self.instance_change_continuations: bool = instance_change_continuations
+        # How the code names the instance that instance_change changes: self in
+        # an event, the instance parameter of an instance's creation code
+        # (nothing in code that has no instance of its own, or inside with).
+        outer_scope = self.scope_context
+        self._continuation_self: str | None = (
+            outer_scope.self_expression
+            if outer_scope.instance_target is not None and outer_scope.instance_target == outer_scope.self_expression
+            else None
+        )
+        # The terminator of the block being parsed (None for the whole code).
+        self._block_end: str | None = None
+        self._continuations: list[_InstanceChangeContinuation] = []
+        # The continuations that still wait for the rest of an enclosing block.
+        self._open_continuations: list[_InstanceChangeContinuation] = []
+        self.continued_instance_changes: list[int] = []
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
         if terminator is None and not self._emitted_hoisted_local_declarations:
             lines.extend(self._hoisted_local_declaration_lines)
             self._emitted_hoisted_local_declarations = True
-        while not self._at_end() and not self._check(terminator):
-            if self._match(";") or self._match("\n"):
-                continue
-            lines.extend(self._parse_statement())
+        enclosing_block_end = self._block_end
+        self._block_end = terminator
+        try:
+            while not self._at_end() and not self._check(terminator):
+                if self._match(";") or self._match("\n"):
+                    continue
+                open_before = len(self._open_continuations)
+                lines.extend(self._parse_statement())
+                if len(self._open_continuations) > open_before:
+                    self._append_block_rest(open_before, terminator)
+        finally:
+            self._block_end = enclosing_block_end
+        if terminator is None and self._continuations:
+            lines = self._expand_continuations(lines)
         return lines
 
     def _parse_statement(self) -> list[str]:
@@ -164,9 +219,15 @@ class _StatementParser:
             self._consume("}")
             return lines
 
+        return self._parse_simple_statement()
+
+    def _parse_simple_statement(self) -> list[str]:
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []
+        continuation_lines = self._parse_instance_change_continuation(statement_tokens)
+        if continuation_lines is not None:
+            return continuation_lines
         return transpile_statement(
             tokens_to_source(statement_tokens),
             self.local_names,
@@ -850,7 +911,134 @@ class _StatementParser:
         return lines
 
     def _parse_nested_single_statement_body(self) -> list[str]:
-        return self._parse_statement()
+        enclosing_block_end = self._block_end
+        self._block_end = _SINGLE_STATEMENT_BLOCK
+        try:
+            return self._parse_statement()
+        finally:
+            self._block_end = enclosing_block_end
+
+    def _parse_instance_change_continuation(self, statement_tokens: list[_Token]) -> list[str] | None:
+        """Compile an instance_change statement with the rest of the event as its continuation.
+
+        Returns the marker line that stands for the call, or None when the
+        statement stays an ordinary call: the converted game then changes the
+        object once the event has returned.
+        """
+        if not self._instance_change_continuation_allowed():
+            return None
+        arguments = _instance_change_call_arguments(statement_tokens)
+        if arguments is None:
+            return None
+        # event_inherited runs the parent's event, which the continuation
+        # cannot do once the object has changed.
+        if any(token.kind == "IDENT" and token.value == "event_inherited" for token in self.tokens[self.position:]):
+            return None
+        object_source, perf_source = (
+            transpile_gml_expression(
+                tokens_to_source(argument),
+                local_names=self.local_names,
+                enum_values=self.enum_values,
+                enum_names=self.enum_names,
+                scope_context=self.scope_context,
+                macro_values=self.macro_values,
+            )
+            for argument in arguments
+        )
+        continuation = _InstanceChangeContinuation(
+            object_source,
+            perf_source,
+            self.scope_context.self_expression,
+            self.scope_context.other_expression,
+        )
+        if self._block_end != _SINGLE_STATEMENT_BLOCK:
+            continuation.body.extend(self._parse_continuation_code(self._block_end, consume=True))
+        self._continuations.append(continuation)
+        self._open_continuations.append(continuation)
+        self.continued_instance_changes.append(self._instance_change_names_before(statement_tokens[0]))
+        return [f"{_CONTINUATION_MARKER}{len(self._continuations) - 1}"]
+
+    def _instance_change_continuation_allowed(self) -> bool:
+        # Only the event's own statements (also inside if, else and plain
+        # blocks), where no other construct stands between the event and the
+        # call.
+        scope = self.scope_context
+        return (
+            self.instance_change_continuations
+            and self.loop_depth == 0
+            and self.finally_depth == 0
+            and self.control_flow_capture is None
+            and scope.self_expression == self._continuation_self
+            and scope.instance_target == self._continuation_self
+        )
+
+    def _instance_change_names_before(self, call: _Token) -> int:
+        count = 0
+        for token in self.tokens:
+            if token.line == call.line and token.column == call.column:
+                break
+            if token.kind == "IDENT" and token.value == "instance_change":
+                count += 1
+        return count
+
+    def _append_block_rest(self, open_before: int, terminator: str | None) -> None:
+        """Give the continuations a statement opened the rest of the block that holds it."""
+        rest = self._parse_continuation_code(terminator, consume=False)
+        for continuation in self._open_continuations[open_before:]:
+            continuation.body.extend(rest)
+
+    def _parse_continuation_code(self, terminator: str | None, *, consume: bool) -> list[str]:
+        """Parse up to the end of the block as code that runs after the object has changed.
+
+        It runs in a function created before the call, which reaches the
+        instance by name only (the script that declared the instance's
+        variables is gone by then) and has its own copy of the locals.
+        """
+        start = self.position
+        saved = (
+            self.scope_context,
+            self.inherited_event_call,
+            self.instance_change_continuations,
+            set(self.local_names),
+            set(self.declared_local_names),
+        )
+        self.scope_context = _continuation_scope(self.scope_context)
+        self.instance_change_continuations = False
+        lines: list[str] = []
+        try:
+            while not self._at_end() and not self._check(terminator):
+                if self._match(";") or self._match("\n"):
+                    continue
+                lines.extend(self._parse_statement())
+        finally:
+            (
+                self.scope_context,
+                self.inherited_event_call,
+                self.instance_change_continuations,
+                local_names,
+                declared_local_names,
+            ) = saved
+            self.local_names.clear()
+            self.local_names.update(local_names)
+            self.declared_local_names.clear()
+            self.declared_local_names |= declared_local_names
+            if not consume:
+                self.position = start
+        return lines
+
+    def _expand_continuations(self, lines: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for line in lines:
+            text = line.lstrip("\t")
+            if not text.startswith(_CONTINUATION_MARKER):
+                expanded.append(line)
+                continue
+            continuation = self._continuations[int(text.removeprefix(_CONTINUATION_MARKER))]
+            block = _continuation_lines(continuation)
+            for _depth in range(len(line) - len(text)):
+                block = indent_lines(block)
+            expanded.extend(block)
+        return expanded
 
     def _read_condition_tokens(self) -> list[_Token]:
         if self._check("("):
@@ -1048,6 +1236,75 @@ class _StatementParser:
         return GMLTranspileError(message, line=token.line, column=token.column)
 
 
+def _instance_change_call_arguments(tokens: list[_Token]) -> tuple[list[_Token], list[_Token]] | None:
+    """Return the two arguments of a statement that is one instance_change call."""
+    if len(tokens) < 4 or tokens[0].kind != "IDENT" or tokens[0].value != "instance_change":
+        return None
+    if tokens[1].value != "(":
+        return None
+    depth = 0
+    closing = -1
+    for index in range(1, len(tokens)):
+        value = tokens[index].value
+        if value in "([{":
+            depth += 1
+        elif value in ")]}":
+            depth -= 1
+            if depth == 0:
+                closing = index
+                break
+    if closing != len(tokens) - 1:
+        return None
+    arguments = split_top_level_tokens(tokens[2:closing], ",")
+    if len(arguments) != 2:
+        return None
+    for argument in arguments:
+        if not any(token.value != "\n" for token in argument):
+            return None
+        # Arguments that change something are left to the ordinary call.
+        if any(token.value in _CONTINUATION_REJECTED_VALUES for token in argument):
+            return None
+    return arguments[0], arguments[1]
+
+
+def _continuation_scope(outer: _ScopeContext) -> _ScopeContext:
+    """The scope of code that runs after instance_change: the instance by name."""
+    return _ScopeContext(
+        self_expression=_CONTINUATION_SELF,
+        other_expression=_CONTINUATION_OTHER,
+        instance_target=_CONTINUATION_SELF,
+        global_names=outer.global_names,
+        asset_names=outer.asset_names,
+        direct_instance_names=frozenset(),
+        dynamic_instance_names=outer.dynamic_instance_names,
+        static_scope=outer.static_scope,
+        static_names=outer.static_names,
+        static_prefix=outer.static_prefix,
+        extension_functions=outer.extension_functions,
+        extension_function_mappings=outer.extension_function_mappings,
+    )
+
+
+def _continuation_lines(continuation: _InstanceChangeContinuation) -> list[str]:
+    body = continuation.body or ["pass"]
+    body_text = "\n".join(body)
+    lines: list[str] = []
+    if _CONTINUATION_SELF in body_text:
+        lines.append(f"var {_CONTINUATION_SELF} = {continuation.self_source}")
+    if _CONTINUATION_OTHER in body_text:
+        lines.append(f"var {_CONTINUATION_OTHER} = {continuation.other_source}")
+    lines.append(f"var {_CONTINUATION_FUNCTION} = func():")
+    lines.extend(indent_lines(body))
+    lines.append(
+        "GMRuntime.gml_instance_change_then("
+        f"{continuation.object_source}, {continuation.perf_source}, {_CONTINUATION_FUNCTION}, "
+        f"{continuation.self_source})"
+    )
+    # The rest of the event runs in the continuation.
+    lines.append("return")
+    return lines
+
+
 def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     parser = _StatementParser(
         list(request.tokens),
@@ -1067,10 +1324,12 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         static_scope_prefix=request.static_scope_prefix,
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
+        instance_change_continuations=request.instance_change_continuations,
     )
     lines = parser.parse()
     return GMLStatementResult(
         lines=tuple(lines),
+        continued_instance_changes=tuple(parser.continued_instance_changes),
         local_names=frozenset(parser.local_names),
         instance_variables=parser.instance_variables,
         scope_context=parser.scope_context,

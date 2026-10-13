@@ -13,11 +13,25 @@
 # A converted object's events are the methods of its node's script, so the
 # change gives the node the new object's script. Godot frees the script
 # instance of a node whose script is replaced, and a method of the old script
-# that is still running would go on using it; so the node's script changes
-# once the instance's running event has returned to the runtime: right after
-# its Create event and creation code, after each event of the step, input and
-# collision dispatch, and at every step phase boundary. Until then the rest of
-# the event that called instance_change still sees the old object.
+# that is still running would go on using it (it crashes Godot): so the node's
+# script is only replaced where no method of the old script that goes on using
+# its members is running.
+#
+# The converter turns an instance_change statement of an object's Create, Step,
+# Alarm, collision and input events and of an instance's creation code (also
+# inside if and else blocks) into gml_instance_change_then. The rest of the
+# code becomes a function that reaches the instance through name-based
+# accessors only, and the event returns right after the call. The helper
+# changes the object, runs the new Create event and then the rest of the code,
+# in the order GameMaker does. Where a method of the old script that goes on
+# using its members may be running (event_inherited raises gml_event_nesting
+# around the call of the parent's event) and for every other instance_change
+# (in a script function, a with block, a loop, the room's creation code, or on
+# another instance), the script changes once the instance's running event has
+# returned to the runtime: right after its Create event and creation code,
+# after each event of the step, input and collision dispatch, and at every
+# step phase boundary. Until then the rest of the event that called
+# instance_change still sees the old object.
 #
 # The instance's later instance_change and instance_destroy calls in that
 # event wait with it, in the order they were made, because GameMaker would
@@ -28,12 +42,14 @@
 #
 # What the rest of the event assigns to the instance's variables (its own
 # variables, the built-in ones, x, y and visible) would come after the change
-# and the new Create event in GameMaker. So each call notes the variables'
-# values; when the change is carried out, the variables the event assigned
-# after the first call go back to those values, and after each change (and
-# its Create event) the event's assignments made after that call are made
-# again. What that code read still came from the old object: the converter
-# warns about such code (GM2GD-GML-INSTANCE-CHANGE-DEFERRED).
+# and the new Create event in GameMaker. So each waiting call notes the
+# variables' values; when the change is carried out, the variables the event
+# assigned after the first call go back to those values, and after each change
+# (and its Create event) the event's assignments made after that call are made
+# again. That compares values: an assignment of the value the variable had at
+# the call, or an in-place change of an array or a struct, is not noticed. What
+# that code read still came from the old object. The converter warns about such
+# code (GM2GD-GML-INSTANCE-CHANGE-DEFERRED).
 
 # Script members that the new object sets (or that only cache state of the
 # old script) rather than carrying over.
@@ -57,14 +73,24 @@ const GML_INSTANCE_CHANGE_IMAGE_METAS = {
 const GML_INSTANCE_CHANGE_UNTRACKED = ["id", "other", "object_index", "image_number"]
 # Keys for the node's position and visible flag among the noted values (no
 # GML variable name has a space).
-const GML_INSTANCE_CHANGE_POSITION_KEY = " position"
+const GML_INSTANCE_CHANGE_X_KEY = " x"
+const GML_INSTANCE_CHANGE_Y_KEY = " y"
 const GML_INSTANCE_CHANGE_VISIBLE_KEY = " visible"
 
+# The event calls on the stack whose caller goes on using its script's
+# members when the call returns (event_inherited: the child's event runs
+# while the parent's does). While it is not 0 the script of a node must not be
+# replaced. Whatever calls an event of an instance from another event of the
+# same instance (event_inherited, and event_perform or event_user where
+# they exist) raises it for the call.
+static var gml_event_nesting = 0
 # Pending operations by node instance id: {"node": the node, "ops": the
 # changes ({"kind": "change", "object": object asset entry, "perf": bool,
 # "events_done": whether the Destroy and Clean Up events of perf already ran})
 # and destroys ({"kind": "destroy"}) in the order the game asked for them,
-# each with "values", the instance's variables when it was asked for}.
+# each with "values", the instance's variables when it was asked for (null
+# for a change carried out at once, which has no later assignments to put
+# back)}.
 static var _gml_instance_changes = {}
 # [script, sprite name, visible] of each object's scene, or null, by object
 # name.
@@ -74,7 +100,7 @@ static var _gml_instance_change_objects = {}
 static var _gml_instance_change_registering = null
 
 
-static func gml_instance_change(object_selector, perf, inst = null):
+static func gml_instance_change(object_selector, perf, inst = null, track = true):
 	var entry: Variant = _gml_instance_entry(inst)
 	if entry == null or entry["destroyed"] or not (inst is Node):
 		return gml_undefined()
@@ -95,7 +121,7 @@ static func gml_instance_change(object_selector, perf, inst = null):
 				"object": object_entry,
 				"perf": perform,
 				"events_done": false,
-				"values": _gml_instance_change_capture(inst),
+				"values": _gml_instance_change_capture(inst) if pending["ops"][0]["values"] != null else null,
 			})
 		return gml_undefined()
 	if perform:
@@ -109,10 +135,30 @@ static func gml_instance_change(object_selector, perf, inst = null):
 			"object": object_entry,
 			"perf": perform,
 			"events_done": true,
-			"values": _gml_instance_change_capture(inst),
+			"values": _gml_instance_change_capture(inst) if track else null,
 		}],
 	}
 	return gml_undefined()
+
+
+# instance_change as a statement of an object event, which the converter
+# compiles to this call with the rest of the event as the continuation (a
+# function that reaches the instance through name-based accessors only) and
+# returns from the event right after. The change and the new object's Create
+# event are done before the continuation runs, as in GameMaker, unless an
+# event of the instance that goes on using its script's members is running
+# (gml_event_nesting): then the change waits for the event to return, as
+# gml_instance_change does.
+static func gml_instance_change_then(object_selector, perf, continuation, inst = null):
+	var at_once = gml_event_nesting == 0
+	gml_instance_change(object_selector, perf, inst, not at_once)
+	if at_once:
+		_gml_instance_change_flush_instance(inst)
+	var result = continuation.call()
+	if at_once:
+		# The continuation's own instance_change calls.
+		_gml_instance_change_flush_instance(inst)
+	return result
 
 
 # instance_destroy of an instance with a pending change: the instance is
@@ -125,7 +171,8 @@ static func _gml_instance_change_defer_destroy(inst):
 	if pending == null:
 		return false
 	if not _gml_instance_change_destroy_pending(pending):
-		pending["ops"].append({"kind": "destroy", "values": _gml_instance_change_capture(inst)})
+		var values = _gml_instance_change_capture(inst) if pending["ops"][0]["values"] != null else null
+		pending["ops"].append({"kind": "destroy", "values": values})
 	return true
 
 
@@ -163,8 +210,12 @@ static func _gml_instance_change_run(key):
 	var ops = pending["ops"]
 	if _gml_instance_change_live_entry(inst) == null:
 		return
-	var latest = _gml_instance_change_capture(inst)
-	_gml_instance_change_rewind(inst, ops[0]["values"], latest)
+	# A change carried out at once has no variables noted: the rest of the
+	# event runs after it.
+	var tracked = ops[0]["values"] != null
+	var latest = _gml_instance_change_capture(inst) if tracked else null
+	if tracked:
+		_gml_instance_change_rewind(inst, ops[0]["values"], latest)
 	for index in range(ops.size()):
 		var entry: Variant = _gml_instance_change_live_entry(inst)
 		if entry == null:
@@ -178,8 +229,9 @@ static func _gml_instance_change_run(key):
 			_gml_instance_change_run(key)
 		if _gml_instance_change_live_entry(inst) == null:
 			return
-		var after = latest if index + 1 == ops.size() else ops[index + 1]["values"]
-		_gml_instance_change_assign(inst, _gml_instance_change_assigned(op["values"], after))
+		if tracked:
+			var after = latest if index + 1 == ops.size() else ops[index + 1]["values"]
+			_gml_instance_change_assign(inst, _gml_instance_change_assigned(op["values"], after))
 
 
 static func _gml_instance_change_live_entry(inst):
@@ -203,7 +255,8 @@ static func _gml_instance_change_capture(inst):
 	for name in fields:
 		values[str(name)] = fields[name]
 	if inst is Node2D:
-		values[GML_INSTANCE_CHANGE_POSITION_KEY] = inst.position
+		values[GML_INSTANCE_CHANGE_X_KEY] = inst.position.x
+		values[GML_INSTANCE_CHANGE_Y_KEY] = inst.position.y
 	if inst is CanvasItem:
 		values[GML_INSTANCE_CHANGE_VISIBLE_KEY] = inst.visible
 	return values
@@ -233,8 +286,10 @@ static func _gml_instance_change_rewind(inst, values, latest):
 static func _gml_instance_change_assign(inst, assigned):
 	for name in assigned:
 		var value = assigned[name]
-		if name == GML_INSTANCE_CHANGE_POSITION_KEY:
-			inst.position = value
+		if name == GML_INSTANCE_CHANGE_X_KEY:
+			inst.position = Vector2(value, inst.position.y)
+		elif name == GML_INSTANCE_CHANGE_Y_KEY:
+			inst.position = Vector2(inst.position.x, value)
 		elif name == GML_INSTANCE_CHANGE_VISIBLE_KEY:
 			inst.visible = value
 		else:

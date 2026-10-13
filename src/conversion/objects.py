@@ -44,6 +44,10 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
 )
 from src.conversion.gml_transpiler_parts.shared_models import Token
 from src.conversion.instance_change_diagnostics import record_instance_change_reads
+from src.conversion.instance_change_events import (
+    event_runs_rest_after_instance_change,
+    inherited_event_call,
+)
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
 from src.conversion.project_enums import collect_project_enum_values
@@ -1311,6 +1315,7 @@ class ObjectConverter(BaseConverter):
                     dynamic_instance_names=dynamic_names,
                     enum_values=enum_values,
                     macro_values=macro_values,
+                    instance_change_continuations=event_runs_rest_after_instance_change(mapping.godot_func),
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
@@ -1330,6 +1335,7 @@ class ObjectConverter(BaseConverter):
                         resource=object_name,
                         resource_type="object",
                         event=mapping.godot_func,
+                        continued_calls=result.continued_instance_changes,
                     )
             except GMLTranspileError as exc:
                 has_event_blocker = True
@@ -1500,9 +1506,10 @@ class ObjectConverter(BaseConverter):
             )
 
     def _inherited_event_call(self, mapping: EventMapping) -> str:
-        if not mapping.params:
-            return f"super.{mapping.godot_func}()"
-        return f"super.{mapping.godot_func}({mapping.params})"
+        return inherited_event_call(
+            mapping.godot_func,
+            f"super.{mapping.godot_func}({mapping.params})",
+        )
 
     def _parent_event_function_names(
         self,

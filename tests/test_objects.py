@@ -2137,17 +2137,25 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertEqual(recorded[0].resource_type, "object")
         self.assertEqual(recorded[0].event, "_ready")
 
-    def test_code_reading_the_instance_after_instance_change_is_reported(self):
-        # The converted instance changes once the event returns, so code after
-        # instance_change that reads the instance sees the old object.
+    def test_code_meeting_the_instance_after_a_deferred_instance_change_is_reported(self):
+        # Where the converter cannot run the rest of the event after the
+        # change (a loop, an event the runtime does not call by itself) the
+        # converted instance changes once the event returns, so code after
+        # instance_change that reads the instance sees the old object. The
+        # instance_change statements of the other events are not reported.
         self._setup_object(
             "o_door",
-            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+            event_list=[
+                {"eventType": 0, "eventNum": 0},
+                {"eventType": 3, "eventNum": 0},
+                {"eventType": 1, "eventNum": 0},
+            ],
         )
         self._setup_object("o_locked")
         sources = {
             "Create_0.gml": "if global.locked { instance_change(o_locked, true) }\nimage_speed = 0;",
-            "Step_0.gml": "instance_change(o_locked, true);\nif (hp > 0) { hp -= 1; }",
+            "Step_0.gml": "repeat (2) { instance_change(o_locked, true); }\nif (hp > 0) { hp -= 1; }",
+            "Destroy_0.gml": "instance_change(o_locked, true);\nhp = 1;",
         }
         for file_name, source in sources.items():
             with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
@@ -2167,13 +2175,26 @@ class TestScriptGeneration(unittest.TestCase):
         outcome = converter.convert(self.gm_dir, "windows", self.godot_dir, {"objects": objects_enabled})
 
         self.assertEqual(outcome.state, "success")
-        recorded = converter.diagnostics.diagnostics()
-        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-INSTANCE-CHANGE-DEFERRED"])
-        self.assertEqual(recorded[0].severity, "warning")
-        self.assertEqual(recorded[0].resource, "o_door")
-        self.assertEqual(recorded[0].event, "_on_step")
-        self.assertEqual((recorded[0].line, recorded[0].api), (1, "instance_change"))
-        self.assertTrue(str(recorded[0].source_path).endswith("Step_0.gml"))
+        recorded = sorted(converter.diagnostics.diagnostics(), key=lambda diagnostic: str(diagnostic.event))
+        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-INSTANCE-CHANGE-DEFERRED"] * 2)
+        self.assertEqual([diagnostic.event for diagnostic in recorded], ["_on_destroy", "_on_step"])
+        for diagnostic in recorded:
+            self.assertEqual(diagnostic.severity, "warning")
+            self.assertEqual(diagnostic.resource, "o_door")
+            self.assertEqual((diagnostic.line, diagnostic.api), (1, "instance_change"))
+        self.assertTrue(str(recorded[0].source_path).endswith("Destroy_0.gml"))
+        self.assertIn("assignment to the instance's variable 'hp'", recorded[0].message)
+        self.assertTrue(str(recorded[1].source_path).endswith("Step_0.gml"))
+        self.assertIn("reads the instance", recorded[1].message)
+
+        # The statement of the Create event runs the rest of the event on the
+        # new object; the others only call instance_change.
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertEqual(script.count("GMRuntime.gml_instance_change_then("), 1)
+        self.assertEqual(script.count("GMRuntime.gml_instance_change("), 2)
+        create = script[script.index("func _ready():"):script.index("func _on_step():")]
+        self.assertIn("gml_instance_change_then(", create)
 
     def test_missing_event_source_skips_object_and_makes_conversion_partial(self):
         self._setup_object(
@@ -2434,9 +2455,13 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _ready():", parent_content)
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
+        # The call runs while the child's event goes on, so the parent's event
+        # must not replace the instance's script (an instance_change in it).
         self.assertIn(
             "\tchild_before = true\n"
+            "\tGMRuntime.gml_event_nesting += 1\n"
             "\tsuper._ready()\n"
+            "\tGMRuntime.gml_event_nesting -= 1\n"
             "\tchild_after = true",
             child_content,
         )

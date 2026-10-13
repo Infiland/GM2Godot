@@ -42,6 +42,9 @@ class GMLStatementRequest:
     static_scope_prefix: str | None = None
     extension_functions: Mapping[str, GMLExtensionFunction] | None = None
     extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None
+    # Compile an instance_change statement of an object event with the rest of
+    # the event as its continuation.
+    instance_change_continuations: bool = False
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,9 @@ class GMLStatementResult:
     enum_values: MutableMapping[str, dict[str, int]]
     enum_names: frozenset[str]
     macro_values: MutableMapping[str, str]
+    # For each instance_change call compiled with a continuation, how many
+    # instance_change names precede it in the code.
+    continued_instance_changes: tuple[int, ...] = ()
 
 
 __all__: Final[tuple[str, ...]] = (

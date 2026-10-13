@@ -113,6 +113,11 @@ class GMLTranspileResult:
     code: str
     source_map: GMLSourceMap
     static_scope_id: str | None = None
+    # For each instance_change call that runs the rest of the event after the
+    # object has changed, how many instance_change names precede it in the
+    # source (the position in the preprocessed code does not match the source's
+    # where comments are removed).
+    continued_instance_changes: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)

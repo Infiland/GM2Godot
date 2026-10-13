@@ -5,9 +5,11 @@ import unittest
 
 from src.conversion.gml_transpiler import (
     GMLTranspileError,
+    GMLTranspileResult,
     load_gml_extension_function_mappings,
     preprocess_gml_source,
     transpile_gml_code,
+    transpile_gml_code_with_source_map,
     transpile_gml_expression,
 )
 from src.conversion.gml_transpiler_parts.constants import BUILTIN_VARIABLE_REGISTRY
@@ -3331,6 +3333,173 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_asset_get_index("o_enemy"), self, other):\n'
             '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "hp", 0)',
         )
+
+    def _transpile_with_continuations(
+        self,
+        source: str,
+        *,
+        enabled: bool = True,
+        inherited_event_call: str | None = None,
+    ) -> GMLTranspileResult:
+        return transpile_gml_code_with_source_map(
+            source,
+            indent="",
+            asset_names={"o_b", "o_c", "s_a"},
+            instance_target="self",
+            direct_instance_names={"hp", "speed"},
+            dynamic_instance_names=set(),
+            inherited_event_call=inherited_event_call,
+            instance_change_continuations=enabled,
+        )
+
+    def test_instance_change_runs_the_rest_of_the_event_on_the_new_object(self):
+        # GameMaker changes the instance at the call, so the statements after
+        # it act on the new object. The converter cannot swap a node's script
+        # while a method of the old script runs, so the rest of the event is
+        # compiled as a function that gml_instance_change_then runs after the
+        # change, reaching the instance by name only, and the event returns.
+        result = self._transpile_with_continuations(
+            "var s = sprite_index;\ninstance_change(o_b, false);\nsprite_index = s;\nhp = 3;"
+        )
+        self.assertEqual(
+            result.code,
+            "var s = sprite_index\n"
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "sprite_index", s)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), false, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        # The call is reported by the number of instance_change names before it,
+        # so the analyser does not warn about it.
+        self.assertEqual(result.continued_instance_changes, (0,))
+
+        # The last statement has nothing to continue with.
+        self.assertEqual(
+            self._transpile_with_continuations("instance_change(o_b, true);").code,
+            "var _gml_change_continue = func():\n"
+            "\tpass\n"
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+
+    def test_instance_change_continuation_is_off_unless_the_event_allows_it(self):
+        # (The Destroy event, the user events and the like run inside code of
+        # the instance that goes on after them.)
+        result = self._transpile_with_continuations("instance_change(o_b, true);\nhp = 1;", enabled=False)
+        self.assertEqual(
+            result.code,
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nhp = 1',
+        )
+        self.assertEqual(result.continued_instance_changes, ())
+        self.assertEqual(
+            transpile_gml_code("instance_change(o_b, true);\nhp = 1;", indent="", asset_names={"o_b"}),
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nhp = 1',
+        )
+
+    def test_instance_change_continuation_follows_the_branches_it_is_in(self):
+        # Each branch that changes the instance carries the statements that come
+        # after the branches, since they run on the new object in that branch.
+        result = self._transpile_with_continuations(
+            "if hp = 1 { instance_change(o_b, 1) } else { instance_change(o_c, 0); hp = 9 }\nx = 3"
+        )
+        self.assertEqual(
+            result.code,
+            "if GMRuntime.gml_eq(hp, 1):\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            '\tGMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), 1, '
+            "_gml_change_continue, self)\n"
+            "\treturn\n"
+            "else:\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 9)\n'
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            '\tGMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_c"), 0, '
+            "_gml_change_continue, self)\n"
+            "\treturn\n"
+            "position.x = 3",
+        )
+        self.assertEqual(result.continued_instance_changes, (0, 1))
+
+        # An unbraced branch and an else-if chain.
+        unbraced = self._transpile_with_continuations("if (hp = 1) instance_change(o_b, 1);\nelse hp = 2;\nx = 3")
+        self.assertEqual(unbraced.continued_instance_changes, (0,))
+        self.assertIn('"x", 3)', unbraced.code.split("else:")[0])
+        self.assertIn("else:\n\thp = 2\nposition.x = 3", unbraced.code)
+        chain = self._transpile_with_continuations(
+            "if (hp) { instance_change(o_b, true) } else if (speed) { instance_change(o_c, true) }\nhp = 2;"
+        )
+        self.assertEqual(chain.continued_instance_changes, (0, 1))
+        self.assertEqual(chain.code.count("gml_instance_change_then("), 2)
+        self.assertTrue(chain.code.endswith("\nhp = 2"))
+
+    def test_instance_change_continuation_ends_at_exit_and_nests_later_calls(self):
+        result = self._transpile_with_continuations("instance_change(o_b, true); exit; hp = 4")
+        self.assertIn("\treturn\n", result.code)
+        # Only the first call of a straight run of statements is a site; the
+        # call that follows it is made by the continuation on the instance
+        # (its own change takes place when the continuation returns).
+        several = self._transpile_with_continuations(
+            "instance_change(o_b, true);\ninstance_change(o_c, true);\nhp = 1;"
+        )
+        self.assertEqual(several.continued_instance_changes, (0,))
+        self.assertEqual(
+            several.code,
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_c"), true, _gml_change_self)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 1)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        # (The count does not depend on where the call is: comments before it
+        # do not move it, and calls that stay deferred are counted.)
+        counted = self._transpile_with_continuations(
+            "/* a\nb */ with (o_c) { instance_change(o_b, true); }\n// c\n  instance_change(o_c, false); hp = 1;"
+            "\n\tif hp { instance_change(o_c, false) }"
+        )
+        self.assertEqual(counted.continued_instance_changes, (1,))
+
+    def test_instance_change_keeps_the_deferred_form_where_the_rest_cannot_run_after_it(self):
+        deferred_sources = (
+            # Inside a loop, a switch, a try statement or a with statement the
+            # rest of the event is not the rest of the enclosing statement.
+            "while (hp > 0) { instance_change(o_b, true); hp -= 1; }\nx = 1",
+            "repeat (3) { instance_change(o_b, true); }",
+            "switch (hp) { case 1: instance_change(o_b, true); break; }\nx = 1",
+            "try { instance_change(o_b, true); } catch (e) { }\nx = 1",
+            "with (o_c) { instance_change(o_b, true); }\nhp = 1",
+            # An argument that changes a variable, or code that goes on to the
+            # parent's event, must not run twice or after the swap.
+            "instance_change(o_b, ++hp);\nx = 1",
+        )
+        for source in deferred_sources:
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(source)
+                self.assertNotIn("gml_instance_change_then", result.code)
+                self.assertIn("GMRuntime.gml_instance_change(", result.code)
+                self.assertEqual(result.continued_instance_changes, ())
+
+        inherited = self._transpile_with_continuations(
+            "instance_change(o_b, true);\nevent_inherited();", inherited_event_call="super._on_step()"
+        )
+        self.assertEqual(
+            inherited.code,
+            'GMRuntime.gml_instance_change(GMRuntime.gml_asset_get_index("o_b"), true, self)\nsuper._on_step()',
+        )
+        # event_inherited before the call is no obstacle.
+        before = self._transpile_with_continuations(
+            "event_inherited();\ninstance_change(o_b, true);\nx = 1", inherited_event_call="super._on_step()"
+        )
+        self.assertTrue(before.code.startswith("super._on_step()\nvar _gml_change_self = self\n"))
+        self.assertEqual(before.continued_instance_changes, (0,))
 
     def test_cross_instance_dot_access_uses_selector_helpers(self):
         asset_names = {"o_enemy", "o_parent"}

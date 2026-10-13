@@ -4,7 +4,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Collection, Iterable
 
 from .constants import (
     BUILTIN_VARIABLE_REGISTRY,
@@ -287,42 +287,61 @@ def analyze_gml_instance_change_reads(
     source: str,
     *,
     known_names: Iterable[str] = (),
+    continued_calls: Collection[int] = (),
 ) -> tuple[GMLSourceDiagnostic, ...]:
-    """Report instance_change calls followed by code that reads the instance.
+    """Report instance_change calls whose following code meets the old object.
 
-    The converted game changes an instance's object once the event that
-    called instance_change returns (see the runtime's 76_instance_change.gd):
-    the rest of the event runs on the old object, before the new object's
-    Create event, where GameMaker runs it after. What that code assigns is
-    assigned again after the change; what it reads (instance variables, self,
-    the instance's events, mask or sprite through a function) may differ.
-    known_names are names that do not belong to the instance (assets, enums,
-    macros).
+    An instance_change that the transpiler compiles with the rest of the event
+    as its continuation (continued_calls holds, for each, how many
+    instance_change names precede it) changes the object before that code
+    runs, as GameMaker does. For the others the converted game changes the object once the event that called
+    instance_change returns (see the runtime's 76_instance_change.gd): the
+    rest of the event runs on the old object, before the new object's Create
+    event, where GameMaker runs it after. What that code reads (instance
+    variables, self, the instance's events, mask or sprite through a function)
+    may differ. What it assigns to the instance's variables is assigned again
+    after the change, but only when it changed the variable's value: an
+    assignment of the value the variable had at the call is lost. known_names
+    are names that do not belong to the instance (assets, enums, macros).
     """
     tokens = _instance_change_tokens(source)
     if not tokens:
         return ()
     free_names = _INSTANCE_FREE_NAMES | set(known_names) | _local_names(source)
     diagnostics: list[GMLSourceDiagnostic] = []
+    names_before = 0
     for index, token in enumerate(tokens):
-        if not _is_instance_change_call(tokens, index):
+        if token.kind == "IDENT" and token.value == "instance_change":
+            names_before += 1
+        if not _is_instance_change_call(tokens, index) or names_before - 1 in continued_calls:
             continue
-        read = _first_instance_read(tokens, _closing_index(tokens, index + 1) + 1, free_names)
-        if read is None:
+        found = _first_instance_use(tokens, _closing_index(tokens, index + 1) + 1, free_names)
+        if found is None:
             continue
+        use, assigns = found
+        if assigns:
+            message = (
+                f"instance_change at line {token.line} is followed by an assignment to the instance's "
+                f"variable '{use.value}' (line {use.line}). The converted game changes the instance once "
+                "the event returns and makes the assignment again afterwards only if it changed the "
+                "variable's value, so an assignment of the value the variable had at the call is lost."
+            )
+        else:
+            message = (
+                f"instance_change at line {token.line} is followed by code that reads the instance "
+                f"('{use.value}' at line {use.line}). The converted game changes the instance once "
+                "the event returns, so that code still sees the old object and runs before the new "
+                "object's Create event; what it assigns to the instance is kept when it changes a "
+                "variable's value."
+            )
         diagnostics.append(
             GMLSourceDiagnostic(
                 severity="warning",
                 code=INSTANCE_CHANGE_DEFERRED_CODE,
-                message=(
-                    f"instance_change at line {token.line} is followed by code that reads the instance "
-                    f"('{read.value}' at line {read.line}). The converted game changes the instance once "
-                    "the event returns, so that code still sees the old object and runs before the new "
-                    "object's Create event; what it assigns to the instance is kept."
-                ),
+                message=message,
                 line=token.line,
                 column=token.column,
-                identifier=read.value,
+                identifier=use.value,
             )
         )
     return tuple(diagnostics)
@@ -385,30 +404,59 @@ def _closing_index(tokens: list[Token], open_index: int) -> int:
     return len(tokens)
 
 
-def _first_instance_read(tokens: list[Token], start: int, free_names: set[str] | frozenset[str]) -> Token | None:
+def _first_instance_use(
+    tokens: list[Token],
+    start: int,
+    free_names: set[str] | frozenset[str],
+) -> tuple[Token, bool] | None:
+    """Return the first token that meets the instance, and whether it is an assignment target."""
+    other_bodies = _with_body_ranges(tokens, start)
     for index in range(start, len(tokens)):
         token = tokens[index]
         if token.kind != "IDENT" or _token_value(tokens, index - 1) == ".":
             # (A member of something else: global, another instance, a struct.)
             continue
-        if _reads_instance(tokens, index, free_names):
-            return token
+        use = _instance_use(tokens, index, free_names)
+        if use == "assign" and any(first <= index <= last for first, last in other_bodies):
+            # (A with statement assigns to the instances it visits, not to this one.)
+            continue
+        if use is not None:
+            return token, use == "assign"
     return None
 
 
-def _reads_instance(tokens: list[Token], index: int, free_names: set[str] | frozenset[str]) -> bool:
+def _with_body_ranges(tokens: list[Token], start: int) -> list[tuple[int, int]]:
+    """Return the first and last token of each with statement body after start.
+
+    A body that is a single statement counts as its first token, which is all an
+    assignment target needs.
+    """
+    ranges: list[tuple[int, int]] = []
+    for index in range(start, len(tokens)):
+        if tokens[index].kind != "IDENT" or tokens[index].value != "with":
+            continue
+        if _token_value(tokens, index + 1) != "(" or _token_value(tokens, index - 1) == ".":
+            continue
+        body = _closing_index(tokens, index + 1) + 1
+        last = _closing_index(tokens, body) if _token_value(tokens, body) == "{" else body
+        ranges.append((body, last))
+    return ranges
+
+
+def _instance_use(tokens: list[Token], index: int, free_names: set[str] | frozenset[str]) -> str | None:
     name = tokens[index].value
     if name in ("self", "id"):
-        return True
+        return "read"
     if name in _INSTANCE_CHANGE_SYNTAX_WORDS:
-        return False
+        return None
     following = _token_value(tokens, index + 1)
     if following == "(":
-        return _call_uses_instance(name)
+        return "read" if _call_uses_instance(name) else None
     if name in free_names:
-        return False
-    # An assignment to the instance's variable is made again after the change.
-    return not (following == "=" and _starts_statement(tokens, index))
+        return None
+    if following == "=" and _starts_statement(tokens, index):
+        return "assign"
+    return "read"
 
 
 def _call_uses_instance(name: str) -> bool:

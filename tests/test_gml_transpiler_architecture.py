@@ -509,7 +509,10 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "(generated_line: 'int', source_line: 'int', source_column: 'int', generated_text: 'str', "
         "source_text: 'str', source_path: 'str | None' = None, event: 'str | None' = None) -> None"
     ),
-    "GMLTranspileResult": "(code: 'str', source_map: 'GMLSourceMap', static_scope_id: 'str | None' = None) -> None",
+    "GMLTranspileResult": (
+        "(code: 'str', source_map: 'GMLSourceMap', static_scope_id: 'str | None' = None, "
+        "continued_instance_changes: 'tuple[int, ...]' = ()) -> None"
+    ),
     "category_issue_numbers": "() -> 'dict[str, int]'",
     "EXTENSION_FUNCTION_MAPPING_FILENAME": None,
     "diagnostic_for_unimplemented_gml_api": "(name: 'str') -> 'str | None'",
@@ -529,7 +532,8 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
     "normalize_extension_functions": "(value: 'object') -> 'dict[str, GMLExtensionFunction]'",
     "analyze_gml_source_identifiers": "(source: 'str') -> 'tuple[GMLSourceDiagnostic, ...]'",
     "analyze_gml_instance_change_reads": (
-        "(source: 'str', *, known_names: 'Iterable[str]' = ()) -> 'tuple[GMLSourceDiagnostic, ...]'"
+        "(source: 'str', *, known_names: 'Iterable[str]' = (), "
+        "continued_calls: 'Collection[int]' = ()) -> 'tuple[GMLSourceDiagnostic, ...]'"
     ),
     "gml_source_map_path": "(gdscript_path: 'str') -> 'str'",
     "merge_gml_source_maps": (
@@ -573,7 +577,8 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "instance_target: 'str | None' = None, direct_instance_names: 'Iterable[str] | None' = None, "
         "dynamic_instance_names: 'Iterable[str] | None' = None, "
         "enum_values: 'Mapping[str, Mapping[str, int]] | None' = None, "
-        "macro_values: 'Mapping[str, str] | None' = None) -> 'GMLTranspileResult'"
+        "macro_values: 'Mapping[str, str] | None' = None, "
+        "instance_change_continuations: 'bool' = False) -> 'GMLTranspileResult'"
     ),
     "transpile_gml_condition": (
         "(source: 'str', local_names: 'Iterable[str] | None' = None, "

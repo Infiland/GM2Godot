@@ -16,7 +16,7 @@ from src.conversion.architecture_policy import (
 from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
-from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code_with_source_map
 from src.conversion.instance_change_diagnostics import record_instance_change_reads
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_godot import GodotProjectFile
@@ -570,7 +570,10 @@ class RoomConverter(BaseConverter):
             raise _RoomCreationCodeBlocked(message) from exc
 
         try:
-            code = transpile_gml_code(
+            # An instance's creation code runs from the room's start-up, with
+            # no method of the instance's script below it, so an instance_change
+            # in it can run the rest of the code on the new object.
+            result = transpile_gml_code_with_source_map(
                 source,
                 asset_names=asset_names,
                 top_level_global_scope=top_level_global_scope,
@@ -580,7 +583,9 @@ class RoomConverter(BaseConverter):
                 self_expression=self_expression,
                 other_expression=other_expression,
                 instance_target=instance_target,
+                instance_change_continuations=instance_target is not None,
             )
+            code = result.code
         except GMLTranspileError as exc:
             message = (
                 "Warning: Could not transpile GameMaker {label} for room {room}: {path}: {error}".format(
@@ -619,6 +624,7 @@ class RoomConverter(BaseConverter):
                 self.diagnostics,
                 source,
                 known_names=asset_names,
+                continued_calls=result.continued_instance_changes,
                 source_path=source_path,
                 resource=room_name,
                 resource_type="room",

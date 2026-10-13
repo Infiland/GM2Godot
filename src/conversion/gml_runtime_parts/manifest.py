@@ -360,7 +360,8 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
     ),
     _segment(
         "76_instance_change.gd",
-        "instance_change: Destroy, Clean Up and Create events and the node's switch to the new object's script.",
+        "instance_change: Destroy, Clean Up and Create events, the node's switch to the new object's script and "
+        "the rest of the calling event.",
         depends_on=(
             "00_prelude.gd",
             "10_handles_and_instances.gd",

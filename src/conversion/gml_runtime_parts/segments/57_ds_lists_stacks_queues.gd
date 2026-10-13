@@ -363,7 +363,8 @@ static func gml_ds_list_set(id_value, pos, value):
 		if idx >= 0:
 			var arr = ds["data"]
 			if idx >= arr.size():
-				arr.resize(idx + 1)
+				# The entries in between hold 0, as in the runner.
+				_gml_array_grow(arr, idx + 1)
 			arr[idx] = value
 			return value
 	return gml_undefined()

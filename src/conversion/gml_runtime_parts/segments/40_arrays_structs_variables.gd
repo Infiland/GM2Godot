@@ -18,9 +18,24 @@ static func gml_array_set(array_value, index, value):
 	if typeof(array_value) != TYPE_ARRAY:
 		return gml_unsupported_type_error("GML array set", array_value)
 	if resolved_index >= array_value.size():
-		array_value.resize(resolved_index + 1)
+		if resolved_index == array_value.size():
+			array_value.append(value)
+			return value
+		_gml_array_grow(array_value, resolved_index + 1)
 	array_value[resolved_index] = value
 	return value
+
+
+# Elements an array gains hold 0, never null: after a = []; a[3] = 1 the
+# elements a[0] to a[2] are 0 (the VM and YYC runners zero the gap, as the
+# HTML5 runner's array_copy comment says: "initialisation flow of array data
+# on VM/YYC"), the runner's array_resize fills what it adds with 0, and
+# array_create does the same unless it is given a value.
+static func _gml_array_grow(array_value, size):
+	var old_size = array_value.size()
+	array_value.resize(size)
+	for index in range(old_size, size):
+		array_value[index] = 0
 
 
 static func gml_array_push(array_value, values):
@@ -53,9 +68,8 @@ static func gml_array_create(size, value = null):
 	var arr = []
 	if resolved_size > 0:
 		arr.resize(resolved_size)
-		if value != null:
-			for i in range(resolved_size):
-				arr[i] = value
+		# 0 unless a value is given; an explicit undefined is a value.
+		arr.fill(0 if typeof(value) == TYPE_NIL else value)
 	return arr
 
 
@@ -75,7 +89,10 @@ static func gml_array_resize(array_value, size):
 	var resolved_size = int(_to_real(size))
 	if resolved_size < 0:
 		return gml_error("GML array_resize requires a non-negative size")
-	array_value.resize(resolved_size)
+	if resolved_size > array_value.size():
+		_gml_array_grow(array_value, resolved_size)
+	else:
+		array_value.resize(resolved_size)
 	return resolved_size
 
 
@@ -219,7 +236,7 @@ static func gml_array_copy(dest, dest_index, src, src_index, length):
 		if src_idx >= src.size():
 			break
 		if dest_idx >= dest.size():
-			dest.resize(dest_idx + 1)
+			_gml_array_grow(dest, dest_idx + 1)
 		dest[dest_idx] = src[src_idx]
 	return dest
 
@@ -525,6 +542,11 @@ static func gml_struct_get(struct_value, member_name):
 			return struct_value[key]
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
+		if struct_value is GMLHandle and struct_value.kind == GML_INSTANCE_HANDLE_KIND:
+			# An instance id reads the instance's variables (the runner
+			# redirects variable_struct_* and struct_* to variable_instance_*).
+			var instance: Variant = _gml_selector_direct_target(struct_value)
+			return gml_struct_get(instance, key) if instance != null else gml_undefined()
 		if (key == "x" or key == "y") and struct_value is Node2D and not (key in struct_value):
 			# The node's position (see _gml_object_builtin_field_get).
 			var position = (
@@ -535,7 +557,14 @@ static func gml_struct_get(struct_value, member_name):
 			return position.x if key == "x" else position.y
 		match _gml_object_member_kind(struct_value, key):
 			GML_OBJECT_MEMBER_PROPERTY:
-				return struct_value.get(key)
+				# A declared member nothing has assigned yet holds null, which
+				# reads as undefined (see _gml_instance_variable_exists). Inline
+				# rather than a helper call: this is the hot path of every
+				# instance variable read. typeof, never == null: a member that
+				# holds a destroyed instance holds a freed object, which Godot
+				# compares equal to null although it is a value.
+				var property_value = struct_value.get(key)
+				return gml_undefined() if typeof(property_value) == TYPE_NIL else property_value
 			GML_OBJECT_MEMBER_FIELD:
 				if struct_value.has_meta(GML_OBJECT_DYNAMIC_FIELDS_META):
 					var fields = struct_value.get_meta(GML_OBJECT_DYNAMIC_FIELDS_META)
@@ -547,7 +576,8 @@ static func gml_struct_get(struct_value, member_name):
 		if _gml_object_uses_builtin_field(struct_value, key):
 			return _gml_object_builtin_field_get(struct_value, key)
 		if _object_has_property(struct_value, key):
-			return struct_value.get(key)
+			var property_value = struct_value.get(key)
+			return gml_undefined() if typeof(property_value) == TYPE_NIL else property_value
 		var dynamic_fields = _gml_object_dynamic_fields(struct_value)
 		if dynamic_fields.has(key):
 			return dynamic_fields[key]
@@ -785,6 +815,14 @@ static func gml_struct_set(struct_value, member_name, value):
 		struct_value[key] = value
 		return value
 	if typeof(struct_value) == TYPE_OBJECT:
+		if _gml_is_instance_handle(struct_value):
+			# An instance id writes to the instance, as the reads resolve it
+			# (the runner redirects variable_struct_* and struct_* to
+			# variable_instance_*); nothing happens once the instance is gone.
+			var instance: Variant = _gml_selector_direct_target(struct_value)
+			if instance != null:
+				gml_struct_set(instance, key, value)
+			return value
 		var kind = _gml_object_member_kind(struct_value, key)
 		if kind == -1:
 			kind = (
@@ -812,9 +850,24 @@ static func gml_struct_remove(struct_value, member_name):
 		struct_value.erase(key)
 		return gml_undefined()
 	if typeof(struct_value) == TYPE_OBJECT:
+		if _gml_is_instance_handle(struct_value):
+			var instance: Variant = _gml_selector_direct_target(struct_value)
+			if instance != null:
+				gml_struct_remove(instance, key)
+			return gml_undefined()
+		if not is_instance_valid(struct_value):
+			return gml_undefined()
 		var dynamic_fields = _gml_object_dynamic_fields(struct_value)
 		if dynamic_fields.has(key):
 			dynamic_fields.erase(key)
+			return gml_undefined()
+		if _gml_is_instance_node(struct_value):
+			# A script cannot drop a member the object declares: the variable
+			# goes back to what it was before its first assignment, when it
+			# does not exist. GameMaker's own variables, and names nothing
+			# defines, stay as they are (a no-op, as in the runner).
+			if _gml_instance_script_variables(struct_value).has(key):
+				struct_value.set(key, null)
 			return gml_undefined()
 	return gml_unsupported_type_error("GML mutable struct access", struct_value)
 
@@ -852,6 +905,10 @@ static func gml_struct_names_count(struct_value):
 # (yyVariable.js).
 static func _gml_is_instance_node(value):
 	return typeof(value) == TYPE_OBJECT and is_instance_valid(value) and value is Node
+
+
+static func _gml_is_instance_handle(value):
+	return is_handle(value) and value.kind == GML_INSTANCE_HANDLE_KIND
 
 
 static func _gml_selects_instances(value):

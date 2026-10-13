@@ -2570,7 +2570,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_array_set_mutates_reference_without_copying(self):
         self.assertIn('return gml_unsupported_type_error("GML array set", array_value)', GML_RUNTIME_SCRIPT)
         self.assertIn("if resolved_index >= array_value.size():", GML_RUNTIME_SCRIPT)
-        self.assertIn("array_value.resize(resolved_index + 1)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_array_grow(array_value, resolved_index + 1)", GML_RUNTIME_SCRIPT)
         self.assertIn("array_value[resolved_index] = value", GML_RUNTIME_SCRIPT)
         self.assertIn("return value", GML_RUNTIME_SCRIPT)
         self.assertNotIn("array_value.duplicate", GML_RUNTIME_SCRIPT)

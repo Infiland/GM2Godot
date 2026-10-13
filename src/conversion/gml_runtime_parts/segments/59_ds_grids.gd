@@ -46,10 +46,16 @@ static func _gml_ds_grid_do_resize(grid, w, h):
 	grid["data"].resize(h)
 	for y in range(h):
 		if y < old_h:
-			grid["data"][y].resize(w)
+			# Cells the grid gains hold 0 (the runner's yyGrid fills a new
+			# grid with 0 and ds_grid_resize copies the old cells into it).
+			if w > old_w:
+				_gml_array_grow(grid["data"][y], w)
+			else:
+				grid["data"][y].resize(w)
 		else:
 			var row = []
 			row.resize(w)
+			row.fill(0)
 			grid["data"][y] = row
 
 static func gml_ds_grid_set(id_value, x, y, val):
@@ -249,5 +255,6 @@ static func _gml_ds_grid_create_unregistered(w, h):
 	for y in range(h):
 		var row = []
 		row.resize(w)
+		row.fill(0)
 		grid["data"].append(row)
 	return grid

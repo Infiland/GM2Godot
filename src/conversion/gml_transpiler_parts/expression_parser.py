@@ -452,6 +452,13 @@ class _ExpressionParser:
             )
         )
         body_lines = list(statement_result.lines)
+        # A function whose body ends without a return gives undefined (a GML
+        # value), not the null a GDScript function gives. A constructor's
+        # result is the struct it builds.
+        if not is_constructor and not (
+            body_lines and (body_lines[-1] == "return" or body_lines[-1].startswith("return "))
+        ):
+            body_lines.append("return GMRuntime.gml_undefined()")
         prelude_lines: list[str] = []
         if parent_constructor is not None:
             if not is_constructor:

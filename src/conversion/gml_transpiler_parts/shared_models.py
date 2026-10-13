@@ -53,10 +53,13 @@ class GMLTranspileError(ValueError):
 class EventFunctionSplit:
     """One part of an object event whose declared functions are bound apart from it.
 
-    part "declarations" keeps only the function declarations at the top of the
-    event, part "body" everything else.
+    members maps the name of a function declared at the top of the event to the
+    member that holds it: calls to it in the event's code go to the member.
+    part "declarations" keeps only the declarations (each followed by an
+    assignment of its function to the member), part "body" everything else.
     """
 
+    members: Mapping[str, str]
     part: Literal["body", "declarations"]
 
 

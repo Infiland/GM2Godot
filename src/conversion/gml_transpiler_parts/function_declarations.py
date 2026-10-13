@@ -160,11 +160,26 @@ def event_function_names(source: str, *, macro_configuration: str | None = None)
 
 
 def split_event_functions(tokens: Sequence[Token], split: EventFunctionSplit) -> list[Token]:
-    """Return the event's body, or the function declarations at its top."""
+    """Return the event's body, or its function declarations, with calls bound to them.
+
+    GameMaker compiles a call to a script function by name straight to that
+    function, without looking at the variable of the same name (manual: GML
+    Overview > Script Functions vs. Methods, "Overridden Script Functions"): in
+    the code that declares it, say_hello() runs the function declared there
+    even when a child object assigns another to the variable. Such calls go to
+    the member that holds the declared function, unless the name is also a
+    parameter or a local variable.
+    """
     spans = function_declaration_spans(tokens)
+    declared: dict[str, str] = {}
+    for start, _end in spans:
+        name = named_function_declaration_name(tokens, start)
+        if name is not None and name in split.members:
+            declared[name] = split.members[name]
+    bound = _bind_direct_calls(tokens, declared)
     if split.part == "body":
-        return _without_spans(tokens, spans)
-    return _only_spans(tokens, spans)
+        return _without_spans(bound, spans)
+    return _only_spans(bound, spans, declared)
 
 
 def _without_spans(tokens: Sequence[Token], spans: Sequence[tuple[int, int]]) -> list[Token]:
@@ -177,15 +192,139 @@ def _without_spans(tokens: Sequence[Token], spans: Sequence[tuple[int, int]]) ->
     return result
 
 
-def _only_spans(tokens: Sequence[Token], spans: Sequence[tuple[int, int]]) -> list[Token]:
+def _only_spans(
+    tokens: Sequence[Token],
+    spans: Sequence[tuple[int, int]],
+    members: dict[str, str],
+) -> list[Token]:
     result: list[Token] = []
     for start, end in spans:
         result.extend(tokens[start:end])
         last = tokens[end - 1]
-        result.append(Token("OP", ";", line=last.line, column=last.column, index=last.index))
+        name = named_function_declaration_name(tokens, start)
+        position = {"line": last.line, "column": last.column, "index": last.index}
+        result.append(Token("OP", ";", **position))
+        member = members.get(name) if name is not None else None
+        if member is not None and name is not None:
+            result.extend(
+                (
+                    Token("IDENT", member, **position),
+                    Token("OP", "=", **position),
+                    Token("IDENT", name, **position),
+                    Token("OP", ";", **position),
+                )
+            )
     if tokens and tokens[-1].kind == "EOF":
         result.append(tokens[-1])
     return result
+
+
+def _bind_direct_calls(tokens: Sequence[Token], members: dict[str, str]) -> list[Token]:
+    shadowed = _shadowing_names(tokens)
+    bound = {name: member for name, member in members.items() if name not in shadowed}
+    result = list(tokens)
+    if not bound:
+        return result
+    for index, token in enumerate(tokens):
+        member = bound.get(token.value) if token.kind == "IDENT" else None
+        if member is not None and _is_direct_call(tokens, index):
+            result[index] = Token("IDENT", member, line=token.line, column=token.column, index=token.index)
+    return result
+
+
+def _is_direct_call(tokens: Sequence[Token], index: int) -> bool:
+    following = skip_newline_tokens(tokens, index + 1)
+    if following >= len(tokens) or tokens[following].kind != "OP" or tokens[following].value != "(":
+        return False
+    previous = index - 1
+    while previous >= 0 and tokens[previous].kind == "NEWLINE":
+        previous -= 1
+    if previous < 0:
+        return True
+    # A member (a.say_hello()), the declaration itself, or a constructor call.
+    return tokens[previous].value not in (".", "function", "new")
+
+
+def _shadowing_names(tokens: Sequence[Token]) -> set[str]:
+    """Names some code in the tokens declares as a local variable, parameter or catch variable."""
+    names: set[str] = set()
+    for index, token in enumerate(tokens):
+        if token.kind != "IDENT":
+            continue
+        if token.value in ("var", "static"):
+            names.update(_declared_variable_names(tokens, index + 1))
+        elif token.value == "function":
+            names.update(_parameter_names(tokens, index + 1))
+        elif token.value == "catch":
+            names.update(_parameter_names(tokens, index + 1))
+    return names
+
+
+def _declared_variable_names(tokens: Sequence[Token], start: int) -> list[str]:
+    names: list[str] = []
+    depth = 0
+    expect_name = True
+    index = start
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "OP" and token.value in _OPENING_BRACKETS:
+            depth += 1
+        elif token.kind == "OP" and token.value in _CLOSING_BRACKETS:
+            depth -= 1
+            if depth < 0:
+                break
+        elif depth == 0 and token.kind == "OP" and token.value == ";":
+            break
+        elif depth == 0 and token.kind == "NEWLINE" and not _continues_variable_list(tokens, index):
+            break
+        elif depth == 0 and token.kind == "OP" and token.value == ",":
+            expect_name = True
+        elif depth == 0 and expect_name and token.kind == "IDENT":
+            names.append(token.value)
+            expect_name = False
+        index += 1
+    return names
+
+
+def _continues_variable_list(tokens: Sequence[Token], newline_index: int) -> bool:
+    previous = newline_index - 1
+    while previous >= 0 and tokens[previous].kind == "NEWLINE":
+        previous -= 1
+    following = skip_newline_tokens(tokens, newline_index)
+    return (previous >= 0 and tokens[previous].value == ",") or (
+        following < len(tokens) and tokens[following].value == ","
+    )
+
+
+def _parameter_names(tokens: Sequence[Token], start: int) -> list[str]:
+    """Names in the parameter list that follows a function (or catch) keyword, name included."""
+    index = skip_newline_tokens(tokens, start)
+    if index < len(tokens) and tokens[index].kind == "IDENT" and tokens[index].value != "constructor":
+        index = skip_newline_tokens(tokens, index + 1)
+    if index >= len(tokens) or tokens[index].value != "(":
+        return []
+    names: list[str] = []
+    depth = 0
+    expect_name = True
+    while index < len(tokens):
+        token = tokens[index]
+        if token.kind == "EOF":
+            break
+        if token.kind == "OP" and token.value in _OPENING_BRACKETS:
+            depth += 1
+        elif token.kind == "OP" and token.value in _CLOSING_BRACKETS:
+            depth -= 1
+            if depth == 0:
+                break
+        elif depth == 1 and token.kind == "OP" and token.value == ",":
+            expect_name = True
+        elif depth == 1 and expect_name and token.kind == "IDENT":
+            names.append(token.value)
+            expect_name = False
+        index += 1
+    return names
 
 
 __all__: Final[tuple[str, ...]] = (

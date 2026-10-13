@@ -6,7 +6,11 @@ Variables, "Defining a function in an Object's event"). The instance's other
 events call it by name, a call can come before the declaration in the same
 event, and another object's function of the same name is a separate one. A
 function declared in the Alarm 0 event can be called in the Create event,
-"regardless of when that alarm event runs (or whether it runs at all)".
+"regardless of when that alarm event runs (or whether it runs at all)". A call
+to a function by name goes straight to the function declared in the same
+event, so a parent's talk() still reaches the parent's say_hello() when the
+child declares its own (manual: GML Overview > Script Functions vs. Methods,
+"Overridden Script Functions").
 """
 from __future__ import annotations
 
@@ -107,6 +111,74 @@ class TestEventFunctionDeclarationsGodot(unittest.TestCase):
         )
 
         self.assertEqual(trace, ["create:20 103", "nested:51", "step:40"])
+
+    def test_call_goes_to_the_function_declared_in_the_same_event_not_to_the_variable(self) -> None:
+        # The manual's example: talk() runs in the child, yet reaches the
+        # parent's say_hello(), because the parent declared both with the
+        # script function syntax. self.say_hello() calls the variable, which
+        # the child's declaration assigned after the parent's.
+        parent_create = (
+            "function talk() { say_hello(); }\n"
+            'function say_hello() { trace("I am the parent!"); }\n'
+        )
+        child_create = (
+            "event_inherited();\n"
+            'function say_hello() { trace("I am the child!"); }\n'
+            'trace("talk");\n'
+            "talk();\n"
+            'trace("direct");\n'
+            "say_hello();\n"
+            'trace("self");\n'
+            "self.say_hello();\n"
+        )
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: 'instance_create_layer(0, 0, "Instances", o_child);\n'},
+            objects=(
+                GameMakerObject("o_parent", {EVENT_CREATE: parent_create}),
+                GameMakerObject("o_child", {EVENT_CREATE: child_create}, parent="o_parent"),
+            ),
+        )
+
+        self.assertEqual(
+            trace,
+            [
+                "talk",
+                "I am the parent!",
+                "direct",
+                "I am the child!",
+                "self",
+                "I am the child!",
+            ],
+        )
+
+    def test_method_variables_are_called_through_the_variable_so_the_child_overrides(self) -> None:
+        # The manual's fix for the example above: method variable syntax makes
+        # every call go through the variable.
+        parent_create = (
+            "talk = function() { say_hello(); };\n"
+            'say_hello = function() { trace("I am the parent!"); };\n'
+        )
+        child_create = (
+            "event_inherited();\n"
+            'say_hello = function() { trace("I am the child!"); };\n'
+            "talk();\n"
+            "say_hello();\n"
+        )
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: 'instance_create_layer(0, 0, "Instances", o_child);\n'},
+            objects=(
+                GameMakerObject("o_parent", {EVENT_CREATE: parent_create}),
+                GameMakerObject("o_child", {EVENT_CREATE: child_create}, parent="o_parent"),
+            ),
+        )
+
+        self.assertEqual(trace, ["I am the child!", "I am the child!"])
 
 
 if __name__ == "__main__":

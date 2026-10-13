@@ -171,7 +171,7 @@ class ObjectRuntimeConfig:
     # them (and their Room Editor overrides) before the Create event.
     runs_variable_definitions: bool = False
     # The object or an ancestor declares named functions in its events: the
-    # instance binds them when it is built.
+    # instance binds them when it is built (see event_function_member_name).
     binds_event_functions: bool = False
     # An ancestor does: the object's binding runs the ancestor's first.
     inherits_event_functions: bool = False
@@ -184,6 +184,17 @@ EVENT_FUNCTIONS_KEY_PREFIX = "event_functions:"
 
 def _event_identifier(event_function: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", event_function).strip("_")
+
+
+def event_function_member_name(object_name: str, event_function: str, function_name: str) -> str:
+    """The member holding a function declared in an event of an object.
+
+    Calls to the function in the event that declares it go to this member
+    rather than to the variable of the same name (manual: GML Overview >
+    Script Functions vs. Methods, "Overridden Script Functions"). The object's
+    name keeps a child's member apart from its parent's.
+    """
+    return f"_gm_fn_{object_name}_{_event_identifier(event_function)}_{function_name}"
 
 
 def _event_function_binder_name(object_name: str, event_function: str) -> str:

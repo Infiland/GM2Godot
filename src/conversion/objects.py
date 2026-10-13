@@ -76,6 +76,7 @@ from src.conversion.script_generator import (
     ObjectRuntimeConfig,
     SpriteRuntimeConfig,
     _valid_instance_variables,
+    event_function_member_name,
     generate_script_content,
 )
 from src.conversion.type_defs import (
@@ -1325,12 +1326,16 @@ class ObjectConverter(BaseConverter):
             )
 
         # The functions an event declares are bound when the instance is
-        # built, by code of their own rather than by the event.
-        event_function_positions = {
-            position
+        # built; the names and the members holding them are instance
+        # variables of the object.
+        event_function_members = {
+            position: members
             for position, entry in enumerate(source_entries)
-            if self._event_declares_functions(entry)
+            if (members := self._event_function_members(object_name, entry))
         }
+        for members in event_function_members.values():
+            instance_variables.update(members)
+            instance_variables.update(members.values())
 
         # A child object's script declares (and reads directly) only the
         # variables no ancestor script can declare already.
@@ -1362,7 +1367,7 @@ class ObjectConverter(BaseConverter):
             mapping = entry["mapping"]
             source_path = entry["source_path"]
             source = entry["source"]
-            declares_functions = position in event_function_positions
+            members = event_function_members.get(position)
             try:
                 self._record_event_source_diagnostics(
                     source,
@@ -1375,16 +1380,16 @@ class ObjectConverter(BaseConverter):
                     object_name,
                     entry,
                     scope,
-                    EventFunctionSplit("body") if declares_functions else None,
+                    EventFunctionSplit(members, "body") if members else None,
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
-                if declares_functions:
+                if members:
                     declarations = self._transpile_event_entry(
                         object_name,
                         entry,
                         scope,
-                        EventFunctionSplit("declarations"),
+                        EventFunctionSplit(members, "declarations"),
                     )
                     key = f"{EVENT_FUNCTIONS_KEY_PREFIX}{mapping.godot_func}"
                     code_bodies[key] = declarations.code
@@ -1438,17 +1443,24 @@ class ObjectConverter(BaseConverter):
             event_functions=event_functions,
         )
 
-    def _event_declares_functions(self, entry: ObjectEventSource) -> bool:
+    def _event_function_members(
+        self,
+        object_name: str,
+        entry: ObjectEventSource,
+    ) -> dict[str, str]:
+        """Map the functions an event declares to the members that hold them."""
         try:
-            return bool(
-                event_function_names(
-                    entry["source"],
-                    macro_configuration=self.macro_configuration,
-                )
+            names = event_function_names(
+                entry["source"],
+                macro_configuration=self.macro_configuration,
             )
         except GMLTranspileError:
             # The transpile of the event reports the error.
-            return False
+            return {}
+        return {
+            name: event_function_member_name(object_name, entry["mapping"].godot_func, name)
+            for name in names
+        }
 
     def _event_source_path(
         self,

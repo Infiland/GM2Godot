@@ -129,8 +129,8 @@ class TestMapEventStatic(unittest.TestCase):
 
     def test_close_button_event(self):
         m = map_event({"eventType": 7, "eventNum": 30})
-        self.assertEqual(m.godot_func, "_notification")
-        self.assertEqual(m.params, "what")
+        self.assertEqual(m.godot_func, "_on_close_button")
+        self.assertEqual(m.params, "")
         self.assertEqual(m.sort_key, 6)
         self.assertEqual(m.gml_filename, "Other_30.gml")
 

@@ -84,11 +84,12 @@ class TestRuntimeManagers(unittest.TestCase):
         )
         self.assertIn("func _exit_tree():", script)
         self.assertIn("GMRuntimeFacade.gm2godot_runtime_shutdown()", script)
-        # Closing the window ends the game: the instances run Clean Up.
+        # Closing the window runs the Close Button event of the instances that
+        # have one, and ends the game otherwise (the instances run Clean Up).
         self.assertIn(
             "func _notification(what):\n"
-            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST and get_tree().auto_accept_quit:\n"
-            "\t\tGMRuntimeFacade.gml_game_window_close()",
+            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n"
+            "\t\tGMRuntimeFacade.gml_game_window_close_request()",
             script,
         )
         self.assertIn(

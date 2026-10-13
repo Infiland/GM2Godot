@@ -260,6 +260,47 @@ static func gml_game_window_close():
 	return null
 
 
+# The window events, Close Button and Draw Resize, are Other and Draw events
+# the runner performs for every instance (_GameMaker.js:
+# g_pInstanceManager.PerformEvent(EVENT_DRAW_RESIZE, 0)), and an instance
+# whose object has no handler runs its nearest ancestor's (yyInstance.js
+# PerformEvent walks pParent). So the runtime calls the generated handler
+# method, which resolves to the nearest one, once per instance: no script
+# wires them in _ready or _notification, where an ancestor's handler would run
+# too, or not at all when the object overrides Create or has none.
+static var _gml_window_resize_attached = false
+
+
+# Called once for each instance as it is registered.
+static func _gml_window_events_register_instance(instance):
+	if instance.has_method(&"_on_close_button"):
+		# With a Close Button event around, closing the window runs the event
+		# and the game goes on until it ends itself (game_end).
+		var tree = _gml_room_tree()
+		if tree != null:
+			tree.auto_accept_quit = false
+	if not _gml_window_resize_attached and instance.has_method(&"_on_resize"):
+		var tree = _gml_room_tree()
+		if tree != null:
+			_gml_window_resize_attached = true
+			tree.root.size_changed.connect(gml_window_resize_event)
+
+
+static func gml_window_resize_event():
+	gml_event_scheduler_dispatch_phase("resize", &"_on_resize")
+	return null
+
+
+# The window's close request: the Close Button event runs for every instance
+# that has it; the game ends here only when none keeps it open.
+static func gml_game_window_close_request():
+	gml_event_scheduler_dispatch_phase("close_button", &"_on_close_button")
+	var tree = _gml_room_tree()
+	if tree == null or tree.auto_accept_quit:
+		gml_game_window_close()
+	return null
+
+
 static func gml_room_exists(room_asset):
 	return _gml_room_entry(room_asset) != null
 

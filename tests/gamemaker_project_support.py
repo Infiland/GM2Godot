@@ -29,10 +29,12 @@ _EVENT_FILE_PREFIXES = {
     1: "Destroy",
     2: "Alarm",
     3: "Step",
+    5: "Keyboard",
     6: "Mouse",
     7: "Other",
     8: "Draw",
     9: "KeyPress",
+    10: "KeyRelease",
     12: "CleanUp",
 }
 EVENT_CREATE = (0, 0)

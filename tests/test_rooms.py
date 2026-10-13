@@ -2143,6 +2143,88 @@ class TestRoomConverter(unittest.TestCase):
         )
         self.assertNotIn("gml_instance_noone()", script)
 
+    def _write_macro_config_script(self) -> None:
+        """A project script that declares the macros and enum the tests below use."""
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "scr_config", "scr_config.yy"),
+            json.dumps({"%Name": "scr_config", "name": "scr_config", "resourceType": "GMScript"}),
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "scripts", "scr_config", "scr_config.gml"),
+            "#macro SPAWN_X 128\n"
+            "#macro Android:SPAWN_Y 48\n"
+            "#macro SPAWN_Y 96\n"
+            "#macro DOUBLE_X (SPAWN_X * 2)\n"
+            "enum Mood { calm, angry = 5, afraid }\n",
+        )
+
+    def test_room_and_instance_creation_code_expand_project_macros_and_enums(self):
+        self._write_yyp(
+            ["r_macro"],
+            extra_resources=[("objects", "o_player"), ("scripts", "scr_config")],
+        )
+        self._write_macro_config_script()
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_macro", "RoomCreationCode.gml"),
+            "room_macro = SPAWN_X + Mood.afraid;\nroom_double = DOUBLE_X;\n",
+        )
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_macro", "InstanceCreationCode_inst_player.gml"),
+            "x = SPAWN_X;\ny = SPAWN_Y;\nmood = Mood.angry;\n",
+        )
+        self._write_room(
+            "r_macro",
+            creation_code_file="RoomCreationCode.gml",
+            layers=[
+                {
+                    "%Name": "Instances",
+                    "resourceType": "GMRInstanceLayer",
+                    "instances": [
+                        {
+                            "name": "inst_player",
+                            "objectId": {"name": "o_player"},
+                            "hasCreationCode": True,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        self._make_converter().convert_all()
+        script = self._read_room_script("r_macro")
+
+        # Macros and enum members are project constants in room creation code
+        # and instance creation code, not instance-variable reads.
+        self.assertIn('"room_macro", GMRuntime.gml_add(128, 6))', script)
+        self.assertIn('"room_double", (GMRuntime.gml_mul(128, 2)))', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "x", 128)', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "y", 96)', script)
+        self.assertIn('GMRuntime.gml_variable_instance_set(_gm_instance, "mood", 5)', script)
+        self.assertNotIn("SPAWN_X", script)
+        self.assertNotIn("Mood", script)
+
+    def test_room_creation_code_macros_follow_the_selected_configuration(self):
+        self._write_yyp(["r_cfg"], extra_resources=[("scripts", "scr_config")])
+        self._write_macro_config_script()
+        _write_file(
+            os.path.join(self.gm_dir, "rooms", "r_cfg", "RoomCreationCode.gml"),
+            "room_y = SPAWN_Y;\n",
+        )
+        self._write_room("r_cfg", creation_code_file="RoomCreationCode.gml")
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            max_workers=1,
+            macro_configuration="Android",
+        )
+
+        converter.convert_all()
+
+        self.assertIn('"room_y", 48)', self._read_room_script("r_cfg"))
+
     def test_room_node_holds_placed_instances_until_the_room_starts(self):
         script = render_room_runtime_script()
 

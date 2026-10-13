@@ -63,7 +63,7 @@ _SMOKE_PRELUDE = textwrap.dedent(
 )
 
 
-def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> None:
+def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> str:
     godot_binary = _find_godot_binary()
     if godot_binary is None:
         test.skipTest("Godot binary not available")
@@ -79,6 +79,7 @@ def _run_runtime_checks(test: unittest.TestCase, body: str, marker: str) -> None
     test.assertEqual(result.returncode, 0, result.stdout)
     test.assertIn(marker, result.stdout)
     test.assertNotIn("SCRIPT ERROR", result.stdout)
+    return result.stdout
 
 
 class TestGMLValueSemanticsGodot(unittest.TestCase):
@@ -148,6 +149,40 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             """,
             "GML_DIVISION_OK",
         )
+
+    def test_modulo_by_zero_raises_like_the_runner(self) -> None:
+        # The runner's yyfmod raises "unable to mod with zero" when the
+        # divisor is zero once it is a real (0, 0.0, -0.0, false, int64(0)),
+        # even for a real dividend; only two int64 values go through Long.mod,
+        # which fails in its own division. A NaN divisor is no zero: the
+        # result is NaN.
+        output = _run_runtime_checks(
+            self,
+            """\
+            _expect("5.5 mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, 0)), true)
+            _expect("5 mod 0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, 0.0)), true)
+            _expect("5.5 mod -0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, -0.0)), true)
+            _expect("5 mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, 0)), true)
+            _expect("5 mod false is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5, false)), true)
+            _expect("true mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(true, 0)), true)
+            _expect("5.5 mod int64(0) is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(5.5, GMRuntime.gml_int64(0))), true)
+            _expect("int64(5) mod 0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0)), true)
+            _expect("int64(5) mod 0.0 is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0.0)), true)
+            _expect("int64(5) mod int64(0) is an error", GMRuntime.is_undefined(GMRuntime.gml_mod(GMRuntime.gml_int64(5), GMRuntime.gml_int64(0))), true)
+            var counter = 7.5
+            counter = GMRuntime.gml_mod(counter, 0)
+            _expect("counter %= 0 is an error", GMRuntime.is_undefined(counter), true)
+            _expect("5 mod NaN", GMRuntime.gml_mod(5, NAN), NAN)
+            _expect("5 mod inf", GMRuntime.gml_mod(5, INF), 5.0)
+            _expect("5.5 mod 2", GMRuntime.gml_mod(5.5, 2), 1.5)
+            _expect("-5.5 mod 2", GMRuntime.gml_mod(-5.5, 2), -1.5)
+            _expect("5 mod 0.5", GMRuntime.gml_mod(5, 0.5), 0.0)
+            _expect("int64(5) mod 0.5", GMRuntime.gml_mod(GMRuntime.gml_int64(5), 0.5), 0.0)
+            """,
+            "GML_MOD_ZERO_OK",
+        )
+        self.assertEqual(output.count("GML runtime error: unable to mod with zero"), 10, output)
+        self.assertEqual(output.count("GML runtime error: GML int64 modulo by zero"), 1, output)
 
     def test_comparisons_use_gamemaker_epsilon(self) -> None:
         _run_runtime_checks(

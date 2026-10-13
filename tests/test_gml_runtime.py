@@ -2511,7 +2511,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return sqrt(real_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _is_arithmetic_real_operand(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_real(left) + _to_real(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return fmod(_to_real(left), _to_real(right))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return fmod(_to_real(left), right_real)", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_repeat_count_preserves_gml_rounding(self):
@@ -3292,7 +3292,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return int(left / right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) % right_int", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int32 division by zero")', GML_RUNTIME_SCRIPT)
-        self.assertIn('return gml_error("GML int32 modulo by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_error(GML_MOD_BY_ZERO_MESSAGE)", GML_RUNTIME_SCRIPT)
+        self.assertIn('const GML_MOD_BY_ZERO_MESSAGE = "unable to mod with zero"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)

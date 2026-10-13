@@ -178,7 +178,10 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
             "46_motion_helpers.gd",
             "47_paths_motion_planning.gd",
         ),
-        tests=("tests/test_motion_planning_steps_godot.py",),
+        tests=(
+            "tests/test_motion_planning_steps_godot.py",
+            "tests/test_move_and_collide_tilemaps_godot.py",
+        ),
     ),
     _segment(
         "48_drawing_basic_forms.gd",

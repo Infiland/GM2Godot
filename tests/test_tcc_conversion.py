@@ -94,17 +94,20 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # The 39 source conversion gaps remain. The asset-registry
-                # step now also skips its 5 object rows whose required
-                # generated outputs are absent, plus the authored sequence whose
+                # No script, object event or room creation code fails to
+                # transpile: a call to an unsupported function or an unmapped
+                # extension function (Steam, Google Play Services) converts,
+                # with only that call failing at run time. The asset-registry
+                # step skips its 5 object rows whose required generated
+                # outputs are absent, plus the authored sequence whose
                 # embedded animation curve is intentionally diagnosed by #707.
                 # Rooms whose creation-code sidecars are missing convert as
                 # empty code, as GameMaker runs them. Eleven shaders fail
                 # closed for custom vertex data, reserved Godot globals, or
                 # unsupported scalar matrix constructors and are omitted once
                 # more from the registry.
-                completed=5319,
-                skipped=56,
+                completed=5359,
+                skipped=16,
                 failed=11,
             ),
         )
@@ -291,12 +294,12 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 37)
-        self.assertEqual(len(script_transpile_diagnostics), 34)
-        self.assertEqual(len(script_transpile_resources), 34)
-        self.assertEqual(len(object_transpile_diagnostics), 3)
-        self.assertEqual(len(object_transpile_resources), 3)
-        self.assertEqual(len(room_transpile_diagnostics), 0)
+        self.assertEqual(all_transpile_diagnostics, [])
+        self.assertEqual(script_transpile_diagnostics, [])
+        self.assertEqual(script_transpile_resources, set())
+        self.assertEqual(object_transpile_diagnostics, [])
+        self.assertEqual(object_transpile_resources, set())
+        self.assertEqual(room_transpile_diagnostics, [])
         self.assertEqual(room_transpile_resources, set())
 
         # Calls the converted game cannot make fail on their own: every one
@@ -307,7 +310,7 @@ class TestTCCConversion(unittest.TestCase):
             for diagnostic in diagnostic_entries
             if diagnostic.get("code") == "GM2GD-GML-UNSUPPORTED-CALL"
         ]
-        self.assertEqual(len(unsupported_calls), 56)
+        self.assertEqual(len(unsupported_calls), 70)
         self.assertEqual(
             {
                 str(diagnostic.get("api", ""))

@@ -26,6 +26,7 @@ PUBLIC_NAMES = (
     "RIGHT_ASSOCIATIVE",
     "GDSCRIPT_RESERVED_IDENTIFIERS",
     "GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS",
+    "GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS",
     "GML_LITERAL_IDENTIFIERS",
     "GML_BUILTIN_CONSTANT_IDENTIFIERS",
     "DIRECT_MEMBER_TARGETS",
@@ -100,6 +101,7 @@ FROZEN_SET_NAMES = (
     "RIGHT_ASSOCIATIVE",
     "GDSCRIPT_RESERVED_IDENTIFIERS",
     "GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS",
+    "GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS",
     "GML_LITERAL_IDENTIFIERS",
     "GML_BUILTIN_CONSTANT_IDENTIFIERS",
     "DIRECT_MEMBER_TARGETS",
@@ -123,7 +125,7 @@ class GmlLanguageMetadataTests(unittest.TestCase):
     def test_exact_public_surface(self) -> None:
         contract = runtime_phase_contract(CONSTANTS_OWNER)
         self.assertEqual(contract.exports, PUBLIC_NAMES)
-        self.assertEqual(len(contract.exports), 66)
+        self.assertEqual(len(contract.exports), 67)
         self.assertTrue(all(not name.startswith("_") for name in contract.exports))
 
     def test_runtime_phase_contract_is_bounded_and_read_only(self) -> None:

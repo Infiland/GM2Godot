@@ -30,11 +30,12 @@ def _write_json(path: Path, data: dict[str, object]) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def _write_script(gm_dir: Path, name: str, source: str) -> None:
+def _write_script(gm_dir: Path, name: str, source: str, *, compatibility: bool = False) -> None:
     _write_json(
         gm_dir / "scripts" / name / f"{name}.yy",
         {
             "%Name": name,
+            "isCompatibility": compatibility,
             "name": name,
             "parent": {"name": "Scripts", "path": "folders/Scripts.yy"},
             "resourceType": "GMScript",
@@ -112,8 +113,9 @@ class TestGlobalPragmaGodot(unittest.TestCase):
                 "scr_legacy",
                 "gml_pragma(\"global\", @'global.legacy = 3; global.trace += \"L\";');\n"
                 "return argument0 + 1;\n",
+                compatibility=True,
             )
-            _write_script(gm_dir, "scr_unity", 'gml_pragma("UnityBuild", "true");\nreturn 0;\n')
+            _write_script(gm_dir, "scr_unity", 'gml_pragma("UnityBuild", "true");\nreturn 0;\n', compatibility=True)
 
             write_fixture_text(godot_dir / "project.godot", "[application]\n")
             write_gml_runtime(str(godot_dir))

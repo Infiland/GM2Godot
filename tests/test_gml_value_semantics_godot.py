@@ -184,6 +184,44 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
         self.assertEqual(output.count("GML runtime error: unable to mod with zero"), 10, output)
         self.assertEqual(output.count("GML runtime error: GML int64 modulo by zero"), 1, output)
 
+    def test_int64_conversion_saturates_like_the_runner(self) -> None:
+        # The runner makes an int64 of a real with Long.fromNumber: NaN is 0,
+        # a real of 2^63 or more (and infinity) the largest int64, one of
+        # -2^63 or less (and -infinity) the smallest, any other is truncated.
+        # A bare int() gives INT64_MIN for all of the first four on x86.
+        # Comparisons below are exact: the checker's tolerance would read the
+        # largest int64 and the largest real below 2^63 as the same number.
+        _run_runtime_checks(
+            self,
+            """\
+            var int64_max = 9223372036854775807
+            var int64_min = -9223372036854775807 - 1
+            _expect("int64(NaN)", GMRuntime.gml_int64(NAN).value == 0, true)
+            _expect("int64(1e19)", GMRuntime.gml_int64(1e19).value == int64_max, true)
+            _expect("int64(2^63)", GMRuntime.gml_int64(9223372036854775808.0).value == int64_max, true)
+            _expect("int64(inf)", GMRuntime.gml_int64(INF).value == int64_max, true)
+            _expect("int64(-inf)", GMRuntime.gml_int64(-INF).value == int64_min, true)
+            _expect("int64(-1e19)", GMRuntime.gml_int64(-1e19).value == int64_min, true)
+            _expect("int64(-2^63)", GMRuntime.gml_int64(-9223372036854775808.0).value == int64_min, true)
+            _expect("int64(2^63 - 1024)", GMRuntime.gml_int64(9223372036854774784.0).value == 9223372036854774784, true)
+            _expect("int64(3.9)", GMRuntime.gml_int64(3.9).value == 3, true)
+            _expect("int64(-3.9)", GMRuntime.gml_int64(-3.9).value == -3, true)
+            _expect("int64(12345678901)", GMRuntime.gml_int64(12345678901).value == 12345678901, true)
+            _expect("int64('1e20')", GMRuntime.gml_int64("1e20").value == int64_max, true)
+            _expect("int64('-1e20')", GMRuntime.gml_int64("-1e20").value == int64_min, true)
+            _expect("1e19 & 255", GMRuntime.gml_bit_and(1e19, 255).value == 255, true)
+            _expect("NaN | 5", GMRuntime.gml_bit_or(NAN, 5).value == 5, true)
+            _expect("-inf >> 62", GMRuntime.gml_shift_right(-INF, 62).value == -2, true)
+            var smallest = GMRuntime.gml_shift_left(1, 63)
+            _expect("MIN div 1e20", GMRuntime.gml_int_div(smallest, 1e20).value == -1, true)
+            _expect("MIN div inf", GMRuntime.gml_int_div(smallest, INF).value == -1, true)
+            _expect("MIN div -inf", GMRuntime.gml_int_div(smallest, -INF).value == 1, true)
+            _expect("MIN div NaN is an error", GMRuntime.is_undefined(GMRuntime.gml_int_div(smallest, NAN)), true)
+            _expect("int64(5) div NaN is an error", GMRuntime.is_undefined(GMRuntime.gml_int_div(GMRuntime.gml_int64(5), NAN)), true)
+            """,
+            "GML_INT64_SATURATION_OK",
+        )
+
     def test_comparisons_use_gamemaker_epsilon(self) -> None:
         _run_runtime_checks(
             self,

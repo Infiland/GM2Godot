@@ -45,6 +45,20 @@ trace("int64(5) mod 0", int64(5) mod 0);
 trace("5 mod 0", 5 mod 0);
 trace("5.5 mod 2", 5.5 mod 2);
 trace("-5 mod 3", -5 mod 3);
+// An int64 is made of a real as Long.fromNumber does: NaN is 0 and a real
+// beyond the int64 range saturates.
+var huge = power(10, 19);
+trace("int64(1e19)", int64(huge));
+trace("int64(-1e19)", int64(-huge));
+trace("int64(infinity)", int64(infinity));
+trace("int64(-infinity)", int64(-infinity));
+trace("int64(NaN)", int64(NaN));
+trace("int64(-3.9)", int64(-3.9));
+var smallest = 1 << 63;
+trace("(1 << 63) div 1e20", smallest div power(10, 20));
+trace("(1 << 63) div infinity", smallest div infinity);
+trace("(1 << 63) div NaN", smallest div NaN);
+trace("1e19 & 255", huge & 255);
 """
 
 _EXPECTED_TRACE = [
@@ -56,6 +70,16 @@ _EXPECTED_TRACE = [
     "5 mod 0:error",
     "5.5 mod 2:1.50",
     "-5 mod 3:-2",
+    "int64(1e19):9223372036854775807",
+    "int64(-1e19):-9223372036854775808",
+    "int64(infinity):9223372036854775807",
+    "int64(-infinity):-9223372036854775808",
+    "int64(NaN):0",
+    "int64(-3.9):-3",
+    "(1 << 63) div 1e20:-1",
+    "(1 << 63) div infinity:-1",
+    "(1 << 63) div NaN:error",
+    "1e19 & 255:255",
 ]
 
 _PROJECT = GameMakerProject(
@@ -108,6 +132,7 @@ class TestNumberEdgeCasesGodot(unittest.TestCase):
         self.assertEqual(len(trace_lines), 1, output)
         self.assertEqual(json.loads(trace_lines[0].removeprefix("NUMBER_EDGES_TRACE ")), _EXPECTED_TRACE)
         self.assertEqual(output.count("GML runtime error: unable to mod with zero"), 6, output)
+        self.assertEqual(output.count("GML runtime error: GML int64 division by zero"), 1, output)
 
 
 if __name__ == "__main__":

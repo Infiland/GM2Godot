@@ -56,6 +56,7 @@ static func gml_int_div(left, right):
 
 
 const GML_INT64_MIN = -9223372036854775807 - 1
+const GML_INT64_MAX = 9223372036854775807
 
 
 # An int64 quotient as the runner's Long.div gives it: the most negative

@@ -2418,7 +2418,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if text.to_lower().is_valid_hex_number(true):", GML_RUNTIME_SCRIPT)
         self.assertIn("return float(_gml_hex_string_to_int(text))", GML_RUNTIME_SCRIPT)
         self.assertIn("if text.is_valid_float():\n\t\treturn text.to_float()", GML_RUNTIME_SCRIPT)
-        self.assertIn("if text.is_valid_float():\n\t\treturn int(text.to_float())", GML_RUNTIME_SCRIPT)
+        self.assertIn("if text.is_valid_float():\n\t\treturn GMLInt64.saturate(text.to_float())", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML real conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 conversion does not support string " + text)', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_hex_string_to_int(value):", GML_RUNTIME_SCRIPT)

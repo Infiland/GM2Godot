@@ -601,23 +601,24 @@ static func gml_device_mouse_y_to_gui(device):
 
 # GameMaker's device_mouse_check_button, _pressed and _released
 # (Function_YoYo.js): device 0 is the mouse; the others are touches, which
-# the runtime does not track, so they report 0 as on a device without touch.
+# the runtime does not track, so they report false (the runner's 0) as on a
+# device without touch, a Boolean like device 0's answer.
 static func gml_device_mouse_check_button(device, button):
 	if int(_to_real(device)) == 0:
 		return gml_mouse_check_button(button)
-	return 0
+	return false
 
 
 static func gml_device_mouse_check_button_pressed(device, button):
 	if int(_to_real(device)) == 0:
 		return gml_mouse_check_button_pressed(button)
-	return 0
+	return false
 
 
 static func gml_device_mouse_check_button_released(device, button):
 	if int(_to_real(device)) == 0:
 		return gml_mouse_check_button_released(button)
-	return 0
+	return false
 
 
 # GameMaker's mouse_wheel_up and mouse_wheel_down (Function_IO.js): whether

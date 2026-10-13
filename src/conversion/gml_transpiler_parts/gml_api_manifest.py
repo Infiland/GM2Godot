@@ -4719,7 +4719,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button.htm",
-        "Device 0 reads the mouse as mouse_check_button does; touch devices are not tracked and report 0, as on a device without touch.",
+        "Device 0 reads the mouse as mouse_check_button does; touch devices are not tracked and report false, as on a device without touch.",
     ),
     _entry(
         "device_mouse_check_button_pressed",
@@ -4731,7 +4731,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button_pressed.htm",
-        "Device 0 reads the mouse as mouse_check_button_pressed does; touch devices are not tracked and report 0.",
+        "Device 0 reads the mouse as mouse_check_button_pressed does; touch devices are not tracked and report false.",
     ),
     _entry(
         "device_mouse_check_button_released",
@@ -4743,7 +4743,7 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "yes",
         "GameMaker_Language/GML_Reference/Game_Input/Device_Input/device_mouse_check_button_released.htm",
-        "Device 0 reads the mouse as mouse_check_button_released does; touch devices are not tracked and report 0.",
+        "Device 0 reads the mouse as mouse_check_button_released does; touch devices are not tracked and report false.",
     ),
     _entry(
         "mouse_wheel_up",

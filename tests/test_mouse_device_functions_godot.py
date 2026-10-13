@@ -2,7 +2,8 @@
 
 As in the HTML5 runner: device_mouse_check_button, _pressed and _released
 (functions/Function_YoYo.js) read the mouse for device 0 and touches for the
-other devices, which report 0 when there is no touch; mouse_wheel_up and
+other devices, which report false when there is no touch (the manual's
+Boolean; the runner's 0 equals false); mouse_wheel_up and
 mouse_wheel_down (functions/Function_IO.js) say whether the wheel turned that
 way since the previous step.
 """
@@ -40,6 +41,15 @@ _RELEASED = (
     "device_mouse_check_button_released(2, mb_left)",
 )
 _WHEEL = ("mouse_wheel_up()", "mouse_wheel_down()")
+_TYPES = tuple(
+    f"typeof({function}({device}, mb_left))"
+    for function in (
+        "device_mouse_check_button",
+        "device_mouse_check_button_pressed",
+        "device_mouse_check_button_released",
+    )
+    for device in (0, 1)
+)
 
 _PROBE = f"""extends Node
 
@@ -64,6 +74,7 @@ func _ready():
 	results.append([{", ".join(_gml(expression) for expression in _WHEEL)}])
 	GMRuntime.gml_input_set_mouse_wheel(false, true)
 	results.append([{", ".join(_gml(expression) for expression in _WHEEL)}])
+	results.append([{", ".join(_gml(expression) for expression in _TYPES)}])
 	print({json.dumps(_RESULT_PREFIX)} + JSON.stringify(results))
 	get_tree().quit(0)
 """
@@ -104,11 +115,12 @@ class TestMouseDeviceFunctionsGodot(unittest.TestCase):
         self.assertEqual(
             json.loads(lines[0].removeprefix(_RESULT_PREFIX)),
             [
-                [True, True, False, 0, 0, True],
-                [False, True, 0],
+                [True, True, False, False, False, True],
+                [False, True, False],
                 [True, False],
                 [False, False],
                 [False, True],
+                ["bool"] * 6,
             ],
         )
 

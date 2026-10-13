@@ -451,6 +451,7 @@ static func _gml_collision_perform_event(inst, other_inst, other_chain, frame):
 		inst.call(method_name)
 		if has_other and _gml_collision_instance_valid(inst):
 			inst.set("other", previous_other)
+		_gml_instance_change_flush()
 		return 1
 	return 0
 

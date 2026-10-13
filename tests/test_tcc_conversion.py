@@ -94,17 +94,20 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # The 39 source conversion gaps remain. The asset-registry
-                # step now also skips its 5 object rows whose required
-                # generated outputs are absent, plus the authored sequence whose
+                # No script, object event or room creation code fails to
+                # transpile: a call to an unsupported function or an unmapped
+                # extension function (Steam, Google Play Services) converts,
+                # with only that call failing at run time. The asset-registry
+                # step skips its 5 object rows whose required generated
+                # outputs are absent, plus the authored sequence whose
                 # embedded animation curve is intentionally diagnosed by #707.
                 # Rooms whose creation-code sidecars are missing convert as
                 # empty code, as GameMaker runs them. Eleven shaders fail
                 # closed for custom vertex data, reserved Godot globals, or
                 # unsupported scalar matrix constructors and are omitted once
                 # more from the registry.
-                completed=5319,
-                skipped=56,
+                completed=5359,
+                skipped=16,
                 failed=11,
             ),
         )
@@ -291,13 +294,43 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 37)
-        self.assertEqual(len(script_transpile_diagnostics), 34)
-        self.assertEqual(len(script_transpile_resources), 34)
-        self.assertEqual(len(object_transpile_diagnostics), 3)
-        self.assertEqual(len(object_transpile_resources), 3)
-        self.assertEqual(len(room_transpile_diagnostics), 0)
+        self.assertEqual(all_transpile_diagnostics, [])
+        self.assertEqual(script_transpile_diagnostics, [])
+        self.assertEqual(script_transpile_resources, set())
+        self.assertEqual(object_transpile_diagnostics, [])
+        self.assertEqual(object_transpile_resources, set())
+        self.assertEqual(room_transpile_diagnostics, [])
         self.assertEqual(room_transpile_resources, set())
+
+        # Calls the converted game cannot make fail on their own: every one
+        # is an extension function the project does not map, or
+        # show_message_async.
+        unsupported_calls = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-UNSUPPORTED-CALL"
+        ]
+        self.assertEqual(len(unsupported_calls), 70)
+        self.assertEqual(
+            {
+                str(diagnostic.get("api", ""))
+                for diagnostic in unsupported_calls
+                if not str(diagnostic.get("api", "")).startswith(("steam_", "GooglePlayServices_"))
+            },
+            {"show_message_async"},
+        )
+        # instance_change in a Create, Step, Alarm, collision or input event, or in
+        # an instance's creation code, runs the rest of the code on the new
+        # object, as GameMaker does: the o_box* Mouse events, the o_spike Create
+        # event, the o_torch collision event and the r_lvl50 creation code all
+        # convert so, and none of the project's code after an instance_change
+        # waits for the object to change.
+        deferred_instance_changes = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        ]
+        self.assertEqual(deferred_instance_changes, [])
 
         object_event_source_missing = [
             (

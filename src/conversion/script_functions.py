@@ -511,6 +511,24 @@ def _declarations_and_global_initialization(
     )
 
 
+def _global_initialization_only(candidate: str, source: str) -> ModernScriptStructure | None:
+    """A script with no functions, whose code is all global initialization.
+
+    GameMaker 2.3+ runs the code of a script asset that is not a compatibility
+    script once, before the first room starts, whether or not the script
+    declares functions; only a compatibility script (saved with
+    "isCompatibility": true, a pre-2.3 script) is a body that runs when it is
+    called.
+    """
+    scan = _TopLevelScan(source, candidate)
+    if not scan.run() or scan.declarations:
+        return None
+    statements = _initialization_statements("".join(scan.initialization))
+    if not statements:
+        return None
+    return ModernScriptStructure(declarations=(), top_level_statements=statements)
+
+
 def _starts_statement(previous: str, previous_word: str, after_line_break: bool) -> bool:
     """Whether a statement can start after the code that ends in ``previous``."""
     if not previous or previous in ";}":
@@ -528,7 +546,14 @@ def modern_script_structure(
     source: str,
     *,
     macro_configuration: str | None = None,
+    legacy_callable: bool = True,
 ) -> ModernScriptStructure | None:
+    """The functions and global initialization of a script, if it has either.
+
+    A script that declares no function is a legacy callable (None) unless
+    ``legacy_callable`` is False, as it is for a script that is not saved as a
+    compatibility script: its code is then the global initialization.
+    """
     preprocessed = preprocess_gml_source_preserving_layout(
         source,
         macro_configuration=macro_configuration,
@@ -539,7 +564,10 @@ def modern_script_structure(
     structure = _declarations_and_constructor_initializers(source, candidate)
     if structure is not None:
         return structure
-    return _declarations_and_global_initialization(source, candidate)
+    structure = _declarations_and_global_initialization(source, candidate)
+    if structure is not None or legacy_callable:
+        return structure
+    return _global_initialization_only(candidate, source)
 
 
 def _declarations_and_constructor_initializers(

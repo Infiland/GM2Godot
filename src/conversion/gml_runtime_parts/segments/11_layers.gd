@@ -64,6 +64,29 @@ static func gml_layer_get_depth(layer):
 	return _gml_layer_handle_depth(handle)
 
 
+# layer_force_draw_depth (Function_Layers.js) makes every layer draw at one z
+# depth, for legacy projects whose layer depths lie outside the z range
+# (-16000 to 16000) of GameMaker's 2D camera. The order layers draw in stays
+# the same. The runtime draws layers in depth order with no depth buffer and
+# no z range, so only the setting itself needs keeping.
+static var _gml_layer_draw_depth_forced = false
+static var _gml_layer_forced_draw_depth = 0
+
+
+static func gml_layer_force_draw_depth(force, depth):
+	_gml_layer_draw_depth_forced = gml_bool(force)
+	_gml_layer_forced_draw_depth = int(_to_real(depth))
+	return gml_undefined()
+
+
+static func gml_layer_is_draw_depth_forced():
+	return _gml_layer_draw_depth_forced
+
+
+static func gml_layer_get_forced_depth():
+	return _gml_layer_forced_draw_depth
+
+
 static func gml_layer_get_x(layer):
 	var node = _gml_layer_resolve_node(layer)
 	if node == null:

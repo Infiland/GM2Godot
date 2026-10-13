@@ -46,6 +46,9 @@ static var _gml_step_activation_mark = 0
 # worked out on the method's first dispatch and kept up to date as the list
 # changes.
 static var _gml_step_method_positions = {}
+# Counts the changes instance_change made to those lists (_gml_step_dispatch_method
+# looks at them again when it differs from the count it started with).
+static var _gml_step_positions_version = 0
 # Counts the times the list was built afresh; an entry's step_order only
 # counts for the build it was taken in by (its step_list).
 static var _gml_step_list_serial = 0
@@ -425,10 +428,14 @@ static func _gml_step_dispatch_method(phase, method_name, frame):
 	var positions = _gml_step_method_positions.get(method_name)
 	if positions == null:
 		positions = _gml_step_find_method_positions(method_name)
-	for k in range(positions.size()):
+	var version = _gml_step_positions_version
+	var k = 0
+	while k < positions.size():
 		if _gml_room_requested_change != null:
 			break
-		var entry = _gml_step_entries[positions[k]]
+		var position = positions[k]
+		k += 1
+		var entry = _gml_step_entries[position]
 		if bool(entry["destroyed"]) or entry["deactivated"]:
 			continue
 		var inst = entry["instance"]
@@ -437,6 +444,17 @@ static func _gml_step_dispatch_method(phase, method_name, frame):
 		if _gml_event_scheduler_tracing:
 			_gml_event_scheduler_record_phase(phase, method_name, inst, frame)
 		inst.call(method_name)
+		_gml_instance_change_flush()
+		if version != _gml_step_positions_version:
+			# An instance_change gave an instance the events of another
+			# object: go on after this instance in the list as it is now,
+			# so an instance that has the method since runs it in this
+			# phase and one that lost it does not.
+			version = _gml_step_positions_version
+			positions = _gml_step_method_positions.get(method_name)
+			if positions == null:
+				positions = _gml_step_find_method_positions(method_name)
+			k = positions.bsearch(position + 1)
 	return null
 
 

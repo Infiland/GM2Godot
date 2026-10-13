@@ -61,6 +61,8 @@ def _write_gm_project(gm_dir: Path) -> None:
             gm_dir / "scripts" / script_name / f"{script_name}.yy",
             {
                 "%Name": script_name,
+                # scr_add is a pre-2.3 script whose code is a callable body.
+                "isCompatibility": script_name == "scr_add",
                 "name": script_name,
                 "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
                 "resourceType": "GMScript",
@@ -187,9 +189,9 @@ class TestScriptRuntimeGodotSmoke(unittest.TestCase):
             \tvar constructor = GMRuntime.gml_script_get_callable(constructor_id)
             \tif not _check(GMRuntime.is_method(constructor) and constructor.is_constructor, "constructor script did not register as a constructor"):
             \t\treturn
-            \tvar operate = GMRuntime.gml_selector_get(constructor_id, "operate")
             \tvar invert = GMRuntime.gml_selector_get(constructor, "invert")
-            \tif not _check(GMRuntime.gml_call_value(operate, [2, 3]) == 1, "constructor static sibling call failed"):
+            \t# A static method called through its constructor runs with the static struct as self, where its bare call to a sibling static is found.
+            \tif not _check(GMRuntime.gml_call_member(constructor_id, "operate", [2, 3]) == 1, "constructor static sibling call failed"):
             \t\treturn
             \tif not _check(GMRuntime.gml_call_value(invert, [4]) == -4, "constructor static invert failed"):
             \t\treturn

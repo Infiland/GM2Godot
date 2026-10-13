@@ -50,6 +50,14 @@ static func _gml_array_grow(array_value, size):
 		array_value[index] = 0
 
 
+# GameMaker's array_set (yyVariable.js): array[index] = value. It returns
+# undefined, and a value that is not an array is left alone.
+static func gml_array_set_function(array_value, index, value):
+	if typeof(array_value) == TYPE_ARRAY:
+		gml_array_set(array_value, index, value)
+	return gml_undefined()
+
+
 static func gml_array_push(array_value, values):
 	if GML_ARRAY_COPY_ON_WRITE_ENABLED:
 		return gml_error(GML_ARRAY_COPY_ON_WRITE_DIAGNOSTIC)
@@ -565,9 +573,10 @@ static func gml_struct_get(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		if struct_value.has(key):
 			return struct_value[key]
-		if _gml_static_structs.is_empty():
+		var static_struct = struct_value.get(GML_STATIC_LINK_KEY)
+		if static_struct == null:
 			return gml_undefined()
-		var static_owner = _gml_static_chain_owner(struct_value, key)
+		var static_owner = _gml_static_chain_owner(static_struct, key)
 		return gml_undefined() if static_owner == null else static_owner[key]
 	if typeof(struct_value) == TYPE_OBJECT:
 		if struct_value is GMLHandle and struct_value.kind == GML_INSTANCE_HANDLE_KIND:
@@ -746,6 +755,11 @@ static func gml_call_member(target, member_name, args = [], caller_self = null, 
 		var receiver: Variant = _gml_selector_direct_target(target)
 		if receiver == null:
 			receiver = _gml_instance_object_first(target)
+		if receiver == null and (target is GMLMethod or _gml_script_entry(target) != null):
+			# Item.method(): a constructor or function names its static
+			# struct, and a static method called through it runs with that
+			# struct as self.
+			receiver = gml_static_get(target)
 		if receiver != null:
 			return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)
 	return gml_call_value(member, args, caller_self, caller_other)
@@ -841,10 +855,10 @@ static func gml_variable_global_set(member_name, value):
 static func gml_struct_exists(struct_value, member_name):
 	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.has(key) or (
-			not _gml_static_structs.is_empty()
-			and _gml_static_chain_owner(struct_value, key) != null
-		)
+		if struct_value.has(key):
+			return true
+		var static_struct = struct_value.get(GML_STATIC_LINK_KEY)
+		return static_struct != null and _gml_static_chain_owner(static_struct, key) != null
 	if _gml_is_instance_node(struct_value):
 		return _gml_instance_variable_exists(struct_value, key)
 	if _gml_selects_instances(struct_value):
@@ -918,9 +932,25 @@ static func gml_struct_remove(struct_value, member_name):
 	return gml_unsupported_type_error("GML mutable struct access", struct_value)
 
 
+# The names of a struct's variables: its keys but for the members the runtime
+# keeps in it (see GML_STATIC_LINK_KEY).
+static func _gml_struct_visible_keys(struct_value):
+	var names = struct_value.keys()
+	if struct_value.has(GML_STATIC_LINK_KEY):
+		names.erase(GML_STATIC_LINK_KEY)
+		for hidden_key in GML_STATIC_OTHER_HIDDEN_KEYS:
+			if struct_value.has(hidden_key):
+				names.erase(hidden_key)
+	return names
+
+
+static func _gml_static_is_hidden_key(key):
+	return key == GML_STATIC_LINK_KEY or GML_STATIC_OTHER_HIDDEN_KEYS.has(key)
+
+
 static func gml_struct_get_names(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.keys()
+		return _gml_struct_visible_keys(struct_value)
 	if _gml_is_instance_node(struct_value):
 		return _gml_instance_variable_names(struct_value)
 	if _gml_selects_instances(struct_value):
@@ -938,7 +968,13 @@ static func gml_struct_get_names(struct_value):
 
 static func gml_struct_names_count(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.size()
+		var count = struct_value.size()
+		if struct_value.has(GML_STATIC_LINK_KEY):
+			count -= 1
+			for hidden_key in GML_STATIC_OTHER_HIDDEN_KEYS:
+				if struct_value.has(hidden_key):
+					count -= 1
+		return count
 	if typeof(struct_value) == TYPE_OBJECT or _gml_selects_instances(struct_value):
 		return gml_struct_get_names(struct_value).size()
 	return 0

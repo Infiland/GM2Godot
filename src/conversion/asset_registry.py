@@ -3956,6 +3956,14 @@ class AssetRegistryConverter(BaseConverter):
                 )
             self._safe_log(message)
             return False
+        if self.diagnostics is not None:
+            self.diagnostics.add_unsupported_calls(
+                body,
+                source_path=gm_source_path,
+                resource=timeline_name,
+                resource_type="timeline",
+                event=f"moment {frame}",
+            )
 
         if not body.strip():
             body = "\tpass"

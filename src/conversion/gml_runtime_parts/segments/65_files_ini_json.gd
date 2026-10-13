@@ -1016,11 +1016,15 @@ static func _gml_json_compatible(value):
 		return arr
 	if value_type == TYPE_DICTIONARY:
 		var result = {}
-		for key in value.keys():
+		for key in _gml_struct_visible_keys(value):
 			result[gml_string(key)] = _gml_json_compatible(value[key])
 		return result
 	if value_type == TYPE_OBJECT:
 		return gml_string(value)
+	if value_type == TYPE_FLOAT and value == floor(value) and abs(value) < 9.0e18:
+		# JavaScript's JSON.stringify writes 7 for the real 7.0 (as for the
+		# int 7); Godot's would write 7.0.
+		return int(value)
 	return value
 
 

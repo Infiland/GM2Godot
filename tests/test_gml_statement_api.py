@@ -22,6 +22,7 @@ from typing import (
 
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
+    EventFunctionSplit,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
@@ -101,6 +102,10 @@ STATEMENT_REQUEST_FIELDS = (
     "static_scope_prefix",
     "extension_functions",
     "extension_function_mappings",
+    "event_functions",
+    "instance_change_continuations",
+    "inherited_event_continuation",
+    "instance_change_names",
 )
 STATEMENT_RESULT_FIELDS = (
     "lines",
@@ -110,6 +115,7 @@ STATEMENT_RESULT_FIELDS = (
     "enum_values",
     "enum_names",
     "macro_values",
+    "continued_instance_changes",
 )
 
 EXPECTED_MODEL_SIGNATURES = {
@@ -135,14 +141,19 @@ EXPECTED_MODEL_SIGNATURES = {
         "static_scope_prefix: 'str | None' = None, "
         "extension_functions: 'Mapping[str, GMLExtensionFunction] | None' = None, "
         "extension_function_mappings: "
-        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None) -> None"
+        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None, "
+        "event_functions: 'EventFunctionSplit | None' = None, "
+        "instance_change_continuations: 'bool' = False, "
+        "inherited_event_continuation: 'bool' = False, "
+        "instance_change_names: 'frozenset[str]' = frozenset()) -> None"
     ),
     GMLStatementResult: (
         "(lines: 'tuple[str, ...]', local_names: 'frozenset[str]', "
         "instance_variables: 'MutableSet[str] | None', scope_context: 'ScopeContext', "
         "enum_values: 'MutableMapping[str, dict[str, int]]', "
         "enum_names: 'frozenset[str]', "
-        "macro_values: 'MutableMapping[str, str]') -> None"
+        "macro_values: 'MutableMapping[str, str]', "
+        "continued_instance_changes: 'tuple[int, ...]' = ()) -> None"
     ),
 }
 
@@ -265,6 +276,10 @@ class GMLStatementAPITests(unittest.TestCase):
                 "extension_function_mappings": (
                     Mapping[str, GMLExtensionFunctionMapping] | None
                 ),
+                "event_functions": EventFunctionSplit | None,
+                "instance_change_continuations": bool,
+                "inherited_event_continuation": bool,
+                "instance_change_names": frozenset[str],
             },
             GMLStatementResult: {
                 "lines": tuple[str, ...],
@@ -274,6 +289,7 @@ class GMLStatementAPITests(unittest.TestCase):
                 "enum_values": MutableMapping[str, dict[str, int]],
                 "enum_names": frozenset[str],
                 "macro_values": MutableMapping[str, str],
+                "continued_instance_changes": tuple[int, ...],
             },
         }
 
@@ -499,7 +515,7 @@ class GMLStatementAPITests(unittest.TestCase):
     def test_statement_contract_remains_package_internal(self) -> None:
         facade_source = (PARTS_PATH.parent / "gml_transpiler.py").read_text(encoding="utf-8")
         facade_exports = literal_all_exports(facade_source)
-        self.assertEqual(len(facade_exports), 44)
+        self.assertEqual(len(facade_exports), 45)
         self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         package_internal_names = frozenset((*PUBLIC_NAMES, *MODEL_NAMES))
         self.assertTrue(package_internal_names.isdisjoint(facade_exports))

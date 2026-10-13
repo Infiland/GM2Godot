@@ -258,6 +258,12 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_time_alarms_godot.py",),
     ),
     _segment(
+        "56_dates.gd",
+        "Date functions, the local time zone's rules, and date_set_timezone.",
+        depends_on=("00_prelude.gd", "35_maths_numbers.gd"),
+        tests=("tests/test_dates_godot.py",),
+    ),
+    _segment(
         "56_object_variable_definitions.gd",
         "Object Variable Definitions and room instance overrides run before the Create event.",
         depends_on=(
@@ -402,6 +408,23 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
             "50_static_types_and_clone.gd",
         ),
         tests=("tests/test_instance_deactivation_godot.py",),
+    ),
+    _segment(
+        "76_instance_change.gd",
+        "instance_change: Destroy, Clean Up and Create events, the node's switch to the new object's script and "
+        "the rest of the calling event.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "45_collision_queries.gd",
+            "50_draw_pipeline.gd",
+            "53_game_input.gd",
+            "55_room_game_flow.gd",
+            "56_time_alarms.gd",
+            "70_handle_string_helpers.gd",
+            "74_game_step.gd",
+        ),
+        tests=("tests/test_instance_change_godot.py",),
     ),
     _segment(
         "80_static_hash_clone_error.gd",

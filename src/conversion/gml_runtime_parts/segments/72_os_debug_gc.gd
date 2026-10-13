@@ -159,6 +159,15 @@ static func gml_exception_unhandled_handler(user_handler):
 	return previous
 
 
+# A handler installed from a script's top-level code is a method bound to that
+# script's instance. Left to the static variable it is freed after the script
+# classes at exit, which corrupts the heap; release it with the other GML data.
+static func _gml_unhandled_exception_handler_shutdown():
+	if _gml_shutdown_is_method(_gml_unhandled_exception_handler):
+		_gml_shutdown_detach_methods([_gml_unhandled_exception_handler])
+	_gml_unhandled_exception_handler = null
+
+
 static func _gml_indexed_placeholder_value_index(index_text, value_count):
 	if index_text.is_empty():
 		return -1
@@ -330,3 +339,47 @@ static func _gml_os_version_code(version_text):
 	if gml_os_type() == GML_OS_WINDOWS:
 		return major * 65536 + minor
 	return major * 16777216 + minor * 4096
+
+
+# Compile-time and runner-debugging functions. Each does what the HTML5
+# runner does (Function_Debug.js, Function_Game.js): nothing, returning the
+# runner's value. gml_pragma is handled by the compiler; its "global" code is
+# hoisted into the script registry's initializers by the converter.
+static func gml_pragma(_args = []):
+	return gml_undefined()
+
+
+static func gml_show_debug_overlay(_enable, _minimised = null, _scale = null, _alpha = null, _gamepad_enable = null, _gamepad_index = null):
+	return gml_undefined()
+
+
+static func gml_is_debug_overlay_open():
+	return false
+
+
+static func gml_is_mouse_over_debug_overlay():
+	return false
+
+
+static func gml_is_keyboard_used_debug_overlay():
+	return false
+
+
+static func gml_debug_event(_event, _silent = false):
+	return gml_undefined()
+
+
+static func gml_scheduler_resolution_set(_milliseconds):
+	return gml_undefined()
+
+
+static func gml_scheduler_resolution_get():
+	return -1
+
+
+static func gml_os_powersave_enable(_flag):
+	return gml_undefined()
+
+
+static func gml_os_lock_orientation(_flag):
+	return gml_undefined()

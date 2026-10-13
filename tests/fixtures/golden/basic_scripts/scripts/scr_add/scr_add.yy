@@ -1,5 +1,6 @@
 {
   "%Name": "scr_add",
+  "isCompatibility": true,
   "name": "scr_add",
   "parent": {
     "name": "Game",

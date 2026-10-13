@@ -29,6 +29,7 @@ _EVENT_FILE_PREFIXES = {
     1: "Destroy",
     2: "Alarm",
     3: "Step",
+    4: "Collision",
     5: "Keyboard",
     6: "Mouse",
     7: "Other",
@@ -45,16 +46,24 @@ EVENT_GAME_START = (7, 2)
 EVENT_GAME_END = (7, 3)
 EVENT_ROOM_START = (7, 4)
 EVENT_ROOM_END = (7, 5)
+EVENT_DRAW = (8, 0)
 EVENT_CLEAN_UP = (12, 0)
+
+
+def collision_event(object_name: str) -> tuple[int, str]:
+    """The key of a Collision event with an object in GameMakerObject.events."""
+    return (4, object_name)
 
 
 @dataclass(frozen=True)
 class GameMakerObject:
     name: str
-    events: Mapping[tuple[int, int], str]
+    # (event type, number), or (4, object name) for a Collision event.
+    events: Mapping[tuple[int, int | str], str] | Mapping[tuple[int, int], str]
     persistent: bool = False
     parent: str | None = None
     sprite: str | None = None
+    visible: bool = True
     # Collision events: the other object's name -> GML source.
     collisions: Mapping[str, str] = field(default_factory=dict[str, str])
 
@@ -179,6 +188,9 @@ class GameMakerProject:
     objects: Sequence[GameMakerObject]
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
+    # Names of the scripts saved with "isCompatibility": true (pre-2.3 scripts,
+    # run only when called); every other script is a 2.3+ script.
+    compatibility_scripts: Sequence[str] = ()
     sprites: Sequence[GameMakerSprite] = ()
     sequences: Sequence[GameMakerSequence] = ()
 
@@ -195,8 +207,8 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
             {
                 "$GMEvent": "v1",
                 "%Name": "",
-                "collisionObjectId": None,
-                "eventNum": event_number,
+                "collisionObjectId": _asset_ref("objects", event_number) if isinstance(event_number, str) else None,
+                "eventNum": 0 if isinstance(event_number, str) else event_number,
                 "eventType": event_type,
                 "isDnD": False,
                 "name": "",
@@ -221,13 +233,9 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "resourceType": "GMObject",
         "resourceVersion": "2.0",
         "solid": False,
-        "spriteId": (
-            None
-            if game_object.sprite is None
-            else {"name": game_object.sprite, "path": f"sprites/{game_object.sprite}/{game_object.sprite}.yy"}
-        ),
+        "spriteId": _asset_ref("sprites", game_object.sprite),
         "spriteMaskId": None,
-        "visible": True,
+        "visible": game_object.visible,
     }
 
 
@@ -568,7 +576,7 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
             {
                 "$GMScript": "v1",
                 "%Name": script_name,
-                "isCompatibility": False,
+                "isCompatibility": script_name in project.compatibility_scripts,
                 "isDnD": False,
                 "name": script_name,
                 "parent": {"name": "Scripts", "path": "folders/Scripts.yy"},

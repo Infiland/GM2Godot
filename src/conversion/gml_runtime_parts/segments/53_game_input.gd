@@ -667,6 +667,38 @@ static func gml_device_mouse_y_to_gui(device):
 	return int(_gml_mouse_room_to_gui(_gml_input_mouse_position).y)
 
 
+# GameMaker's device_mouse_check_button, _pressed and _released
+# (Function_YoYo.js): device 0 is the mouse; the others are touches, which
+# the runtime does not track, so they report false (the runner's 0) as on a
+# device without touch, a Boolean like device 0's answer.
+static func gml_device_mouse_check_button(device, button):
+	if int(_to_real(device)) == 0:
+		return gml_mouse_check_button(button)
+	return false
+
+
+static func gml_device_mouse_check_button_pressed(device, button):
+	if int(_to_real(device)) == 0:
+		return gml_mouse_check_button_pressed(button)
+	return false
+
+
+static func gml_device_mouse_check_button_released(device, button):
+	if int(_to_real(device)) == 0:
+		return gml_mouse_check_button_released(button)
+	return false
+
+
+# GameMaker's mouse_wheel_up and mouse_wheel_down (Function_IO.js): whether
+# the wheel turned that way since the previous step.
+static func gml_mouse_wheel_up():
+	return _gml_input_mouse_wheel_up
+
+
+static func gml_mouse_wheel_down():
+	return _gml_input_mouse_wheel_down
+
+
 static func gml_gamepad_is_connected(device):
 	return Input.is_joy_known(int(_to_real(device)))
 
@@ -852,6 +884,7 @@ static func _gml_input_dispatch_binding(inst, binding, payload):
 		})
 	inst.call(method_name)
 	_gml_builtin_globals["event_data"] = previous_event_data
+	_gml_instance_change_flush()
 	return 1
 
 

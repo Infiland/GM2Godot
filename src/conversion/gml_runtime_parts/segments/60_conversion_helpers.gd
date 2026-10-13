@@ -65,13 +65,13 @@ static func _to_int64_value(value):
 
 static func _returns_int64_arithmetic_result(left, right):
 	return (
-		(is_int64(left) and (is_int64(right) or is_int32(right)))
-		or (is_int64(right) and is_int32(left))
+		(is_int64(left) and (is_int64(right) or _is_godot_int32(right)))
+		or (is_int64(right) and _is_godot_int32(left))
 	)
 
 
 static func _returns_int32_arithmetic_result(left, right):
-	return is_int32(left) and is_int32(right)
+	return _is_godot_int32(left) and _is_godot_int32(right)
 
 
 static func _to_int32_value(value):
@@ -92,3 +92,17 @@ static func _gml_runner_int32(value):
 	return wrapped
 
 
+# The functions gml_unsupported_call has reported, by name.
+static var _gml_unsupported_calls_reported = {}
+
+
+# A call the converted game cannot run (a GameMaker function GM2Godot does not
+# support, or an extension function with no Godot mapping). Like the HTML5
+# runner's ErrorFunction it reports the function once and returns undefined;
+# the rest of the calling code keeps running.
+static func gml_unsupported_call(function_name, reason = "", _args = []):
+	var name = str(function_name)
+	if not _gml_unsupported_calls_reported.has(name):
+		_gml_unsupported_calls_reported[name] = true
+		gml_error("GML function '" + name + "' cannot run in the converted game: " + str(reason))
+	return gml_undefined()

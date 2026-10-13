@@ -237,7 +237,7 @@ static func _gml_ds_serialize_value(value, seen):
 		return {"type": "array", "items": items}
 	if value is Dictionary:
 		var entries = []
-		for key in value.keys():
+		for key in _gml_struct_visible_keys(value):
 			entries.append({
 				"key": _gml_ds_serialize_value(key, seen),
 				"value": _gml_ds_serialize_value(value[key], seen)

@@ -323,6 +323,7 @@ class TestCLIReports(unittest.TestCase):
                 {
                     "name": script_name,
                     "resourceType": "GMScript",
+                    "isCompatibility": True,
                     "parent": {
                         "name": "Scripts",
                         "path": "folders/Scripts.yy",
@@ -2570,6 +2571,7 @@ class TestCLIReports(unittest.TestCase):
                     {
                         "name": script_name,
                         "resourceType": "GMScript",
+                        "isCompatibility": True,
                         "parent": {
                             "name": "Scripts",
                             "path": "folders/Scripts.yy",

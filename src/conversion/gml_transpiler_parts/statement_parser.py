@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from contextvars import ContextVar
-from typing import Iterable, Mapping, MutableMapping, MutableSet
+from dataclasses import dataclass, field
+from typing import Final, Iterable, Mapping, MutableMapping, MutableSet
 
 from .constants import ASSIGNMENT_OPERATORS, BINARY_PRECEDENCE, EOF
 from .expression_api import (
@@ -13,6 +15,13 @@ from .expression_api import (
     transpile_gml_condition,
     transpile_gml_expression,
 )
+from .function_declarations import (
+    function_declaration_as_assignment,
+    hoist_function_declarations,
+    named_function_declaration_name,
+    split_event_functions,
+)
+from .instance_change_sites import instance_change_site_ordinals
 from .lexical_api import (
     reject_asset_identifier_name,
     sanitize_gdscript_identifier,
@@ -54,6 +63,34 @@ from .utils import (
     tokens_to_source,
 )
 
+# An instance_change statement of an object event is compiled to a call that
+# changes the object and then runs the rest of the event as a function (see
+# the runtime's 76_instance_change.gd). The statement parser leaves a marker
+# line where the call goes and fills it in once it has the rest of the event.
+_CONTINUATION_MARKER: Final = "\0instance_change_continuation:"
+# The block of an `if (x) statement` without braces.
+_SINGLE_STATEMENT_BLOCK: Final = "\0single statement"
+# The continuation's names for the instance, its other and itself.
+_CONTINUATION_SELF: Final = "_gml_change_self"
+_CONTINUATION_OTHER: Final = "_gml_change_other"
+_CONTINUATION_FUNCTION: Final = "_gml_change_continue"
+_CONTINUATION_REJECTED_VALUES: Final = frozenset(
+    {"++", "--", "=", ":=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "??=", "function"}
+)
+
+
+@dataclass
+class _InstanceChangeContinuation:
+    # The instance and the other instance, as the code around the call names them.
+    self_source: str
+    other_source: str
+    # What runs the function and ends the event: the instance_change call, or the
+    # parent's event and the function.
+    closing_lines: list[str]
+    # The statements that follow the call, in the name-based form: the rest of
+    # its block, then the rest of each enclosing block.
+    body: list[str] = field(default_factory=lambda: list[str]())
+
 
 class _StatementParser:
     def __init__(
@@ -81,7 +118,13 @@ class _StatementParser:
         extension_functions: Mapping[str, GMLExtensionFunction] | None = None,
         extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
         control_flow_capture: ControlFlowCapture | None = None,
+        instance_change_continuations: bool = False,
+        inherited_event_continuation: bool = False,
+        instance_change_names: Collection[str] = (),
     ) -> None:
+        # The sites are numbered before macros are spliced in, as the source
+        # reads (see instance_change_sites).
+        self._instance_change_sites = instance_change_site_ordinals(tokens, instance_change_names)
         # Macros whose value is statements are spliced in before anything
         # reads the tokens, so their var declarations are hoisted like any
         # other.
@@ -137,16 +180,43 @@ class _StatementParser:
             macro_priorities if macro_priorities is not None else {}
         )
         self.macro_configuration = macro_configuration
+        self.instance_change_continuations: bool = instance_change_continuations
+        self.inherited_event_continuation: bool = inherited_event_continuation
+        # How the code names the instance that instance_change changes: self in
+        # an event, the instance parameter of an instance's creation code
+        # (nothing in code that has no instance of its own, or inside with).
+        outer_scope = self.scope_context
+        self._continuation_self: str | None = (
+            outer_scope.self_expression
+            if outer_scope.instance_target is not None and outer_scope.instance_target == outer_scope.self_expression
+            else None
+        )
+        # The terminator of the block being parsed (None for the whole code).
+        self._block_end: str | None = None
+        self._continuations: list[_InstanceChangeContinuation] = []
+        # The continuations that still wait for the rest of an enclosing block.
+        self._open_continuations: list[_InstanceChangeContinuation] = []
+        self.continued_instance_changes: list[int] = []
 
     def parse(self, terminator: str | None = None) -> list[str]:
         lines: list[str] = []
         if terminator is None and not self._emitted_hoisted_local_declarations:
             lines.extend(self._hoisted_local_declaration_lines)
             self._emitted_hoisted_local_declarations = True
-        while not self._at_end() and not self._check(terminator):
-            if self._match(";") or self._match("\n"):
-                continue
-            lines.extend(self._parse_statement())
+        enclosing_block_end = self._block_end
+        self._block_end = terminator
+        try:
+            while not self._at_end() and not self._check(terminator):
+                if self._match(";") or self._match("\n"):
+                    continue
+                open_before = len(self._open_continuations)
+                lines.extend(self._parse_statement())
+                if len(self._open_continuations) > open_before:
+                    self._append_block_rest(open_before, terminator)
+        finally:
+            self._block_end = enclosing_block_end
+        if terminator is None and self._continuations:
+            lines = self._expand_continuations(lines)
         return lines
 
     def _parse_statement(self) -> list[str]:
@@ -184,15 +254,20 @@ class _StatementParser:
         return self._parse_simple_statement()
 
     def _parse_simple_statement(self) -> list[str]:
-        declared_function = _named_function_declaration_name(self.tokens, self.position)
+        declared_function = named_function_declaration_name(self.tokens, self.position)
         statement_tokens = self._read_simple_statement()
         if not statement_tokens:
             return []
         if declared_function is not None:
-            statement_tokens = _function_declaration_as_assignment(
+            statement_tokens = function_declaration_as_assignment(
                 declared_function,
                 statement_tokens,
             )
+        continuation_lines = self._parse_instance_change_continuation(statement_tokens)
+        if continuation_lines is None:
+            continuation_lines = self._parse_inherited_event_call(statement_tokens)
+        if continuation_lines is not None:
+            return continuation_lines
         return transpile_statement(
             tokens_to_source(statement_tokens),
             self.local_names,
@@ -744,6 +819,7 @@ class _StatementParser:
             macro_configuration=self.macro_configuration,
             global_names=self.global_names,
             control_flow_capture=control_flow_capture,
+            inherited_event_continuation=self.inherited_event_continuation,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)
@@ -778,10 +854,17 @@ class _StatementParser:
         self._skip_newlines()
         catch_name: str | None = None
         catch_lines: list[str] | None = None
+        catch_declares = False
         if self._match_identifier("catch"):
             catch_name = self._parse_catch_variable_name()
             had_catch_local = catch_name in self.local_names
+            # GDScript refuses a variable that has the name of one already
+            # declared in the function, in any block around it; a catch
+            # variable named like an outer catch variable or local (catch (e)
+            # inside catch (e)) is that variable again, as in GML.
+            catch_declares = catch_name not in self.declared_local_names
             self.local_names.add(catch_name)
+            self.declared_local_names.add(catch_name)
             self.control_flow_capture = try_capture
             try:
                 catch_lines = self._parse_body()
@@ -789,6 +872,8 @@ class _StatementParser:
                 self.control_flow_capture = parent_capture
                 if not had_catch_local:
                     self.local_names.discard(catch_name)
+                if catch_declares:
+                    self.declared_local_names.discard(catch_name)
 
         self._skip_newlines()
         finally_lines: list[str] | None = None
@@ -811,9 +896,10 @@ class _StatementParser:
 
         if catch_lines is not None and catch_name is not None:
             gdscript_catch_name = sanitize_gdscript_identifier(catch_name)
+            catch_declaration = "var " if catch_declares else ""
             lines.extend([
                 f"if not GMRuntime.is_undefined({control_name}) and {control_name}[\"kind\"] == \"throw\":",
-                f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
+                f"\t{catch_declaration}{gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
                 f"\t{control_name} = GMRuntime.gml_undefined()",
                 "\twhile true:",
                 *indent_lines(indent_lines(catch_lines or ["pass"])),
@@ -916,7 +1002,174 @@ class _StatementParser:
         return lines
 
     def _parse_nested_single_statement_body(self) -> list[str]:
-        return self._parse_statement()
+        enclosing_block_end = self._block_end
+        self._block_end = _SINGLE_STATEMENT_BLOCK
+        try:
+            return self._parse_statement()
+        finally:
+            self._block_end = enclosing_block_end
+
+    def _parse_instance_change_continuation(self, statement_tokens: list[_Token]) -> list[str] | None:
+        """Compile an instance_change statement with the rest of the event as its continuation.
+
+        Returns the marker line that stands for the call, or None when the
+        statement stays an ordinary call: the converted game then changes the
+        object once the event has returned.
+        """
+        if not self._instance_change_continuation_allowed():
+            return None
+        arguments = _instance_change_call_arguments(statement_tokens)
+        if arguments is None:
+            return None
+        # (A macro's tokens stand where the macro was used.)
+        site = self._instance_change_sites.get((statement_tokens[0].line, statement_tokens[0].column))
+        if site is None:
+            return None
+        # event_inherited runs the parent's event, which the continuation
+        # cannot do once the object has changed.
+        if self._event_inherited_follows():
+            return None
+        object_source, perf_source = (
+            transpile_gml_expression(
+                tokens_to_source(argument),
+                local_names=self.local_names,
+                enum_values=self.enum_values,
+                enum_names=self.enum_names,
+                scope_context=self.scope_context,
+                macro_values=self.macro_values,
+            )
+            for argument in arguments
+        )
+        self_source = self.scope_context.self_expression
+        continuation = _InstanceChangeContinuation(
+            self_source,
+            self.scope_context.other_expression,
+            [
+                "GMRuntime.gml_instance_change_then("
+                f"{object_source}, {perf_source}, {_CONTINUATION_FUNCTION}, {self_source})",
+                "return",
+            ],
+        )
+        self.continued_instance_changes.append(site)
+        return self._open_continuation(continuation)
+
+    def _parse_inherited_event_call(self, statement_tokens: list[_Token]) -> list[str] | None:
+        """Compile event_inherited() of an event whose ancestors replace the instance's script.
+
+        An ancestor's event that runs an instance_change statement changes the
+        node's script while the parent's event is running, and Godot frees the
+        script instance that the child's event is running on. So the child's
+        event must not use its members after the call: the rest of the event is
+        compiled as a function created before the call, which reaches the
+        instance by name only, and the event returns after running it. Where the
+        rest cannot be compiled so (in a loop, a with, switch or try statement,
+        or when the event calls event_inherited again), the call raises the
+        instance's nesting count, which makes a change in the parent's event
+        wait for this event to return.
+        """
+        inherited_call = self.inherited_event_call
+        if not self.inherited_event_continuation or inherited_call is None:
+            return None
+        if not _is_event_inherited_call(statement_tokens):
+            return None
+        if self._instance_change_continuation_allowed() and not self._event_inherited_follows():
+            self_source = self.scope_context.self_expression
+            return self._open_continuation(
+                _InstanceChangeContinuation(
+                    self_source,
+                    self.scope_context.other_expression,
+                    [inherited_call, f"{_CONTINUATION_FUNCTION}.call()", "return"],
+                )
+            )
+        # (The parent's event runs on the node of this script, also inside a
+        # with statement.)
+        return ["GMRuntime.gml_event_nest(self)", inherited_call, "GMRuntime.gml_event_unnest(self)"]
+
+    def _event_inherited_follows(self) -> bool:
+        # The parent's event cannot be run from the function that runs after
+        # the first one.
+        return any(token.kind == "IDENT" and token.value == "event_inherited" for token in self.tokens[self.position:])
+
+    def _open_continuation(self, continuation: _InstanceChangeContinuation) -> list[str]:
+        """Give the continuation the rest of the block that holds the statement; return its marker line."""
+        if self._block_end != _SINGLE_STATEMENT_BLOCK:
+            continuation.body.extend(self._parse_continuation_code(self._block_end, consume=True))
+        self._continuations.append(continuation)
+        self._open_continuations.append(continuation)
+        return [f"{_CONTINUATION_MARKER}{len(self._continuations) - 1}"]
+
+    def _instance_change_continuation_allowed(self) -> bool:
+        # Only the event's own statements (also inside if, else and plain
+        # blocks), where no other construct stands between the event and the
+        # call.
+        scope = self.scope_context
+        return (
+            self.instance_change_continuations
+            and self.loop_depth == 0
+            and self.finally_depth == 0
+            and self.control_flow_capture is None
+            and scope.self_expression == self._continuation_self
+            and scope.instance_target == self._continuation_self
+        )
+
+    def _append_block_rest(self, open_before: int, terminator: str | None) -> None:
+        """Give the continuations a statement opened the rest of the block that holds it."""
+        rest = self._parse_continuation_code(terminator, consume=False)
+        for continuation in self._open_continuations[open_before:]:
+            continuation.body.extend(rest)
+
+    def _parse_continuation_code(self, terminator: str | None, *, consume: bool) -> list[str]:
+        """Parse up to the end of the block as code that runs after the object has changed.
+
+        It runs in a function created before the call, which reaches the
+        instance by name only (the script that declared the instance's
+        variables is gone by then) and has its own copy of the locals.
+        """
+        start = self.position
+        saved = (
+            self.scope_context,
+            self.inherited_event_call,
+            self.instance_change_continuations,
+            set(self.local_names),
+            set(self.declared_local_names),
+        )
+        self.scope_context = _continuation_scope(self.scope_context)
+        self.instance_change_continuations = False
+        lines: list[str] = []
+        try:
+            while not self._at_end() and not self._check(terminator):
+                if self._match(";") or self._match("\n"):
+                    continue
+                lines.extend(self._parse_statement())
+        finally:
+            (
+                self.scope_context,
+                self.inherited_event_call,
+                self.instance_change_continuations,
+                local_names,
+                declared_local_names,
+            ) = saved
+            self.local_names.clear()
+            self.local_names.update(local_names)
+            self.declared_local_names.clear()
+            self.declared_local_names |= declared_local_names
+            if not consume:
+                self.position = start
+        return lines
+
+    def _expand_continuations(self, lines: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for line in lines:
+            text = line.lstrip("\t")
+            if not text.startswith(_CONTINUATION_MARKER):
+                expanded.append(line)
+                continue
+            continuation = self._continuations[int(text.removeprefix(_CONTINUATION_MARKER))]
+            block = _continuation_lines(continuation)
+            for _depth in range(len(line) - len(text)):
+                block = indent_lines(block)
+            expanded.extend(block)
+        return expanded
 
     def _read_condition_tokens(self) -> list[_Token]:
         # The condition is one expression, with or without parentheses; the
@@ -1132,6 +1385,80 @@ class _StatementParser:
         return GMLTranspileError(message, line=token.line, column=token.column)
 
 
+def _instance_change_call_arguments(tokens: list[_Token]) -> tuple[list[_Token], list[_Token]] | None:
+    """Return the two arguments of a statement that is one instance_change call."""
+    if len(tokens) < 4 or tokens[0].kind != "IDENT" or tokens[0].value != "instance_change":
+        return None
+    if tokens[1].value != "(":
+        return None
+    depth = 0
+    closing = -1
+    for index in range(1, len(tokens)):
+        value = tokens[index].value
+        if value in "([{":
+            depth += 1
+        elif value in ")]}":
+            depth -= 1
+            if depth == 0:
+                closing = index
+                break
+    if closing != len(tokens) - 1:
+        return None
+    arguments = split_top_level_tokens(tokens[2:closing], ",")
+    if len(arguments) != 2:
+        return None
+    for argument in arguments:
+        if not any(token.value != "\n" for token in argument):
+            return None
+        # Arguments that change something are left to the ordinary call.
+        if any(token.value in _CONTINUATION_REJECTED_VALUES for token in argument):
+            return None
+    return arguments[0], arguments[1]
+
+
+def _continuation_scope(outer: _ScopeContext) -> _ScopeContext:
+    """The scope of code that runs after instance_change: the instance by name."""
+    return _ScopeContext(
+        self_expression=_CONTINUATION_SELF,
+        other_expression=_CONTINUATION_OTHER,
+        instance_target=_CONTINUATION_SELF,
+        global_names=outer.global_names,
+        asset_names=outer.asset_names,
+        direct_instance_names=frozenset(),
+        dynamic_instance_names=outer.dynamic_instance_names,
+        static_scope=outer.static_scope,
+        static_names=outer.static_names,
+        static_prefix=outer.static_prefix,
+        extension_functions=outer.extension_functions,
+        extension_function_mappings=outer.extension_function_mappings,
+    )
+
+
+def _continuation_lines(continuation: _InstanceChangeContinuation) -> list[str]:
+    body = continuation.body or ["pass"]
+    body_text = "\n".join(body)
+    lines: list[str] = []
+    if _CONTINUATION_SELF in body_text:
+        lines.append(f"var {_CONTINUATION_SELF} = {continuation.self_source}")
+    if _CONTINUATION_OTHER in body_text:
+        lines.append(f"var {_CONTINUATION_OTHER} = {continuation.other_source}")
+    lines.append(f"var {_CONTINUATION_FUNCTION} = func():")
+    lines.extend(indent_lines(body))
+    # The rest of the event runs in the continuation.
+    lines.extend(continuation.closing_lines)
+    return lines
+
+
+def _is_event_inherited_call(tokens: list[_Token]) -> bool:
+    return (
+        len(tokens) == 3
+        and tokens[0].kind == "IDENT"
+        and tokens[0].value == "event_inherited"
+        and tokens[1].value == "("
+        and tokens[2].value == ")"
+    )
+
+
 # The temporaries counter of the statements being parsed. Statements parsed
 # while it is set are a method's body written in them, which becomes a GDScript
 # lambda inside them; redeclaring a name already in scope there is a parse
@@ -1142,9 +1469,16 @@ _ACTIVE_GENERATED_COUNTER: ContextVar[list[int] | None] = ContextVar(
 )
 
 
+def _request_tokens(request: GMLStatementRequest) -> list[_Token]:
+    tokens = list(request.tokens)
+    if request.event_functions is not None:
+        return split_event_functions(tokens, request.event_functions)
+    return hoist_function_declarations(tokens)
+
+
 def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     parser = _StatementParser(
-        _hoist_function_declarations(list(request.tokens)),
+        _request_tokens(request),
         local_names=request.local_names,
         instance_variables=request.instance_variables,
         return_depth=request.return_depth,
@@ -1161,6 +1495,9 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         static_scope_prefix=request.static_scope_prefix,
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
+        instance_change_continuations=request.instance_change_continuations,
+        inherited_event_continuation=request.inherited_event_continuation,
+        instance_change_names=request.instance_change_names,
         generated_counter=_ACTIVE_GENERATED_COUNTER.get(),
     )
     active_counter = _ACTIVE_GENERATED_COUNTER.set(parser.generated_counter)
@@ -1170,6 +1507,7 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         _ACTIVE_GENERATED_COUNTER.reset(active_counter)
     return GMLStatementResult(
         lines=tuple(lines),
+        continued_instance_changes=tuple(parser.continued_instance_changes),
         local_names=frozenset(parser.local_names),
         instance_variables=parser.instance_variables,
         scope_context=parser.scope_context,
@@ -1177,124 +1515,6 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         enum_names=frozenset(parser.enum_names),
         macro_values=parser.macro_values,
     )
-
-
-# A named function declaration (function name(...) {...}) in event, method,
-# constructor or script-function code is a method variable of the instance or
-# struct running that code, bound to it, as if it were written name =
-# function(...) {...} (manual: GML Overview > Script Functions And Variables,
-# Method Variables: "Defining a function in an Object's event using either
-# syntax will make the function only available in the context of its
-# instance"). GameMaker has the function available throughout the body, even
-# before its line runs, so the declarations at the top of a body are moved to
-# its start.
-_EXPRESSION_KEYWORDS = frozenset({
-    "and",
-    "case",
-    "delete",
-    "div",
-    "do",
-    "else",
-    "in",
-    "mod",
-    "new",
-    "not",
-    "or",
-    "return",
-    "then",
-    "throw",
-    "xor",
-})
-_OPENING_BRACKETS = frozenset({"(", "[", "{"})
-_CLOSING_BRACKETS = frozenset({")", "]", "}"})
-
-
-def _named_function_declaration_name(tokens: list[_Token], index: int) -> str | None:
-    if index >= len(tokens) or tokens[index].kind != "IDENT" or tokens[index].value != "function":
-        return None
-    name_index = skip_newline_tokens(tokens, index + 1)
-    if (
-        name_index >= len(tokens)
-        or tokens[name_index].kind != "IDENT"
-        or tokens[name_index].value == "constructor"
-    ):
-        return None
-    parameters_index = skip_newline_tokens(tokens, name_index + 1)
-    if parameters_index >= len(tokens) or tokens[parameters_index].value != "(":
-        return None
-    return tokens[name_index].value
-
-
-def _function_declaration_as_assignment(name: str, statement_tokens: list[_Token]) -> list[_Token]:
-    first = statement_tokens[0]
-    return [
-        _Token("IDENT", name, line=first.line, column=first.column, index=first.index),
-        _Token("OP", "=", line=first.line, column=first.column, index=first.index),
-        *statement_tokens,
-    ]
-
-
-def _starts_statement(tokens: list[_Token], index: int) -> bool:
-    previous = index - 1
-    crossed_line_break = False
-    while previous >= 0 and tokens[previous].kind == "NEWLINE":
-        previous -= 1
-        crossed_line_break = True
-    if previous < 0:
-        return True
-    token = tokens[previous]
-    if token.value in (";", "}"):
-        return True
-    if not crossed_line_break:
-        return False
-    # Line breaks are white space, but a function declaration cannot continue
-    # an expression: after anything that can end one, it starts a statement.
-    if token.kind == "IDENT":
-        return token.value not in _EXPRESSION_KEYWORDS
-    return token.kind in ("NUMBER", "STRING", "VERBATIM_STRING", "TEMPLATE_STRING") or token.value in (")", "]")
-
-
-def _hoist_function_declarations(tokens: list[_Token]) -> list[_Token]:
-    spans: list[tuple[int, int]] = []
-    depth = 0
-    in_directive = False
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if token.kind == "EOF":
-            break
-        if token.kind == "DIRECTIVE":
-            in_directive = True
-        elif token.kind == "NEWLINE":
-            in_directive = False
-        elif token.kind == "OP" and token.value in _OPENING_BRACKETS:
-            depth += 1
-        elif token.kind == "OP" and token.value in _CLOSING_BRACKETS:
-            depth = max(0, depth - 1)
-        elif (
-            depth == 0
-            and not in_directive
-            and _named_function_declaration_name(tokens, index) is not None
-            and _starts_statement(tokens, index)
-        ):
-            end = scan_statement_end(tokens, index)
-            if end is not None and end > index:
-                spans.append((index, end))
-                index = end
-                continue
-        index += 1
-    if not spans:
-        return tokens
-    hoisted: list[_Token] = []
-    remaining: list[_Token] = []
-    cursor = 0
-    for start, end in spans:
-        remaining.extend(tokens[cursor:start])
-        hoisted.extend(tokens[start:end])
-        hoisted.append(_Token("OP", ";", line=tokens[end - 1].line, column=tokens[end - 1].column, index=tokens[end - 1].index))
-        cursor = end
-    remaining.extend(tokens[cursor:])
-    return [*hoisted, *remaining]
 
 
 def _source_macro_values(tokens: list[_Token], macro_configuration: str | None) -> dict[str, str]:

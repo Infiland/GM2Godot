@@ -27,6 +27,7 @@ from src.conversion.script_functions import (
 from src.conversion.scripts import (
     SCRIPT_REGISTRY_RELATIVE_PATH,
     ScriptConverter,
+    global_pragma_sources,
 )
 from tests.godot_test_support import write_fixture_text as _write_text
 
@@ -105,6 +106,9 @@ class TestScriptConverter(unittest.TestCase):
                 self.gm_dir / "scripts" / script_name / f"{script_name}.yy",
                 {
                     "%Name": script_name,
+                    # scr_add is a pre-2.3 script whose code is the body of
+                    # a callable; scr_modern is a 2.3+ script.
+                    "isCompatibility": script_name == "scr_add",
                     "name": script_name,
                     "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
                     "resourceType": "GMScript",
@@ -246,6 +250,88 @@ class TestScriptConverter(unittest.TestCase):
                 and diagnostic.resource == "scr_modern"
                 for diagnostic in diagnostics.diagnostics()
             )
+        )
+
+    def test_unsupported_call_keeps_the_script(self) -> None:
+        # A call the converted game cannot make fails on its own at run time;
+        # GameMaker runs the rest of the script, so the script still converts.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            'function scr_modern() {\n    show_question("Quit?");\n    return 7;\n}\n',
+        )
+        diagnostics = DiagnosticCollector()
+        converter = self._converter(diagnostics=diagnostics)
+
+        converter.convert_all()
+        result = converter.conversion_step_result()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertRegex(
+            script,
+            r'\tGMRuntime\.gml_unsupported_call\("show_question", "[^"]*#515[^"]*", \["Quit\?"\]\)\n'
+            r"\treturn 7\n",
+        )
+        self.assertEqual(result.resources.completed, 2)
+        self.assertEqual(result.resources.skipped, 0)
+        unsupported = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-UNSUPPORTED-CALL"
+        ]
+        self.assertEqual(len(unsupported), 1)
+        self.assertEqual(unsupported[0].severity, "warning")
+        self.assertEqual(unsupported[0].api, "show_question")
+        self.assertEqual(unsupported[0].issue_number, 515)
+        self.assertEqual(unsupported[0].resource, "scr_modern")
+        self.assertEqual(unsupported[0].resource_type, "script")
+        self.assertFalse(
+            any(diagnostic.code == "GM2GD-GML-TRANSPILE" for diagnostic in diagnostics.diagnostics())
+        )
+
+    def test_global_pragma_code_becomes_a_registry_initializer(self) -> None:
+        # GameMaker runs gml_pragma("global", code) code before the first
+        # room, wherever the pragma is; the call itself does nothing at run time.
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern() {\n"
+            '    gml_pragma("global", "scr_modern();");\n'
+            '    // gml_pragma("global", "commented_out();");\n'
+            '    gml_pragma("UnityBuild", "true");\n'
+            "    global.ready = true;\n"
+            "}\n",
+        )
+        converter = self._converter(diagnostics=DiagnosticCollector())
+
+        converter.convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        self.assertIn('\tGMRuntime.gml_pragma(["global", "scr_modern();"])\n', script)
+        self.assertRegex(
+            script,
+            r"\nfunc gm2godot_initialize_global_pragmas\(\):\n\t[^\n]*scr_modern[^\n]*\n$",
+        )
+        self.assertNotIn("commented_out", script.split("func gm2godot_initialize_global_pragmas")[1])
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertIn('"global_pragma_initializer": _gm_script_method(_gm_initializer_owner_', registry)
+        self.assertEqual(registry.count('"global_pragma_initializer"'), 1)
+
+    def test_global_pragma_sources_reads_literal_global_pragmas_only(self) -> None:
+        self.assertEqual(
+            global_pragma_sources(
+                '#macro CODE "ignored()"\n'
+                'gml_pragma("global", "a();");\n'
+                "/* gml_pragma(\"global\", \"b();\"); */\n"
+                "gml_pragma(\"global\", @'c(\"x\");');\n"
+                'gml_pragma("global", CODE);\n'
+                "gml_pragma(\"global\", code_variable);\n"
+                'gml_pragma("forceinline");\n'
+                'gml_pragma("optimise", "js_array_check", "push, off");\n'
+                'gml_pragma( "global" , "d();" );\n',
+                macro_values={"CODE": '"from_macro();"', "OTHER": "1"},
+            ),
+            ("a();", 'c("x");', "from_macro();", "d();"),
         )
 
     def test_missing_only_declared_script_is_requested_and_skipped(self) -> None:
@@ -738,6 +824,73 @@ class TestScriptConverter(unittest.TestCase):
         )
         self.assertIn("GMRuntime.gml_struct_set(_gml_static_scope_", script)
         self.assertIn("return GMRuntime.gml_struct_get(_gml_static_scope_", script)
+        # static_get(scr_modern) and scr_modern.total find the function's
+        # static variables.
+        self.assertIn(
+            'return GMRuntime.gml_method(self, GMRuntime.gml_static_bind(Callable(self, "_gm_script_call"), '
+            '"scr_modern.scr_modern:<anonymous>:0:',
+            script,
+        )
+
+    def test_script_function_without_statics_is_not_bound_to_a_static_struct(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "function scr_modern(delta)\n{\n    return delta + 1;\n}\n",
+        )
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'return GMRuntime.gml_method(self, Callable(self, "_gm_script_call"))',
+            script,
+        )
+        self.assertNotIn("gml_static_bind", script)
+
+    def test_legacy_script_body_with_statics_is_bound_to_its_static_struct(self) -> None:
+        self._write_project()
+        # Only a compatibility script is a callable body (the other scripts
+        # run their top-level code at game start).
+        _write_json(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.yy",
+            {
+                "%Name": "scr_modern",
+                "isCompatibility": True,
+                "name": "scr_modern",
+                "parent": {"name": "Game", "path": "folders/Scripts/Game.yy"},
+                "resourceType": "GMScript",
+            },
+        )
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            "static total = 0;\ntotal += 1;\nreturn total;\n",
+        )
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+        ).convert_all()
+
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'return GMRuntime.gml_method(self, GMRuntime.gml_static_bind(Callable(self, "_gm_script_call"), '
+            '"scr_modern.script:',
+            script,
+        )
 
     def test_modern_script_verbatim_default_ignores_literal_delimiters(self) -> None:
         self._write_project()
@@ -1152,6 +1305,50 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIsNone(
             modern_script_structure("var _f = function named() { return 1; };\nreturn _f();\n")
         )
+
+    def test_script_without_functions_is_global_initialization_unless_legacy_callable(self) -> None:
+        source = 'global.boot = "ran";\nif (os_type != os_android) { global.desktop = true; }\n'
+
+        legacy = modern_script_structure(source)
+        initialization = modern_script_structure(source, legacy_callable=False)
+
+        self.assertIsNone(legacy)
+        assert initialization is not None
+        self.assertEqual(initialization.declarations, ())
+        self.assertEqual(len(initialization.top_level_statements), 1)
+        self.assertIn('global.boot = "ran";', initialization.top_level_statements[0].source)
+        # Nothing to run at start: only enums and macros, or comments.
+        self.assertIsNone(modern_script_structure("enum Kind { A, B }\n#macro LIMIT 3\n", legacy_callable=False))
+        self.assertIsNone(modern_script_structure("// nothing yet\n", legacy_callable=False))
+
+    def test_converts_script_without_functions_by_compatibility_flag(self) -> None:
+        self._write_project()
+        _write_text(
+            self.gm_dir / "scripts" / "scr_modern" / "scr_modern.gml",
+            'global.boot = "ran";\n',
+        )
+        diagnostics = DiagnosticCollector()
+
+        ScriptConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda message: self.logs.append(str(message)),
+            progress_callback=lambda _value: None,
+            conversion_running=lambda: True,
+            diagnostics=diagnostics,
+        ).convert_all()
+
+        self.assertEqual(diagnostics.diagnostics(), ())
+        script = (self.godot_dir / "scripts" / "game" / "scr_modern.gd").read_text(encoding="utf-8")
+        registry = (self.godot_dir / SCRIPT_REGISTRY_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertIn("func gm2godot_initialize_top_level():", script)
+        self.assertIn('"boot", "ran"', script)
+        self.assertIn('"initializer": _gm_script_method(', registry)
+        # scr_add (isCompatibility true) is still a callable body that
+        # runs when called, with argument0 and so on.
+        legacy = (self.godot_dir / "scripts" / "game" / "scr_add.gd").read_text(encoding="utf-8")
+        self.assertNotIn("gm2godot_initialize_top_level", legacy)
+        self.assertIn('"legacy_arguments": true', registry)
 
     def test_converts_function_script_with_global_initialization(self) -> None:
         self._write_project()

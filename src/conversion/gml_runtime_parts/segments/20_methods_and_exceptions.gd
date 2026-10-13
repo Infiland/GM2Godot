@@ -112,11 +112,12 @@ static func gm2godot_runtime_shutdown():
 	gm2godot_draw_runtime_shutdown()
 	gml_sequence_runtime_cleanup_all()
 	_gml_time_source_shutdown()
+	_gml_unhandled_exception_handler_shutdown()
 	_gml_shutdown_detach_methods([
 		_gml_script_registry,
 		_gml_script_argument_stack,
-		_gml_static_registry,
-		_gml_static_structs,
+		_gml_static_functions,
+		_gml_constructor_stack,
 		_gml_static_named_scopes,
 		_gml_static_root,
 		_gml_global_scope,
@@ -129,9 +130,8 @@ static func gm2godot_runtime_shutdown():
 	_gml_script_registry_loaded = false
 	_gml_script_registry_initializers_running = false
 	_gml_script_registry_initializers_complete = false
-	_gml_static_registry.clear()
-	_gml_static_structs.clear()
-	_gml_static_cursor = 0
+	_gml_static_functions.clear()
+	_gml_constructor_stack.clear()
 	_gml_static_named_scopes.clear()
 	_gml_static_root.clear()
 	_gml_global_scope.clear()
@@ -273,6 +273,7 @@ static func gml_script_registry_set(entries):
 	if typeof(entries) != TYPE_ARRAY:
 		return null
 	var initializers = []
+	var global_pragmas = []
 	for entry in entries:
 		if typeof(entry) != TYPE_DICTIONARY or not entry.has("callable"):
 			continue
@@ -286,9 +287,15 @@ static func gml_script_registry_set(entries):
 		var initializer: Variant = entry.get("initializer", null)
 		if is_method(initializer) and not initializers.has(initializer):
 			initializers.append(initializer)
+		var global_pragma: Variant = entry.get("global_pragma_initializer", null)
+		if is_method(global_pragma) and not global_pragmas.has(global_pragma):
+			global_pragmas.append(global_pragma)
 	if _gml_script_registry_initializers_complete:
 		return null
 	_gml_script_registry_initializers_running = true
+	# gml_pragma("global", code) runs its code before the first room, once
+	# every script's own top-level code has run.
+	initializers.append_array(global_pragmas)
 	for initializer in initializers:
 		if initializer is GMLMethod:
 			initializer.gml_callv([])
@@ -444,7 +451,12 @@ static func _gml_constructor_invoke(constructor, instance, args, constructor_oth
 		call_args.append_array(args)
 	else:
 		call_args.append(args)
-	return constructor.function_value.callv(call_args)
+	# The constructor that is running, for the constructor it inherits from to
+	# join its static struct to.
+	_gml_constructor_stack.append(constructor.function_value)
+	var result = constructor.function_value.callv(call_args)
+	_gml_constructor_stack.pop_back()
+	return result
 
 
 static func gml_new(constructor, args = [], caller_self = null, caller_other = null):
@@ -461,9 +473,9 @@ static func gml_new(constructor, args = [], caller_self = null, caller_other = n
 	]:
 		return gml_error("GML constructor is missing explicit receiver metadata")
 	var instance = gml_struct({})
-	var constructor_static = gml_static_get(constructor)
-	if not is_undefined(constructor_static):
-		_gml_static_link_new(instance, constructor_static)
+	# The new struct reaches its constructor's static struct through its own
+	# link, which goes away with the struct.
+	instance[GML_STATIC_LINK_KEY] = _gml_static_ensure(constructor.function_value)
 	# GameMaker's bound-constructor exception uses the constructor's bound
 	# scope as other. An unbound script constructor uses the scope that called new.
 	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_self
@@ -492,11 +504,7 @@ static func gml_constructor_inherit(
 		GML_RECEIVER_ARGUMENTS_SELF_OTHER,
 	]:
 		return gml_error("GML constructor is missing explicit receiver metadata")
-	var parent_static = gml_static_get(constructor)
-	if not is_undefined(parent_static):
-		var current_static = gml_static_get(instance)
-		if not is_undefined(current_static):
-			gml_static_set(current_static, parent_static)
+	_gml_static_join_parent(instance, constructor.function_value)
 	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_other
 	if constructor_other == null:
 		constructor_other = caller_self

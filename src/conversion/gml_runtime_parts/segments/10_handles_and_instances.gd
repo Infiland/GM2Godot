@@ -132,6 +132,10 @@ static func gml_instance_destroy(target = null):
 		var entry = _gml_instance_entry(instance)
 		if entry == null or entry["destroyed"]:
 			continue
+		if _gml_instance_change_defer_destroy(instance):
+			# It waits for the instance's pending instance_change (see
+			# 76_instance_change.gd).
+			continue
 		entry["destroyed"] = true
 		# After a room change request GameMaker skips the Destroy event,
 		# unless the instance or the current room is persistent.

@@ -289,7 +289,7 @@ _VISIBLE_PROJECT = GameMakerProject(
     ),
 )
 
-_VISIBLE_PROBE = """extends Node
+_TRACE_PROBE = """extends Node
 
 const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
 
@@ -303,6 +303,76 @@ func _process(_delta):
 		print("INSTANCE_CHANGE_NODES []")
 		get_tree().quit(0)
 """
+
+# An instance that asks for instance_change and then for instance_destroy, or
+# for a second instance_change, in the same event: GameMaker runs these on the
+# object the instance has changed into (the change and its Create event are
+# done by then), so in the converted game they wait for the first change.
+_ORDER_STEP = """\
+steps += 1;
+if (steps == mode) {
+    if (mode == 1) {
+        instance_change(o_b, true);
+        instance_destroy();
+    } else if (mode == 2) {
+        instance_change(o_b, false);
+        instance_change(o_c, true);
+    }
+}
+"""
+
+
+_ORDER_CTRL_STEP = """\
+global.ctrl_step += 1;
+if (global.ctrl_step == 3) {
+    trace("counts " + string(instance_number(o_a)) + " " + string(instance_number(o_b)) + " "
+        + string(instance_number(o_c)));
+    global.done = true;
+}
+"""
+
+
+def _order_object(name: str, step: str | None = None) -> GameMakerObject:
+    short = name.removeprefix("o_")
+    events = {
+        EVENT_CREATE: f'trace("{short} create " + string(mode));\n',
+        EVENT_DESTROY: f'trace("{short} destroy " + string(mode));\n',
+        EVENT_CLEAN_UP: f'trace("{short} cleanup " + string(mode));\n',
+    }
+    if step is not None:
+        events[EVENT_CREATE] = "steps = 0;\n"
+        events[EVENT_STEP] = step
+    return GameMakerObject(name, events)
+
+
+_ORDER_PROJECT = GameMakerProject(
+    name="InstanceChangeOrder",
+    scripts={"scr_trace": _SCRIPT},
+    objects=(
+        _order_object("o_a", _ORDER_STEP),
+        _order_object("o_b"),
+        _order_object("o_c"),
+        GameMakerObject("o_ctrl", {EVENT_CREATE: "global.ctrl_step = 0;\n", EVENT_STEP: _ORDER_CTRL_STEP}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_destroy", "o_a", 0, 0, creation_code="mode = 1;\n"),
+                        RoomInstance("inst_twice", "o_a", 0, 0, creation_code="mode = 2;\n"),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_destroy", "inst_twice", "inst_ctrl"),
+        ),
+    ),
+)
+
 
 _COLLISION_PROBE = """extends Node
 
@@ -388,8 +458,28 @@ class TestInstanceChangeGodot(unittest.TestCase):
         # The brick has no Draw event, so its sprite shows again.
         self.assertEqual(node, ["o_brick.gd", [["s_brick", True]]])
 
+    def test_destroy_and_second_change_wait_for_a_pending_change(self) -> None:
+        trace, _nodes = self._run(_ORDER_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                # instance_change(o_b, true); instance_destroy();
+                "a destroy 1",
+                "a cleanup 1",
+                "b create 1",
+                "b destroy 1",
+                "b cleanup 1",
+                # instance_change(o_b, false); instance_change(o_c, true);
+                "b destroy 2",
+                "b cleanup 2",
+                "c create 2",
+                "counts 0 0 1",
+            ],
+        )
+
     def test_instance_change_takes_the_objects_visible_flag(self) -> None:
-        trace, _nodes = self._run(_VISIBLE_PROJECT, _VISIBLE_PROBE)
+        trace, _nodes = self._run(_VISIBLE_PROJECT, _TRACE_PROBE)
 
         self.assertEqual(
             trace,

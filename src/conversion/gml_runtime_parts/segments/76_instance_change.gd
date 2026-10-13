@@ -17,8 +17,14 @@
 # once the instance's running event has returned to the runtime: right after
 # its Create event and creation code, after each event of the step, input and
 # collision dispatch, and at every step phase boundary. Until then the rest of
-# the event that called instance_change still sees the old object, and a
-# second instance_change in that event replaces the first.
+# the event that called instance_change still sees the old object.
+#
+# The instance's later instance_change and instance_destroy calls in that
+# event wait with it, in the order they were made, because GameMaker would
+# run them on the new object: a second change runs the object it changed into
+# first's Destroy and Clean Up (perf), and instance_destroy runs its Destroy
+# event, once the first change (and its Create event) is done. Until then the
+# instance still exists.
 
 # Script members that the new object sets (or that only cache state of the
 # old script) rather than carrying over.
@@ -38,7 +44,10 @@ const GML_INSTANCE_CHANGE_IMAGE_METAS = {
 	"gamemaker_image_alpha": "image_alpha",
 }
 
-# Pending changes by node instance id: [node, object asset entry, perf].
+# Pending operations by node instance id: {"node": the node, "ops": the
+# changes ({"kind": "change", "object": object asset entry, "perf": bool,
+# "events_done": whether the Destroy and Clean Up events of perf already ran})
+# and destroys ({"kind": "destroy"}) in the order the game asked for them}.
 static var _gml_instance_changes = {}
 # [script, sprite name, visible] of each object's scene, or null, by object
 # name.
@@ -59,12 +68,39 @@ static func gml_instance_change(object_selector, perf, inst = null):
 	if _gml_instance_change_object(object_entry) == null:
 		return gml_error("instance_change: object '%s' has no converted scene to change into" % str(object_entry["name"]))
 	var perform = gml_bool(perf)
+	var pending = _gml_instance_changes.get(inst.get_instance_id())
+	if pending != null:
+		# The node still runs the first object; the Destroy and Clean Up events
+		# are those of the object the instance will have changed into.
+		if not _gml_instance_change_destroy_pending(pending):
+			pending["ops"].append({"kind": "change", "object": object_entry, "perf": perform, "events_done": false})
+		return gml_undefined()
 	if perform:
-		if not _gml_event_scheduler_event_blocked(inst, true):
-			_gml_instance_change_event(inst, "_on_destroy")
-		_gml_instance_change_clean_up(inst)
-	_gml_instance_changes[inst.get_instance_id()] = [inst, object_entry, perform]
+		_gml_instance_change_destroy_events(inst)
+	_gml_instance_changes[inst.get_instance_id()] = {
+		"node": inst,
+		"ops": [{"kind": "change", "object": object_entry, "perf": perform, "events_done": true}],
+	}
 	return gml_undefined()
+
+
+# instance_destroy of an instance with a pending change: the instance is
+# destroyed once the change is done, as the object it changed into. Returns
+# whether the destroy waits.
+static func _gml_instance_change_defer_destroy(inst):
+	if _gml_instance_changes.is_empty() or typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+		return false
+	var pending = _gml_instance_changes.get(inst.get_instance_id())
+	if pending == null:
+		return false
+	if not _gml_instance_change_destroy_pending(pending):
+		pending["ops"].append({"kind": "destroy"})
+	return true
+
+
+static func _gml_instance_change_destroy_pending(pending):
+	var ops = pending["ops"]
+	return not ops.is_empty() and ops[ops.size() - 1]["kind"] == "destroy"
 
 
 # Carries out every pending change. Only for points where no event runs
@@ -72,7 +108,7 @@ static func gml_instance_change(object_selector, perf, inst = null):
 # phase boundaries); the Create events it runs may ask for more changes.
 static func _gml_instance_change_flush():
 	while not _gml_instance_changes.is_empty():
-		_gml_instance_change_apply(_gml_instance_changes.keys()[0])
+		_gml_instance_change_run(_gml_instance_changes.keys()[0])
 
 
 # Carries out an instance's pending change once its own Create event and
@@ -82,22 +118,56 @@ static func _gml_instance_change_flush_instance(inst):
 		return
 	var key = inst.get_instance_id()
 	while _gml_instance_changes.has(key):
-		_gml_instance_change_apply(key)
+		_gml_instance_change_run(key)
 
 
-static func _gml_instance_change_apply(key):
-	var change = _gml_instance_changes[key]
+# Runs an instance's pending operations in order. An event they run may ask
+# for another change, which waits for that event to return: the operations
+# left then wait after it.
+static func _gml_instance_change_run(key):
+	var pending = _gml_instance_changes[key]
 	_gml_instance_changes.erase(key)
-	var inst = change[0]
-	if not is_instance_valid(inst) or inst.is_queued_for_deletion():
-		return
-	var entry: Variant = _gml_instance_entry(inst)
-	if entry == null or entry["destroyed"]:
-		return
-	var object_entry = change[1]
+	var inst = pending["node"]
+	var ops = pending["ops"]
+	for index in range(ops.size()):
+		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
+			return
+		var entry: Variant = _gml_instance_entry(inst)
+		if entry == null or entry["destroyed"]:
+			return
+		var op = ops[index]
+		if op["kind"] == "destroy":
+			gml_instance_destroy(inst)
+			return
+		_gml_instance_change_apply(inst, entry, op)
+		var again = _gml_instance_changes.get(key)
+		if again != null:
+			for rest in ops.slice(index + 1):
+				if rest["kind"] == "destroy":
+					_gml_instance_change_defer_destroy(inst)
+				elif not _gml_instance_change_destroy_pending(again):
+					rest["events_done"] = false
+					again["ops"].append(rest)
+			return
+
+
+# Destroy and Clean Up events of perf.
+static func _gml_instance_change_destroy_events(inst):
+	if not _gml_event_scheduler_event_blocked(inst, true):
+		_gml_instance_change_event(inst, "_on_destroy")
+	if is_instance_valid(inst):
+		_gml_instance_change_clean_up(inst)
+
+
+static func _gml_instance_change_apply(inst, entry, op):
+	var object_entry = op["object"]
 	var info = _gml_instance_change_object(object_entry)
 	if info == null:
 		return
+	if op["perf"] and not op["events_done"]:
+		_gml_instance_change_destroy_events(inst)
+		if not is_instance_valid(inst) or inst.is_queued_for_deletion() or entry["destroyed"]:
+			return
 	var values = _gml_instance_change_member_values(inst)
 	var old_visual = inst.call("_gm_current_sprite_scene_root") if inst.has_method("_gm_current_sprite_scene_root") else null
 	_gml_instance_change_show_sprite(inst)
@@ -122,7 +192,7 @@ static func _gml_instance_change_apply(key):
 		if is_same(_gml_step_entries[i], entry):
 			_gml_step_infos[i] = _gml_step_script_info(inst)
 	_gml_input_live_table_mark = -1
-	if change[2]:
+	if op["perf"]:
 		_gml_instance_change_create(inst)
 
 

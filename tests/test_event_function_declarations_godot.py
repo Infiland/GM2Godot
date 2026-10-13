@@ -180,6 +180,22 @@ class TestEventFunctionDeclarationsGodot(unittest.TestCase):
 
         self.assertEqual(trace, ["I am the child!", "I am the child!"])
 
+    def test_function_named_like_a_node_member_loads_and_returns_its_value(self) -> None:
+        # ready, add_child and get_children are Node members a script cannot
+        # redeclare; GML has no such limit, so the script still has to load.
+        create = (
+            "function ready() { return 1; }\n"
+            "function add_child(_q) { return _q + 2; }\n"
+            "function get_children() { return 3; }\n"
+            "plain_count = ready() + add_child(10) + get_children();\n"
+            'trace("members:" + string(ready()) + " " + string(add_child(5)) + " " + string(get_children()));\n'
+            'trace("sum:" + string(plain_count));\n'
+            "hidden = 7;\n"
+            'trace("variable:" + string(hidden));\n'
+        )
+        trace = run_gml_trace(self, {}, {EVENT_CREATE: create})
+        self.assertEqual(trace, ["members:1 7 3", "sum:16", "variable:7"])
+
 
 if __name__ == "__main__":
     unittest.main()

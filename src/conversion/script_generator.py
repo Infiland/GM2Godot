@@ -10,6 +10,7 @@ from src.conversion.events.features import get_script_features
 from src.conversion.gml_runtime import GML_RUNTIME_RESOURCE_PATH
 from src.conversion.gml_transpiler_parts.constants import (
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+    GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.lexical_api import sanitize_gdscript_identifier
 from src.conversion.json_values import JsonObject
@@ -109,7 +110,9 @@ _SPRITE_RUNTIME_RESERVED_NAMES = _SCRIPT_BUILTIN_VARIABLES | _OBJECT_RUNTIME_MEM
     "_gm_sprite_visual_node",
     "Vector2",
 })
-_NATIVE_NODE2D_MEMBER_VARIABLES = GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
+_NATIVE_NODE2D_MEMBER_VARIABLES = (
+    GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS | GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS
+)
 _GDSCRIPT_RESERVED_WORDS = frozenset({
     "and",
     "as",

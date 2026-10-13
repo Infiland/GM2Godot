@@ -37,6 +37,7 @@ from src.conversion.gml_transpiler_parts.constants import (
     BUILTIN_GLOBAL_VARIABLES,
     BUILTIN_INSTANCE_VARIABLES,
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
+    GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS,
     GML_LITERAL_IDENTIFIERS,
 )
 from src.conversion.gml_transpiler_parts.function_declarations import event_function_names
@@ -1457,9 +1458,12 @@ class ObjectConverter(BaseConverter):
         except GMLTranspileError:
             # The transpile of the event reports the error.
             return {}
+        # A name the script cannot declare as a member (a Node2D method or
+        # signal, a builtin type, a generated function) stays a dynamic variable.
         return {
             name: event_function_member_name(object_name, entry["mapping"].godot_func, name)
             for name in names
+            if name not in GDSCRIPT_NODE2D_MEMBER_COLLISION_IDENTIFIERS
         }
 
     def _event_source_path(

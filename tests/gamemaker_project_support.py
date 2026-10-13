@@ -167,6 +167,8 @@ class GameMakerSprite:
     xorigin: int = 0
     yorigin: int = 0
     playback_speed: float = 0.0
+    # GameMaker's collisionKind: 0 is precise (opaque pixels), 1 a rectangle.
+    collision_kind: int = 1
 
 
 @dataclass(frozen=True)
@@ -479,7 +481,7 @@ def _sprite_yy(sprite: GameMakerSprite) -> dict[str, object]:
         "bbox_left": 0,
         "bbox_right": sprite.width - 1,
         "bbox_top": 0,
-        "collisionKind": 1,
+        "collisionKind": sprite.collision_kind,
         "collisionTolerance": 0,
         "frames": [
             {"$GMSpriteFrame": "", "%Name": name, "name": name, "resourceType": "GMSpriteFrame", "resourceVersion": "2.0"}

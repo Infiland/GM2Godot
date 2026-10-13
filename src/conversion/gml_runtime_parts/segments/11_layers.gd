@@ -445,10 +445,11 @@ static func gml_tilemap_set(tilemap_element_id, tiledata, xcell, ycell):
 	var layout = _gml_tilemap_atlas_layout(node.tile_set)
 	if layout.is_empty():
 		return false
-	var atlas_index = tile_index - 1
+	# Tile N is cell N of the tileset sprite's own grid; tile 0 is the empty
+	# top-left cell (tilemap_set rejects tile_index >= the tileset's tile count).
 	var atlas_coords = Vector2i(
-		atlas_index % int(layout["columns"]),
-		int(floor(float(atlas_index) / float(layout["columns"])))
+		tile_index % int(layout["columns"]),
+		int(floor(float(tile_index) / float(layout["columns"])))
 	)
 	var source = layout["source"]
 	if source is TileSetAtlasSource and not source.has_tile(atlas_coords):
@@ -481,7 +482,7 @@ static func gml_tilemap_get(tilemap_element_id, xcell, ycell):
 	if layout.is_empty():
 		return -1
 	var atlas_coords = node.get_cell_atlas_coords(coords)
-	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x + 1
+	var tile_value = atlas_coords.y * int(layout["columns"]) + atlas_coords.x
 	var alternative_tile = node.get_cell_alternative_tile(coords)
 	tile_value |= _gml_tilemap_transform_from_godot(alternative_tile)
 	return tile_value
@@ -1054,12 +1055,14 @@ static func _gml_tilemap_atlas_layout(tile_set):
 	var source = tile_set.get_source(source_id)
 	if not (source is TileSetAtlasSource):
 		return {}
-	var columns = int(tile_set.get_meta("gamemaker_tileset_out_columns", 0))
+	# GameMaker numbers tiles by cell of the tileset sprite's own grid, which is
+	# the converted atlas's grid. The tileset's out_columns describe the compiled
+	# texture page tileset_get_info reports, not the numbering.
+	var columns = int(source.get_atlas_grid_size().x)
 	if columns <= 0:
-		var grid_size = source.get_atlas_grid_size()
-		if grid_size.x <= 0:
-			return {}
-		columns = grid_size.x
+		columns = int(tile_set.get_meta("gamemaker_tileset_source_columns", 0))
+	if columns <= 0:
+		return {}
 	var layout = {
 		"source_id": source_id,
 		"source": source,

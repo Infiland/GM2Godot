@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 from typing import IO, Any, Callable, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -40,7 +40,6 @@ from src.conversion.rooms import (
     RoomConverter,
     render_room_runtime_script,
 )
-from src.conversion.tileset_metadata import select_tileset_room_layout
 
 
 def _write_file(path: str, content: str) -> None:
@@ -175,16 +174,22 @@ def _make_object_yy(name: str, parent_path: str = "folders/Objects.yy") -> str:
     ).format(name=name, parent_path=parent_path)
 
 
-def _make_sprite_yy(name: str, parent_path: str = "folders/Sprites.yy") -> str:
+def _make_sprite_yy(
+    name: str,
+    parent_path: str = "folders/Sprites.yy",
+    size: tuple[int, int] | None = None,
+) -> str:
+    size_lines = "" if size is None else '  "width":{},\n  "height":{},\n'.format(*size)
     return (
         '{{\n'
         '  "$GMSprite":"",\n'
         '  "%Name":"{name}",\n'
         '  "name":"{name}",\n'
+        '{size_lines}'
         '  "parent":{{"name":"Sprites","path":"{parent_path}",}},\n'
         '  "resourceType":"GMSprite",\n'
         '}}\n'
-    ).format(name=name, parent_path=parent_path)
+    ).format(name=name, parent_path=parent_path, size_lines=size_lines)
 
 
 def _node_block(scene: str, node_name: str) -> list[str]:
@@ -414,9 +419,14 @@ class TestRoomConverter(unittest.TestCase):
         _write_file(scene_path, '[gd_scene format=3]\n\n[node name="{}" type="Node2D"]\n'.format(name))
         return scene_path
 
-    def _write_sprite(self, name: str, parent_path: str = "folders/Sprites.yy") -> str:
+    def _write_sprite(
+        self,
+        name: str,
+        parent_path: str = "folders/Sprites.yy",
+        size: tuple[int, int] | None = None,
+    ) -> str:
         sprite_path = os.path.join(self.gm_dir, "sprites", name, name + ".yy")
-        _write_file(sprite_path, _make_sprite_yy(name, parent_path))
+        _write_file(sprite_path, _make_sprite_yy(name, parent_path, size))
         return sprite_path
 
     def _write_sprite_scene(self, name: str, *subfolders: str) -> str:
@@ -436,6 +446,8 @@ class TestRoomConverter(unittest.TestCase):
         parent_path: str = "folders/Tile Sets.yy",
         tile_count: int = 4,
         out_columns: int = 2,
+        tilexoff: int = 0,
+        tilehsep: int = 0,
     ) -> str:
         tileset_path = os.path.join(self.gm_dir, "tilesets", name, name + ".yy")
         _write_file(
@@ -452,9 +464,9 @@ class TestRoomConverter(unittest.TestCase):
                 '  "tileHeight":16,\n'
                 '  "tileWidth":16,\n'
                 '  "tile_count":{tile_count},\n'
-                '  "tilehsep":0,\n'
+                '  "tilehsep":{tilehsep},\n'
                 '  "tilevsep":0,\n'
-                '  "tilexoff":0,\n'
+                '  "tilexoff":{tilexoff},\n'
                 '  "tileyoff":0,\n'
                 '}}\n'
             ).format(
@@ -462,6 +474,8 @@ class TestRoomConverter(unittest.TestCase):
                 out_columns=out_columns,
                 parent_path=parent_path,
                 tile_count=tile_count,
+                tilexoff=tilexoff,
+                tilehsep=tilehsep,
             ),
         )
         return tileset_path
@@ -904,8 +918,9 @@ class TestRoomConverter(unittest.TestCase):
                 )
 
     def test_tile_layer_emits_tilemaplayer_with_decoded_cells(self):
-        self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_yyp(["r_tiles"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
         self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_sprite("s_tiles", size=(32, 32))
         self._write_tileset_resource("ts_ground")
         self._write_room("r_tiles", layers=[
             {
@@ -934,7 +949,8 @@ class TestRoomConverter(unittest.TestCase):
             content,
         )
         self.assertIn('tile_set = ExtResource("1")', content)
-        self.assertIn('tile_map_data = PackedByteArray(0, 0', content)
+        # Tile N is cell N of the two column sprite grid: tile 1 is (1, 0), tile 2 is (0, 1).
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 0, 1, 0, 0), (0, 1, 0, 1, 0)) + "\n", content)
         self.assertIn('metadata/gamemaker_layer_element_type = "tilemap"', content)
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 6', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 3', content)
@@ -968,6 +984,75 @@ class TestRoomConverter(unittest.TestCase):
         self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 4', content)
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 2', content)
         self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        # The tileset has no readable sprite: its tiles go in one row, tile N at column N.
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 1, 2, 0, 0)) + "\n", content)
+
+    def test_tile_layer_counts_tiles_in_the_source_sprite_grid_not_out_columns(self):
+        self._write_yyp(["r_grid"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        # The sprite is 4 x 3 cells; the compiled texture page is 7 columns wide.
+        self._write_tileset("ts_ground", tile_count=12, out_columns=7)
+        self._write_sprite("s_tiles", size=(64, 48))
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_grid", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 5,
+                    "SerialiseHeight": 1,
+                    "TileDataFormat": 0,
+                    "TileCompressedData": [
+                        1,
+                        5 | GAMEMAKER_TILE_MIRROR_BIT,
+                        11 | GAMEMAKER_TILE_FLIP_BIT | GAMEMAKER_TILE_ROTATE_BIT,
+                        0,
+                        4,
+                    ],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_grid")
+
+        self.assertIn(
+            "\n" + _tile_map_data(
+                (0, 0, 1, 0, 0),
+                (1, 0, 1, 1, GODOT_TILE_TRANSFORM_FLIP_H),
+                (2, 0, 3, 2, GODOT_TILE_TRANSFORM_TRANSPOSE),
+                (4, 0, 0, 1, 0),
+            ) + "\n",
+            content,
+        )
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 4', content)
+        self.assertIn('metadata/gamemaker_tile_raw_values = [1, ', content)
+
+    def test_tile_layer_atlas_cells_follow_tileset_offset_and_separation(self):
+        self._write_yyp(["r_sep"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
+        # Three 16 pixel cells after a 4 pixel margin, 2 pixels apart: 4 + 3 * 16 + 2 * 2 wide.
+        self._write_tileset("ts_ground", tile_count=3, out_columns=3, tilexoff=4, tilehsep=2)
+        self._write_sprite("s_tiles", size=(56, 16))
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_sep", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 2, "SerialiseHeight": 1, "TileDataFormat": 0,
+                    "TileCompressedData": [1, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+
+        self.assertIn(
+            "\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 0, 2, 0, 0)) + "\n",
+            self._read_scene("r_sep"),
+        )
 
     def test_missing_tileset_warns_without_emitting_tilemaplayer(self):
         self._write_yyp(["r_tiles"])
@@ -2930,12 +3015,24 @@ class TestRoomConverter(unittest.TestCase):
 
 
 
+def _tile_map_data(*cells: tuple[int, int, int, int, int]) -> str:
+    """The TileMapLayer data of cells given as (x, y, atlas_x, atlas_y, alternative)."""
+    values = [0, 0]
+    for x, y, atlas_x, atlas_y, alternative in cells:
+        for value in (x, y, 0, atlas_x, atlas_y, alternative):
+            values.extend([value & 0xFF, (value >> 8) & 0xFF])
+    return "tile_map_data = PackedByteArray({})".format(", ".join(str(value) for value in values))
+
+
 class _TypedLayoutResourceIndex:
-    def __init__(self, source: str, output_root: str) -> None:
+    def __init__(self, source: str, output_root: str, sprite_source: str | None = None) -> None:
         self.source = source
+        self.sprite_source = sprite_source
         self.godot_project_path = output_root
 
     def resolve_gm_path(self, kind: str, name: str) -> str | None:
+        if kind == "sprites" and name == "typed_sprite":
+            return self.sprite_source
         return self.source if kind == "tilesets" and name == "typed" else None
 
     def resolve_godot_path(self, kind: str, name: str) -> str | None:
@@ -2943,10 +3040,16 @@ class _TypedLayoutResourceIndex:
 
 
 class TestTypedRoomTilesetAcquisition(unittest.TestCase):
+    TILESET_WITH_SPRITE = (
+        '{"spriteId":{"name":"typed_sprite","path":"sprites/typed_sprite/typed_sprite.yy"},'
+        '"tileWidth":16,"out_columns":%s,"unknown":"a,}",}'
+    )
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         self.path = os.path.join(self.directory.name, "tileset.yy")
-        self.index = _TypedLayoutResourceIndex(self.path, self.directory.name)
+        self.sprite_path = os.path.join(self.directory.name, "typed_sprite.yy")
+        self.index = _TypedLayoutResourceIndex(self.path, self.directory.name, self.sprite_path)
         with open(os.path.join(self.directory.name, "typed.tres"), "w", encoding="utf-8") as stream:
             stream.write('[gd_resource type="TileSet" format=3]')
 
@@ -2955,6 +3058,10 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
 
     def _write_layout(self, source: str) -> None:
         with open(self.path, "w", encoding="utf-8") as stream:
+            stream.write(source)
+
+    def _write_sprite(self, source: str) -> None:
+        with open(self.sprite_path, "w", encoding="utf-8") as stream:
             stream.write(source)
 
     def _serialize_layout(self) -> SerializedRoomLayers:
@@ -2966,28 +3073,61 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         return serialize_room_layers(room, resource_index=self.index)
 
     def test_shared_decoder_receives_actual_utf8_content_path_and_returns_same_object(self) -> None:
-        source = '{"out_columns":"3.5","unknown":"a,}",}'
+        source = self.TILESET_WITH_SPRITE % '"3.5"'
+        sprite_source = '{"width":64,"height":48,"unknown":"b,}",}'
         self._write_layout(source)
-        document = decode_gamemaker_json(source, source_path=self.path)
-        with (
-            patch("src.conversion.room_layers.decode_gamemaker_json", return_value=document) as decoder,
-            patch("src.conversion.room_layers.select_tileset_room_layout", wraps=select_tileset_room_layout) as selection,
-        ):
+        self._write_sprite(sprite_source)
+        documents = [
+            decode_gamemaker_json(source, source_path=self.path),
+            decode_gamemaker_json(sprite_source, source_path=self.sprite_path),
+        ]
+        with patch("src.conversion.room_layers.decode_gamemaker_json", side_effect=documents) as decoder:
             result = self._serialize_layout()
-        self.assertIs(selection.call_args.args[0], document.value)
-        decoder.assert_called_once_with(source, source_path=self.path)
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0)", result.node_lines)
+        self.assertEqual(decoder.call_args_list, [
+            call(source, source_path=self.path),
+            call(sprite_source, source_path=self.sprite_path),
+        ])
+        # Tile 9 is cell 9 of the sprite's 4 column grid, whatever out_columns says.
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), result.node_lines)
 
     def test_live_file_replacement_changes_serialized_atlas_cells(self) -> None:
-        self._write_layout('{"out_columns":2}')
+        self._write_layout(self.TILESET_WITH_SPRITE % 9)
+        self._write_sprite('{"width":32,"height":96}')
         first = self._serialize_layout()
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0)", first.node_lines)
-        self._write_layout('{"out_columns":0,"tile_count":"7.9"}')
+        self.assertIn(_tile_map_data((0, 0, 1, 4, 0)), first.node_lines)
+        self._write_sprite('{"width":64,"height":48}')
         second = self._serialize_layout()
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0)", second.node_lines)
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), second.node_lines)
+        self._write_layout('{"spriteId":{"name":"typed_sprite"},"tileWidth":16,"tilexoff":4,"tilehsep":2}')
+        self._write_sprite('{"width":%d,"height":48}' % (4 + 16 * 3 + 2 * 2))
+        third = self._serialize_layout()
+        self.assertIn(_tile_map_data((0, 0, 0, 3, 0)), third.node_lines)
+
+    def test_tile_n_is_source_cell_n_and_out_columns_play_no_part(self) -> None:
+        self._write_sprite('{"width":48,"height":48}')
+        for out_columns in (0, 1, 3, 17):
+            with self.subTest(out_columns=out_columns):
+                self._write_layout(self.TILESET_WITH_SPRITE % out_columns)
+                self.assertIn(_tile_map_data((0, 0, 0, 3, 0)), self._serialize_layout().node_lines)
+
+    def test_tileset_without_a_readable_sprite_lays_tiles_out_in_one_row(self) -> None:
+        expected = _tile_map_data((0, 0, 9, 0, 0))
+        self._write_layout(self.TILESET_WITH_SPRITE % 2)
+        self._write_sprite('{"height":48}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_sprite('{"width":8}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_sprite('[]')
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        os.unlink(self.sprite_path)
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self.index.sprite_source = None
+        self.assertIn(expected, self._serialize_layout().node_lines)
+        self._write_layout('{"out_columns":2}')
+        self.assertIn(expected, self._serialize_layout().node_lines)
 
     def test_nonobject_roots_io_and_json_errors_use_decoded_tile_fallback(self) -> None:
-        expected = "tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)"
+        expected = _tile_map_data((0, 0, 9, 0, 0))
         for source in ('null', '[]', 'true', 'NaN', '"layout"', '{"out_columns":'):
             with self.subTest(source=source):
                 self._write_layout(source)
@@ -3003,6 +3143,11 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         with open(self.path, "wb") as stream:
             stream.write(b'\xef\xbb\xbf{}')
         self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 1', self._serialize_layout().node_lines)
+        self._write_layout(self.TILESET_WITH_SPRITE % 4)
+        with open(self.sprite_path, "wb") as stream:
+            stream.write(b"\xff")
+        with self.assertRaises(UnicodeDecodeError):
+            self._serialize_layout()
 
     def test_decoder_error_and_control_identity_keep_narrow_catch(self) -> None:
         self._write_layout('{}')
@@ -3025,17 +3170,12 @@ class TestTypedRoomTilesetAcquisition(unittest.TestCase):
         self.assertEqual(caught.exception.source_path, self.path)
         self.assertEqual(caught.exception.field_path, ("unknown",))
 
-    def test_positive_columns_skip_unused_overflow_and_owner_fallback_remains(self) -> None:
-        self._write_layout('{"out_columns":"4.9","tile_count":Infinity}')
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0)",
-                      self._serialize_layout().node_lines)
-        self._write_layout('{"out_columns":false,"tile_count":null}')
-        self.assertIn("tile_map_data = PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0)",
-                      self._serialize_layout().node_lines)
-        self._write_layout('{"out_columns":0,"tile_count":Infinity}')
-        with self.assertRaises(OverflowError):
-            self._serialize_layout()
-
+    def test_unused_tileset_counts_are_never_coerced(self) -> None:
+        self._write_sprite('{"width":64,"height":48}')
+        self._write_layout(
+            '{"spriteId":{"name":"typed_sprite"},"tileWidth":16,"out_columns":Infinity,"tile_count":Infinity}'
+        )
+        self.assertIn(_tile_map_data((0, 0, 1, 2, 0)), self._serialize_layout().node_lines)
 
 
 class TestTypedRoomConsumerStages(unittest.TestCase):

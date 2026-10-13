@@ -31,7 +31,10 @@ from src.conversion.room_metadata import (
     room_item_name_value,
     room_object_items,
 )
-from src.conversion.tileset_metadata import select_tileset_room_layout
+from src.conversion.tileset_metadata import (
+    select_tileset_source_columns,
+    tileset_sprite_name,
+)
 from src.conversion.type_defs import LogCallback
 
 KNOWN_LAYER_TYPES = {
@@ -563,7 +566,7 @@ def _tile_map_layer_lines(
         return []
 
     layout = _tileset_layout(context, tileset_name)
-    columns = _tileset_columns(layout, decoded_tiles)
+    columns = _tileset_columns(context, layout, decoded_tiles)
     cells = _godot_tile_cells(decoded_tiles, width, columns)
     tile_map_data = _format_godot_tile_map_data(cells)
     transform_count = sum(
@@ -625,12 +628,42 @@ def _tileset_layout(
     return data or {}
 
 
-def _tileset_columns(layout: JsonObject, decoded_tiles: list[int]) -> int:
-    selected = select_tileset_room_layout(layout)
-    if selected.columns is not None:
-        return selected.columns
-    max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=1)
-    return max(1, max_index)
+def _tileset_columns(
+    context: RoomLayerSerializationContext,
+    layout: JsonObject,
+    decoded_tiles: list[int],
+) -> int:
+    """Cells per row of the grid the tileset's tile numbers count in.
+
+    GameMaker's tile N is cell N of the tileset's source sprite, counted from
+    0 at the top-left cell, so the converted atlas is laid out in that
+    sprite's own grid (out_columns only describes the compiled texture page).
+    A tileset whose sprite cannot be read gets a single row long enough for
+    every tile the layer uses.
+    """
+    columns = _tileset_source_columns(context, layout)
+    if columns is not None:
+        return columns
+    max_index = max((decode_gamemaker_tile(value).tile_index for value in decoded_tiles), default=0)
+    return max(1, max_index + 1)
+
+
+def _tileset_source_columns(
+    context: RoomLayerSerializationContext, layout: JsonObject
+) -> int | None:
+    sprite_name = tileset_sprite_name(layout)
+    if sprite_name is None or context.resource_index is None:
+        return None
+    sprite_path = context.resource_index.resolve_gm_path("sprites", sprite_name)
+    if sprite_path is None:
+        return None
+    sprite = _read_yy_json(sprite_path)
+    if sprite is None:
+        return None
+    width = sprite.get("width")
+    if isinstance(width, bool) or not isinstance(width, (int, float)):
+        return None
+    return select_tileset_source_columns(layout, int(width))
 
 
 def _godot_tile_cells(
@@ -643,7 +676,7 @@ def _godot_tile_cells(
         if is_empty_gamemaker_tile(raw_tile):
             continue
         tile = decode_gamemaker_tile(raw_tile)
-        atlas_index = max(0, tile.tile_index - 1)
+        # Tile N is cell N of the tileset's grid; tile 0 (empty) was skipped.
         alternative_tile = gamemaker_tile_transform_to_godot(
             mirror=tile.mirror,
             flip=tile.flip,
@@ -654,8 +687,8 @@ def _godot_tile_cells(
                 x=index % width,
                 y=index // width,
                 source_id=0,
-                atlas_x=atlas_index % columns,
-                atlas_y=atlas_index // columns,
+                atlas_x=tile.tile_index % columns,
+                atlas_y=tile.tile_index // columns,
                 alternative_tile=alternative_tile,
                 raw_value=raw_tile,
             )

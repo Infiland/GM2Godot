@@ -314,6 +314,39 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["ok:7", "child:41"])
 
+    def test_loop_condition_and_case_label_may_contain_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_flow": (
+                "function until_value() {\n"
+                "    var _n = 0;\n"
+                "    do {\n"
+                "        _n++;\n"
+                "        if (_n < 3) continue;\n"
+                "    } until (_n >= (function() { var _t = 3; return _t; })());\n"
+                "    return _n;\n"
+                "}\n"
+                "\n"
+                "function label_value() {\n"
+                "    switch (2) {\n"
+                "        case (function() { var _c = 1; return _c; })(): return \"one\";\n"
+                "        case (function() { var _c = 2; return _c; })(): return \"two\";\n"
+                "        default: return \"none\";\n"
+                "    }\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("until:" + string(until_value()));\n'
+            'trace("label:" + label_value());\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "until:3", "label:two"])
+
     def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
         scripts = {
             "scr_ok": "function ok_value() { return 7; }\n",

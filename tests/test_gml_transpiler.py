@@ -2670,6 +2670,45 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertNotIn("var _ =", output)
 
+    def test_a_method_in_a_do_until_condition_or_case_label_keeps_its_body_indented(self):
+        # The test lines of these statements are built by the statement
+        # parser; a multi-line method inside them is indented with the line.
+        until_output = transpile_gml_code(
+            "do { n++; continue; } until (is_method(function() { var _a = 1; return _a; }));",
+            indent="",
+        )
+        until_check = (
+            "\tif GMRuntime.is_method(GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _a = 1\n"
+            "\t\treturn _a\n"
+            "\t)):\n"
+            "\t\tbreak"
+        )
+        # The check ends the loop body and also runs before the continue.
+        self.assertEqual(
+            until_output,
+            "while true:\n"
+            "\tn = GMRuntime.gml_add(n, 1)\n"
+            f"{until_check}\n"
+            "\tcontinue\n"
+            f"{until_check}",
+        )
+
+        switch_output = transpile_gml_code(
+            "switch (a) { case (function() { var _c = 1; return _c; })(): b = 1; break; }",
+            indent="",
+        )
+        self.assertIn(
+            "\tif not _gml_switch_matched_1 and GMRuntime.gml_eq(_gml_switch_value_0, "
+            "GMRuntime.gml_call_value((GMRuntime.gml_receiver_method(self, "
+            "func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _c = 1\n"
+            "\t\treturn _c\n"
+            "\t)), [], self, other)):\n"
+            "\t\t_gml_switch_matched_1 = true\n",
+            switch_output,
+        )
+
     def test_transpiles_try_finally_blocks(self):
         output = transpile_gml_code("try { score = 1; } finally { cleaned = true; }", indent="")
 

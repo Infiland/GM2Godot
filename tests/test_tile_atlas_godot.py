@@ -221,12 +221,34 @@ def _project() -> GameMakerProject:
     )
 
 
+def _ide_compress(cells: list[int]) -> list[int]:
+    """The TileDataFormat 1 stream the IDE saves for a row-major list of cells.
+
+    Two or more equal neighbours are a run, [-count, value]; the cells between
+    runs are a literal block, [count, value, ...] (the same stream as a real
+    room saved by the IDE, see TileCompressedDataFormatTests in test_rooms.py).
+    """
+    stream: list[int] = []
+    literals: list[int] = []
+    for value, group in itertools.groupby(cells):
+        count = len(list(group))
+        if count < 2:
+            literals.append(value)
+            continue
+        if literals:
+            stream.extend([len(literals), *literals])
+            literals = []
+        stream.extend([-count, value])
+    if literals:
+        stream.extend([len(literals), *literals])
+    return stream
+
+
 def _tile_layer(name: str, depth: int, tileset: _Tileset, placed: list[_Placed]) -> dict[str, object]:
     cells = [0] * (_MAP_WIDTH * _MAP_HEIGHT)
     for tile in placed:
         cells[tile.row * _MAP_WIDTH + tile.column] = tile.data
-    # TileDataFormat 1 repeat runs only, [-count, value]; every cell on its own here.
-    compressed = [entry for cell in cells for entry in (-1, cell)]
+    compressed = _ide_compress(cells)
     return {
         "$GMRTileLayer": "",
         "%Name": name,

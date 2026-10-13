@@ -428,7 +428,34 @@ def decode_tile_compressed_data(
     compressed_data: list[JsonValue],
     tile_data_format: int = 1,
 ) -> list[int]:
-    """Expand GameMaker TileCompressedData format 1 into a row-major cell array."""
+    """Expand GameMaker TileCompressedData into a row-major cell array.
+
+    Format 0 stores one raw tile value per cell. Format 1 (2022.8 and later,
+    "TileDataFormat": 1) is a run-length stream of control words:
+
+    * a negative count -n is followed by ONE tile value that repeats n times;
+    * a positive count n is followed by n literal tile values, each one cell.
+
+    The IDE starts a run as soon as two or more equal tiles are adjacent, so a
+    run is never shorter than 2, two literal blocks are never adjacent and
+    adjacent runs never repeat the same value. The empty tile -2147483648 is an
+    ordinary tile value (a run value or a literal), never a count. A tile value
+    keeps its mirror (bit 28), flip (bit 29) and
+    rotate (bit 30) flags, so it can be a large positive number or negative.
+    A zero count is an empty literal block, as in expandTiles; the IDE never
+    writes one. A count that overruns the layer or a block that runs past the
+    end of the data raises ValueError before anything is expanded.
+
+    Checked against rooms saved by the IDE: all 100 distinct format 1 tile
+    layers in 30 room .yy files from 11 public GameMaker projects decode to
+    exactly SerialiseWidth * SerialiseHeight cells with this reading, while
+    the earlier reading (a negative number is a run, every other number is one
+    tile) reached that size only for the 4 layers made of runs alone. The
+    sources are listed in tests/test_rooms.py (TileCompressedDataFormatTests).
+    The same control-word structure is the HTML5 runner's expandTiles
+    (yyRoom.js) and the 2022.8 write-up at
+    https://cookiedraggy.itch.io/kincaid/devlog/436785/weekly-roundup-week-39-mostly-recovered-from-covid
+    """
     if tile_data_format not in (0, 1):
         raise ValueError(f"Unsupported GameMaker tile data format: {tile_data_format}")
     if serialise_width < 0 or serialise_height < 0:
@@ -440,47 +467,52 @@ def decode_tile_compressed_data(
             _require_int(value, "TileCompressedData value")
             for value in compressed_data
         ]
-        if len(decoded) != expected_length:
-            raise ValueError(
-                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                    actual=len(decoded),
-                    expected=expected_length,
-                )
-            )
-        return decoded
+    else:
+        decoded = _expand_tile_runs(compressed_data, expected_length)
 
+    if len(decoded) != expected_length:
+        raise _tile_count_error(len(decoded), expected_length)
+    return decoded
+
+
+def _expand_tile_runs(compressed_data: list[JsonValue], expected_length: int) -> list[int]:
+    """Expand the format 1 control words; never produce more than expected_length cells."""
     decoded: list[int] = []
     index = 0
     while index < len(compressed_data):
-        value = _require_int(compressed_data[index], "TileCompressedData value")
-        if value < 0 and value != GAMEMAKER_EMPTY_TILE_SENTINEL:
-            if index + 1 >= len(compressed_data):
+        count = _require_int(compressed_data[index], "TileCompressedData count")
+        index += 1
+        if count < 0:
+            if index >= len(compressed_data):
                 raise ValueError("Malformed GameMaker tile data: repeated run has no value")
             repeat_value = _require_int(
-                compressed_data[index + 1], "TileCompressedData repeated value"
+                compressed_data[index], "TileCompressedData repeated value"
             )
-            decoded.extend([repeat_value] * -value)
-            index += 2
-        else:
-            decoded.append(value)
             index += 1
+            if len(decoded) - count > expected_length:
+                raise _tile_count_error(len(decoded) - count, expected_length)
+            decoded.extend([repeat_value] * -count)
+            continue
 
-        if len(decoded) > expected_length:
-            raise ValueError(
-                "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                    actual=len(decoded),
-                    expected=expected_length,
-                )
-            )
-
-    if len(decoded) != expected_length:
-        raise ValueError(
-            "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
-                actual=len(decoded),
-                expected=expected_length,
-            )
+        if index + count > len(compressed_data):
+            raise ValueError("Malformed GameMaker tile data: literal run is shorter than its count")
+        if len(decoded) + count > expected_length:
+            raise _tile_count_error(len(decoded) + count, expected_length)
+        decoded.extend(
+            _require_int(value, "TileCompressedData value")
+            for value in compressed_data[index:index + count]
         )
+        index += count
     return decoded
+
+
+def _tile_count_error(actual: int, expected: int) -> ValueError:
+    return ValueError(
+        "Malformed GameMaker tile data: decoded {actual} cells, expected {expected}".format(
+            actual=actual,
+            expected=expected,
+        )
+    )
 
 
 def is_empty_gamemaker_tile(raw_value: int) -> bool:

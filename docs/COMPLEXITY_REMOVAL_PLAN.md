@@ -1122,18 +1122,6 @@ Removal: Extract directory entry collection and note asset assembly.
 
 Existing checks: `tests.test_notes.TestNoteConverterSourceContainment.test_rejects_external_companion_yy_without_reading_it`, `tests.test_notes.TestNoteConverterSourceContainment.test_final_pre_copy_check_rejects_late_note_symlink_swap`
 
-<a id="fn-34e1346ae3e0d615"></a>
-
-## `src/conversion/script_functions.py::modern_script_structure`
-
-Recognize modern script declarations and top-level constructor initialization.
-
-Preserve: Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.
-
-Removal: Extract declaration parsing and supported top-level initializer cases.
-
-Existing checks: `tests.test_scripts.TestScriptConverter.test_discovers_constructor_and_explicit_top_level_initialization`, `tests.test_scripts.TestScriptConverter.test_discovers_modern_functions_around_top_level_enum`
-
 <a id="fn-e47f1faeb860c46f"></a>
 
 ## `src/conversion/script_generator.py::generate_script_content`

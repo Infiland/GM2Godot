@@ -116,6 +116,7 @@ static func gm2godot_runtime_shutdown():
 		_gml_script_registry,
 		_gml_script_argument_stack,
 		_gml_static_registry,
+		_gml_static_structs,
 		_gml_static_named_scopes,
 		_gml_static_root,
 		_gml_global_scope,
@@ -129,6 +130,8 @@ static func gm2godot_runtime_shutdown():
 	_gml_script_registry_initializers_running = false
 	_gml_script_registry_initializers_complete = false
 	_gml_static_registry.clear()
+	_gml_static_structs.clear()
+	_gml_static_cursor = 0
 	_gml_static_named_scopes.clear()
 	_gml_static_root.clear()
 	_gml_global_scope.clear()
@@ -460,7 +463,7 @@ static func gml_new(constructor, args = [], caller_self = null, caller_other = n
 	var instance = gml_struct({})
 	var constructor_static = gml_static_get(constructor)
 	if not is_undefined(constructor_static):
-		gml_static_set(instance, constructor_static)
+		_gml_static_link_new(instance, constructor_static)
 	# GameMaker's bound-constructor exception uses the constructor's bound
 	# scope as other. An unbound script constructor uses the scope that called new.
 	var constructor_other = constructor.bound_self if constructor.has_bound_self else caller_self

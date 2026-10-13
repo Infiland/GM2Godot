@@ -94,17 +94,23 @@ class TestTCCConversion(unittest.TestCase):
             resources=ConversionCounts(
                 requested=5386,
                 executed=5386,
-                # The 178 source conversion gaps remain. The asset-registry
-                # step now also skips its 104 object/room rows whose required
-                # generated outputs are absent, plus the authored sequence whose
-                # embedded animation curve is intentionally diagnosed by #707.
-                # Rooms whose creation-code sidecars are missing convert as
-                # empty code, as GameMaker runs them. Eleven shaders fail
-                # closed for custom vertex data, reserved Godot globals, or
-                # unsupported scalar matrix constructors and are omitted once
-                # more from the registry.
-                completed=5081,
-                skipped=294,
+                # 151 source conversion gaps remain. Scripts and events whose
+                # only problem is a call to an unsupported function or an
+                # unmapped extension function (Steam, Google Play Services)
+                # now convert, with only those calls failing at run time, and
+                # gml_pragma, layer_force_draw_depth, string_join,
+                # show_debug_overlay and the date functions convert, which
+                # leaves 25 fewer scripts and 2 fewer objects behind. The
+                # asset-registry step also skips its 102 object/room rows
+                # whose required generated outputs are absent, plus the
+                # authored sequence whose embedded animation curve is
+                # intentionally diagnosed by #707. Rooms whose creation-code
+                # sidecars are missing convert as empty code, as GameMaker
+                # runs them. Eleven shaders fail closed for custom vertex
+                # data, reserved Godot globals, or unsupported scalar matrix
+                # constructors and are omitted once more from the registry.
+                completed=5110,
+                skipped=265,
                 failed=11,
             ),
         )
@@ -291,13 +297,56 @@ class TestTCCConversion(unittest.TestCase):
         ]
         self.assertNotIn("", script_transpile_resources)
         self.assertNotIn("", object_transpile_resources)
-        self.assertEqual(len(all_transpile_diagnostics), 191)
-        self.assertEqual(len(script_transpile_diagnostics), 74)
-        self.assertEqual(len(script_transpile_resources), 74)
-        self.assertEqual(len(object_transpile_diagnostics), 115)
-        self.assertEqual(len(object_transpile_resources), 100)
+        self.assertEqual(len(all_transpile_diagnostics), 163)
+        self.assertEqual(len(script_transpile_diagnostics), 49)
+        self.assertEqual(len(script_transpile_resources), 49)
+        self.assertEqual(len(object_transpile_diagnostics), 112)
+        self.assertEqual(len(object_transpile_resources), 98)
         self.assertEqual(len(room_transpile_diagnostics), 2)
         self.assertEqual(room_transpile_resources, {"r_donolvl1", "r_lvl1"})
+
+        # Calls the converted game cannot make fail on their own: every one
+        # is an extension function the project does not map, or
+        # show_message_async.
+        unsupported_calls = [
+            diagnostic
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-UNSUPPORTED-CALL"
+        ]
+        self.assertEqual(len(unsupported_calls), 56)
+        self.assertEqual(
+            {
+                str(diagnostic.get("api", ""))
+                for diagnostic in unsupported_calls
+                if not str(diagnostic.get("api", "")).startswith(("steam_", "GooglePlayServices_"))
+            },
+            {"show_message_async"},
+        )
+        # Events that read the instance after instance_change, which the
+        # converted game carries out once the event returns.
+        deferred_instance_changes = sorted(
+            (
+                str(diagnostic.get("resource", "")),
+                str(diagnostic.get("event", "")),
+                int(diagnostic.get("line") or 0),
+            )
+            for diagnostic in diagnostic_entries
+            if diagnostic.get("code") == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        )
+        self.assertEqual(
+            deferred_instance_changes,
+            [
+                ("o_box", "_gm_input_mouse_0", 2),
+                ("o_boxLE", "_gm_input_mouse_0", 2),
+                ("o_boxwithammo", "_gm_input_mouse_0", 2),
+                ("o_boxwithammoLE", "_gm_input_mouse_0", 2),
+                ("o_boxwithinfiniteammo", "_gm_input_mouse_0", 2),
+                ("o_boxwithinfiniteammoLE", "_gm_input_mouse_0", 2),
+                ("o_spike", "_ready", 14),
+                ("o_spike", "_ready", 19),
+                ("o_torch", "_on_collision_o_player", 17),
+            ],
+        )
 
         object_event_source_missing = [
             (

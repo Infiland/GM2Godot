@@ -85,7 +85,7 @@ conversion through a downloadable extension.
 
 ## Releases
 
-Current source version: `1.0.0`.
+Current source version: `1.1.0`.
 
 Published downloads include Windows and Linux ZIPs, plus separate macOS Apple Silicon
 and Intel ZIP/DMG pairs. See [Installation](https://github.com/Infiland/GM2Godot/wiki/Installation)

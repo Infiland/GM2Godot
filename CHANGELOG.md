@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 - 2026-10-13
+
+- Make converted games play like GameMaker: GameMaker's step order, depth-ordered drawing, mask-based collisions with both instances getting the event, tilemap collisions, views, the GUI layer and baked bitmap fonts (#953).
+- Follow the runner on rooms, room changes, timelines, game speed, paths, Variable Definitions, instance deactivation, Clean Up and instance destruction.
+- Match GameMaker values and GML: real division, epsilon comparisons, banker's rounding, int64 edge cases, `undefined` for unset values, `variable_instance_exists`, semicolon-less statements, macros, try/catch in methods and script functions registered at start-up.
+- Speed up large rooms with per-object instance lists and cached collision boxes; Monophobia's busiest room runs at about 60 fps and all seven of its endings play through.
+- Track the remaining parity work in #954.
+
 ## 1.0.0 - 2026-10-05
 
 - Publish the 1.0 release with the conversion, generated-runtime, diagnostics, packaging and dependency fixes delivered throughout the 0.8 series.

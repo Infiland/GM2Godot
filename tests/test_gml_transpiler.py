@@ -3824,6 +3824,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         *,
         enabled: bool = True,
         inherited_event_call: str | None = None,
+        inherited_event_continuation: bool = False,
+        macro_values: dict[str, str] | None = None,
+        instance_change_names: tuple[str, ...] = (),
     ) -> GMLTranspileResult:
         return transpile_gml_code_with_source_map(
             source,
@@ -3834,6 +3837,9 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             dynamic_instance_names=set(),
             inherited_event_call=inherited_event_call,
             instance_change_continuations=enabled,
+            inherited_event_continuation=inherited_event_continuation,
+            macro_values=macro_values,
+            instance_change_names=instance_change_names,
         )
 
     def test_instance_change_runs_the_rest_of_the_event_on_the_new_object(self):
@@ -3856,8 +3862,8 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "_gml_change_continue, self)\n"
             "return",
         )
-        # The call is reported by the number of instance_change names before it,
-        # so the analyser does not warn about it.
+        # The call is reported by its place among the sites of the source, so
+        # the analyser does not warn about it.
         self.assertEqual(result.continued_instance_changes, (0,))
 
         # The last statement has nothing to continue with.
@@ -3984,6 +3990,123 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         )
         self.assertTrue(before.code.startswith("super._on_step()\nvar _gml_change_self = self\n"))
         self.assertEqual(before.continued_instance_changes, (0,))
+
+    def test_event_inherited_ends_the_event_when_an_ancestor_can_change_the_object(self):
+        # The parent's event may replace the node's script under the child's
+        # method, which must use no member afterwards: the rest of the child's
+        # event is a function made before the call and run right after it.
+        result = self._transpile_with_continuations(
+            "var s = sprite_index;\nevent_inherited();\nsprite_index = s;\nhp = 3;",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            result.code,
+            "var s = sprite_index\n"
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "sprite_index", s)\n'
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            "super._on_step()\n"
+            "_gml_change_continue.call()\n"
+            "return",
+        )
+        self.assertEqual(result.continued_instance_changes, ())
+
+        # Inside a branch, the statements after the branches go with it, as
+        # they do for an instance_change.
+        branch = self._transpile_with_continuations(
+            "if hp = 1 { event_inherited(); hp = 2 }\nx = 3",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            branch.code,
+            "if GMRuntime.gml_eq(hp, 1):\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 2)\n'
+            '\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, "x", 3)\n'
+            "\tsuper._on_step()\n"
+            "\t_gml_change_continue.call()\n"
+            "\treturn\n"
+            "position.x = 3",
+        )
+
+        # Without an ancestor that can change the object the call stays plain.
+        plain = self._transpile_with_continuations(
+            "event_inherited();\nhp = 3;", inherited_event_call="super._on_step()"
+        )
+        self.assertEqual(plain.code, "super._on_step()\nhp = 3")
+
+    def test_event_inherited_outside_the_events_own_statements_marks_the_instance(self):
+        # Where the rest of the event cannot be a function (a loop, a with, a
+        # switch or try statement, or a call that another call of the parent's
+        # event follows) the call raises the instance's nesting count, which
+        # makes a change in the parent's event wait for the child's event to
+        # return.
+        for source in (
+            "for (var i = 0; i < 2; i++) { event_inherited(); }\nhp = 3;",
+            "try { event_inherited(); } catch (e) { }\nhp = 3;",
+            "with (o_c) { event_inherited(); }\nhp = 3;",
+        ):
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(
+                    source, inherited_event_call="super._on_step()", inherited_event_continuation=True
+                )
+                self.assertIn(
+                    "GMRuntime.gml_event_nest(self)\n\tsuper._on_step()\n\tGMRuntime.gml_event_unnest(self)",
+                    result.code.replace("\t\t", "\t"),
+                )
+                self.assertNotIn("_gml_change_continue", result.code)
+
+        # (The last call of a straight run of statements ends the event.)
+        twice = self._transpile_with_continuations(
+            "event_inherited();\nhp = 3;\nevent_inherited();",
+            inherited_event_call="super._on_step()",
+            inherited_event_continuation=True,
+        )
+        self.assertEqual(
+            twice.code,
+            "GMRuntime.gml_event_nest(self)\nsuper._on_step()\nGMRuntime.gml_event_unnest(self)\nhp = 3\n"
+            "var _gml_change_continue = func():\n\tpass\n"
+            "super._on_step()\n_gml_change_continue.call()\nreturn",
+        )
+
+    def test_a_macro_used_as_a_statement_continues_like_instance_change(self):
+        macros = {"BECOME": "instance_change(o_b, true)", "PLAIN": "hp = 5"}
+        result = self._transpile_with_continuations(
+            "BECOME;\nhp = 3;", macro_values=macros, instance_change_names=("BECOME",)
+        )
+        self.assertEqual(
+            result.code,
+            "var _gml_change_self = self\n"
+            "var _gml_change_continue = func():\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_change_self, "hp", 3)\n'
+            'GMRuntime.gml_instance_change_then(GMRuntime.gml_asset_get_index("o_b"), true, '
+            "_gml_change_continue, self)\n"
+            "return",
+        )
+        self.assertEqual(result.continued_instance_changes, (0,))
+
+        # The sites are numbered as the source reads, whatever the macros
+        # splice in front of them: a script function call is one (never
+        # continued), the macro is the second, the call after it the third.
+        numbered = self._transpile_with_continuations(
+            "// BECOME\nscr_wrap(o_b);\nif (hp) { BECOME; }\ninstance_change(o_c, true);\nhp = 1;",
+            macro_values={**macros, "LOCAL": "instance_change(o_b, true); instance_change(o_c, true)"},
+            instance_change_names=("BECOME", "scr_wrap"),
+        )
+        self.assertEqual(numbered.continued_instance_changes, (1, 2))
+
+        # A macro in a loop or in an expression stays an ordinary use.
+        for source in ("repeat (2) { BECOME; }\nhp = 3;", "var f = function() { BECOME; };\nhp = 3;"):
+            with self.subTest(source=source):
+                result = self._transpile_with_continuations(
+                    source, macro_values=macros, instance_change_names=("BECOME",)
+                )
+                self.assertNotIn("gml_instance_change_then", result.code)
+                self.assertEqual(result.continued_instance_changes, ())
 
     def test_cross_instance_dot_access_uses_selector_helpers(self):
         asset_names = {"o_enemy", "o_parent"}

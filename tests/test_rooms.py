@@ -1409,6 +1409,74 @@ class TestRoomConverter(unittest.TestCase):
             by_file["InstanceCreationCode_inst_kept.gml"].message,
         )
 
+    def test_creation_code_calling_a_function_or_macro_that_changes_the_object_is_reported(self):
+        # instance_change inside a project script function stays deferred, so
+        # the creation code that calls it meets the old object; a macro used
+        # as a statement of the creation code is continued and is not reported.
+        self._write_yyp(
+            ["r_change"],
+            extra_resources=[
+                ("objects", "o_player"),
+                ("objects", "o_ghost"),
+                ("scripts", "scr_become"),
+                ("scripts", "macros"),
+            ],
+        )
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_object("o_ghost")
+        self._write_object_scene("o_ghost")
+        for name, source in (
+            ("scr_become", "function scr_become(_o) { instance_change(_o, true); }\n"),
+            ("macros", "#macro BECOME_GHOST instance_change(o_ghost, true)\n"),
+        ):
+            _write_file(os.path.join(self.gm_dir, "scripts", name, name + ".yy"), json.dumps({"name": name, "resourceType": "GMScript"}))
+            _write_file(os.path.join(self.gm_dir, "scripts", name, name + ".gml"), source)
+        room_dir = os.path.join(self.gm_dir, "rooms", "r_change")
+        _write_file(os.path.join(room_dir, "InstanceCreationCode_inst_call.gml"), "scr_become(o_ghost);\nhp = 2;\n")
+        _write_file(os.path.join(room_dir, "InstanceCreationCode_inst_macro.gml"), "BECOME_GHOST;\nhp = 2;\n")
+        self._write_room("r_change", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": name,
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 0,
+                        "y": 0,
+                        "hasCreationCode": True,
+                    }
+                    for name in ("inst_call", "inst_macro")
+                ],
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        recorded = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        ]
+
+        self.assertEqual(
+            [(os.path.basename(str(d.source_path)), d.line) for d in recorded],
+            [("InstanceCreationCode_inst_call.gml", 1)],
+        )
+        self.assertIn("The call of the script function scr_become, which runs instance_change,", recorded[0].message)
+        script = self._read_room_script("r_change")
+        self.assertEqual(script.count("GMRuntime.gml_instance_change_then("), 1)
+
     def test_unsupported_layer_type_warns_and_emits_placeholder(self):
         self._write_yyp(["r_unknown"])
         self._write_room("r_unknown", layers=[

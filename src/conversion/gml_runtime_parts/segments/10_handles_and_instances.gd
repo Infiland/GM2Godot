@@ -272,7 +272,11 @@ static func gml_event_perform(event_type, event_number, current_self = null, cur
 	# still run for persistent instances.
 	if type_value != 12 and _gml_event_scheduler_event_blocked(current_self, type_value in [0, 1, 2, 7, 14]):
 		return null
+	# The caller's method goes on using the script's members when this returns:
+	# an instance_change in the event must not replace the script meanwhile.
+	gml_event_nest(current_self)
 	_gml_instance_call_event(current_self, method_name, current_other if current_other != null else current_self)
+	gml_event_unnest(current_self)
 	return null
 
 

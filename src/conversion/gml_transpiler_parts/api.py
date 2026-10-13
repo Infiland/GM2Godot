@@ -110,6 +110,8 @@ def transpile_gml_code_with_source_map(
     enum_values: Mapping[str, Mapping[str, int]] | None = None,
     macro_values: Mapping[str, str] | None = None,
     instance_change_continuations: bool = False,
+    inherited_event_continuation: bool = False,
+    instance_change_names: Iterable[str] = (),
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(
@@ -178,6 +180,8 @@ def transpile_gml_code_with_source_map(
                 extension_function_mappings
             ),
             instance_change_continuations=instance_change_continuations,
+            inherited_event_continuation=inherited_event_continuation,
+            instance_change_names=frozenset(instance_change_names),
         )
     )
     lines = list(statement_result.lines)

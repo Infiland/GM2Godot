@@ -16,6 +16,7 @@ from .constants import (
     VIRTUAL_KEY_CONSTANTS,
 )
 from .gml_function_dispatch import get_gml_function_descriptor
+from .instance_change_sites import instance_change_site_indices
 from .lexical_api import (
     is_verbatim_string_start,
     read_ordinary_string,
@@ -288,47 +289,53 @@ def analyze_gml_instance_change_reads(
     *,
     known_names: Iterable[str] = (),
     continued_calls: Collection[int] = (),
+    change_functions: Collection[str] = (),
+    change_macros: Collection[str] = (),
 ) -> tuple[GMLSourceDiagnostic, ...]:
     """Report instance_change calls whose following code meets the old object.
 
     An instance_change that the transpiler compiles with the rest of the event
-    as its continuation (continued_calls holds, for each, how many
-    instance_change names precede it) changes the object before that code
-    runs, as GameMaker does. For the others the converted game changes the object once the event that called
-    instance_change returns (see the runtime's 76_instance_change.gd): the
-    rest of the event runs on the old object, before the new object's Create
-    event, where GameMaker runs it after. What that code reads (instance
-    variables, self, the instance's events, mask or sprite through a function)
-    may differ. What it assigns to the instance's variables is assigned again
-    after the change, but only when it changed the variable's value: an
-    assignment of the value the variable had at the call is lost. known_names
-    are names that do not belong to the instance (assets, enums, macros).
+    as its continuation (continued_calls holds the place of each among the
+    source's sites, see instance_change_sites) changes the object before that
+    code runs, as GameMaker does. For the others the converted game changes the
+    object once the event that called instance_change returns (see the
+    runtime's 76_instance_change.gd): the rest of the event runs on the old
+    object, before the new object's Create event, where GameMaker runs it
+    after. What that code reads (instance variables, self, the instance's
+    events, mask or sprite through a function) may differ. What it assigns to
+    the instance's variables is assigned again after the change, but only when
+    it changed the variable's value: an assignment of the value the variable
+    had at the call is lost. known_names are names that do not belong to the
+    instance (assets, enums, macros). change_functions and change_macros are
+    the project's script functions and macros that run instance_change: a call
+    of one is such a site too, and never continued when it is a function's.
     """
-    tokens = _instance_change_tokens(source)
+    names = frozenset(change_functions) | frozenset(change_macros)
+    tokens = _instance_change_tokens(source, names)
     if not tokens:
         return ()
     free_names = _INSTANCE_FREE_NAMES | set(known_names) | _local_names(source)
     diagnostics: list[GMLSourceDiagnostic] = []
-    names_before = 0
-    for index, token in enumerate(tokens):
-        if token.kind == "IDENT" and token.value == "instance_change":
-            names_before += 1
-        if not _is_instance_change_call(tokens, index) or names_before - 1 in continued_calls:
+    for ordinal, index in enumerate(instance_change_site_indices(tokens, names)):
+        token = tokens[index]
+        site = _instance_change_subject(tokens, index, change_functions, change_macros)
+        if site is None or ordinal in continued_calls:
             continue
-        found = _first_instance_use(tokens, _closing_index(tokens, index + 1) + 1, free_names)
+        subject, last = site
+        found = _first_instance_use(tokens, last + 1, free_names)
         if found is None:
             continue
         use, assigns = found
         if assigns:
             message = (
-                f"instance_change at line {token.line} is followed by an assignment to the instance's "
+                f"{subject} at line {token.line} is followed by an assignment to the instance's "
                 f"variable '{use.value}' (line {use.line}). The converted game changes the instance once "
                 "the event returns and makes the assignment again afterwards only if it changed the "
                 "variable's value, so an assignment of the value the variable had at the call is lost."
             )
         else:
             message = (
-                f"instance_change at line {token.line} is followed by code that reads the instance "
+                f"{subject} at line {token.line} is followed by code that reads the instance "
                 f"('{use.value}' at line {use.line}). The converted game changes the instance once "
                 "the event returns, so that code still sees the old object and runs before the new "
                 "object's Create event; what it assigns to the instance is kept when it changes a "
@@ -347,17 +354,41 @@ def analyze_gml_instance_change_reads(
     return tuple(diagnostics)
 
 
-def _instance_change_tokens(source: str) -> list[Token]:
-    if "instance_change" not in source:
+def _instance_change_subject(
+    tokens: list[Token],
+    index: int,
+    change_functions: Collection[str],
+    change_macros: Collection[str],
+) -> tuple[str, int] | None:
+    """Name what runs instance_change at a site token, with the index of the last token of its use.
+
+    Returns None for a site that is not a call.
+    """
+    name = tokens[index].value
+    if name == "instance_change" and _is_instance_change_call(tokens, index):
+        return "instance_change", _closing_index(tokens, index + 1)
+    if name != "instance_change" and name in change_macros:
+        return f"The macro {name}, which runs instance_change,", index
+    if name != "instance_change" and name in change_functions and _token_value(tokens, index + 1) == "(":
+        return f"The call of the script function {name}, which runs instance_change,", _closing_index(tokens, index + 1)
+    return None
+
+
+def _instance_change_tokens(source: str, names: Collection[str] = ()) -> list[Token]:
+    if "instance_change" not in source and not any(name in source for name in names):
         return []
     comments_stripped = _source_lexical_views(source)[0]
-    # Preprocessor lines (#macro, #region) are not statements.
-    code = "".join(
-        " " * len(line.rstrip("\r\n")) + line[len(line.rstrip("\r\n")):] if line.lstrip().startswith("#") else line
-        for line in comments_stripped.splitlines(keepends=True)
-    )
+    # Preprocessor lines (#macro, #region) are not statements; a #macro line
+    # goes on with the next line when it ends with a backslash.
+    lines: list[str] = []
+    continues = False
+    for line in comments_stripped.splitlines(keepends=True):
+        bare = line.rstrip("\r\n")
+        blank = continues or line.lstrip().startswith("#")
+        continues = blank and bare.endswith("\\")
+        lines.append(" " * len(bare) + line[len(bare):] if blank else line)
     try:
-        return tokenize_gml_source(code)
+        return tokenize_gml_source("".join(lines))
     except GMLTranspileError:
         return []
 

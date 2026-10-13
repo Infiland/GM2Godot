@@ -3,7 +3,7 @@ import unittest
 from src.conversion.events import map_event
 from src.conversion.instance_change_events import (
     event_runs_rest_after_instance_change,
-    inherited_event_call,
+    source_may_continue_instance_change,
 )
 
 
@@ -25,6 +25,9 @@ class TestInstanceChangeEvents(unittest.TestCase):
             "_on_alarm_11",
             "_on_collision",
             "_on_collision_o_wall",
+            "_on_game_start",
+            "_on_room_start",
+            "_on_animation_end",
             "_gm_input_keyboard_37",
             "_gm_input_mouse_0",
             "_gm_input_mouse_-1",
@@ -46,7 +49,8 @@ class TestInstanceChangeEvents(unittest.TestCase):
             "_user_event_3",
             "_on_event_3_10",
             "_on_event_11_2",
-            "_on_room_start",
+            "_on_room_end",
+            "_on_game_end",
             "_on_draw",
             "_on_draw_gui",
             "_on_async_http",
@@ -68,27 +72,27 @@ class TestInstanceChangeEvents(unittest.TestCase):
             (3, 2): "_on_end_step",
             (2, 4): "_on_alarm_4",
             (4, 0): "_on_collision",
+            (7, 2): "_on_game_start",
+            (7, 4): "_on_room_start",
+            (7, 7): "_on_animation_end",
         }
         for (event_type, event_num), function in dispatched.items():
             self.assertEqual(_mapped_function(event_type, event_num), function)
             self.assertTrue(event_runs_rest_after_instance_change(function))
-        for event_type, event_num in ((1, 0), (7, 10), (7, 4), (8, 0), (12, 0)):
+        for event_type, event_num in ((1, 0), (7, 10), (7, 5), (7, 3), (8, 0), (12, 0)):
             function = _mapped_function(event_type, event_num)
             self.assertFalse(event_runs_rest_after_instance_change(function), function)
 
-    def test_event_inherited_raises_the_nesting_depth_only_where_it_matters(self):
-        # The child's event goes on after the parent's, so the parent's event
-        # must not replace the node's script meanwhile.
-        self.assertEqual(
-            inherited_event_call("_on_step", "super._on_step()"),
-            "GMRuntime.gml_event_nesting += 1\nsuper._on_step()\nGMRuntime.gml_event_nesting -= 1",
-        )
-        self.assertEqual(
-            inherited_event_call("_ready", "super._ready()"),
-            "GMRuntime.gml_event_nesting += 1\nsuper._ready()\nGMRuntime.gml_event_nesting -= 1",
-        )
-        # (Instance_change in those events keeps the change waiting anyway.)
-        self.assertEqual(inherited_event_call("_on_destroy", "super._on_destroy()"), "super._on_destroy()")
+    def test_a_child_event_ends_with_event_inherited_only_where_an_ancestor_may_change_the_object(self):
+        source = "var s = sprite_index;\ninstance_change(o_b, true);\nsprite_index = s;\n"
+        self.assertTrue(source_may_continue_instance_change("_on_step", source))
+        self.assertTrue(source_may_continue_instance_change("_ready", "if (a) instance_change (o_b, 1);"))
+        # Events the converter keeps waiting for the return of, and code that
+        # does not call instance_change.
+        self.assertFalse(source_may_continue_instance_change("_on_destroy", source))
+        self.assertFalse(source_may_continue_instance_change("_user_event_0", source))
+        self.assertFalse(source_may_continue_instance_change("_on_step", "x += 1;\nevent_inherited();"))
+        self.assertFalse(source_may_continue_instance_change("_on_step", "my_instance_change(o_b);"))
 
 
 if __name__ == "__main__":

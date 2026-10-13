@@ -10,14 +10,17 @@ xstart/ystart; with perf true the new object's Create event runs last.
 A converted object's events are its node's script, and Godot cannot replace
 the script of a node while a method of that script that uses the node's
 members runs. An instance_change statement of a Create, Step, Alarm,
-collision or input event is therefore converted with the rest of the event as
-a function, which the runtime runs after the change and the new Create event,
-as GameMaker does. Any other instance_change (in a script function, a with
-block, creation code, or below an event_inherited) changes the object once the
-event returns: the rest of that event still sees the old object (the "with
-pending" and "after o_a" lines below), what it assigns is assigned again after
-the Create event, and its instance_change and instance_destroy calls wait for
-the first change.
+collision, input, Game Start, Room Start or Animation End event is therefore
+converted with the rest of the event as a function, which the runtime runs
+after the change and the new Create event, as GameMaker does; so is the rest
+of a child's event after an event_inherited() that reaches such a statement of
+its parent. Any other instance_change (in a script function, a with block,
+creation code) changes the object once the event returns: the rest of that
+event still sees the old object (the "with pending" and "after o_a" lines
+below), what it assigns is assigned again after the Create event, and its
+instance_change and instance_destroy calls wait for the first change. The
+converter warns where code meets the instance after such a call, also after a
+call of a script function that runs instance_change.
 """
 from __future__ import annotations
 
@@ -25,12 +28,15 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 
 from tests.gamemaker_project_support import (
     EVENT_CLEAN_UP,
     EVENT_CREATE,
     EVENT_DESTROY,
     EVENT_DRAW,
+    EVENT_GAME_START,
+    EVENT_ROOM_START,
     EVENT_STEP,
     GameMakerObject,
     GameMakerProject,
@@ -656,6 +662,307 @@ _CONTINUE_PROJECT = GameMakerProject(
     ),
 )
 
+# A child's event_inherited() reaches the parent's instance_change: the change
+# is made at once, the parent's event goes on as the new object, and so does
+# the child's event after the call (Step, then Create: the child that has no
+# event of its own runs the parent's as its own).
+_FRAME_GUARD = "if (global.fr != 1) exit;\n"
+_FRAME_CTRL_STEP = (
+    "global.fr += 1;\n"
+    "if (global.fr == 3) {\n"
+    "    with (all) if (variable_instance_exists(id, \"hp\")) trace(\"final \" + object_get_name(object_index) + \" \"\n"
+    "        + sprite_get_name(sprite_index) + \" hp=\" + string(hp) + \" x=\" + string(x));\n"
+    "    global.done = true;\n"
+    "}\n"
+)
+_FRAME_CTRL = GameMakerObject("o_ctrl", {EVENT_CREATE: "global.fr = 0;\n", EVENT_STEP: _FRAME_CTRL_STEP})
+_FRAME_SPRITES = (
+    GameMakerSprite("s_a", 2, 2, frames=_frames(_RED, 2)),
+    GameMakerSprite("s_b", 2, 2, frames=_frames(_GREEN, 2)),
+)
+_KEEP_SPRITE_AND_HP = (
+    "var _s = sprite_index;\n"
+    "instance_change(o_t1, true);\n"
+    "sprite_index = _s;\n"
+    "hp = 3;\n"
+    'trace("par " + object_get_name(object_index) + " " + sprite_get_name(sprite_index) + " hp=" + string(hp));\n'
+)
+_AFTER_INHERITED = 'trace("kid " + object_get_name(object_index) + " " + sprite_get_name(sprite_index) + " hp=" + string(hp));\n'
+_TARGET_T1 = GameMakerObject("o_t1", {EVENT_CREATE: 'hp = 100; trace("t1 create");\n'}, sprite="s_b")
+
+_INHERITED_STEP_PROJECT = GameMakerProject(
+    name="InstanceChangeInheritedStep",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject("o_par", {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _FRAME_GUARD + _KEEP_SPRITE_AND_HP}, sprite="s_a"),
+        GameMakerObject(
+            "o_kid",
+            {EVENT_STEP: _FRAME_GUARD + "event_inherited();\n" + _AFTER_INHERITED + "x += 5;\nhp = 3;\n"},
+            parent="o_par",
+            sprite="s_a",
+        ),
+        _TARGET_T1,
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances", 0, (RoomInstance("inst_kid", "o_kid", 10, 20), RoomInstance("inst_ctrl", "o_ctrl", 0, 0))
+                ),
+            ),
+            creation_order=("inst_kid", "inst_ctrl"),
+        ),
+    ),
+)
+
+_INHERITED_CREATE_PROJECT = GameMakerProject(
+    name="InstanceChangeInheritedCreate",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject("o_par", {EVENT_CREATE: "hp = 3;\n" + _KEEP_SPRITE_AND_HP}, sprite="s_a"),
+        GameMakerObject("o_kid", {EVENT_STEP: 'trace("never");\n'}, parent="o_par", sprite="s_a"),
+        GameMakerObject(
+            "o_kid2",
+            {EVENT_CREATE: 'trace("kid2 pre");\nevent_inherited();\n' + _AFTER_INHERITED.replace('"kid ', '"kid2 post ')},
+            parent="o_par",
+            sprite="s_a",
+        ),
+        _TARGET_T1,
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_kid", "o_kid", 10, 20),
+                        RoomInstance("inst_kid2", "o_kid2", 10, 20),
+                        RoomInstance("inst_par", "o_par", 10, 20),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_kid", "inst_kid2", "inst_par", "inst_ctrl"),
+        ),
+    ),
+)
+
+# An unrelated instance created while a child's event_inherited() runs the
+# parent's event (the parent creates it, and its Create event changes it)
+# changes at once too, whatever event of whatever instance is below it.
+_UNRELATED_CREATE_PROJECT = GameMakerProject(
+    name="InstanceChangeUnrelated",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject(
+            "o_par",
+            {EVENT_CREATE: "steps = 0;\n", EVENT_STEP: "if (global.fr == 1) { instance_create_depth(0, 0, 0, o_spawn); }\n"},
+            sprite="s_a",
+        ),
+        GameMakerObject(
+            "o_kid", {EVENT_STEP: 'event_inherited();\ntrace("kid end");\n'}, parent="o_par", sprite="s_a"
+        ),
+        GameMakerObject(
+            "o_spawn",
+            {
+                EVENT_CREATE: (
+                    "hp = 1;\n"
+                    "var _s = sprite_index;\n"
+                    "instance_change(o_to, true);\n"
+                    'trace("spawn after " + object_get_name(object_index) + " hp=" + string(hp));\n'
+                    "hp = 1;\n"
+                    "sprite_index = _s;\n"
+                    'trace("spawn end hp=" + string(hp) + " " + sprite_get_name(sprite_index));\n'
+                )
+            },
+            sprite="s_a",
+        ),
+        GameMakerObject("o_to", {EVENT_CREATE: 'hp = 100; trace("to create");\n'}, sprite="s_b"),
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances", 0, (RoomInstance("inst_kid", "o_kid", 10, 0), RoomInstance("inst_ctrl", "o_ctrl", 0, 0))
+                ),
+            ),
+            creation_order=("inst_kid", "inst_ctrl"),
+        ),
+    ),
+)
+
+# The events the runtime calls by itself with no method of the instance's
+# script below them change the object at once too: Game Start, Room Start
+# and Animation End.
+_ANIMATION_END = (7, 7)
+_KEEP_SPRITE = (
+    "var _s = sprite_index;\n"
+    "instance_change(o_t1, true);\n"
+    "sprite_index = _s;\n"
+    "hp = 5;\n"
+    'trace("%s " + object_get_name(object_index) + " " + sprite_get_name(sprite_index) + " hp=" + string(hp));\n'
+)
+_OTHER_EVENTS_PROJECT = GameMakerProject(
+    name="InstanceChangeOtherEvents",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=(
+        GameMakerSprite("s_a", 2, 2, frames=_frames(_RED, 2), playback_speed=60.0),
+        GameMakerSprite("s_b", 2, 2, frames=_frames(_GREEN, 2)),
+    ),
+    objects=(
+        GameMakerObject(
+            "o_gs", {EVENT_CREATE: 'hp = 5;\ntrace("gs create");\n', EVENT_GAME_START: _KEEP_SPRITE % "gs"}, sprite="s_a"
+        ),
+        GameMakerObject(
+            "o_rs", {EVENT_CREATE: 'hp = 5;\ntrace("rs create");\n', EVENT_ROOM_START: _KEEP_SPRITE % "rs"}, sprite="s_a"
+        ),
+        GameMakerObject(
+            "o_ae", {EVENT_CREATE: 'hp = 5;\ntrace("ae create");\n', _ANIMATION_END: _KEEP_SPRITE % "ae"}, sprite="s_a"
+        ),
+        _TARGET_T1,
+        GameMakerObject(
+            "o_ctrl",
+            {EVENT_CREATE: "global.fr = 0;\n", EVENT_STEP: _FRAME_CTRL_STEP.replace("== 3", "== 6")},
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_gs", "o_gs", 10, 20),
+                        RoomInstance("inst_rs", "o_rs", 10, 20),
+                        RoomInstance("inst_ae", "o_ae", 10, 20),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_gs", "inst_rs", "inst_ae", "inst_ctrl"),
+        ),
+    ),
+)
+
+# event_perform runs another event of the instance inside the calling event,
+# whose method goes on using the instance's script when it returns: the
+# instance's change waits for the calling event to return (and the runtime
+# says so), where an unrelated instance's change does not.
+_PERFORM_PROJECT = GameMakerProject(
+    name="InstanceChangePerform",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject(
+            "o_ep",
+            {
+                EVENT_CREATE: (
+                    'hp = 3;\ntrace("ep create");\nevent_perform(ev_step, ev_step_normal);\n'
+                    'trace("ep after " + object_get_name(object_index) + " hp=" + string(hp));\n'
+                ),
+                EVENT_STEP: (
+                    'if (variable_global_exists("once")) exit;\nglobal.once = true;\n'
+                    'instance_change(o_t1, true);\ntrace("step rest " + object_get_name(object_index));\n'
+                ),
+            },
+            sprite="s_a",
+        ),
+        _TARGET_T1,
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances", 0, (RoomInstance("inst_ep", "o_ep", 10, 20), RoomInstance("inst_ctrl", "o_ctrl", 0, 0))
+                ),
+            ),
+            creation_order=("inst_ep", "inst_ctrl"),
+        ),
+    ),
+)
+
+# Where the converter cannot run the rest of the event after the change (a
+# script function, or a macro that is not a statement of the event), the
+# object changes once the event returns and the converter warns about the code
+# after the call.
+_DEFERRED_STEP = (
+    _FRAME_GUARD
+    + "var _s = sprite_index;\n"
+    + "%s;\n"
+    + "sprite_index = _s;\n"
+    + "hp = 3;\n"
+    + 'trace("%s " + object_get_name(object_index) + " " + sprite_get_name(sprite_index) + " hp=" + string(hp));\n'
+)
+_DEFERRED_PROJECT = GameMakerProject(
+    name="InstanceChangeDeferred",
+    scripts={
+        "scr_trace": _SCRIPT,
+        "scr_become": "function scr_become(_object) { instance_change(_object, true); }\n",
+        "scr_become_via": "function scr_become_via(_object) {\n    scr_become(_object);\n}\n",
+        "macros": "#macro BECOME_T1 instance_change(o_t1, true)\n",
+    },
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject(
+            "o_fn",
+            {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _DEFERRED_STEP % ("scr_become(o_t1)", "fn")},
+            sprite="s_a",
+        ),
+        GameMakerObject(
+            "o_via",
+            {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _DEFERRED_STEP % ("scr_become_via(o_t1)", "via")},
+            sprite="s_a",
+        ),
+        GameMakerObject(
+            "o_macro",
+            {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _DEFERRED_STEP % ("BECOME_T1", "macro")},
+            sprite="s_a",
+        ),
+        GameMakerObject(
+            "o_macro_loop",
+            {
+                EVENT_CREATE: "hp = 3;\n",
+                EVENT_STEP: _FRAME_GUARD + 'repeat (1) { BECOME_T1; }\nhp = 3;\ntrace("loop " + object_get_name(object_index));\n',
+            },
+            sprite="s_a",
+        ),
+        _TARGET_T1,
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_fn", "o_fn", 10, 20),
+                        RoomInstance("inst_via", "o_via", 10, 20),
+                        RoomInstance("inst_macro", "o_macro", 10, 20),
+                        RoomInstance("inst_loop", "o_macro_loop", 10, 20),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_fn", "inst_via", "inst_macro", "inst_loop", "inst_ctrl"),
+        ),
+    ),
+)
+
 _COLLISION_PROBE = """extends Node
 
 const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
@@ -698,7 +1005,33 @@ func _process(_delta):
 """
 
 
+def _deferred_warnings(diagnostics_path: Path) -> list[tuple[str, str, int, str]]:
+    """The converter's instance_change warnings as (resource, event, line, message)."""
+    if not diagnostics_path.exists():
+        return []
+    data = cast(object, json.loads(diagnostics_path.read_text(encoding="utf-8")))
+    entries = cast(
+        list[dict[str, object]],
+        cast(dict[str, object], data).get("diagnostics", []) if isinstance(data, dict) else data,
+    )
+    found: list[tuple[str, str, int, str]] = []
+    for entry in entries:
+        if entry.get("code") == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED":
+            line = entry.get("line")
+            found.append(
+                (
+                    str(entry.get("resource")),
+                    str(entry.get("event")),
+                    line if isinstance(line, int) else 0,
+                    str(entry.get("message")),
+                )
+            )
+    return sorted(found)
+
+
 class TestInstanceChangeGodot(unittest.TestCase):
+    deferred_warnings: list[tuple[str, str, int, str]]
+
     def _run(self, project: GameMakerProject, probe: str) -> tuple[object, object]:
         godot_binary = find_smoke_godot_binary()
         if godot_binary is None:
@@ -712,6 +1045,8 @@ class TestInstanceChangeGodot(unittest.TestCase):
             import_converted_project(godot_binary, root / "godot")
             result = run_converted_project(godot_binary, root / "godot")
             output = result.stdout + result.stderr
+            diagnostics_path = root / "godot" / "gm2godot" / "conversion_diagnostics.json"
+            self.deferred_warnings = _deferred_warnings(diagnostics_path)
 
         self.assertEqual(result.returncode, 0, output)
         self.assertNotIn("SCRIPT ERROR", output)
@@ -835,10 +1170,10 @@ class TestInstanceChangeGodot(unittest.TestCase):
                 "m10 o_d10a",
                 "o_d10a destroy",
                 "o_d10b create",
-                # Below event_inherited the change also waits for the event to
-                # return, so the child event runs first.
-                "child ran",
+                # The parent's change below event_inherited() is made at once:
+                # the child's event goes on afterwards, as the new object.
                 "o_d11 create",
+                "child ran",
                 # What the instances ended up as.
                 "r1 o_d1 s_a hp=0 speed=0 visible=true x=100 y=50 n=-",
                 "r2 o_d2 s_b hp=3 speed=0 visible=true x=100 y=50 n=-",
@@ -848,6 +1183,145 @@ class TestInstanceChangeGodot(unittest.TestCase):
                 "child o_d11 s_b hp=1 speed=0 visible=true x=0 y=0 n=-",
             ],
         )
+
+    def test_event_inherited_reaching_a_parents_instance_change_in_a_step_event(self) -> None:
+        trace, _nodes = self._run(_INHERITED_STEP_PROJECT, _TRACE_PROBE)
+
+        # The parent's rest runs on o_t1, then the child's: neither the
+        # sprite nor hp the child sees is o_t1's, and the child's last
+        # assignments (hp = 3, x += 5) are on o_t1 too.
+        self.assertEqual(
+            trace,
+            ["t1 create", "par o_t1 s_a hp=3", "kid o_t1 s_a hp=3", "final o_t1 s_a hp=3 x=15"],
+        )
+        self.assertEqual(self.deferred_warnings, [])
+
+    def test_event_inherited_reaching_a_parents_instance_change_in_a_create_event(self) -> None:
+        trace, _nodes = self._run(_INHERITED_CREATE_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                # o_kid has no Create event: the parent's runs as its own.
+                "t1 create",
+                "par o_t1 s_a hp=3",
+                # o_kid2's own Create event goes on as o_t1 after the call.
+                "kid2 pre",
+                "t1 create",
+                "par o_t1 s_a hp=3",
+                "kid2 post o_t1 s_a hp=3",
+                "t1 create",
+                "par o_t1 s_a hp=3",
+                "final o_t1 s_a hp=3 x=10",
+                "final o_t1 s_a hp=3 x=10",
+                "final o_t1 s_a hp=3 x=10",
+            ],
+        )
+        self.assertEqual(self.deferred_warnings, [])
+
+    def test_an_unrelated_instances_create_event_changes_the_object_at_once(self) -> None:
+        trace, _nodes = self._run(_UNRELATED_CREATE_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                "kid end",
+                # The parent's Step event, run by the child's event_inherited(),
+                # creates o_spawn, whose Create event runs the rest of itself on
+                # o_to; the child's event is not affected.
+                "to create",
+                "spawn after o_to hp=100",
+                "spawn end hp=1 s_a",
+                "kid end",
+                "kid end",
+                "final o_to s_a hp=1 x=0",
+            ],
+        )
+
+    def test_a_change_in_an_event_performed_by_the_same_instance_waits_for_the_calling_event(self) -> None:
+        trace, _nodes = self._run(_PERFORM_PROJECT, _TRACE_PROBE)
+
+        # Changing the node's script under the Create event's method would
+        # free the instance that method runs on; the change is made once the
+        # Create event has returned.
+        self.assertEqual(
+            trace,
+            [
+                "ep create",
+                "step rest o_ep",
+                "ep after o_ep hp=3",
+                "t1 create",
+                "final o_t1 s_b hp=100 x=10",
+            ],
+        )
+
+    def test_game_start_room_start_and_animation_end_events_change_the_object_at_once(self) -> None:
+        trace, _nodes = self._run(_OTHER_EVENTS_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                "gs create",
+                "rs create",
+                "ae create",
+                "t1 create",
+                "gs o_t1 s_a hp=5",
+                "t1 create",
+                "rs o_t1 s_a hp=5",
+                "t1 create",
+                "ae o_t1 s_a hp=5",
+                "final o_t1 s_a hp=5 x=10",
+                "final o_t1 s_a hp=5 x=10",
+                "final o_t1 s_a hp=5 x=10",
+            ],
+        )
+        self.assertEqual(self.deferred_warnings, [])
+
+    def test_calls_of_script_functions_and_macros_that_change_the_object_are_warned_about(self) -> None:
+        trace, _nodes = self._run(_DEFERRED_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                # The change inside a script function waits for the event to
+                # return, so the rest of the event runs on the old object, and
+                # its assignments of the values the variables had at the call
+                # (the sprite, hp) are lost: the warnings below tell so.
+                "fn o_fn s_a hp=3",
+                "t1 create",
+                "via o_via s_a hp=3",
+                "t1 create",
+                # A macro used as a statement of the event runs the rest of the
+                # event on the new object, as GameMaker does.
+                "t1 create",
+                "macro o_t1 s_a hp=3",
+                # In a loop it waits for the event to return too.
+                "loop o_macro_loop",
+                "t1 create",
+                "final o_t1 s_b hp=100 x=10",
+                "final o_t1 s_b hp=100 x=10",
+                "final o_t1 s_a hp=3 x=10",
+                "final o_t1 s_b hp=100 x=10",
+            ],
+        )
+        warnings = [(resource, event, line) for resource, event, line, _message in self.deferred_warnings]
+        # (The macro statement of o_macro is made at once and is not reported.)
+        self.assertEqual(
+            warnings,
+            [("o_fn", "_on_step", 3), ("o_macro_loop", "_on_step", 2), ("o_via", "_on_step", 3)],
+        )
+        messages = {resource: message for resource, _event, _line, message in self.deferred_warnings}
+        self.assertIn(
+            "The call of the script function scr_become, which runs instance_change, at line 3",
+            messages["o_fn"],
+        )
+        self.assertIn("assignment to the instance's variable 'sprite_index' (line 4)", messages["o_fn"])
+        self.assertIn(
+            "The call of the script function scr_become_via, which runs instance_change, at line 3",
+            messages["o_via"],
+        )
+        self.assertIn("The macro BECOME_T1, which runs instance_change, at line 2", messages["o_macro_loop"])
+        self.assertIn("assignment to the instance's variable 'hp' (line 3)", messages["o_macro_loop"])
 
     def test_instance_change_takes_the_objects_visible_flag(self) -> None:
         trace, _nodes = self._run(_VISIBLE_PROJECT, _TRACE_PROBE)

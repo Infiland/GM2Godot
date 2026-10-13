@@ -179,6 +179,87 @@ class TestGMLSourceMaps(unittest.TestCase):
         # position the comments shifted in the transpiler's code, is skipped.
         self.assertEqual([(d.line, d.identifier) for d in reported], [(2, "hp"), (5, "hp")])
 
+    def test_calls_of_functions_and_macros_that_change_the_object_are_sites(self) -> None:
+        # A project script function or macro that runs instance_change is
+        # deferred like the call itself, and reported where code after it
+        # meets the instance.
+        known = {"o_b", "BECOME"}
+
+        def reported(source: str, **options: object) -> list[tuple[int, int, str]]:
+            return [
+                (d.line, d.column, d.identifier)
+                for d in analyze_gml_instance_change_reads(
+                    source,
+                    known_names=known,
+                    change_functions={"scr_become"},
+                    change_macros={"BECOME"},
+                    **options,  # type: ignore[arg-type]
+                )
+            ]
+
+        self.assertEqual(reported("scr_become(o_b);\nhp += 1;"), [(1, 1, "hp")])
+        self.assertEqual(reported("BECOME;\nhp += 1;"), [(1, 1, "hp")])
+        self.assertEqual(reported("if a { BECOME } else { scr_become(o_b) }\nshow_debug_message(y);"), [(1, 8, "scr_become"), (1, 24, "y")])
+        # A macro that is continued by the transpiler, a name that is not a
+        # call, a member of something else and code that does not meet the
+        # instance are quiet.
+        self.assertEqual(reported("BECOME;\nhp += 1;", continued_calls={0}), [])
+        self.assertEqual(reported("var f = scr_become;\nhp += 1;"), [])
+        self.assertEqual(reported("other_object.scr_become(o_b);\nhp += 1;"), [])
+        self.assertEqual(reported("scr_become(o_b); global.n += 1;"), [])
+        # (The sites are numbered together, in the order of the source.)
+        self.assertEqual(
+            reported("BECOME;\nscr_become(o_b);\ninstance_change(o_b, true);\nhp += 1;", continued_calls={0, 2}),
+            [(2, 1, "hp")],
+        )
+        message = analyze_gml_instance_change_reads(
+            "scr_become(o_b);\nhp += 1;", known_names=known, change_functions={"scr_become"}
+        )[0].message
+        self.assertTrue(message.startswith("The call of the script function scr_become, which runs instance_change, at line 1"))
+        # A macro definition is not a use of the macro, also over several lines.
+        self.assertEqual(
+            reported("#macro WRAP BECOME; \\\n    BECOME; \\\n    hp = 1\nBECOME;\nhp += 1;"),
+            [(4, 1, "hp")],
+        )
+
+    def test_the_analyser_and_the_transpiler_agree_on_the_continued_macro_calls(self) -> None:
+        # A macro used as a statement is a site in the order of the source,
+        # also when it is spliced in front of other sites, and a macro
+        # definition or a comment is not.
+        source = (
+            "#macro LOCAL_BECOME instance_change(o_b, true); \\\n"
+            "    hp = 2\n"
+            "// BECOME in a note\n"
+            "scr_become(o_b);\n"
+            "if a { BECOME; }\n"
+            "while b { BECOME; hp -= 1 }\n"
+            "instance_change(o_b, true);\n"
+            "hp += 1;\n"
+        )
+        options = dict(
+            asset_names={"o_b"},
+            instance_target="self",
+            direct_instance_names={"hp"},
+            dynamic_instance_names=set(),
+            macro_values={"BECOME": "instance_change(o_b, true)"},
+            instance_change_names={"BECOME", "scr_become"},
+        )
+        result = transpile_gml_code_with_source_map(
+            source, indent="", instance_change_continuations=True, **options  # type: ignore[arg-type]
+        )
+        # The macro in the if statement continues, and so does the last call,
+        # which the code runs when the if statement does not (the function
+        # call before them and the loop's macro stay calls).
+        self.assertEqual(result.continued_instance_changes, (1, 3))
+        reported = analyze_gml_instance_change_reads(
+            source,
+            known_names={"o_b", "BECOME", "LOCAL_BECOME"},
+            continued_calls=result.continued_instance_changes,
+            change_functions={"scr_become"},
+            change_macros={"BECOME"},
+        )
+        self.assertEqual([(d.line, d.identifier) for d in reported], [(4, "a"), (6, "hp")])
+
     def test_initializer_values_are_not_reported_as_declared_identifiers(self) -> None:
         diagnostics = analyze_gml_source_identifiers(
             "\n".join(

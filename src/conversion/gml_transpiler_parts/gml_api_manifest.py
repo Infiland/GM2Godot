@@ -1577,10 +1577,13 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/instance_change.htm",
         "Runs Destroy and Clean Up (perf), gives the node the new object's script, identity and sprite while "
-        "keeping its id and variables, then runs Create (perf). In the Create, Step, Alarm, collision and input "
-        "events the rest of the event runs on the new object after the change, as in GameMaker; elsewhere the "
-        "switch happens once the calling event returns, with the event's later assignments that change a "
-        "variable made again after it, and the converter warns about the code after the call.",
+        "keeping its id and variables, then runs Create (perf). A statement of the Create, Step, Alarm, collision, "
+        "input, Game Start, Room Start and Animation End events (also one that a macro stands for, and one in an "
+        "ancestor's event reached through event_inherited()) runs the rest of the event on the new object after the "
+        "change, as in GameMaker. In a loop, with, switch or try statement, in a script function or in the other "
+        "events the switch happens once the calling event returns, with the event's later assignments that change a "
+        "variable made again after it; the converter warns about the code after such a call, also after a call of "
+        "a project script function or macro that runs instance_change.",
     ),
     _entry(
         "with",

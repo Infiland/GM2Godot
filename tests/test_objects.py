@@ -2369,6 +2369,112 @@ class TestScriptGeneration(unittest.TestCase):
         create = script[script.index("func _ready():"):script.index("func _on_step():")]
         self.assertIn("gml_instance_change_then(", create)
 
+    def _instance_change_diagnostics(self, diagnostics: DiagnosticCollector):
+        return sorted(
+            (
+                diagnostic
+                for diagnostic in diagnostics.diagnostics()
+                if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+            ),
+            key=lambda diagnostic: (str(diagnostic.event), diagnostic.line or 0),
+        )
+
+    def _write_project_scripts(self, scripts: dict[str, str], *object_names: str) -> None:
+        resources: list[JsonObject] = []
+        for name, source in scripts.items():
+            script_dir = os.path.join(self.gm_dir, "scripts", name)
+            os.makedirs(script_dir, exist_ok=True)
+            with open(os.path.join(script_dir, f"{name}.yy"), "w", encoding="utf-8") as f:
+                json.dump({"%Name": name, "name": name, "resourceType": "GMScript"}, f)
+            with open(os.path.join(script_dir, f"{name}.gml"), "w", encoding="utf-8") as f:
+                f.write(source)
+            resources.append({"id": {"name": name, "path": f"scripts/{name}/{name}.yy"}})
+        for name in object_names:
+            resources.append({"id": {"name": name, "path": f"objects/{name}/{name}.yy"}})
+        with open(os.path.join(self.gm_dir, "Project.yyp"), "w", encoding="utf-8") as f:
+            json.dump({"resources": resources, "RoomOrderNodes": [], "resourceType": "GMProject"}, f)
+
+    def test_call_of_a_script_function_that_changes_the_object_is_reported(self):
+        # instance_change inside a script function is not compiled with the
+        # rest of the event, so the converted instance changes once the event
+        # returns: the calls of such a function (also through another function)
+        # are reported where code after them meets the instance.
+        self._setup_object(
+            "o_door",
+            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "scr_wrap(o_locked);\nhp = 1;",
+            "Step_0.gml": "var _s = sprite_index;\nscr_become(o_locked);\nsprite_index = _s;\nscr_plain(o_locked);\nhp = 2;",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_project_scripts(
+            {
+                "scr_become": "function scr_become(_o) { instance_change(_o, true); }\n",
+                "scr_wrap": "function scr_wrap(_o) {\n    scr_become(_o);\n}\n",
+                "scr_plain": "function scr_plain(_o) { return _o; }\n",
+            },
+            "o_door",
+            "o_locked",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        recorded = self._instance_change_diagnostics(diagnostics)
+        self.assertEqual([(d.event, d.line, d.column) for d in recorded], [("_on_step", 2, 1), ("_ready", 1, 1)])
+        self.assertIn("script function scr_become, which runs instance_change", recorded[0].message)
+        self.assertIn("assignment to the instance's variable 'sprite_index'", recorded[0].message)
+        self.assertIn("script function scr_wrap, which runs instance_change", recorded[1].message)
+        self.assertEqual(recorded[0].severity, "warning")
+        self.assertEqual((recorded[0].resource, recorded[0].resource_type), ("o_door", "object"))
+        self.assertEqual(recorded[0].api, "instance_change")
+        self.assertTrue(str(recorded[0].source_path).endswith("Step_0.gml"))
+
+        # The calls stay ordinary calls: no continuation is compiled for them.
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertNotIn("gml_instance_change_then", script)
+
+    def test_macro_that_changes_the_object_is_reported_only_where_it_is_not_continued(self):
+        # A macro used as a statement of the event runs the rest of the event
+        # after the change; in a loop it does not, and the code after it is
+        # reported.
+        self._setup_object(
+            "o_door",
+            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "BECOME_LOCKED;\nhp = 1;",
+            "Step_0.gml": "// BECOME_LOCKED in a comment\nrepeat (2) {\n    BECOME_LOCKED;\n}\nhp = 2;",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_project_scripts(
+            {
+                "macros": "#macro BECOME_LOCKED instance_change(o_locked, true)\n#macro PLAIN 3\n",
+                "scr_use": "function scr_use() { BECOME_LOCKED; }\n",
+            },
+            "o_door",
+            "o_locked",
+        )
+        diagnostics = DiagnosticCollector()
+
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        recorded = self._instance_change_diagnostics(diagnostics)
+        self.assertEqual([(d.event, d.line) for d in recorded], [("_on_step", 3)])
+        self.assertIn("The macro BECOME_LOCKED, which runs instance_change,", recorded[0].message)
+        with open(os.path.join(self.godot_dir, "objects", "o_door", "o_door.gd"), encoding="utf-8") as f:
+            script = f.read()
+        create = script[script.index("func _ready():"):script.index("func _on_step():")]
+        self.assertIn("gml_instance_change_then(", create)
+
     def test_missing_event_source_skips_object_and_makes_conversion_partial(self):
         self._setup_object(
             "o_missing",
@@ -2628,16 +2734,139 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _ready():", parent_content)
         self.assertIn("\tparent_ran = true\n\treturn\n\tparent_after_exit = true", parent_content)
         self.assertTrue(child_content.startswith('extends "res://objects/o_parent/o_parent.gd"'))
-        # The call runs while the child's event goes on, so the parent's event
-        # must not replace the instance's script (an instance_change in it).
+        # No ancestor's event can change the instance's script, so the call is
+        # an ordinary one and the child's event goes on after it.
         self.assertIn(
             "\tchild_before = true\n"
-            "\tGMRuntime.gml_event_nesting += 1\n"
             "\tsuper._ready()\n"
-            "\tGMRuntime.gml_event_nesting -= 1\n"
             "\tchild_after = true",
             child_content,
         )
+        self.assertNotIn("_gml_change_continue", child_content)
+        self.assertNotIn("gml_event_nest", child_content)
+
+    def _convert_child_of_changing_parent(
+        self,
+        parent_code: str,
+        child_code: str,
+        *,
+        event_type: int = 0,
+        event_num: int = 0,
+        grandparent: bool = False,
+    ) -> str:
+        """Convert a child (and, optionally, a childless-event middle object) of a parent and return the child's script."""
+        event: JsonObject = {"eventType": event_type, "eventNum": event_num}
+        file_name = {0: "Create_0.gml", 3: "Step_0.gml"}[event_type]
+        self._setup_object("o_parent", event_list=[event])
+        if grandparent:
+            self._setup_object("o_middle", event_list=[], parent_object_name="o_parent")
+        self._setup_object(
+            "o_child",
+            event_list=[event],
+            parent_object_name="o_middle" if grandparent else "o_parent",
+        )
+        for object_name, code in (("o_parent", parent_code), ("o_child", child_code)):
+            with open(
+                os.path.join(self.gm_dir, "objects", object_name, file_name),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            return f.read()
+
+    def test_child_event_inherited_runs_rest_as_continuation_when_parent_changes_object(self):
+        """event_inherited() reaching a parent's instance_change ends the child's own code."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true); parent_after = 1;",
+            "child_before = true; event_inherited(); child_after = true;",
+        )
+        self.assertIn(
+            "\tchild_before = true\n"
+            "\tvar _gml_change_self = self\n"
+            "\tvar _gml_change_continue = func():\n"
+            "\t\tGMRuntime.gml_variable_instance_set(_gml_change_self, \"child_after\", true)\n"
+            "\tsuper._ready()\n"
+            "\t_gml_change_continue.call()\n"
+            "\treturn",
+            child_content,
+        )
+        self.assertNotIn("gml_event_nest", child_content)
+
+    def test_child_event_inherited_continuation_reaches_grandparent_events(self):
+        """An ancestor above the nearest parent decides too (the middle object has no event)."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true);",
+            "event_inherited(); child_after = true;",
+            event_type=3,
+            grandparent=True,
+        )
+        self.assertIn("\tsuper._on_step()\n\t_gml_change_continue.call()\n\treturn", child_content)
+
+    def test_child_event_inherited_stays_plain_when_the_ancestor_event_cannot_continue(self):
+        """The Destroy event runs inside the code that destroys the instance: no continuation form."""
+        self._setup_object("o_parent", event_list=[{"eventType": 1, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 1, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        for object_name, code in (
+            ("o_parent", "instance_change(o_target, true);"),
+            ("o_child", "event_inherited(); child_after = true;"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", object_name, "Destroy_0.gml"), "w", encoding="utf-8") as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            child_content = f.read()
+        self.assertNotIn("_gml_change_continue", child_content)
+
+    def test_child_event_inherited_in_a_loop_raises_the_instance_nesting_count(self):
+        """Where the rest of the event cannot be a function, the parent's change waits for the child's event."""
+        child_content = self._convert_child_of_changing_parent(
+            "instance_change(o_target, true);",
+            "for (var i = 0; i < 2; i++) { event_inherited(); } child_after = true;",
+        )
+        self.assertIn(
+            "GMRuntime.gml_event_nest(self)\n\t\tsuper._ready()\n\t\tGMRuntime.gml_event_unnest(self)",
+            child_content,
+        )
+
+    def test_child_event_inherited_continuation_sees_a_parent_macro_that_changes_the_object(self):
+        """A macro that expands to instance_change in the parent's event counts as the call."""
+        self._setup_object("o_parent", event_list=[{"eventType": 0, "eventNum": 0}])
+        self._setup_object(
+            "o_child",
+            event_list=[{"eventType": 0, "eventNum": 0}],
+            parent_object_name="o_parent",
+        )
+        self._reference_object_and_scripts("o_child", "macros")
+        with open(os.path.join(self.gm_dir, "Project.yyp"), "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "resources": [
+                        {"id": {"name": name, "path": f"{kind}/{name}/{name}.yy"}}
+                        for kind, name in (("scripts", "macros"), ("objects", "o_parent"), ("objects", "o_child"))
+                    ],
+                    "RoomOrderNodes": [],
+                    "resourceType": "GMProject",
+                },
+                f,
+            )
+        with open(os.path.join(self.gm_dir, "scripts", "macros", "macros.gml"), "w", encoding="utf-8") as f:
+            f.write("#macro BECOME_TARGET instance_change(o_target, true)\n")
+        for object_name, code in (
+            ("o_parent", "BECOME_TARGET;"),
+            ("o_child", "event_inherited(); child_after = true;"),
+        ):
+            with open(os.path.join(self.gm_dir, "objects", object_name, "Create_0.gml"), "w", encoding="utf-8") as f:
+                f.write(code)
+        self._make_converter().convert_all()
+        with open(os.path.join(self.godot_dir, "objects", "o_child", "o_child.gd"), "r", encoding="utf-8") as f:
+            child_content = f.read()
+        self.assertIn("\tsuper._ready()\n\t_gml_change_continue.call()\n\treturn", child_content)
 
     def test_event_inherited_noops_when_parent_lacks_matching_event(self):
         self._setup_object("o_parent", event_list=[{"eventType": 3, "eventNum": 0}])

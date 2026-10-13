@@ -59,7 +59,7 @@ def collision_event(object_name: str) -> tuple[int, str]:
 class GameMakerObject:
     name: str
     # (event type, number), or (4, object name) for a Collision event.
-    events: Mapping[tuple[int, int | str], str]
+    events: Mapping[tuple[int, int | str], str] | Mapping[tuple[int, int], str]
     persistent: bool = False
     parent: str | None = None
     sprite: str | None = None

@@ -45,6 +45,14 @@ class GMLStatementRequest:
     # Compile an instance_change statement of an object event with the rest of
     # the event as its continuation.
     instance_change_continuations: bool = False
+    # An ancestor's event of the same name runs the rest of that event after an
+    # instance_change, which replaces the instance's script. event_inherited()
+    # then ends the event's own code: the rest of the event is compiled as a
+    # function that runs after the parent's event.
+    inherited_event_continuation: bool = False
+    # Project script functions and macros that run instance_change: calls of
+    # them are sites of the source along with instance_change itself.
+    instance_change_names: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)

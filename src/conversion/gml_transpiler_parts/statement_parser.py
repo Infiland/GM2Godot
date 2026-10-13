@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Final, Iterable, Mapping, MutableMapping, MutableSet
@@ -14,6 +15,7 @@ from .expression_api import (
     transpile_gml_condition,
     transpile_gml_expression,
 )
+from .instance_change_sites import instance_change_site_ordinals
 from .lexical_api import (
     reject_asset_identifier_name,
     sanitize_gdscript_identifier,
@@ -73,11 +75,12 @@ _CONTINUATION_REJECTED_VALUES: Final = frozenset(
 
 @dataclass
 class _InstanceChangeContinuation:
-    object_source: str
-    perf_source: str
     # The instance and the other instance, as the code around the call names them.
     self_source: str
     other_source: str
+    # What runs the function and ends the event: the instance_change call, or the
+    # parent's event and the function.
+    closing_lines: list[str]
     # The statements that follow the call, in the name-based form: the rest of
     # its block, then the rest of each enclosing block.
     body: list[str] = field(default_factory=lambda: list[str]())
@@ -110,7 +113,12 @@ class _StatementParser:
         extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
         control_flow_capture: ControlFlowCapture | None = None,
         instance_change_continuations: bool = False,
+        inherited_event_continuation: bool = False,
+        instance_change_names: Collection[str] = (),
     ) -> None:
+        # The sites are numbered before macros are spliced in, as the source
+        # reads (see instance_change_sites).
+        self._instance_change_sites = instance_change_site_ordinals(tokens, instance_change_names)
         # Macros whose value is statements are spliced in before anything
         # reads the tokens, so their var declarations are hoisted like any
         # other.
@@ -167,6 +175,7 @@ class _StatementParser:
         )
         self.macro_configuration = macro_configuration
         self.instance_change_continuations: bool = instance_change_continuations
+        self.inherited_event_continuation: bool = inherited_event_continuation
         # How the code names the instance that instance_change changes: self in
         # an event, the instance parameter of an instance's creation code
         # (nothing in code that has no instance of its own, or inside with).
@@ -249,6 +258,8 @@ class _StatementParser:
                 statement_tokens,
             )
         continuation_lines = self._parse_instance_change_continuation(statement_tokens)
+        if continuation_lines is None:
+            continuation_lines = self._parse_inherited_event_call(statement_tokens)
         if continuation_lines is not None:
             return continuation_lines
         return transpile_statement(
@@ -993,9 +1004,13 @@ class _StatementParser:
         arguments = _instance_change_call_arguments(statement_tokens)
         if arguments is None:
             return None
+        # (A macro's tokens stand where the macro was used.)
+        site = self._instance_change_sites.get((statement_tokens[0].line, statement_tokens[0].column))
+        if site is None:
+            return None
         # event_inherited runs the parent's event, which the continuation
         # cannot do once the object has changed.
-        if any(token.kind == "IDENT" and token.value == "event_inherited" for token in self.tokens[self.position:]):
+        if self._event_inherited_follows():
             return None
         object_source, perf_source = (
             transpile_gml_expression(
@@ -1008,17 +1023,62 @@ class _StatementParser:
             )
             for argument in arguments
         )
+        self_source = self.scope_context.self_expression
         continuation = _InstanceChangeContinuation(
-            object_source,
-            perf_source,
-            self.scope_context.self_expression,
+            self_source,
             self.scope_context.other_expression,
+            [
+                "GMRuntime.gml_instance_change_then("
+                f"{object_source}, {perf_source}, {_CONTINUATION_FUNCTION}, {self_source})",
+                "return",
+            ],
         )
+        self.continued_instance_changes.append(site)
+        return self._open_continuation(continuation)
+
+    def _parse_inherited_event_call(self, statement_tokens: list[_Token]) -> list[str] | None:
+        """Compile event_inherited() of an event whose ancestors replace the instance's script.
+
+        An ancestor's event that runs an instance_change statement changes the
+        node's script while the parent's event is running, and Godot frees the
+        script instance that the child's event is running on. So the child's
+        event must not use its members after the call: the rest of the event is
+        compiled as a function created before the call, which reaches the
+        instance by name only, and the event returns after running it. Where the
+        rest cannot be compiled so (in a loop, a with, switch or try statement,
+        or when the event calls event_inherited again), the call raises the
+        instance's nesting count, which makes a change in the parent's event
+        wait for this event to return.
+        """
+        inherited_call = self.inherited_event_call
+        if not self.inherited_event_continuation or inherited_call is None:
+            return None
+        if not _is_event_inherited_call(statement_tokens):
+            return None
+        if self._instance_change_continuation_allowed() and not self._event_inherited_follows():
+            self_source = self.scope_context.self_expression
+            return self._open_continuation(
+                _InstanceChangeContinuation(
+                    self_source,
+                    self.scope_context.other_expression,
+                    [inherited_call, f"{_CONTINUATION_FUNCTION}.call()", "return"],
+                )
+            )
+        # (The parent's event runs on the node of this script, also inside a
+        # with statement.)
+        return ["GMRuntime.gml_event_nest(self)", inherited_call, "GMRuntime.gml_event_unnest(self)"]
+
+    def _event_inherited_follows(self) -> bool:
+        # The parent's event cannot be run from the function that runs after
+        # the first one.
+        return any(token.kind == "IDENT" and token.value == "event_inherited" for token in self.tokens[self.position:])
+
+    def _open_continuation(self, continuation: _InstanceChangeContinuation) -> list[str]:
+        """Give the continuation the rest of the block that holds the statement; return its marker line."""
         if self._block_end != _SINGLE_STATEMENT_BLOCK:
             continuation.body.extend(self._parse_continuation_code(self._block_end, consume=True))
         self._continuations.append(continuation)
         self._open_continuations.append(continuation)
-        self.continued_instance_changes.append(self._instance_change_names_before(statement_tokens[0]))
         return [f"{_CONTINUATION_MARKER}{len(self._continuations) - 1}"]
 
     def _instance_change_continuation_allowed(self) -> bool:
@@ -1034,15 +1094,6 @@ class _StatementParser:
             and scope.self_expression == self._continuation_self
             and scope.instance_target == self._continuation_self
         )
-
-    def _instance_change_names_before(self, call: _Token) -> int:
-        count = 0
-        for token in self.tokens:
-            if token.line == call.line and token.column == call.column:
-                break
-            if token.kind == "IDENT" and token.value == "instance_change":
-                count += 1
-        return count
 
     def _append_block_rest(self, open_before: int, terminator: str | None) -> None:
         """Give the continuations a statement opened the rest of the block that holds it."""
@@ -1376,14 +1427,19 @@ def _continuation_lines(continuation: _InstanceChangeContinuation) -> list[str]:
         lines.append(f"var {_CONTINUATION_OTHER} = {continuation.other_source}")
     lines.append(f"var {_CONTINUATION_FUNCTION} = func():")
     lines.extend(indent_lines(body))
-    lines.append(
-        "GMRuntime.gml_instance_change_then("
-        f"{continuation.object_source}, {continuation.perf_source}, {_CONTINUATION_FUNCTION}, "
-        f"{continuation.self_source})"
-    )
     # The rest of the event runs in the continuation.
-    lines.append("return")
+    lines.extend(continuation.closing_lines)
     return lines
+
+
+def _is_event_inherited_call(tokens: list[_Token]) -> bool:
+    return (
+        len(tokens) == 3
+        and tokens[0].kind == "IDENT"
+        and tokens[0].value == "event_inherited"
+        and tokens[1].value == "("
+        and tokens[2].value == ")"
+    )
 
 
 # The temporaries counter of the statements being parsed. Statements parsed
@@ -1416,6 +1472,8 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
         instance_change_continuations=request.instance_change_continuations,
+        inherited_event_continuation=request.inherited_event_continuation,
+        instance_change_names=request.instance_change_names,
         generated_counter=_ACTIVE_GENERATED_COUNTER.get(),
     )
     active_counter = _ACTIVE_GENERATED_COUNTER.set(parser.generated_counter)

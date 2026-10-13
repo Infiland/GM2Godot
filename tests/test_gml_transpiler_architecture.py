@@ -537,7 +537,8 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
     "analyze_gml_source_identifiers": "(source: 'str') -> 'tuple[GMLSourceDiagnostic, ...]'",
     "analyze_gml_instance_change_reads": (
         "(source: 'str', *, known_names: 'Iterable[str]' = (), "
-        "continued_calls: 'Collection[int]' = ()) -> 'tuple[GMLSourceDiagnostic, ...]'"
+        "continued_calls: 'Collection[int]' = (), change_functions: 'Collection[str]' = (), "
+        "change_macros: 'Collection[str]' = ()) -> 'tuple[GMLSourceDiagnostic, ...]'"
     ),
     "gml_source_map_path": "(gdscript_path: 'str') -> 'str'",
     "merge_gml_source_maps": (
@@ -582,7 +583,8 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "dynamic_instance_names: 'Iterable[str] | None' = None, "
         "enum_values: 'Mapping[str, Mapping[str, int]] | None' = None, "
         "macro_values: 'Mapping[str, str] | None' = None, "
-        "instance_change_continuations: 'bool' = False) -> 'GMLTranspileResult'"
+        "instance_change_continuations: 'bool' = False, inherited_event_continuation: 'bool' = False, "
+        "instance_change_names: 'Iterable[str]' = ()) -> 'GMLTranspileResult'"
     ),
     "transpile_gml_condition": (
         "(source: 'str', local_names: 'Iterable[str] | None' = None, "

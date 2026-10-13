@@ -23,11 +23,16 @@
 # code becomes a function that reaches the instance through name-based
 # accessors only, and the event returns right after the call. The helper
 # changes the object, runs the new Create event and then the rest of the code,
-# in the order GameMaker does. Where a method of the old script that goes on
-# using its members may be running (event_inherited raises gml_event_nesting
-# around the call of the parent's event) and for every other instance_change
-# (in a script function, a with block, a loop, the room's creation code, or on
-# another instance), the script changes once the instance's running event has
+# in the order GameMaker does. A child's event_inherited() goes the same way
+# where an ancestor's event can change the object: the child's event ends with
+# the call of the parent's event and runs the rest of its code as such a
+# function, so its method uses no member after the parent's event returned.
+# Where a method of the old script that goes on using its members may be
+# running (event_perform and event_user raise the instance's nesting count
+# around the event they run, as does an event_inherited() in a loop, a with,
+# switch or try statement) and for every other instance_change (in a script
+# function, a with block, a loop, the room's creation code, or on another
+# instance), the script changes once the instance's running event has
 # returned to the runtime: right after its Create event and creation code,
 # after each event of the step, input and collision dispatch, and at every
 # step phase boundary. Until then the rest of the event that called
@@ -77,13 +82,15 @@ const GML_INSTANCE_CHANGE_X_KEY = " x"
 const GML_INSTANCE_CHANGE_Y_KEY = " y"
 const GML_INSTANCE_CHANGE_VISIBLE_KEY = " visible"
 
-# The event calls on the stack whose caller goes on using its script's
-# members when the call returns (event_inherited: the child's event runs
-# while the parent's does). While it is not 0 the script of a node must not be
-# replaced. Whatever calls an event of an instance from another event of the
-# same instance (event_inherited, and event_perform or event_user where
-# they exist) raises it for the call.
-static var gml_event_nesting = 0
+# The instances that have a method of their script running below a call of
+# another event of the same instance (event_perform and event_user, and an
+# event_inherited() the converter could not end its event with), by node
+# instance id, with the number of such calls. While an instance has one the
+# script of its node must not be replaced, so its instance_change waits for the
+# calling event to return. (An instance_change of an unrelated instance is not
+# held back, whatever else is running.)
+static var _gml_instance_event_nesting = {}
+static var _gml_instance_change_nesting_warned = false
 # Pending operations by node instance id: {"node": the node, "ops": the
 # changes ({"kind": "change", "object": object asset entry, "perf": bool,
 # "events_done": whether the Destroy and Clean Up events of perf already ran})
@@ -141,16 +148,54 @@ static func gml_instance_change(object_selector, perf, inst = null, track = true
 	return gml_undefined()
 
 
+# Marks a call of another event of the instance from one of its own events
+# (the caller's method goes on using the script's members when it returns):
+# gml_event_nest before it and gml_event_unnest after it.
+static func gml_event_nest(inst):
+	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+		return null
+	if _gml_instance_event_nesting.size() > 64:
+		_gml_instance_event_nesting_prune()
+	var key = inst.get_instance_id()
+	_gml_instance_event_nesting[key] = int(_gml_instance_event_nesting.get(key, 0)) + 1
+	return null
+
+
+static func gml_event_unnest(inst):
+	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst):
+		return null
+	var key = inst.get_instance_id()
+	var depth = int(_gml_instance_event_nesting.get(key, 0)) - 1
+	if depth > 0:
+		_gml_instance_event_nesting[key] = depth
+	else:
+		_gml_instance_event_nesting.erase(key)
+	return null
+
+
+# Forgets the instances that were freed while one of their events ran.
+static func _gml_instance_event_nesting_prune():
+	for key in _gml_instance_event_nesting.keys():
+		if not is_instance_id_valid(key):
+			_gml_instance_event_nesting.erase(key)
+
+
 # instance_change as a statement of an object event, which the converter
 # compiles to this call with the rest of the event as the continuation (a
 # function that reaches the instance through name-based accessors only) and
 # returns from the event right after. The change and the new object's Create
 # event are done before the continuation runs, as in GameMaker, unless an
-# event of the instance that goes on using its script's members is running
-# (gml_event_nesting): then the change waits for the event to return, as
-# gml_instance_change does.
+# event of this instance that goes on using its script's members is running
+# below another event of it (see _gml_instance_event_nesting): then the change
+# waits for the event to return, as gml_instance_change does.
 static func gml_instance_change_then(object_selector, perf, continuation, inst = null):
-	var at_once = gml_event_nesting == 0
+	var at_once = typeof(inst) == TYPE_OBJECT and is_instance_valid(inst) and not _gml_instance_event_nesting.has(inst.get_instance_id())
+	if not at_once and not _gml_instance_change_nesting_warned and typeof(inst) == TYPE_OBJECT:
+		_gml_instance_change_nesting_warned = true
+		push_warning(
+			"GM2Godot: an instance_change reached through event_perform or event_user changes the object once "
+			+ "the event that performed it returns; the code after the call still runs on the old object."
+		)
 	gml_instance_change(object_selector, perf, inst, not at_once)
 	if at_once:
 		_gml_instance_change_flush_instance(inst)
@@ -376,7 +421,7 @@ static func _gml_instance_change_identity(inst, entry, object_entry):
 	var handle = inst.get("id")
 	# _gm_register_instance gives a room's instance its name; the instance
 	# keeps the value it has.
-	var has_name = gml_struct_exists(inst, "name")
+	var has_name = inst.has_meta("gamemaker_instance_name")
 	var name_value = gml_struct_get(inst, "name") if has_name else null
 	inst.set("id", gml_instance_noone())
 	_gml_instance_change_registering = inst

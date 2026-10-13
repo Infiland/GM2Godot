@@ -50,6 +50,17 @@ class GMLTranspileError(ValueError):
 
 
 @dataclass(frozen=True)
+class EventFunctionSplit:
+    """One part of an object event whose declared functions are bound apart from it.
+
+    part "declarations" keeps only the function declarations at the top of the
+    event, part "body" everything else.
+    """
+
+    part: Literal["body", "declarations"]
+
+
+@dataclass(frozen=True)
 class Token:
     kind: str
     value: str
@@ -125,6 +136,7 @@ __all__ = [
     "AssignmentOperator",
     "BuiltinVariableMetadata",
     "DEFAULT_SCOPE_CONTEXT",
+    "EventFunctionSplit",
     "GMLExtensionFunction",
     "GMLExtensionFunctionMapping",
     "GMLTranspileError",

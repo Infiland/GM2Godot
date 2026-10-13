@@ -571,7 +571,8 @@ EXPECTED_PUBLIC_FACADE_SIGNATURES: dict[str, str | None] = {
         "instance_target: 'str | None' = None, direct_instance_names: 'Iterable[str] | None' = None, "
         "dynamic_instance_names: 'Iterable[str] | None' = None, "
         "enum_values: 'Mapping[str, Mapping[str, int]] | None' = None, "
-        "macro_values: 'Mapping[str, str] | None' = None) -> 'GMLTranspileResult'"
+        "macro_values: 'Mapping[str, str] | None' = None, "
+        "event_functions: 'EventFunctionSplit | None' = None) -> 'GMLTranspileResult'"
     ),
     "transpile_gml_condition": (
         "(source: 'str', local_names: 'Iterable[str] | None' = None, "

@@ -12,7 +12,7 @@ from .extension_functions import (
 )
 from .lexical_api import preprocess_gml_source, tokenize_gml_source
 from .result_models import GMLTranspileResult
-from .shared_models import ScopeContext as _ScopeContext
+from .shared_models import EventFunctionSplit, ScopeContext as _ScopeContext
 from .source_map import (
     build_gml_source_map,
     render_gml_source_header,
@@ -109,6 +109,7 @@ def transpile_gml_code_with_source_map(
     dynamic_instance_names: Iterable[str] | None = None,
     enum_values: Mapping[str, Mapping[str, int]] | None = None,
     macro_values: Mapping[str, str] | None = None,
+    event_functions: EventFunctionSplit | None = None,
 ) -> GMLTranspileResult:
     """Transpile supported GML statements and return trace metadata."""
     preprocessed = preprocess_gml_source(
@@ -123,9 +124,12 @@ def transpile_gml_code_with_source_map(
     }
     known_macro_values = dict(macro_values or {})
     initial_local_names = tuple(local_names or ())
-    static_declarations = (
-        collect_static_declarations(tokens) if static_scope_prefix is not None else ()
+    # The declarations split from an event are functions of their own: the
+    # event's statics are initialized with its body.
+    declares_statics = static_scope_prefix is not None and (
+        event_functions is None or event_functions.part == "body"
     )
+    static_declarations = collect_static_declarations(tokens) if declares_statics else ()
     static_scope_id = None
     static_scope_name = None
     parser_static_prefix = static_scope_prefix
@@ -176,6 +180,7 @@ def transpile_gml_code_with_source_map(
             extension_function_mappings=normalize_extension_function_mappings(
                 extension_function_mappings
             ),
+            event_functions=event_functions,
         )
     )
     lines = list(statement_result.lines)

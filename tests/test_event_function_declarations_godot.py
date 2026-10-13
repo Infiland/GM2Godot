@@ -4,7 +4,9 @@ A function declared in an event is available only in the context of its
 instance, throughout the instance's lifetime (manual: GML Overview > Method
 Variables, "Defining a function in an Object's event"). The instance's other
 events call it by name, a call can come before the declaration in the same
-event, and another object's function of the same name is a separate one.
+event, and another object's function of the same name is a separate one. A
+function declared in the Alarm 0 event can be called in the Create event,
+"regardless of when that alarm event runs (or whether it runs at all)".
 """
 from __future__ import annotations
 
@@ -12,6 +14,9 @@ import unittest
 
 from tests.gamemaker_project_support import EVENT_CREATE, EVENT_STEP, GameMakerObject
 from tests.gml_trace_support import run_gml_trace
+
+EVENT_ALARM_0 = (2, 0)
+EVENT_USER_0 = (7, 10)
 
 _SCRIPTS = {
     "scr_counter": (
@@ -78,6 +83,30 @@ class TestEventFunctionDeclarationsGodot(unittest.TestCase):
                 "step event:12 15",
             ],
         )
+
+    def test_function_declared_in_an_event_that_has_not_run_is_available_from_creation(self) -> None:
+        create = (
+            'trace("create:" + string(from_alarm(2)) + " " + string(from_user(3)));\n'
+            "function in_create(_q) { return from_alarm(_q) + 1; }\n"
+            'trace("nested:" + string(in_create(5)));\n'
+        )
+        step = (
+            'if (!variable_global_exists("stepped")) {\n'
+            "    global.stepped = true;\n"
+            '    trace("step:" + string(from_alarm(4)));\n'
+            "}\n"
+        )
+        # Alarm 0 is never set, and no user event 0 is ever performed.
+        alarm = "function from_alarm(_q) { return _q * 10; }\ntrace(\"alarm ran\");\n"
+        user = "function from_user(_q) { return _q + 100; }\n"
+
+        trace = run_gml_trace(
+            self,
+            {},
+            {EVENT_CREATE: create, EVENT_STEP: step, EVENT_ALARM_0: alarm, EVENT_USER_0: user},
+        )
+
+        self.assertEqual(trace, ["create:20 103", "nested:51", "step:40"])
 
 
 if __name__ == "__main__":

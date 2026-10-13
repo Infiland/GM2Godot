@@ -26,6 +26,7 @@ from src.conversion.gml_runtime import write_gml_runtime
 from src.conversion.gml_transpiler import (
     GMLSourceMap,
     GMLTranspileError,
+    GMLTranspileResult,
     analyze_gml_source_identifiers,
     merge_gml_source_maps,
     transpile_gml_code_with_source_map,
@@ -38,11 +39,12 @@ from src.conversion.gml_transpiler_parts.constants import (
     GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS,
     GML_LITERAL_IDENTIFIERS,
 )
+from src.conversion.gml_transpiler_parts.function_declarations import event_function_names
 from src.conversion.gml_transpiler_parts.lexical_api import (
     preprocess_gml_source,
     tokenize_gml_source,
 )
-from src.conversion.gml_transpiler_parts.shared_models import Token
+from src.conversion.gml_transpiler_parts.shared_models import EventFunctionSplit, Token
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
 from src.conversion.object_variables import (
@@ -70,6 +72,7 @@ from src.conversion.project_source_paths import (
 )
 from src.conversion.resource_reference_metadata import capture_asset_name_declaration
 from src.conversion.script_generator import (
+    EVENT_FUNCTIONS_KEY_PREFIX,
     ObjectRuntimeConfig,
     SpriteRuntimeConfig,
     _valid_instance_variables,
@@ -153,6 +156,18 @@ class ObjectEventSource(TypedDict):
     source_path: str
     source: str
     inherited_event_call: str | None
+
+
+@dataclass(frozen=True)
+class _EventTranspileScope:
+    """What the events of one object share when they are transpiled."""
+
+    instance_variables: set[str]
+    asset_names: set[str] | None
+    direct_names: set[str]
+    dynamic_names: set[str]
+    enum_values: Mapping[str, Mapping[str, int]] | None
+    macro_values: Mapping[str, str] | None
 
 
 @dataclass(frozen=True)
@@ -1309,6 +1324,14 @@ class ObjectConverter(BaseConverter):
                 )
             )
 
+        # The functions an event declares are bound when the instance is
+        # built, by code of their own rather than by the event.
+        event_function_positions = {
+            position
+            for position, entry in enumerate(source_entries)
+            if self._event_declares_functions(entry)
+        }
+
         # A child object's script declares (and reads directly) only the
         # variables no ancestor script can declare already.
         own_variables = (
@@ -1327,10 +1350,19 @@ class ObjectConverter(BaseConverter):
             | GDSCRIPT_NATIVE_INSTANCE_MEMBER_IDENTIFIERS
         ) - direct_names
 
-        for entry in source_entries:
+        scope = _EventTranspileScope(
+            instance_variables=instance_variables,
+            asset_names=asset_names,
+            direct_names=direct_names,
+            dynamic_names=dynamic_names,
+            enum_values=enum_values,
+            macro_values=macro_values,
+        )
+        for position, entry in enumerate(source_entries):
             mapping = entry["mapping"]
             source_path = entry["source_path"]
             source = entry["source"]
+            declares_functions = position in event_function_positions
             try:
                 self._record_event_source_diagnostics(
                     source,
@@ -1338,24 +1370,25 @@ class ObjectConverter(BaseConverter):
                     object_name,
                     mapping.godot_func,
                 )
-                result = transpile_gml_code_with_source_map(
-                    source,
-                    instance_variables=instance_variables,
-                    inherited_event_call=entry["inherited_event_call"],
-                    macro_configuration=self.macro_configuration,
-                    asset_names=asset_names,
-                    static_scope_prefix=f"{object_name}.{mapping.godot_func}",
-                    source_path=source_path,
-                    event=mapping.godot_func,
-                    preserve_source_comments=True,
-                    instance_target="self",
-                    direct_instance_names=direct_names,
-                    dynamic_instance_names=dynamic_names,
-                    enum_values=enum_values,
-                    macro_values=macro_values,
+
+                result = self._transpile_event_entry(
+                    object_name,
+                    entry,
+                    scope,
+                    EventFunctionSplit("body") if declares_functions else None,
                 )
                 code_bodies[mapping.godot_func] = result.code
                 source_maps[mapping.godot_func] = result.source_map
+                if declares_functions:
+                    declarations = self._transpile_event_entry(
+                        object_name,
+                        entry,
+                        scope,
+                        EventFunctionSplit("declarations"),
+                    )
+                    key = f"{EVENT_FUNCTIONS_KEY_PREFIX}{mapping.godot_func}"
+                    code_bodies[key] = declarations.code
+                    source_maps[key] = declarations.source_map
             except GMLTranspileError as exc:
                 has_event_blocker = True
                 message = (
@@ -1376,6 +1409,46 @@ class ObjectConverter(BaseConverter):
                 self._safe_log(message)
 
         return code_bodies, instance_variables, source_maps, has_event_blocker
+
+    def _transpile_event_entry(
+        self,
+        object_name: str,
+        entry: ObjectEventSource,
+        scope: _EventTranspileScope,
+        event_functions: EventFunctionSplit | None,
+    ) -> GMLTranspileResult:
+        mapping = entry["mapping"]
+        return transpile_gml_code_with_source_map(
+            entry["source"],
+            instance_variables=scope.instance_variables,
+            inherited_event_call=entry["inherited_event_call"],
+            macro_configuration=self.macro_configuration,
+            asset_names=scope.asset_names,
+            static_scope_prefix=f"{object_name}.{mapping.godot_func}",
+            source_path=entry["source_path"],
+            event=mapping.godot_func,
+            preserve_source_comments=(
+                event_functions is None or event_functions.part == "body"
+            ),
+            instance_target="self",
+            direct_instance_names=scope.direct_names,
+            dynamic_instance_names=scope.dynamic_names,
+            enum_values=scope.enum_values,
+            macro_values=scope.macro_values,
+            event_functions=event_functions,
+        )
+
+    def _event_declares_functions(self, entry: ObjectEventSource) -> bool:
+        try:
+            return bool(
+                event_function_names(
+                    entry["source"],
+                    macro_configuration=self.macro_configuration,
+                )
+            )
+        except GMLTranspileError:
+            # The transpile of the event reports the error.
+            return False
 
     def _event_source_path(
         self,
@@ -1605,6 +1678,49 @@ class ObjectConverter(BaseConverter):
             object_name = parsed["parent_object_name"]
             source_path = parsed["parent_object_source_path"]
         return function_names
+
+    def _ancestors_declare_event_functions(
+        self,
+        parent_object_name: str | None,
+        parent_object_source_path: str | None,
+    ) -> bool:
+        """Whether an ancestor's script binds functions its events declare."""
+        seen: set[str] = set()
+        object_name = parent_object_name
+        source_path = parent_object_source_path
+        while object_name is not None and object_name not in seen:
+            seen.add(object_name)
+            parsed = self._parse_object_yy(object_name, source_path)
+            if parsed is None:
+                return False
+            if self._object_has_script(object_name) and self._object_declares_event_functions(
+                object_name,
+                parsed,
+            ):
+                return True
+            object_name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
+        return False
+
+    def _object_declares_event_functions(self, object_name: str, parsed: ParsedObject) -> bool:
+        for event in parsed["event_list"]:
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+            if event.get("isDnD") is True or mapping is None or not mapping.gml_filename:
+                continue
+            event_source_path = self._event_source_path(parsed["source_path"], object_name, mapping)
+            if event_source_path is None:
+                continue
+            try:
+                with open(event_source_path, "r", encoding="utf-8") as f:
+                    declared = event_function_names(
+                        f.read(),
+                        macro_configuration=self.macro_configuration,
+                    )
+            except (OSError, UnicodeDecodeError, GMLTranspileError):
+                continue
+            if declared:
+                return True
+        return False
 
     def _inherited_input_functions(
         self,
@@ -1942,6 +2058,15 @@ class ObjectConverter(BaseConverter):
             inherited_member_names=inherited_member_names,
             variable_definitions=variable_definitions,
         )
+        binds_event_functions = any(
+            key.startswith(EVENT_FUNCTIONS_KEY_PREFIX) for key in code_bodies
+        )
+        inherits_event_functions = parent_object_name is not None and (
+            self._ancestors_declare_event_functions(
+                parent_object_name,
+                parent_object_source_path,
+            )
+        )
         if has_event_blocker:
             # An object is one logical resource. Publishing a script with only
             # the events with available, readable, supported GML would make the
@@ -1985,6 +2110,8 @@ class ObjectConverter(BaseConverter):
                     parent_object_source_path,
                 ),
                 runs_variable_definitions=runs_variable_definitions,
+                binds_event_functions=binds_event_functions or inherits_event_functions,
+                inherits_event_functions=inherits_event_functions,
             ),
             base_script_path=parent_script_res_path,
         )

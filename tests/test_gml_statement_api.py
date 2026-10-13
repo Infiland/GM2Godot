@@ -22,6 +22,7 @@ from typing import (
 
 from src.conversion.gml_transpiler_parts.lexical_api import tokenize_gml_source
 from src.conversion.gml_transpiler_parts.shared_models import (
+    EventFunctionSplit,
     GMLExtensionFunction,
     GMLExtensionFunctionMapping,
     GMLTranspileError,
@@ -101,6 +102,7 @@ STATEMENT_REQUEST_FIELDS = (
     "static_scope_prefix",
     "extension_functions",
     "extension_function_mappings",
+    "event_functions",
 )
 STATEMENT_RESULT_FIELDS = (
     "lines",
@@ -135,7 +137,8 @@ EXPECTED_MODEL_SIGNATURES = {
         "static_scope_prefix: 'str | None' = None, "
         "extension_functions: 'Mapping[str, GMLExtensionFunction] | None' = None, "
         "extension_function_mappings: "
-        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None) -> None"
+        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None, "
+        "event_functions: 'EventFunctionSplit | None' = None) -> None"
     ),
     GMLStatementResult: (
         "(lines: 'tuple[str, ...]', local_names: 'frozenset[str]', "
@@ -265,6 +268,7 @@ class GMLStatementAPITests(unittest.TestCase):
                 "extension_function_mappings": (
                     Mapping[str, GMLExtensionFunctionMapping] | None
                 ),
+                "event_functions": EventFunctionSplit | None,
             },
             GMLStatementResult: {
                 "lines": tuple[str, ...],

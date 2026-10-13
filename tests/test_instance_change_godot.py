@@ -1235,9 +1235,9 @@ class TestInstanceChangeGodot(unittest.TestCase):
         # The rest of a switch case cannot become a function, so the parent's
         # change waits for the child's event to return instead of replacing the
         # script under the child's running method (which crashed the engine).
-        assert isinstance(trace, list)
-        self.assertEqual(trace[-1], "final o_t1 s_b hp=100 x=15")
-        self.assertIn("kid o_sw s_a hp=3", trace)
+        lines = [str(line) for line in cast(list[object], trace)]
+        self.assertEqual(lines[-1], "final o_t1 s_b hp=100 x=15")
+        self.assertIn("kid o_sw s_a hp=3", lines)
 
     def test_event_inherited_reaching_a_parents_instance_change_in_a_create_event(self) -> None:
         trace, _nodes = self._run(_INHERITED_CREATE_PROJECT, _TRACE_PROBE)

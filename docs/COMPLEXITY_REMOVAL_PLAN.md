@@ -1134,18 +1134,6 @@ Removal: Extract fallback discovery and completed/skipped/failed future accounti
 
 Existing checks: `tests.test_objects.TestObjectConverterBasic.test_cancellation_leaves_objects_for_inherited_finalization`, `tests.test_objects.TestScriptGeneration.test_missing_event_source_skips_object_and_makes_conversion_partial`
 
-<a id="fn-34e1346ae3e0d615"></a>
-
-## `src/conversion/script_functions.py::modern_script_structure`
-
-Recognize modern script declarations and top-level constructor initialization.
-
-Preserve: Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.
-
-Removal: Extract declaration parsing and supported top-level initializer cases.
-
-Existing checks: `tests.test_scripts.TestScriptConverter.test_discovers_constructor_and_explicit_top_level_initialization`, `tests.test_scripts.TestScriptConverter.test_discovers_modern_functions_around_top_level_enum`
-
 <a id="fn-e47f1faeb860c46f"></a>
 
 ## `src/conversion/script_generator.py::generate_script_content`

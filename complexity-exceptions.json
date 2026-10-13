@@ -849,15 +849,6 @@
       "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-aa2d274f778c8fdd"
     },
     {
-      "path": "src/conversion/script_functions.py",
-      "function": "modern_script_structure",
-      "measured_complexity": 18,
-      "ceiling": 18,
-      "reason": "Retain layout-preserving source offsets, enum/preprocessor skipping, declaration-before-constructor-call requirement and None for unsupported syntax.",
-      "removal_action": "Extract declaration parsing and supported top-level initializer cases.",
-      "tracking_url": "docs/COMPLEXITY_REMOVAL_PLAN.md#fn-34e1346ae3e0d615"
-    },
-    {
       "path": "src/conversion/script_generator.py",
       "function": "generate_script_content",
       "measured_complexity": 34,

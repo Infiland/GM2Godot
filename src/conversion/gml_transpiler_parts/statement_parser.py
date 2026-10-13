@@ -778,10 +778,17 @@ class _StatementParser:
         self._skip_newlines()
         catch_name: str | None = None
         catch_lines: list[str] | None = None
+        catch_declares = False
         if self._match_identifier("catch"):
             catch_name = self._parse_catch_variable_name()
             had_catch_local = catch_name in self.local_names
+            # GDScript refuses a variable that has the name of one already
+            # declared in the function, in any block around it; a catch
+            # variable named like an outer catch variable or local (catch (e)
+            # inside catch (e)) is that variable again, as in GML.
+            catch_declares = catch_name not in self.declared_local_names
             self.local_names.add(catch_name)
+            self.declared_local_names.add(catch_name)
             self.control_flow_capture = try_capture
             try:
                 catch_lines = self._parse_body()
@@ -789,6 +796,8 @@ class _StatementParser:
                 self.control_flow_capture = parent_capture
                 if not had_catch_local:
                     self.local_names.discard(catch_name)
+                if catch_declares:
+                    self.declared_local_names.discard(catch_name)
 
         self._skip_newlines()
         finally_lines: list[str] | None = None
@@ -811,9 +820,10 @@ class _StatementParser:
 
         if catch_lines is not None and catch_name is not None:
             gdscript_catch_name = sanitize_gdscript_identifier(catch_name)
+            catch_declaration = "var " if catch_declares else ""
             lines.extend([
                 f"if not GMRuntime.is_undefined({control_name}) and {control_name}[\"kind\"] == \"throw\":",
-                f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
+                f"\t{catch_declaration}{gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
                 f"\t{control_name} = GMRuntime.gml_undefined()",
                 "\twhile true:",
                 *indent_lines(indent_lines(catch_lines or ["pass"])),

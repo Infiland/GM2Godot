@@ -356,10 +356,14 @@ static func _gml_step_entry_active(entry):
 
 
 static func _gml_step_timeline_instances():
+	# Every converted object has the timeline members; only instances whose
+	# timeline is running take part in the timeline phase.
 	var instances = []
 	for i in range(_gml_step_entries.size()):
 		if _gml_step_infos[i].has_timeline and _gml_step_entry_active(_gml_step_entries[i]):
-			instances.append(_gml_step_entries[i]["instance"])
+			var inst = _gml_step_entries[i]["instance"]
+			if inst.timeline_running:
+				instances.append(inst)
 	return instances
 
 

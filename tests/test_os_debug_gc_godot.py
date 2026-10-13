@@ -43,6 +43,14 @@ class TestOSDebugGCGodotSmoke(unittest.TestCase):
             \tvar info = GMRuntime.gml_os_get_info()
             \tif not _check(GMRuntime.gml_selector_get(info, "os_type") == os_type, "os_get_info os_type mismatch"):
             \t\treturn
+            \t# GameMaker's os_type and os_browser hold numbers: os_linux is 6 and
+            \t# browser_not_a_browser is -1 (HTML5 runner Globals.js).
+            \tif not _check(typeof(os_type) == TYPE_INT and (OS.get_name() != "Linux" or os_type == 6), "os_type is not GameMaker's number: " + str(os_type)):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_string(os_type) == str(os_type), "os_type does not print as a number"):
+            \t\treturn
+            \tif not _check(GMRuntime.gml_builtin_global("os_browser") == -1, "os_browser is not browser_not_a_browser (-1)"):
+            \t\treturn
             \tif not _check(GMRuntime.gml_os_get_language().length() <= 2, "language code too long"):
             \t\treturn
             \tGMRuntime.gml_clipboard_set_text("gm2godot clipboard smoke")

@@ -375,6 +375,32 @@ static func _gml_room_child_has_depth(node, depth):
 	return false
 
 
+
+
+static func gml_instance_layer_get(instance):
+	# GameMaker's layer variable: the handle of the room or runtime layer the
+	# instance is on. An instance made with instance_create_depth, or given a
+	# depth of its own, is on a managed depth layer and reads -1 (an invalid
+	# layer handle).
+	if not (instance is Node) or instance.has_meta(GML_EXPLICIT_DEPTH_META):
+		return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+	var node = instance.get_parent()
+	while node != null:
+		if _gml_layer_node_has_metadata(node):
+			return _gml_layer_register_node(node)
+		if node.has_meta(&"gm2godot_room_root_policy"):
+			break
+		node = node.get_parent()
+	return gml_handle_invalid(GML_LAYER_HANDLE_KIND)
+
+
+static func gml_instance_layer_set(instance, layer):
+	# Assigning layer moves the instance to that layer, which gives it the
+	# layer's depth (HTML5 runner yyInstance.js layer setter).
+	gml_layer_add_instance(layer, instance)
+	return null
+
+
 static func gml_layer_get_all_elements(layer):
 	var handle = _gml_layer_resolve_handle(layer)
 	if not gml_handle_is_valid(handle):

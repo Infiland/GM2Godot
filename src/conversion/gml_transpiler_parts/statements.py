@@ -1940,12 +1940,41 @@ def _lower_simple_array_index_postincrement_target(
     )
 
 
+def _function_literal_token_indices(tokens: list[_Token]) -> set[int]:
+    # A ++ or -- inside a function literal belongs to that function's body,
+    # which runs when the function is called, not where it is declared; the
+    # function literal's own parse lowers it.
+    indices: set[int] = set()
+    index = 0
+    while index < len(tokens):
+        if tokens[index].kind == "IDENT" and tokens[index].value == "function":
+            end = _function_literal_end(tokens, index)
+            indices.update(range(index, end))
+            index = end
+            continue
+        index += 1
+    return indices
+
+
+def _function_literal_end(tokens: list[_Token], start: int) -> int:
+    depth = 0
+    for index in range(start, len(tokens)):
+        if tokens[index].value == "{":
+            depth += 1
+        elif tokens[index].value == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    return len(tokens)
+
+
 def _find_next_mutation_expression(
     source: str,
 ) -> tuple[int, int, str, _IncrementDelta, _IncrementMode] | None:
     tokens = [token for token in tokenize_gml_expression(source) if token.kind != "EOF"]
+    function_literal_indices = _function_literal_token_indices(tokens)
     for index, token in enumerate(tokens):
-        if token.value not in ("++", "--"):
+        if token.value not in ("++", "--") or index in function_literal_indices:
             continue
 
         delta: _IncrementDelta = 1 if token.value == "++" else -1

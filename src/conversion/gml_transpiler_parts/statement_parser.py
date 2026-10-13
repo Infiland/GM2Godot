@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from typing import Iterable, Mapping, MutableMapping, MutableSet
 
-from .constants import BINARY_PRECEDENCE, EOF
+from .constants import ASSIGNMENT_OPERATORS, BINARY_PRECEDENCE, EOF
 from .expression_api import (
     emit_instance_keyword_argument,
     evaluate_enum_value_tokens,
@@ -24,6 +25,13 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
     Token as _Token,
 )
+from .statement_boundaries import (
+    matching_close_index,
+    scan_expression_end,
+    scan_statement_end,
+    skip_newline_tokens,
+)
+from .statement_macros import expand_statement_macros, macro_tokens_at
 from .statement_models import (
     ControlFlowCapture,
     GMLStatementRequest,
@@ -73,6 +81,13 @@ class _StatementParser:
         extension_function_mappings: Mapping[str, GMLExtensionFunctionMapping] | None = None,
         control_flow_capture: ControlFlowCapture | None = None,
     ) -> None:
+        # Macros whose value is statements are spliced in before anything
+        # reads the tokens, so their var declarations are hoisted like any
+        # other.
+        tokens = expand_statement_macros(
+            tokens,
+            {**_source_macro_values(tokens, macro_configuration), **(macro_values or {})},
+        )
         self.tokens = tokens
         self.position = 0
         initial_local_names = set(local_names or [])
@@ -134,6 +149,7 @@ class _StatementParser:
         return lines
 
     def _parse_statement(self) -> list[str]:
+        self._expand_statement_start_macro()
         if self._check_directive("#macro"):
             return self._parse_macro_statement()
         if self._check_identifier("globalvar"):
@@ -184,6 +200,33 @@ class _StatementParser:
             generated_counter=self.generated_counter,
             control_flow_capture=self.control_flow_capture,
         )
+
+    def _expand_statement_start_macro(self) -> None:
+        # A macro is text substitution, so one used as a statement runs its
+        # value as that statement: with #macro M x = 5, M; assigns x. (A
+        # write to the macro itself is left to report the constant.)
+        expanded: set[str] = set()
+        token = self._peek()
+        while (
+            token.kind == "IDENT"
+            and token.value in self.macro_values
+            and token.value not in expanded
+            and not self._macro_is_written(self.position)
+        ):
+            expanded.add(token.value)
+            self.tokens = [
+                *self.tokens[:self.position],
+                *macro_tokens_at(self.macro_values[token.value], token),
+                *self.tokens[self.position + 1:],
+            ]
+            token = self._peek()
+
+    def _macro_is_written(self, index: int) -> bool:
+        next_index = skip_newline_tokens(self.tokens, index + 1)
+        if next_index >= len(self.tokens):
+            return False
+        next_token = self.tokens[next_index]
+        return next_token.kind == "OP" and (next_token.value in ASSIGNMENT_OPERATORS or next_token.value in ("++", "--"))
 
     def _parse_macro_statement(self) -> list[str]:
         self._consume_directive("#macro")
@@ -278,6 +321,10 @@ class _StatementParser:
         condition_tokens = self._read_condition_tokens()
         if not condition_tokens:
             raise GMLTranspileError("Expected if condition")
+        # if <condition> then <statement> (manual: If Else and Conditional
+        # Operators).
+        self._skip_newlines()
+        self._match_identifier("then")
 
         condition = transpile_gml_condition(
             tokens_to_source(condition_tokens),
@@ -415,6 +462,10 @@ class _StatementParser:
         self._consume("(")
         header_tokens = self._read_balanced_tokens("(", ")")
         header_parts = split_top_level_tokens(header_tokens, ";")
+        if len(header_parts) == 4 and all(token.kind == "NEWLINE" for token in header_parts[3]):
+            # The operation may end with a semicolon: the manual's form is
+            # for (<assignment>; <expression>; <operation>;).
+            header_parts = header_parts[:3]
         if len(header_parts) != 3:
             raise GMLTranspileError("Expected for initializer, condition, and operation clauses")
 
@@ -853,6 +904,16 @@ class _StatementParser:
         return self._parse_statement()
 
     def _read_condition_tokens(self) -> list[_Token]:
+        # The condition is one expression, with or without parentheses; the
+        # body may follow on the same line.
+        start = skip_newline_tokens(self.tokens, self.position)
+        end = scan_expression_end(self.tokens, start)
+        if end is not None:
+            self.position = end
+            tokens = [token for token in self.tokens[start:end] if token.kind != "NEWLINE"]
+            if tokens[0].value == "(" and matching_close_index(tokens, 0) == len(tokens) - 1:
+                return tokens[1:-1]
+            return tokens
         if self._check("("):
             condition_start = self.position
             self._advance()
@@ -953,6 +1014,14 @@ class _StatementParser:
         raise self._error(f"Expected '{closer}'")
 
     def _read_simple_statement(self) -> list[_Token]:
+        # A statement ends where its expression ends: it may share a line
+        # with the next statement, and line breaks inside it are white space.
+        end = scan_statement_end(self.tokens, self.position)
+        if end is not None:
+            statement_tokens = [token for token in self.tokens[self.position:end] if token.kind != "NEWLINE"]
+            self.position = end
+            self._match(";")
+            return statement_tokens
         tokens: list[_Token] = []
         depth = 0
         while not self._at_end():
@@ -1048,6 +1117,16 @@ class _StatementParser:
         return GMLTranspileError(message, line=token.line, column=token.column)
 
 
+# The temporaries counter of the statements being parsed. Statements parsed
+# while it is set are a method's body written in them, which becomes a GDScript
+# lambda inside them; redeclaring a name already in scope there is a parse
+# error, so the method numbers its temporaries (switch, try, with, repeat...)
+# from the same counter.
+_ACTIVE_GENERATED_COUNTER: ContextVar[list[int] | None] = ContextVar(
+    "gml_active_generated_counter", default=None
+)
+
+
 def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
     parser = _StatementParser(
         list(request.tokens),
@@ -1067,8 +1146,13 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         static_scope_prefix=request.static_scope_prefix,
         extension_functions=request.extension_functions,
         extension_function_mappings=request.extension_function_mappings,
+        generated_counter=_ACTIVE_GENERATED_COUNTER.get(),
     )
-    lines = parser.parse()
+    active_counter = _ACTIVE_GENERATED_COUNTER.set(parser.generated_counter)
+    try:
+        lines = parser.parse()
+    finally:
+        _ACTIVE_GENERATED_COUNTER.reset(active_counter)
     return GMLStatementResult(
         lines=tuple(lines),
         local_names=frozenset(parser.local_names),
@@ -1078,6 +1162,37 @@ def parse_gml_statements(request: GMLStatementRequest) -> GMLStatementResult:
         enum_names=frozenset(parser.enum_names),
         macro_values=parser.macro_values,
     )
+
+
+def _source_macro_values(tokens: list[_Token], macro_configuration: str | None) -> dict[str, str]:
+    # The #macro definitions in these tokens; one for the active
+    # configuration replaces the plain one.
+    values: dict[str, str] = {}
+    configured: set[str] = set()
+    index = 0
+    while index < len(tokens):
+        if tokens[index].kind != "DIRECTIVE" or tokens[index].value != "#macro":
+            index += 1
+            continue
+        end = index + 1
+        while end < len(tokens) and tokens[end].kind not in ("NEWLINE", "EOF"):
+            end += 1
+        definition = tokens[index + 1:end]
+        index = end
+        if len(definition) >= 3 and definition[1].value == ":":
+            configuration, name, value_tokens = definition[0].value, definition[2].value, definition[3:]
+            if not macro_configuration_matches(configuration, macro_configuration):
+                continue
+            configured.add(name)
+        elif definition and definition[0].kind == "IDENT":
+            name, value_tokens = definition[0].value, definition[1:]
+            if name in configured:
+                continue
+        else:
+            continue
+        if value_tokens:
+            values[name] = tokens_to_source(value_tokens)
+    return values
 
 
 def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
@@ -1090,6 +1205,11 @@ def _collect_hoisted_local_names(tokens: list[_Token]) -> tuple[str, ...]:
         token = tokens[index]
         if token.kind == "EOF":
             break
+        if token.kind == "DIRECTIVE" and token.value == "#macro":
+            # A macro's value declares its locals where the macro is used.
+            while index < len(tokens) and tokens[index].kind not in ("NEWLINE", "EOF"):
+                index += 1
+            continue
         if token.kind == "IDENT" and token.value == "function":
             index = _skip_function_literal(tokens, index)
             continue

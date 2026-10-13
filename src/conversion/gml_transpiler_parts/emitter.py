@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Iterable, TypeGuard
 
 from .asset_lowering import asset_argument_indices, first_argument_is_script_asset
@@ -447,16 +448,7 @@ def _emit_expression(
             POSTFIX_PRECEDENCE,
         )
     if isinstance(expr, _StructLiteral):
-        fields = ", ".join(
-            _emit_struct_field(
-                field_name,
-                field_value,
-                local_names,
-                scope_context=scope_context,
-            )
-            for field_name, field_value in expr.fields
-        )
-        return f"GMRuntime.gml_struct({{{fields}}})", POSTFIX_PRECEDENCE
+        return _emit_struct_literal(expr, local_names, scope_context), POSTFIX_PRECEDENCE
     if isinstance(expr, _Index):
         if _is_alarm_array_access(expr, local_names):
             index = _emit_expression(expr.index, local_names, scope_context=scope_context)[0]
@@ -630,11 +622,54 @@ def _emit_function_literal(
         parameter_names,
         scope_context=function_scope_context,
     )
-    body_lines = [*default_lines, *expr.body_lines]
+    body_lines = _rename_function_literal_locals(
+        [*default_lines, *expr.body_lines],
+        local_names,
+    )
     if _can_emit_single_line_function_literal(body_lines):
         return f"func{name}({parameters}): {body_lines[0]}"
     body = "\n".join(_prefix_multiline(line, "\t") for line in body_lines)
     return f"func{name}({parameters}):\n{body}\n"
+
+
+# A GDScript local declaration (var or a for loop variable).
+_GDSCRIPT_LOCAL_DECLARATION_RE = re.compile(r"\b(?:var|for)\s+([A-Za-z_]\w*)")
+# String literals and comments (left as they are), or a bare name that is not
+# a member access and not called.
+_GDSCRIPT_LOCAL_REFERENCE_RE = re.compile(
+    r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|#[^\n]*|(?<![\w.])[A-Za-z_]\w*(?![\w(])'
+)
+_GDSCRIPT_NAME_RE = re.compile(r"[A-Za-z_]\w*")
+
+
+def _rename_function_literal_locals(body_lines: list[str], enclosing_names: Iterable[str]) -> list[str]:
+    # Each GML function or method has its own local variables (manual:
+    # Local Variables), so a method may declare a local with the name of a
+    # local or parameter of the function it is written in. A GDScript lambda
+    # shares its enclosing function's scope, where that redeclaration is a
+    # parse error, so such locals get a name of their own. A method reaches
+    # anything outside it through its receiver, never as a bare name, so
+    # every bare use of the name in the body is the method's own local (or
+    # a nested method's, renamed alike).
+    text = "\n".join(body_lines)
+    visible_names = {sanitize_gdscript_identifier(name) for name in enclosing_names}
+    colliding_names = set(_GDSCRIPT_LOCAL_DECLARATION_RE.findall(text)) & visible_names
+    if not colliding_names:
+        return body_lines
+    used_names = set(_GDSCRIPT_NAME_RE.findall(text)) | visible_names
+    aliases: dict[str, str] = {}
+    for name in sorted(colliding_names):
+        alias = f"_gml_local_{name}"
+        suffix = 2
+        while alias in used_names:
+            alias = f"_gml_local_{name}_{suffix}"
+            suffix += 1
+        used_names.add(alias)
+        aliases[name] = alias
+    return [
+        _GDSCRIPT_LOCAL_REFERENCE_RE.sub(lambda match: aliases.get(match.group(0), match.group(0)), line)
+        for line in body_lines
+    ]
 
 
 def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
@@ -645,6 +680,29 @@ def _can_emit_single_line_function_literal(body_lines: list[str]) -> bool:
         return False
     stripped = line.lstrip("\t")
     return stripped == "pass" or stripped == "return" or stripped.startswith("return ")
+
+
+def _emit_struct_literal(
+    expr: _StructLiteral,
+    local_names: Iterable[str],
+    scope_context: _ScopeContext,
+) -> str:
+    # A struct literal may repeat a variable name: every value is evaluated
+    # in order and the last one wins. A GDScript dictionary literal cannot
+    # repeat a key, so each repeat starts another dictionary, and the
+    # runtime merges them in order (the key keeps its first place).
+    groups: list[list[str]] = [[]]
+    group_names: set[str] = set()
+    for field_name, field_value in expr.fields:
+        if field_name in group_names:
+            groups.append([])
+            group_names = set()
+        group_names.add(field_name)
+        groups[-1].append(_emit_struct_field(field_name, field_value, local_names, scope_context=scope_context))
+    dictionaries = [f"{{{', '.join(group)}}}" for group in groups]
+    if len(dictionaries) == 1:
+        return f"GMRuntime.gml_struct({dictionaries[0]})"
+    return f"GMRuntime.gml_struct_repeated_fields([{', '.join(dictionaries)}])"
 
 
 def _emit_struct_field(

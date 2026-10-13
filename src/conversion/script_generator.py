@@ -34,6 +34,7 @@ _SPRITE_RUNTIME_IDENTIFIER_RE = re.compile(
 )
 _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "direction",
+    "drawn_by_sequence",
     "friction",
     "gravity",
     "gravity_direction",
@@ -46,6 +47,8 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "image_speed",
     "image_xscale",
     "image_yscale",
+    "in_sequence",
+    "layer",
     "mask_index",
     "path_endaction",
     "path_index",
@@ -54,6 +57,7 @@ _SCRIPT_BUILTIN_VARIABLES = frozenset({
     "path_positionprevious",
     "path_scale",
     "path_speed",
+    "sequence_instance",
     "solid",
     "speed",
     "sprite_index",
@@ -642,6 +646,30 @@ def _emit_motion_runtime_prelude(lines: list[str], *, declare_members: bool) -> 
     )
 
 
+def _emit_builtin_instance_variables_prelude(lines: list[str], *, declare_members: bool) -> None:
+    # Every GameMaker instance has these built-in variables, with the HTML5
+    # runner's defaults (yyInstance.js). The timeline step reads the
+    # timeline_* members; layer is the handle of the instance's layer, and
+    # assigning it moves the instance to that layer.
+    if not declare_members:
+        return
+    lines.append(
+        "\n\nvar timeline_index = -1"
+        "\nvar timeline_position = 0.0"
+        "\nvar timeline_speed = 1.0"
+        "\nvar timeline_running = false"
+        "\nvar timeline_loop = false"
+        "\nvar in_sequence = false"
+        "\nvar drawn_by_sequence = false"
+        "\nvar sequence_instance = GMRuntime.gml_undefined()"
+        "\nvar layer:"
+        "\n\tget:"
+        "\n\t\treturn GMRuntime.gml_instance_layer_get(self)"
+        "\n\tset(value):"
+        "\n\t\tGMRuntime.gml_instance_layer_set(self, value)\n"
+    )
+
+
 def _guard_create_event_body(body: str) -> str:
     # GameMaker runs no Create event for an instance created after the
     # current event requested a room change (unless the instance or room is
@@ -906,6 +934,10 @@ def generate_script_content(
             # Its own object's sprite: _gm_object_sprite_index (virtual) starts
             # sprite_index, and construction shows it.
             sprite_construct_lines=("\t_gm_initialize_sprite_runtime()",) if constructs_sprite else (),
+        )
+        _emit_builtin_instance_variables_prelude(
+            lines,
+            declare_members=base_script_path is None,
         )
     if uses_motion_runtime:
         _emit_motion_runtime_prelude(

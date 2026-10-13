@@ -421,6 +421,16 @@ static func gml_struct(fields = {}):
 	return fields
 
 
+static func gml_struct_repeated_fields(field_groups):
+	# A struct literal that repeats a variable name, as dictionaries of its
+	# fields in order (each repeat starts the next one): the last value wins
+	# and the variable keeps its first place.
+	var fields = {}
+	for group in field_groups:
+		fields.merge(group, true)
+	return gml_struct(fields)
+
+
 static func gml_enum(fields = {}):
 	if typeof(fields) != TYPE_DICTIONARY:
 		return gml_unsupported_type_error("GML enum declaration", fields)

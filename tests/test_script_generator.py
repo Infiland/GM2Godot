@@ -358,6 +358,23 @@ class TestScriptGeneratorEvents(unittest.TestCase):
 
         self.assertIn("timeline_index = tl_intro", content)
         self.assertIn("timeline_running = true", content)
+        # Every instance owns these members with GameMaker's defaults.
+        self.assertIn("\nvar timeline_index = -1\n", content)
+        self.assertIn("\nvar timeline_speed = 1.0\n", content)
+        self.assertIn("\nvar timeline_running = false\n", content)
+        self.assertIn("\nvar in_sequence = false\n", content)
+        self.assertIn("\nvar sequence_instance = GMRuntime.gml_undefined()\n", content)
+        self.assertIn("\t\treturn GMRuntime.gml_instance_layer_get(self)", content)
+
+    def test_child_objects_inherit_builtin_instance_variables(self):
+        content = generate_script_content(
+            [],
+            base_script_path="res://objects/o_parent/o_parent.gd",
+            object_runtime=ObjectRuntimeConfig(object_name="o_child"),
+        )
+
+        self.assertNotIn("var timeline_index", content)
+        self.assertNotIn("var layer:", content)
 
     def test_other_event(self):
         content = generate_script_content([{"eventType": 7, "eventNum": 26}])

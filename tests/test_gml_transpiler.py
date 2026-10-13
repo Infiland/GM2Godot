@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -155,6 +156,20 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             with self.subTest(source=source):
                 with self.assertRaises(GMLTranspileError):
                     transpile_gml_expression(source)
+
+    def test_grey_and_gray_colour_constants_share_gamemaker_values(self):
+        # GameMaker defines both spellings: c_grey = c_gray = 8421504,
+        # c_dkgrey = c_dkgray = 4210752, c_ltgrey = c_ltgray = 12632256.
+        cases = (
+            ("c_grey", "c_gray", 8421504),
+            ("c_dkgrey", "c_dkgray", 4210752),
+            ("c_ltgrey", "c_ltgray", 12632256),
+        )
+        for british, american, value in cases:
+            with self.subTest(constant=british):
+                emitted = transpile_gml_expression(british)
+                self.assertEqual(emitted, transpile_gml_expression(american))
+                self.assertEqual(int(emitted, 16), value)
 
     def test_preserves_hex_literals_as_numeric_values(self):
         self.assertEqual(
@@ -1085,6 +1100,111 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "return [_gml_method_self, _gml_method_other])",
         )
 
+    def test_method_locals_get_their_own_names_beside_enclosing_locals(self):
+        # A method's locals are its own (manual: Local Variables); GDScript
+        # rejects a lambda local that reuses an enclosing local or parameter.
+        code = transpile_gml_code(
+            "function outer(_name) {\n"
+            "    var n = 1;\n"
+            "    var f = function() {\n"
+            "        var n = 2;\n"
+            "        var _name = \"n\";\n"
+            "        var g = function() { var n = 4; return n; };\n"
+            "        for (var _i = 0; _i < 2; _i += 1) { n += _i; }\n"
+            "        return n + other.n + _name;\n"
+            "    };\n"
+            "    return f() + n;\n"
+            "}\n"
+        )
+
+        self.assertIn("\t\tvar n = 1\n", code)
+        self.assertIn("\t\t\tvar _gml_local_n_2 = 2\n", code)
+        self.assertIn('\t\t\tvar _gml_local__name = "n"\n', code)
+        self.assertIn("\t\t\t\tvar _gml_local_n = 4\n\t\t\t\treturn _gml_local_n\n", code)
+        self.assertIn("_gml_local_n_2 = GMRuntime.gml_add(_gml_local_n_2, _i)", code)
+        self.assertIn(
+            'return GMRuntime.gml_add(GMRuntime.gml_add(_gml_local_n_2, '
+            'GMRuntime.gml_selector_get(_gml_method_other, "n")), _gml_local__name)',
+            code,
+        )
+        self.assertIn('GMRuntime.gml_call_value(f, [], _gml_method_self, _gml_method_other, "f"), n)', code)
+        # A local that reuses no enclosing name keeps its own name.
+        self.assertIn("\t\t\tvar _i = 0\n", code)
+
+    def test_method_temporaries_are_named_apart_from_the_enclosing_code(self):
+        # switch, try, with and repeat declare temporaries. A method is a
+        # GDScript lambda inside the enclosing code, where GDScript rejects
+        # redeclaring a name already in scope, so a method (or a method in a
+        # method) using the same constructs needs temporaries of its own.
+        code = transpile_gml_code(
+            "switch (a) { case 1: b = 1; break; }\n"
+            "try { b = 2; } catch (_e) { b = 3; }\n"
+            "repeat (2) { b += 1; }\n"
+            "with (obj_thing) {\n"
+            "    f = function(_k) {\n"
+            "        switch (_k) { case 2: return 2; }\n"
+            "        try { throw 1; } catch (_e) { _k = 0; }\n"
+            "        repeat (2) { _k += 1; }\n"
+            "        with (obj_thing) { y = 1; }\n"
+            "        var g = function() { switch (a) { default: return 0; } };\n"
+            "        return g();\n"
+            "    };\n"
+            "}\n"
+        )
+
+        declared = re.findall(r"\b(?:var|for)\s+(_gml_\w+)", code)
+        for prefix in ("_gml_switch_value_", "_gml_try_control_", "_gml_repeat_index_", "_gml_with_target_"):
+            self.assertGreaterEqual(sum(name.startswith(prefix) for name in declared), 2, code)
+        self.assertEqual(len(declared), len(set(declared)), code)
+
+    def test_increments_inside_methods_stay_in_the_method_body(self):
+        # A method's ++ and -- run each time the method is called, not where
+        # the method is declared.
+        code = transpile_gml_code(
+            "var f = function() {\n"
+            "    var _n = 0;\n"
+            "    for (var _i = 0; _i < 3; _i++) { _n++; }\n"
+            "    return [_n--, ++_n];\n"
+            "};\n"
+            "var g = [function(a) { a--; return a; }, j++];\n"
+        )
+
+        self.assertEqual(
+            code,
+            "\tvar f = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar _n = 0\n"
+            "\t\tvar _i = 0\n"
+            "\t\twhile GMRuntime.gml_lt(_i, 3):\n"
+            "\t\t\t_n = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t\t_i = GMRuntime.gml_add(_i, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_0 = _n\n"
+            "\t\t_n = GMRuntime.gml_sub(_gm2gd_mutation_value_0, 1)\n"
+            "\t\tvar _gm2gd_mutation_value_1 = GMRuntime.gml_add(_n, 1)\n"
+            "\t\t_n = _gm2gd_mutation_value_1\n"
+            "\t\treturn [_gm2gd_mutation_value_0, _gm2gd_mutation_value_1]\n"
+            "\t)\n"
+            "\tvar _gm2gd_mutation_value_2 = j\n"
+            "\tj = GMRuntime.gml_add(_gm2gd_mutation_value_2, 1)\n"
+            "\tvar g = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null, a = null):\n"
+            "\t\tif a == null: a = GMRuntime.gml_undefined()\n"
+            "\t\ta = GMRuntime.gml_sub(a, 1)\n"
+            "\t\treturn a\n"
+            "\t), _gm2gd_mutation_value_2]",
+        )
+
+    def test_struct_literals_may_repeat_a_variable_name(self):
+        # Every value is evaluated in order and the last one wins; a GDScript
+        # dictionary literal cannot repeat a key.
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: f(), a: 3, c: 4, b: 5, a: 6}"),
+            'GMRuntime.gml_struct_repeated_fields([{"a": 1, "b": GMRuntime.gml_call_named("f", [], self, other)}, '
+            '{"a": 3, "c": 4, "b": 5}, {"a": 6}])',
+        )
+        self.assertEqual(
+            transpile_gml_expression("{a: 1, b: 2}"),
+            'GMRuntime.gml_struct({"a": 1, "b": 2})',
+        )
+
     def test_method_rebinding_resolves_script_asset_callable_metadata(self):
         self.assertEqual(
             transpile_gml_expression(
@@ -1420,6 +1540,46 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertEqual(result.diagnostics, ())
         self.assertIn("#macro VALUE 7", result.source)
         self.assertNotIn("#region", result.source)
+
+    def test_macros_used_as_statements_run_their_statements(self):
+        # A macro is text substitution (manual: Constants, Macros): its value
+        # may be several statements, and it may be used on its own as a
+        # statement.
+        self.assertEqual(
+            transpile_gml_code(
+                "#macro SET_FONT var _data = load(_name);\\\n"
+                "    _data.ready = true;\\\n"
+                "    if (_data.missing) return false;\\\n"
+                "    ++_count;\n"
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": SET_FONT; break;\n"
+                "        case \"b\": SET_FONT break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+            transpile_gml_code(
+                "function parse(_name) {\n"
+                "    var _count = 0;\n"
+                "    switch (_name) {\n"
+                "        case \"a\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count;; break;\n"
+                "        case \"b\": var _data = load(_name); _data.ready = true; "
+                "if (_data.missing) return false; ++_count; break;\n"
+                "    }\n"
+                "    return _data;\n"
+                "}\n",
+                indent="",
+            ),
+        )
+        self.assertEqual(transpile_gml_code("#macro SET_X x = 5\nSET_X;", indent=""), "position.x = 5")
+        self.assertEqual(
+            transpile_gml_code("#macro LOG show_debug_message\nLOG(\"hi\");", indent=""),
+            'GMRuntime.gml_show_debug_message("hi", [])',
+        )
 
     def test_rejects_recursive_macros(self):
         with self.assertRaisesRegex(GMLTranspileError, "Recursive macro"):
@@ -3023,6 +3183,19 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\ti = GMRuntime.gml_add(i, 1)",
         )
 
+    def test_for_loop_header_may_end_with_a_semicolon(self):
+        # The manual's form is for (<assignment>; <expression>; <operation>;).
+        for source in (
+            "for (var i = 0; i < 3; i++;) total += i;",
+            "for (var i = 0; i < 3; i++;\n) total += i;",
+        ):
+            self.assertEqual(
+                transpile_gml_code(source, indent=""),
+                transpile_gml_code("for (var i = 0; i < 3; i++) total += i;", indent=""),
+            )
+        with self.assertRaisesRegex(GMLTranspileError, "Expected for initializer"):
+            transpile_gml_code("for (var i = 0; i < 3; i++; i++) total += i;", indent="")
+
     def test_for_continue_runs_operation_clause(self):
         self.assertEqual(
             transpile_gml_code(
@@ -4221,6 +4394,63 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "\tscore = _gm2gd_mutation_value_0",
         )
 
+    def test_statements_end_where_their_expression_ends(self):
+        # GameMaker needs no semicolons and treats line breaks as white space:
+        # a statement ends before the first token that cannot continue it
+        # (manual: If Else and Conditional Operators).
+        cases = {
+            "a = 2 trace(a);": 'a = 2\nGMRuntime.gml_call_named("trace", [a], self, other)',
+            "instance_destroy(o) exit": "GMRuntime.gml_instance_destroy(o)\nreturn",
+            "{onice = false onGround = true}": "onice = false\nonGround = true",
+            "var s = 1, t = 2 u = 3": "var s = 1\nvar t = 2\nu = 3",
+            "total = a +\n    b;": "total = GMRuntime.gml_add(a, b)",
+            "total = a\n    + b;": "total = GMRuntime.gml_add(a, b)",
+            "total = ready\n    ? a\n    : b;": "total = a if GMRuntime.gml_bool(ready) else b",
+            "count++ total = 1": "count = GMRuntime.gml_add(count, 1)\ntotal = 1",
+            'lang = "english" set_language(0);': 'lang = "english"\nGMRuntime.gml_call_named("set_language", [0], self, other)',
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+
+    def test_conditions_without_parentheses_end_before_their_body(self):
+        cases = {
+            "if f(v) g()": (
+                'if GMRuntime.gml_bool(GMRuntime.gml_call_named("f", [v], self, other)):\n'
+                '\tGMRuntime.gml_call_named("g", [], self, other)'
+            ),
+            "if a == 1\n    b = 1;": "if GMRuntime.gml_eq(a, 1):\n\tb = 1",
+            "if test == true variable = false else variable = true;": (
+                "if GMRuntime.gml_eq(test, true):\n\tvariable = false\nelse:\n\tvariable = true"
+            ),
+            "if ready then go = 1 else { go = 2 }": (
+                "if GMRuntime.gml_bool(ready):\n\tgo = 1\nelse:\n\tgo = 2"
+            ),
+            "if (a) ++b;": "if GMRuntime.gml_bool(a):\n\tb = GMRuntime.gml_add(b, 1)",
+            "while i < 3 i += 1": "while GMRuntime.gml_lt(i, 3):\n\ti = GMRuntime.gml_add(i, 1)",
+            "with o_thing instance_destroy()": (
+                "for _gml_with_target_0 in GMRuntime.gml_with_targets(o_thing, self, other):\n"
+                "\tGMRuntime.gml_instance_destroy(_gml_with_target_0)"
+            ),
+        }
+        for source, expected in cases.items():
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_code(source, indent=""), expected)
+        self.assertEqual(
+            transpile_gml_code("function loc(p) {\n    if !file_exists(p) return false;\n    return true;\n}", indent=""),
+            transpile_gml_code("function loc(p) {\n    if (!file_exists(p)) { return false; }\n    return true;\n}", indent=""),
+        )
+
+    def test_case_bodies_and_methods_split_statements_without_semicolons(self):
+        self.assertEqual(
+            transpile_gml_code('switch (k) { case("40"): r = 1 break; default: v = 5 break }', indent=""),
+            transpile_gml_code('switch (k) { case("40"): r = 1; break; default: v = 5; break; }', indent=""),
+        )
+        self.assertEqual(
+            transpile_gml_code("fn = function() {\n    a = 1\n    b = 2\n}", indent=""),
+            transpile_gml_code("fn = function() {\n    a = 1;\n    b = 2;\n}", indent=""),
+        )
+
     def test_transpiles_increment_decrement_statements(self):
         self.assertEqual(
             transpile_gml_code("count++;", indent=""),
@@ -4534,6 +4764,30 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_audio_start_sync_group(group)\n"
             "GMRuntime.gml_audio_destroy_sync_group(group)",
         )
+
+    def test_master_and_emitter_gain_take_gamemaker_arguments(self):
+        # Manual: audio_set_master_gain(listenerIndex, gain),
+        # audio_get_master_gain(listenerIndex) and
+        # audio_emitter_gain(emitter, gain, [time]).
+        self.assertEqual(
+            transpile_gml_code(
+                "audio_set_master_gain(0, 0.5);"
+                "g = audio_get_master_gain(0);"
+                "audio_emitter_gain(e, 0.5);"
+                "audio_emitter_gain(e, 0, 1000);"
+                "audio_master_gain(0.25);",
+                indent="",
+            ),
+            "GMRuntime.gml_audio_set_master_gain(0, 0.5)\n"
+            "g = GMRuntime.gml_audio_get_master_gain(0)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0.5)\n"
+            "GMRuntime.gml_audio_emitter_gain(e, 0, 1000)\n"
+            "GMRuntime.gml_audio_master_gain(0.25)",
+        )
+        for source in ("audio_set_master_gain(0.5);", "g = audio_get_master_gain();"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "argument"):
+                    transpile_gml_code(source, indent="")
 
     def test_audio_group_helpers_lower_to_runtime_and_group_constants(self):
         self.assertEqual(
@@ -5388,10 +5642,49 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "[GMRuntime.gml_time_source_exists(ts), GMRuntime.gml_time_source_get_children(1)]",
         )
 
+    def test_os_type_and_browser_constants_are_gamemaker_numbers(self):
+        # os_type and os_browser hold numbers in GameMaker. The HTML5 runner's
+        # Globals.js gives the desktop, mobile, unknown and browser values.
+        cases = {
+            "os_unknown": -1,
+            "os_windows": 0,
+            "os_macosx": 1,
+            "os_ios": 3,
+            "os_android": 4,
+            "os_linux": 6,
+            "os_winphone": 7,
+            "os_win8native": 9,
+            "os_ps4": 14,
+            "os_xboxone": 15,
+            "os_uwp": 18,
+            "os_tvos": 20,
+            "os_switch": 21,
+            "os_ps5": 22,
+            "os_gxgames": 23,
+            "os_operagx": 23,
+            "os_gdk": 24,
+            "os_xboxseriesxs": 24,
+            "browser_not_a_browser": -1,
+            "browser_unknown": 0,
+            "browser_ie": 1,
+            "browser_firefox": 2,
+            "browser_chrome": 3,
+            "browser_safari": 4,
+            "browser_safari_mobile": 5,
+            "browser_opera": 6,
+            "browser_windows_store": 8,
+            "browser_tizen": 9,
+            "browser_ie_mobile": 10,
+            "browser_edge": 11,
+        }
+        for name, value in cases.items():
+            with self.subTest(constant=name):
+                self.assertEqual(transpile_gml_expression(name), str(value))
+
     def test_os_debug_gc_helpers_lower_to_runtime_and_builtins(self):
         self.assertEqual(
             transpile_gml_expression("os_type == os_macosx"),
-            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), "macosx")',
+            'GMRuntime.gml_eq(GMRuntime.gml_builtin_global("os_type"), 1)',
         )
         self.assertEqual(
             transpile_gml_expression("fps_real"),

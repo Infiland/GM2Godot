@@ -201,11 +201,15 @@ class TestScriptConverter(unittest.TestCase):
             modern_script,
         )
         self.assertIn("if b == null or GMRuntime.is_undefined(b): b = 4", modern_script)
-        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_callable()', registry)
-        self.assertIn('preload("res://scripts/game/scr_add.gd").new().gm2godot_scoped_callable()', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_add.gd", "gm2godot_callable")', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_add.gd", "gm2godot_scoped_callable")', registry)
+        # Scripts load one by one, so one that fails to load keeps only its
+        # own entries from working.
+        self.assertNotIn("preload(", registry)
+        self.assertIn("\tvar script = load(resource_path)\n", registry)
         self.assertIn('"legacy_arguments": true', registry)
-        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_callable()', registry)
-        self.assertIn('preload("res://scripts/game/scr_modern.gd").new().gm2godot_scoped_callable()', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_modern.gd", "gm2godot_callable")', registry)
+        self.assertIn('_gm_script_callable("res://scripts/game/scr_modern.gd", "gm2godot_scoped_callable")', registry)
         self.assertIn('"legacy_arguments": false', registry)
 
     def test_resource_outcome_counts_safe_and_blocked_scripts(self) -> None:
@@ -1028,7 +1032,7 @@ class TestScriptConverter(unittest.TestCase):
             script,
         )
         self.assertIn(
-            '"initializer": Callable(_gm_initializer_owner_1, '
+            '"initializer": _gm_script_method(_gm_initializer_owner_1, '
             '"gm2godot_initialize_top_level")',
             registry,
         )
@@ -1349,11 +1353,11 @@ class TestScriptConverter(unittest.TestCase):
         self.assertIn('"name": "saveending"', registry)
         self.assertNotIn('"name": "ending"', registry)
         self.assertIn(
-            'preload("res://scripts/game/ending.gd").new().gm2godot_callable_loadending()',
+            '_gm_script_callable("res://scripts/game/ending.gd", "gm2godot_callable_loadending")',
             registry,
         )
         self.assertIn(
-            'preload("res://scripts/game/ending.gd").new().gm2godot_scoped_callable_saveending()',
+            '_gm_script_callable("res://scripts/game/ending.gd", "gm2godot_scoped_callable_saveending")',
             registry,
         )
 

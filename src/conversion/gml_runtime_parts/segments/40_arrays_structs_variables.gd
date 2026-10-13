@@ -692,6 +692,11 @@ static func gml_call_member(target, member_name, args = [], caller_self = null, 
 		var receiver: Variant = _gml_selector_direct_target(target)
 		if receiver == null:
 			receiver = _gml_instance_object_first(target)
+		if receiver == null and (target is GMLMethod or _gml_script_entry(target) != null):
+			# Item.method(): a constructor or function names its static
+			# struct, and a static method called through it runs with that
+			# struct as self.
+			receiver = gml_static_get(target)
 		if receiver != null:
 			return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)
 	return gml_call_value(member, args, caller_self, caller_other)

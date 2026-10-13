@@ -3243,6 +3243,13 @@ class TestGMLRuntimeScript(unittest.TestCase):
             "return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)",
             GML_RUNTIME_SCRIPT,
         )
+        # Item.method() runs a static method with Item's static struct as self.
+        self.assertIn(
+            "if receiver == null and (target is GMLMethod or _gml_script_entry(target) != null):\n"
+            "\t\t\t# Item.method()",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn("\t\t\treceiver = gml_static_get(target)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_constructor_identity_uses_static_chain(self):
         self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)

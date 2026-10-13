@@ -652,8 +652,6 @@ def _emit_function_literal(
         asset_names=scope_context.asset_names,
         direct_instance_names=frozenset(),
         dynamic_instance_names=scope_context.dynamic_instance_names,
-        static_scope=scope_context.static_scope,
-        static_names=scope_context.static_names,
         static_prefix=scope_context.static_prefix,
         extension_functions=scope_context.extension_functions,
         extension_function_mappings=scope_context.extension_function_mappings,

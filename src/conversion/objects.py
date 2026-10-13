@@ -43,6 +43,7 @@ from src.conversion.gml_transpiler_parts.lexical_api import (
     tokenize_gml_source,
 )
 from src.conversion.gml_transpiler_parts.shared_models import Token
+from src.conversion.instance_change_diagnostics import record_instance_change_reads
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.object_metadata import capture_gamemaker_object_resource_reference
 from src.conversion.project_enums import collect_project_enum_values
@@ -1316,6 +1317,15 @@ class ObjectConverter(BaseConverter):
                 if self.diagnostics is not None:
                     self.diagnostics.add_unsupported_calls(
                         result.code,
+                        source_path=source_path,
+                        resource=object_name,
+                        resource_type="object",
+                        event=mapping.godot_func,
+                    )
+                    record_instance_change_reads(
+                        self.diagnostics,
+                        source,
+                        known_names=asset_name_set | set(enum_values or {}) | set(macro_values or {}),
                         source_path=source_path,
                         resource=object_name,
                         resource_type="object",

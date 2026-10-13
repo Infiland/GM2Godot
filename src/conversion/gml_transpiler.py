@@ -58,6 +58,7 @@ from src.conversion.gml_transpiler_parts.shared_models import (
     GMLTranspileError as GMLTranspileError,
 )
 from src.conversion.gml_transpiler_parts.source_map import (
+    analyze_gml_instance_change_reads as analyze_gml_instance_change_reads,
     analyze_gml_source_identifiers as analyze_gml_source_identifiers,
     gml_source_map_path as gml_source_map_path,
     merge_gml_source_maps as merge_gml_source_maps,
@@ -98,6 +99,7 @@ __all__ = [
     "normalize_extension_function_mappings",
     "normalize_extension_functions",
     "analyze_gml_source_identifiers",
+    "analyze_gml_instance_change_reads",
     "gml_source_map_path",
     "merge_gml_source_maps",
     "preprocess_gml_source",

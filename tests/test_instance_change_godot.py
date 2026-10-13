@@ -11,8 +11,10 @@ A converted object's events are its node's script, and Godot cannot replace
 the script of a node while one of its methods runs. So the switch, and the
 new object's Create event, happen as soon as the event that called
 instance_change returns to the runtime: the rest of that event still sees the
-old object (the "after change" and "with pending" lines below; in GameMaker
-they would come after the new Create event and print false).
+old object (the "after change", "with pending" and "after o_a" lines below; in
+GameMaker they would come after the new Create event and print false or o_b).
+What the rest of the event assigns is assigned again after the Create event,
+and its instance_change and instance_destroy calls wait for the first change.
 """
 from __future__ import annotations
 
@@ -334,7 +336,7 @@ if (global.ctrl_step == 3) {
 
 def _order_object(name: str, step: str | None = None) -> GameMakerObject:
     short = name.removeprefix("o_")
-    events = {
+    events: dict[tuple[int, int | str], str] = {
         EVENT_CREATE: f'trace("{short} create " + string(mode));\n',
         EVENT_DESTROY: f'trace("{short} destroy " + string(mode));\n',
         EVENT_CLEAN_UP: f'trace("{short} cleanup " + string(mode));\n',
@@ -373,6 +375,92 @@ _ORDER_PROJECT = GameMakerProject(
     ),
 )
 
+
+# Code after instance_change in the same event. In GameMaker it runs after
+# the change and the new object's Create event; in the converted game it runs
+# first, on the old object, but what it assigns is assigned again after the
+# Create event, and the Create event sees the values from before the call.
+# An instance whose Create event changes it runs its creation code as the new
+# object.
+_AFTER_A_STEP = """\
+if (global.phase == 1) {
+    instance_change(o_b, true);
+    sprite_index = s_c;
+    hp = 99;
+    gone = 1;
+    x = 70;
+    visible = false;
+    trace("after " + object_get_name(object_index));
+}
+"""
+_AFTER_B_CREATE = """\
+trace("b create hp=" + string(hp) + " gone=" + string(variable_instance_exists(id, "gone")));
+maxhp = hp * 2;
+hp = 10;
+sprite_index = s_b2;
+x = 5;
+"""
+_AFTER_CTRL_STEP = """\
+global.phase += 1;
+if (global.phase == 3) {
+    with (o_b) {
+        trace(tag + " " + object_get_name(object_index) + " " + sprite_get_name(sprite_index) + " hp=" + string(hp)
+            + " maxhp=" + string(maxhp) + " x=" + string(x) + " visible=" + string(visible));
+        if (tag == "step") trace("name " + name);
+    }
+    global.done = true;
+}
+"""
+
+_AFTER_PROJECT = GameMakerProject(
+    name="InstanceChangeAfter",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=tuple(
+        GameMakerSprite(name, 2, 2, frames=_frames(colour, 2))
+        for name, colour in (("s_a", _RED), ("s_b", _GREEN), ("s_b2", _BLUE), ("s_c", _RED))
+    ),
+    objects=(
+        GameMakerObject("o_a", {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _AFTER_A_STEP}, sprite="s_a"),
+        GameMakerObject("o_b", {EVENT_CREATE: _AFTER_B_CREATE}, sprite="s_b"),
+        GameMakerObject("o_m", {EVENT_CREATE: "hp = 4;\ninstance_change(o_b, true);\n"}, sprite="s_a"),
+        GameMakerObject("o_n", {EVENT_CREATE: "hp = 5;\n"}, sprite="s_a"),
+        GameMakerObject("o_ctrl", {EVENT_CREATE: "global.phase = 0;\n", EVENT_STEP: _AFTER_CTRL_STEP}),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_step", "o_a", 10, 0, creation_code='tag = "step";\nname = "bob";\n'),
+                        RoomInstance(
+                            "inst_create",
+                            "o_m",
+                            20,
+                            0,
+                            creation_code=(
+                                'tag = "create";\n'
+                                'trace("code " + object_get_name(object_index) + " hp=" + string(hp));\n'
+                                "hp = 50;\n"
+                            ),
+                        ),
+                        RoomInstance(
+                            "inst_code",
+                            "o_n",
+                            30,
+                            0,
+                            creation_code='tag = "code";\ninstance_change(o_b, true);\nsprite_index = s_c;\nhp = 77;\n',
+                        ),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_step", "inst_create", "inst_code", "inst_ctrl"),
+        ),
+    ),
+)
 
 _COLLISION_PROBE = """extends Node
 
@@ -475,6 +563,31 @@ class TestInstanceChangeGodot(unittest.TestCase):
                 "b cleanup 2",
                 "c create 2",
                 "counts 0 0 1",
+            ],
+        )
+
+    def test_assignments_after_instance_change_follow_the_create_event(self) -> None:
+        trace, _nodes = self._run(_AFTER_PROJECT, _TRACE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                # o_m's Create event changes it to o_b; its creation code then
+                # runs as o_b.
+                "b create hp=4 gone=false",
+                "code o_b hp=10",
+                # The creation code changes o_n to o_b and assigns sprite_index
+                # and hp after the call.
+                "b create hp=5 gone=false",
+                # In GameMaker "b create hp=3 gone=false" would come first and
+                # the rest of the event would see o_b.
+                "after o_a",
+                "b create hp=3 gone=false",
+                "step o_b s_c hp=99 maxhp=6 x=70 visible=false",
+                # A variable called name is the game's own too.
+                "name bob",
+                "create o_b s_b2 hp=50 maxhp=8 x=5 visible=true",
+                "code o_b s_c hp=77 maxhp=10 x=5 visible=true",
             ],
         )
 

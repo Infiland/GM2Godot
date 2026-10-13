@@ -1045,6 +1045,63 @@ class TestRoomConverter(unittest.TestCase):
             for diagnostic in recorded
         ))
 
+    def test_creation_code_reading_the_instance_after_instance_change_is_reported(self):
+        # The converted instance changes once its creation code returns; an
+        # assignment after the call is kept, a read sees the old object.
+        self._write_yyp(["r_change"], extra_resources=[("objects", "o_player"), ("objects", "o_ghost")])
+        self._write_object("o_player")
+        self._write_object_scene("o_player")
+        self._write_object("o_ghost")
+        self._write_object_scene("o_ghost")
+        room_dir = os.path.join(self.gm_dir, "rooms", "r_change")
+        _write_file(
+            os.path.join(room_dir, "InstanceCreationCode_inst_kept.gml"),
+            "if global.hard { instance_change(o_ghost, true)\nsprite_index = -1 }\n",
+        )
+        _write_file(
+            os.path.join(room_dir, "InstanceCreationCode_inst_read.gml"),
+            "instance_change(o_ghost, true);\nhp = hp * 2;\n",
+        )
+        self._write_room("r_change", layers=[
+            {
+                "%Name": "Instances",
+                "resourceType": "GMRInstanceLayer",
+                "instances": [
+                    {
+                        "name": name,
+                        "objectId": {"name": "o_player", "path": "objects/o_player/o_player.yy"},
+                        "x": 0,
+                        "y": 0,
+                        "hasCreationCode": True,
+                    }
+                    for name in ("inst_kept", "inst_read")
+                ],
+            }
+        ])
+        diagnostics = DiagnosticCollector()
+        converter = RoomConverter(
+            self.gm_dir,
+            self.godot_dir,
+            log_callback=lambda msg: self.logs.append(str(msg)),
+            progress_callback=lambda value: self.progress.append(value),
+            conversion_running=lambda: True,
+            max_workers=1,
+            diagnostics=diagnostics,
+        )
+
+        converter.convert_all()
+        recorded = [
+            diagnostic
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-GML-INSTANCE-CHANGE-DEFERRED"
+        ]
+
+        self.assertEqual(len(recorded), 1)
+        self.assertEqual(recorded[0].resource, "r_change")
+        self.assertEqual(recorded[0].resource_type, "room")
+        self.assertTrue(str(recorded[0].source_path).endswith("InstanceCreationCode_inst_read.gml"))
+        self.assertIn("('hp' at line 2)", recorded[0].message)
+
     def test_unsupported_layer_type_warns_and_emits_placeholder(self):
         self._write_yyp(["r_unknown"])
         self._write_room("r_unknown", layers=[

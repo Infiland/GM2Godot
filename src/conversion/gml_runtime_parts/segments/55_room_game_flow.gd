@@ -460,8 +460,11 @@ static func _gml_room_create_instances(scene):
 			continue
 		if step.has("parent") and not _gml_room_add_held_instance(scene, node, step["parent"]):
 			continue
+		# An instance_change in its Create event: the creation code runs on
+		# the new object, as in GameMaker.
+		_gml_instance_change_flush_instance(node)
 		_gml_room_run_instance_creation_code(scene, node)
-		# An instance_change in its Create event or creation code.
+		# An instance_change in its creation code.
 		_gml_instance_change_flush_instance(node)
 	_gml_room_restore_child_order(held["parents"])
 

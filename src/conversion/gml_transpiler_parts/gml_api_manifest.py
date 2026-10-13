@@ -1453,7 +1453,9 @@ _GML_API_ENTRIES: tuple[GMLAPIEntry, ...] = (
         "yes",
         "GameMaker_Language/GML_Reference/Asset_Management/Instances/instance_change.htm",
         "Runs Destroy and Clean Up (perf), gives the node the new object's script, identity and sprite while "
-        "keeping its id and variables, then runs Create (perf); the switch happens once the calling event returns.",
+        "keeping its id and variables, then runs Create (perf); the switch happens once the calling event returns, "
+        "with the event's later assignments made again after it and its later instance_change and "
+        "instance_destroy calls waiting for it.",
     ),
     _entry(
         "with",

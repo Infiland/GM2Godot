@@ -17,6 +17,7 @@ from src.conversion.asset_registry import AssetRegistryConverter
 from src.conversion.base_converter import BaseConverter
 from src.conversion.diagnostics import DiagnosticCollector
 from src.conversion.gml_transpiler import GMLTranspileError, transpile_gml_code
+from src.conversion.instance_change_diagnostics import record_instance_change_reads
 from src.conversion.json_values import JsonObject, JsonValue
 from src.conversion.project_godot import GodotProjectFile
 from src.conversion.project_source_paths import (
@@ -609,6 +610,15 @@ class RoomConverter(BaseConverter):
         if self.diagnostics is not None:
             self.diagnostics.add_unsupported_calls(
                 code,
+                source_path=source_path,
+                resource=room_name,
+                resource_type="room",
+                event=label,
+            )
+            record_instance_change_reads(
+                self.diagnostics,
+                source,
+                known_names=asset_names,
                 source_path=source_path,
                 resource=room_name,
                 resource_type="room",

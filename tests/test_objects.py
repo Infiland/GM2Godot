@@ -2137,6 +2137,44 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertEqual(recorded[0].resource_type, "object")
         self.assertEqual(recorded[0].event, "_ready")
 
+    def test_code_reading_the_instance_after_instance_change_is_reported(self):
+        # The converted instance changes once the event returns, so code after
+        # instance_change that reads the instance sees the old object.
+        self._setup_object(
+            "o_door",
+            event_list=[{"eventType": 0, "eventNum": 0}, {"eventType": 3, "eventNum": 0}],
+        )
+        self._setup_object("o_locked")
+        sources = {
+            "Create_0.gml": "if global.locked { instance_change(o_locked, true) }\nimage_speed = 0;",
+            "Step_0.gml": "instance_change(o_locked, true);\nif (hp > 0) { hp -= 1; }",
+        }
+        for file_name, source in sources.items():
+            with open(os.path.join(self.gm_dir, "objects", "o_door", file_name), "w", encoding="utf-8") as f:
+                f.write(source)
+        self._write_object_manifest("o_door", "o_locked")
+
+        running = threading.Event()
+        running.set()
+        converter = Converter(
+            log_callback=lambda msg: self.logs.append(msg),
+            progress_callback=lambda _value: None,
+            status_callback=lambda _message: None,
+            conversion_running=running,
+        )
+        objects_enabled = MagicMock()
+        objects_enabled.get.return_value = True
+        outcome = converter.convert(self.gm_dir, "windows", self.godot_dir, {"objects": objects_enabled})
+
+        self.assertEqual(outcome.state, "success")
+        recorded = converter.diagnostics.diagnostics()
+        self.assertEqual([diagnostic.code for diagnostic in recorded], ["GM2GD-GML-INSTANCE-CHANGE-DEFERRED"])
+        self.assertEqual(recorded[0].severity, "warning")
+        self.assertEqual(recorded[0].resource, "o_door")
+        self.assertEqual(recorded[0].event, "_on_step")
+        self.assertEqual((recorded[0].line, recorded[0].api), (1, "instance_change"))
+        self.assertTrue(str(recorded[0].source_path).endswith("Step_0.gml"))
+
     def test_missing_event_source_skips_object_and_makes_conversion_partial(self):
         self._setup_object(
             "o_missing",

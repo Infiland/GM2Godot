@@ -9,6 +9,7 @@ if (PROJECT_ROOT := os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.conversion.gml_transpiler import (
     GMLTranspileError,
+    analyze_gml_instance_change_reads,
     analyze_gml_source_identifiers,
     transpile_gml_code,
     transpile_gml_code_with_source_map,
@@ -72,6 +73,48 @@ class TestGMLSourceMaps(unittest.TestCase):
         self.assertEqual(reserved[0].suggested_name, "class_")
         self.assertGreaterEqual(len(case_collisions), 2)
         self.assertTrue(all(diagnostic.line in (2, 3) for diagnostic in case_collisions))
+
+    def test_instance_change_followed_by_a_read_of_the_instance(self) -> None:
+        # The converted game changes the instance once the event returns: code
+        # after the call that reads the instance sees the old object; what it
+        # assigns is kept. Globals, assets, locals, constants and other
+        # instances are not the instance.
+        known = {"o_b", "o_wall", "s_c", "r_editor", "scr_score"}
+
+        def reads(source: str) -> list[tuple[int, str]]:
+            return [
+                (diagnostic.line, diagnostic.identifier)
+                for diagnostic in analyze_gml_instance_change_reads(source, known_names=known)
+            ]
+
+        quiet = (
+            "if global.mode = 1 { instance_change(o_b, true) }\nif global.mode = 2 { instance_change(o_b, false) }",
+            "instance_change(o_b, true)\nsprite_index = s_c\nhp = 99; image_speed = 0.5",
+            "if room = r_editor { instance_change(o_b, 1) sprite_index = s_c }",
+            "var n = 2; instance_change(o_b, true); n = n + 1; show_debug_message(n); global.total += n;",
+            "instance_change(o_b, true); o_wall.x += 1; if instance_exists(o_wall) { audio_stop_all(); }",
+            "instance_change(o_b, true); // hp = hp + 1\n/* if (hp) */ c = c_white; instance_destroy();",
+            "if hp > 0 { x += 1; } instance_change(o_b, true);",
+        )
+        for source in quiet:
+            with self.subTest(source=source):
+                self.assertEqual(reads(source), [])
+
+        self.assertEqual(reads("instance_change(o_b, true);\nhp += 1;"), [(1, "hp")])
+        self.assertEqual(reads("instance_change(o_b, true)\nif hp = 1 { }"), [(1, "hp")])
+        self.assertEqual(reads("instance_change(o_b, true); trace = object_index;"), [(1, "object_index")])
+        self.assertEqual(reads("instance_change(o_b, true); if place_meeting(0, 0, o_wall) {}"), [(1, "place_meeting")])
+        self.assertEqual(reads("instance_change(o_b, true); scr_score();"), [(1, "scr_score")])
+        self.assertEqual(reads("instance_change(o_b, true); with (o_wall) other_id = self;"), [(1, "self")])
+        self.assertEqual(
+            reads("if a { instance_change(o_b, true) }\nif global.b { instance_change(o_wall, true) }\nx = y;"),
+            [(1, "y"), (2, "y")],
+        )
+        diagnostic = analyze_gml_instance_change_reads("instance_change(o_b, true)\nhp -= 1", known_names=known)[0]
+        self.assertEqual(diagnostic.code, "GM2GD-GML-INSTANCE-CHANGE-DEFERRED")
+        self.assertEqual(diagnostic.severity, "warning")
+        self.assertEqual((diagnostic.line, diagnostic.column), (1, 1))
+        self.assertIn("('hp' at line 2)", diagnostic.message)
 
     def test_initializer_values_are_not_reported_as_declared_identifiers(self) -> None:
         diagnostics = analyze_gml_source_identifiers(

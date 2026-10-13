@@ -25,6 +25,15 @@
 # first's Destroy and Clean Up (perf), and instance_destroy runs its Destroy
 # event, once the first change (and its Create event) is done. Until then the
 # instance still exists.
+#
+# What the rest of the event assigns to the instance's variables (its own
+# variables, the built-in ones, x, y and visible) would come after the change
+# and the new Create event in GameMaker. So each call notes the variables'
+# values; when the change is carried out, the variables the event assigned
+# after the first call go back to those values, and after each change (and
+# its Create event) the event's assignments made after that call are made
+# again. What that code read still came from the old object: the converter
+# warns about such code (GM2GD-GML-INSTANCE-CHANGE-DEFERRED).
 
 # Script members that the new object sets (or that only cache state of the
 # old script) rather than carrying over.
@@ -44,10 +53,18 @@ const GML_INSTANCE_CHANGE_IMAGE_METAS = {
 	"gamemaker_image_alpha": "image_alpha",
 }
 
+# Variables that are not the game's to assign.
+const GML_INSTANCE_CHANGE_UNTRACKED = ["id", "other", "object_index", "image_number"]
+# Keys for the node's position and visible flag among the noted values (no
+# GML variable name has a space).
+const GML_INSTANCE_CHANGE_POSITION_KEY = " position"
+const GML_INSTANCE_CHANGE_VISIBLE_KEY = " visible"
+
 # Pending operations by node instance id: {"node": the node, "ops": the
 # changes ({"kind": "change", "object": object asset entry, "perf": bool,
 # "events_done": whether the Destroy and Clean Up events of perf already ran})
-# and destroys ({"kind": "destroy"}) in the order the game asked for them}.
+# and destroys ({"kind": "destroy"}) in the order the game asked for them,
+# each with "values", the instance's variables when it was asked for}.
 static var _gml_instance_changes = {}
 # [script, sprite name, visible] of each object's scene, or null, by object
 # name.
@@ -73,13 +90,27 @@ static func gml_instance_change(object_selector, perf, inst = null):
 		# The node still runs the first object; the Destroy and Clean Up events
 		# are those of the object the instance will have changed into.
 		if not _gml_instance_change_destroy_pending(pending):
-			pending["ops"].append({"kind": "change", "object": object_entry, "perf": perform, "events_done": false})
+			pending["ops"].append({
+				"kind": "change",
+				"object": object_entry,
+				"perf": perform,
+				"events_done": false,
+				"values": _gml_instance_change_capture(inst),
+			})
 		return gml_undefined()
 	if perform:
 		_gml_instance_change_destroy_events(inst)
+		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
+			return gml_undefined()
 	_gml_instance_changes[inst.get_instance_id()] = {
 		"node": inst,
-		"ops": [{"kind": "change", "object": object_entry, "perf": perform, "events_done": true}],
+		"ops": [{
+			"kind": "change",
+			"object": object_entry,
+			"perf": perform,
+			"events_done": true,
+			"values": _gml_instance_change_capture(inst),
+		}],
 	}
 	return gml_undefined()
 
@@ -94,7 +125,7 @@ static func _gml_instance_change_defer_destroy(inst):
 	if pending == null:
 		return false
 	if not _gml_instance_change_destroy_pending(pending):
-		pending["ops"].append({"kind": "destroy"})
+		pending["ops"].append({"kind": "destroy", "values": _gml_instance_change_capture(inst)})
 	return true
 
 
@@ -121,34 +152,93 @@ static func _gml_instance_change_flush_instance(inst):
 		_gml_instance_change_run(key)
 
 
-# Runs an instance's pending operations in order. An event they run may ask
-# for another change, which waits for that event to return: the operations
-# left then wait after it.
+# Runs an instance's pending operations in order, each followed by the
+# assignments the calling event made after asking for it. A Create event they
+# run may ask for another change, which is carried out as soon as that event
+# returns.
 static func _gml_instance_change_run(key):
 	var pending = _gml_instance_changes[key]
 	_gml_instance_changes.erase(key)
 	var inst = pending["node"]
 	var ops = pending["ops"]
+	if _gml_instance_change_live_entry(inst) == null:
+		return
+	var latest = _gml_instance_change_capture(inst)
+	_gml_instance_change_rewind(inst, ops[0]["values"], latest)
 	for index in range(ops.size()):
-		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
-			return
-		var entry: Variant = _gml_instance_entry(inst)
-		if entry == null or entry["destroyed"]:
+		var entry: Variant = _gml_instance_change_live_entry(inst)
+		if entry == null:
 			return
 		var op = ops[index]
 		if op["kind"] == "destroy":
 			gml_instance_destroy(inst)
 			return
 		_gml_instance_change_apply(inst, entry, op)
-		var again = _gml_instance_changes.get(key)
-		if again != null:
-			for rest in ops.slice(index + 1):
-				if rest["kind"] == "destroy":
-					_gml_instance_change_defer_destroy(inst)
-				elif not _gml_instance_change_destroy_pending(again):
-					rest["events_done"] = false
-					again["ops"].append(rest)
+		if _gml_instance_changes.has(key):
+			_gml_instance_change_run(key)
+		if _gml_instance_change_live_entry(inst) == null:
 			return
+		var after = latest if index + 1 == ops.size() else ops[index + 1]["values"]
+		_gml_instance_change_assign(inst, _gml_instance_change_assigned(op["values"], after))
+
+
+static func _gml_instance_change_live_entry(inst):
+	if not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		return null
+	var entry: Variant = _gml_instance_entry(inst)
+	if entry == null or entry["destroyed"]:
+		return null
+	return entry
+
+
+# The instance's variables as the game's code sees them.
+static func _gml_instance_change_capture(inst):
+	var values = {}
+	for property in inst.get_property_list():
+		if int(property["usage"]) & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			var name = str(property["name"])
+			if not name.begins_with("_gm") and not GML_INSTANCE_CHANGE_UNTRACKED.has(name):
+				values[name] = inst.get(name)
+	var fields = _gml_object_dynamic_fields(inst)
+	for name in fields:
+		values[str(name)] = fields[name]
+	if inst is Node2D:
+		values[GML_INSTANCE_CHANGE_POSITION_KEY] = inst.position
+	if inst is CanvasItem:
+		values[GML_INSTANCE_CHANGE_VISIBLE_KEY] = inst.visible
+	return values
+
+
+# The variables whose values differ between two notes, with their later value.
+static func _gml_instance_change_assigned(before, after):
+	var assigned = {}
+	for name in after:
+		var value = after[name]
+		if not before.has(name) or typeof(before[name]) != typeof(value) or not is_same(before[name], value):
+			assigned[name] = value
+	return assigned
+
+
+# Puts back the values the instance had when the change was asked for (the
+# variables the rest of the event assigned).
+static func _gml_instance_change_rewind(inst, values, latest):
+	var fields = _gml_object_dynamic_fields(inst)
+	for name in _gml_instance_change_assigned(values, latest):
+		if values.has(name):
+			_gml_instance_change_assign(inst, {name: values[name]})
+		elif fields.has(name):
+			fields.erase(name)
+
+
+static func _gml_instance_change_assign(inst, assigned):
+	for name in assigned:
+		var value = assigned[name]
+		if name == GML_INSTANCE_CHANGE_POSITION_KEY:
+			inst.position = value
+		elif name == GML_INSTANCE_CHANGE_VISIBLE_KEY:
+			inst.visible = value
+		else:
+			gml_struct_set(inst, name, value)
 
 
 # Destroy and Clean Up events of perf.
@@ -206,11 +296,17 @@ static func _gml_instance_change_identity(inst, entry, object_entry):
 		gml_struct_set(inst, "object_index", int(object_entry["id"]))
 		return
 	var handle = inst.get("id")
+	# _gm_register_instance gives a room's instance its name; the instance
+	# keeps the value it has.
+	var has_name = gml_struct_exists(inst, "name")
+	var name_value = gml_struct_get(inst, "name") if has_name else null
 	inst.set("id", gml_instance_noone())
 	_gml_instance_change_registering = inst
 	inst.call("_gm_register_instance")
 	_gml_instance_change_registering = null
 	inst.set("id", handle)
+	if has_name:
+		gml_struct_set(inst, "name", name_value)
 
 
 # Moves a registry entry to another object (with its parents) in the
@@ -295,7 +391,9 @@ static func _gml_instance_change_restore(inst, values):
 			continue
 		if declared.has(name):
 			inst.set(name, values[name])
-		elif not str(name).begins_with("_gm_"):
+		elif not str(name).begins_with("_gm_") and values[name] != null:
+			# (A member the old object's code never assigned holds null; the
+			# variable does not exist yet.)
 			_gml_object_dynamic_fields(inst, true)[name] = values[name]
 
 

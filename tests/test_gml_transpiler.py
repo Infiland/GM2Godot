@@ -4049,14 +4049,16 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "for (var i = 0; i < 2; i++) { event_inherited(); }\nhp = 3;",
             "try { event_inherited(); } catch (e) { }\nhp = 3;",
             "with (o_c) { event_inherited(); }\nhp = 3;",
+            "switch (hp) { case 1: event_inherited(); break; default: break; }\nhp = 3;",
+            "if hp { switch (hp) { default: event_inherited(); } }\nhp = 3;",
         ):
             with self.subTest(source=source):
                 result = self._transpile_with_continuations(
                     source, inherited_event_call="super._on_step()", inherited_event_continuation=True
                 )
-                self.assertIn(
-                    "GMRuntime.gml_event_nest(self)\n\tsuper._on_step()\n\tGMRuntime.gml_event_unnest(self)",
-                    result.code.replace("\t\t", "\t"),
+                self.assertRegex(
+                    result.code,
+                    r"GMRuntime\.gml_event_nest\(self\)\n\t+super\._on_step\(\)\n\t+GMRuntime\.gml_event_unnest\(self\)",
                 )
                 self.assertNotIn("_gml_change_continue", result.code)
 

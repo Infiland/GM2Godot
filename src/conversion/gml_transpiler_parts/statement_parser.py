@@ -813,6 +813,7 @@ class _StatementParser:
             macro_configuration=self.macro_configuration,
             global_names=self.global_names,
             control_flow_capture=control_flow_capture,
+            inherited_event_continuation=self.inherited_event_continuation,
         )
         lines = parser.parse()
         self.local_names.update(parser.local_names)

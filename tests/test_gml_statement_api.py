@@ -101,6 +101,9 @@ STATEMENT_REQUEST_FIELDS = (
     "static_scope_prefix",
     "extension_functions",
     "extension_function_mappings",
+    "instance_change_continuations",
+    "inherited_event_continuation",
+    "instance_change_names",
 )
 STATEMENT_RESULT_FIELDS = (
     "lines",
@@ -110,6 +113,7 @@ STATEMENT_RESULT_FIELDS = (
     "enum_values",
     "enum_names",
     "macro_values",
+    "continued_instance_changes",
 )
 
 EXPECTED_MODEL_SIGNATURES = {
@@ -135,14 +139,18 @@ EXPECTED_MODEL_SIGNATURES = {
         "static_scope_prefix: 'str | None' = None, "
         "extension_functions: 'Mapping[str, GMLExtensionFunction] | None' = None, "
         "extension_function_mappings: "
-        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None) -> None"
+        "'Mapping[str, GMLExtensionFunctionMapping] | None' = None, "
+        "instance_change_continuations: 'bool' = False, "
+        "inherited_event_continuation: 'bool' = False, "
+        "instance_change_names: 'frozenset[str]' = frozenset()) -> None"
     ),
     GMLStatementResult: (
         "(lines: 'tuple[str, ...]', local_names: 'frozenset[str]', "
         "instance_variables: 'MutableSet[str] | None', scope_context: 'ScopeContext', "
         "enum_values: 'MutableMapping[str, dict[str, int]]', "
         "enum_names: 'frozenset[str]', "
-        "macro_values: 'MutableMapping[str, str]') -> None"
+        "macro_values: 'MutableMapping[str, str]', "
+        "continued_instance_changes: 'tuple[int, ...]' = ()) -> None"
     ),
 }
 
@@ -265,6 +273,9 @@ class GMLStatementAPITests(unittest.TestCase):
                 "extension_function_mappings": (
                     Mapping[str, GMLExtensionFunctionMapping] | None
                 ),
+                "instance_change_continuations": bool,
+                "inherited_event_continuation": bool,
+                "instance_change_names": frozenset[str],
             },
             GMLStatementResult: {
                 "lines": tuple[str, ...],
@@ -274,6 +285,7 @@ class GMLStatementAPITests(unittest.TestCase):
                 "enum_values": MutableMapping[str, dict[str, int]],
                 "enum_names": frozenset[str],
                 "macro_values": MutableMapping[str, str],
+                "continued_instance_changes": tuple[int, ...],
             },
         }
 

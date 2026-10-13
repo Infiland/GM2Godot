@@ -718,6 +718,39 @@ _INHERITED_STEP_PROJECT = GameMakerProject(
     ),
 )
 
+_INHERITED_IN_SWITCH_PROJECT = GameMakerProject(
+    name="InstanceChangeInheritedInSwitch",
+    scripts={"scr_trace": _SCRIPT},
+    sprites=_FRAME_SPRITES,
+    objects=(
+        GameMakerObject("o_par", {EVENT_CREATE: "hp = 3;\n", EVENT_STEP: _FRAME_GUARD + _KEEP_SPRITE_AND_HP}, sprite="s_a"),
+        GameMakerObject(
+            "o_sw",
+            {
+                EVENT_STEP: _FRAME_GUARD
+                + "switch (global.fr) {\n    case 1: event_inherited(); break;\n    default: break;\n}\n"
+                + _AFTER_INHERITED
+                + "x += 5;\nhp = 3;\n"
+            },
+            parent="o_par",
+            sprite="s_a",
+        ),
+        _TARGET_T1,
+        _FRAME_CTRL,
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances", 0, (RoomInstance("inst_sw", "o_sw", 10, 20), RoomInstance("inst_ctrl", "o_ctrl", 0, 0))
+                ),
+            ),
+            creation_order=("inst_sw", "inst_ctrl"),
+        ),
+    ),
+)
+
 _INHERITED_CREATE_PROJECT = GameMakerProject(
     name="InstanceChangeInheritedCreate",
     scripts={"scr_trace": _SCRIPT},
@@ -1195,6 +1228,16 @@ class TestInstanceChangeGodot(unittest.TestCase):
             ["t1 create", "par o_t1 s_a hp=3", "kid o_t1 s_a hp=3", "final o_t1 s_a hp=3 x=15"],
         )
         self.assertEqual(self.deferred_warnings, [])
+
+    def test_event_inherited_inside_a_switch_case_defers_the_parents_change_safely(self) -> None:
+        trace, _nodes = self._run(_INHERITED_IN_SWITCH_PROJECT, _TRACE_PROBE)
+
+        # The rest of a switch case cannot become a function, so the parent's
+        # change waits for the child's event to return instead of replacing the
+        # script under the child's running method (which crashed the engine).
+        assert isinstance(trace, list)
+        self.assertEqual(trace[-1], "final o_t1 s_b hp=100 x=15")
+        self.assertIn("kid o_sw s_a hp=3", trace)
 
     def test_event_inherited_reaching_a_parents_instance_change_in_a_create_event(self) -> None:
         trace, _nodes = self._run(_INHERITED_CREATE_PROJECT, _TRACE_PROBE)

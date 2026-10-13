@@ -400,7 +400,7 @@ static func _gml_instance_change_step_methods(position, inst):
 		var has_method = _gml_step_has_method(info, inst, method_name)
 		if listed == has_method:
 			continue
-		positions = positions.duplicate()
+		positions = positions.slice(0)
 		if has_method:
 			positions.insert(at, position)
 		else:

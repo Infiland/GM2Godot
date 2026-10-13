@@ -357,7 +357,16 @@ static func _gml_bool_number_pattern():
 	return _gml_bool_number_regex
 
 
+# The runner's __yy_is_nullish is `v == undefined || v == null`: a variable
+# that was never assigned counts as nullish for ?? and ??=. The instance
+# variables an object's scripts and events assign are members of its script,
+# which read null until they are first assigned.
 static func gml_is_nullish(value):
+	var value_type = typeof(value)
+	if value_type == TYPE_NIL:
+		return true
+	if value_type != TYPE_OBJECT:
+		return false
 	return is_undefined(value) or (is_ptr(value) and value.value == 0)
 
 

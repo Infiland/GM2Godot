@@ -614,6 +614,24 @@ class TestGMLValueSemanticsGodot(unittest.TestCase):
             "GML_WHOLE_NUMBERS_OK",
         )
 
+    def test_nullish_includes_a_variable_that_was_never_assigned(self) -> None:
+        # The runner's __yy_is_nullish: `v == undefined || v == null`.
+        _run_runtime_checks(
+            self,
+            """\
+            _expect("null", GMRuntime.gml_is_nullish(null), true)
+            _expect("undefined", GMRuntime.gml_is_nullish(GMRuntime.gml_undefined()), true)
+            _expect("pointer_null", GMRuntime.gml_is_nullish(GMRuntime.gml_pointer_null()), true)
+            _expect("0", GMRuntime.gml_is_nullish(0), false)
+            _expect("false", GMRuntime.gml_is_nullish(false), false)
+            _expect("empty string", GMRuntime.gml_is_nullish(""), false)
+            _expect("empty array", GMRuntime.gml_is_nullish([]), false)
+            _expect("struct", GMRuntime.gml_is_nullish({}), false)
+            _expect("pointer", GMRuntime.gml_is_nullish(GMRuntime.gml_ptr(8)), false)
+            """,
+            "GML_NULLISH_OK",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

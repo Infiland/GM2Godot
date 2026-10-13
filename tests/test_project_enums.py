@@ -96,6 +96,34 @@ class TestProjectEnums(unittest.TestCase):
                 {"Masks": {"all": -1, "top": -9223372036854775808, "low": 255}},
             )
 
+    def test_folds_div_and_mod_with_gml_integer_semantics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            _write_project_resources(project_dir, [("scripts", "Folds")])
+            source_path = project_dir / "scripts" / "Folds" / "Folds.gml"
+            source_path.parent.mkdir(parents=True, exist_ok=True)
+            source_path.write_text(
+                "enum Folds {\n"
+                "    neg_mod = -5 mod 3,\n"
+                "    neg_div = -7 div 2,\n"
+                "    huge = 9223372036854775807 div 3,\n"
+                "    wrapped = 1 << 63,\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                collect_project_enum_values(project_dir),
+                {
+                    "Folds": {
+                        "neg_mod": -2,
+                        "neg_div": -3,
+                        "huge": 3074457345618258602,
+                        "wrapped": -9223372036854775808,
+                    }
+                },
+            )
+
     def test_ignores_enum_text_in_comments_and_strings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_dir = Path(temp_dir)

@@ -1389,6 +1389,70 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
         )
 
+    def test_folds_enum_div_and_mod_with_gml_integer_semantics(self):
+        # mod and div truncate toward zero (GML gives -5 mod 3 == -2, where
+        # Python's floor modulo gives 1), and the folding is exact beyond
+        # 2^53, where a float quotient is not. Results wrap around 2^64 like
+        # an int64, and a shift count is taken modulo 64 like the runner's Long.
+        source = (
+            "enum FOLD {\n"
+            "    NEG_MOD = -5 mod 3,\n"
+            "    NEG_PERCENT = -5 % 3,\n"
+            "    NEG_DIVISOR_MOD = 5 mod -3,\n"
+            "    BOTH_NEG_MOD = -5 % -3,\n"
+            "    EXACT_MOD = 6 mod 3,\n"
+            "    NEG_DIV = -7 div 2,\n"
+            "    NEG_DIVISOR_DIV = 7 div -2,\n"
+            "    BOTH_NEG_DIV = -7 div -2,\n"
+            "    SLASH = 7 / 2,\n"
+            "    HUGE_DIV = 9007199254740993 div 1,\n"
+            "    PRECISE_DIV = 9223372036854775807 div 3,\n"
+            "    PRECISE_MOD = 18014398509481985 mod 10,\n"
+            "    SMALLEST_DIV = 0x8000000000000000 div -1,\n"
+            "    SHIFTED = 1 << 63,\n"
+            "    SHIFT_WRAPS = 1 << 64,\n"
+            "    SHIFT_RIGHT = -8 >> 1,\n"
+            "    OVERFLOW = 0x7FFFFFFFFFFFFFFF + 1,\n"
+            "    NEGATED = -0x8000000000000000,\n"
+            "    AFTER_LARGEST = 0x7FFFFFFFFFFFFFFE,\n"
+            "    NEXT,\n"
+            "}\n"
+        )
+        expected_values = {
+            "NEG_MOD": -2,
+            "NEG_PERCENT": -2,
+            "NEG_DIVISOR_MOD": 2,
+            "BOTH_NEG_MOD": -2,
+            "EXACT_MOD": 0,
+            "NEG_DIV": -3,
+            "NEG_DIVISOR_DIV": -3,
+            "BOTH_NEG_DIV": 3,
+            "SLASH": 3,
+            "HUGE_DIV": 9007199254740993,
+            "PRECISE_DIV": 3074457345618258602,
+            "PRECISE_MOD": 5,
+            "SMALLEST_DIV": -9223372036854775808,
+            "SHIFTED": -9223372036854775808,
+            "SHIFT_WRAPS": 1,
+            "SHIFT_RIGHT": -4,
+            "OVERFLOW": -9223372036854775808,
+            "NEGATED": -9223372036854775808,
+            "AFTER_LARGEST": 9223372036854775806,
+            "NEXT": 9223372036854775807,
+        }
+        emitted = transpile_gml_code(source, indent="")
+        fields = ", ".join(
+            f'"{name}": ' + ("(-9223372036854775807 - 1)" if value == -9223372036854775808 else str(value))
+            for name, value in expected_values.items()
+        )
+        self.assertEqual(emitted, f"var FOLD = GMRuntime.gml_enum({{{fields}}})")
+
+    def test_rejects_enum_division_by_zero(self):
+        for source in ("enum BAD { A = 5 div 0 }", "enum BAD { A = 5 mod 0 }", "enum BAD { A = 5 % 0 }"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "integer compile-time constants"):
+                    transpile_gml_code(source, indent="")
+
     def test_wraps_hex_enum_values_of_two_to_the_63_or_more_to_signed_int64(self):
         self.assertEqual(
             transpile_gml_code(

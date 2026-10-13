@@ -32,6 +32,17 @@ _SCRIPT = (
     "}\n"
 )
 
+_ENUM_SCRIPT = """\
+enum Folded {
+    negative_mod = -5 mod 3,
+    negative_divisor_mod = 5 % -3,
+    negative_div = -7 div 2,
+    precise_div = 9223372036854775807 div 3,
+    all_bits = 0xFFFFFFFFFFFFFFFF,
+    top_bit = 1 << 63,
+}
+"""
+
 _PROBE_CREATE = """\
 var zero = 0;
 // A zero divisor is an error for every kind of mod (yyfmod).
@@ -73,6 +84,13 @@ trace("0x8000000000000001", 0x8000000000000001);
 trace("0xFFFFFFFFFFFFFFFF & 255", 0xFFFFFFFFFFFFFFFF & 255);
 trace("0xCBF29CE484222325 >> 60", 0xCBF29CE484222325 >> 60);
 trace("9223372036854775808", 9223372036854775808);
+// Enum values fold at conversion time with GML integer semantics.
+trace("-5 mod 3 in an enum", Folded.negative_mod);
+trace("5 % -3 in an enum", Folded.negative_divisor_mod);
+trace("-7 div 2 in an enum", Folded.negative_div);
+trace("9223372036854775807 div 3 in an enum", Folded.precise_div);
+trace("0xFFFFFFFFFFFFFFFF in an enum", Folded.all_bits);
+trace("1 << 63 in an enum", Folded.top_bit);
 """
 
 _EXPECTED_TRACE = [
@@ -106,11 +124,17 @@ _EXPECTED_TRACE = [
     "0xFFFFFFFFFFFFFFFF & 255:255",
     "0xCBF29CE484222325 >> 60:-4",
     "9223372036854775808:9223372036854775808",
+    "-5 mod 3 in an enum:-2",
+    "5 % -3 in an enum:2",
+    "-7 div 2 in an enum:-3",
+    "9223372036854775807 div 3 in an enum:3074457345618258602",
+    "0xFFFFFFFFFFFFFFFF in an enum:-1",
+    "1 << 63 in an enum:-9223372036854775808",
 ]
 
 _PROJECT = GameMakerProject(
     name="NumberEdgeCases",
-    scripts={"scr_trace": _SCRIPT},
+    scripts={"scr_trace": _SCRIPT, "scr_enums": _ENUM_SCRIPT},
     objects=(GameMakerObject("o_probe", {EVENT_CREATE: _PROBE_CREATE}),),
     rooms=(
         GameMakerRoom(

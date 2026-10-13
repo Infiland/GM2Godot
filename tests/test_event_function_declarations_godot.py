@@ -197,5 +197,21 @@ class TestEventFunctionDeclarationsGodot(unittest.TestCase):
         self.assertEqual(trace, ["members:1 7 3", "sum:16", "variable:7"])
 
 
+    def test_function_declared_in_an_event_survives_instance_change_in_that_event(self) -> None:
+        # The function is an instance variable in GameMaker, so the rest of
+        # the event, which runs on the new object, can still call it.
+        step = (
+            'if (variable_global_exists("changed")) exit;\n'
+            "global.changed = true;\n"
+            'function f() { return "f:" + object_get_name(object_index) + ":" + string(hp); }\n'
+            "instance_change(o_t, true);\n"
+            'trace("after " + f());\n'
+            "hp += 1;\n"
+            'trace("end " + f());\n'
+        )
+        target = GameMakerObject("o_t", {EVENT_CREATE: "hp = 100;\n"})
+        trace = run_gml_trace(self, {}, {EVENT_CREATE: "hp = 1;\n", EVENT_STEP: step}, objects=(target,))
+        self.assertEqual(trace, ["after f:o_t:100", "end f:o_t:101"])
+
 if __name__ == "__main__":
     unittest.main()

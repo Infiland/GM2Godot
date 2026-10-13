@@ -230,6 +230,42 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["gray:4:rgbG:3"])
 
+    def test_methods_with_several_lines_inside_catch_and_finally_blocks(self) -> None:
+        # A method is a GDScript lambda whose body is indented from the line
+        # that declares it, so every line of it moves in with the catch body.
+        scripts = {
+            "scr_ok": "function ok_value() { return 7; }\n",
+            "scr_catching": (
+                "function catching(_k) {\n"
+                "    var _r = 0;\n"
+                "    try { throw _k; }\n"
+                "    catch (_e) {\n"
+                "        var _u = function() { var _a = 2; return _a * 3; };\n"
+                "        _r = _u();\n"
+                "    }\n"
+                "    finally {\n"
+                "        var _v = function() { var _b = 10; return _b; };\n"
+                "        _r += _v();\n"
+                "    }\n"
+                "    return _r;\n"
+                "}\n"
+            ),
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("catching:" + string(catching(1)));\n'
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n"
+            'trace("event:" + string(x));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "catching:16", "event:1"])
+
     def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
         scripts = {
             "scr_ok": "function ok_value() { return 7; }\n",

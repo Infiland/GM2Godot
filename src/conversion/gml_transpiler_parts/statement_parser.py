@@ -801,7 +801,7 @@ class _StatementParser:
                 f"\tvar {gdscript_catch_name} = GMRuntime.gml_exception_struct({control_name}[\"value\"])",
                 f"\t{control_name} = GMRuntime.gml_undefined()",
                 "\twhile true:",
-                *[f"\t\t{line}" if line else "" for line in (catch_lines or ["pass"])],
+                *indent_lines(indent_lines(catch_lines or ["pass"])),
                 "\t\tbreak",
             ])
 

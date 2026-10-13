@@ -2636,6 +2636,28 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             output,
         )
 
+    def test_methods_with_several_lines_stay_inside_the_catch_body(self):
+        # A method is a GDScript lambda: every line of it has to move in with
+        # the catch body, or GDScript finds no indented block under it.
+        output = transpile_gml_code(
+            "try { throw 1; } catch (_e) {\n"
+            "    var _u = function() { var _a = 1; return _a; };\n"
+            "    x = _u();\n"
+            "}\n",
+            indent="",
+        )
+
+        self.assertIn(
+            "\twhile true:\n"
+            "\t\t_u = GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\t\tvar _a = 1\n"
+            "\t\t\treturn _a\n"
+            "\t\t)\n"
+            '\t\tposition.x = GMRuntime.gml_call_value(_u, [], self, other, "_u")\n'
+            "\t\tbreak\n",
+            output,
+        )
+
     def test_transpiles_discard_catch_identifier_to_valid_gdscript(self):
         output = transpile_gml_code(
             "try { value = real(text); } catch (_) {}",

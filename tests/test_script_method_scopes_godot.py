@@ -347,6 +347,28 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["ok:7", "until:3", "label:two"])
 
+    def test_chained_nullish_assignment_may_hold_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_chain": (
+                "function chained() {\n"
+                "    var _z;\n"
+                "    var _q = 0;\n"
+                "    _q = _z ??= { f: function() { var _a = 8; return _a; } };\n"
+                "    return _q.f() + _z.f();\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("chained:" + string(chained()));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "chained:16"])
+
     def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
         scripts = {
             "scr_ok": "function ok_value() { return 7; }\n",

@@ -3399,6 +3399,20 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_array_set(items, _gml_array_index_0, _gml_assignment_value_1)",
         )
 
+    def test_chained_nullish_assignment_keeps_a_multi_line_method_inside_its_block(self):
+        self.assertEqual(
+            transpile_gml_code("a = b ??= [function() { return 1; }, function() { var c = 2; return c; }];", indent=""),
+            "var _gml_assignment_value_0 = b\n"
+            "if GMRuntime.gml_is_nullish(_gml_assignment_value_0):\n"
+            "\t_gml_assignment_value_0 = [GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null): return 1), "
+            "GMRuntime.gml_receiver_method(self, func(_gml_method_self = null, _gml_method_other = null):\n"
+            "\t\tvar c = 2\n"
+            "\t\treturn c\n"
+            "\t)]\n"
+            "\tb = _gml_assignment_value_0\n"
+            "a = _gml_assignment_value_0",
+        )
+
     def test_rejects_invalid_local_var_names(self):
         with self.assertRaises(GMLTranspileError):
             transpile_gml_code("var 6fish;", indent="")

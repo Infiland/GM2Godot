@@ -2610,7 +2610,7 @@ def _transpile_assignment_expression_to_temp(
             f"var {result_name} = {current_value}",
             f"if GMRuntime.gml_is_nullish({result_name}):",
             *indent_lines(rhs_lines),
-            f"\t{result_name} = {rhs_value}",
+            *indent_lines([f"{result_name} = {rhs_value}"]),
             *indent_lines(write_value(result_name)),
         ], result_name
 

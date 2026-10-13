@@ -1102,6 +1102,36 @@ class TestRoomConverter(unittest.TestCase):
         # The tileset has no readable sprite: its tiles go in one row, tile N at column N.
         self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 1, 2, 0, 0)) + "\n", content)
 
+    def test_tile_layer_reads_uncompressed_tile_serialise_data_from_older_rooms(self):
+        # Rooms saved before GameMaker 2022.8 have no TileDataFormat and keep
+        # every cell under TileSerialiseData, with the empty cell written as
+        # the unsigned 2147483648.
+        self._write_yyp(["r_old_tiles"], extra_resources=[("tilesets", "ts_ground")])
+        self._write_tileset("ts_ground", tile_count=4, out_columns=2)
+        self._write_tileset_resource("ts_ground")
+        self._write_room("r_old_tiles", layers=[
+            {
+                "%Name": "Tiles",
+                "resourceType": "GMRTileLayer",
+                "visible": True,
+                "tilesetId": {"name": "ts_ground", "path": "tilesets/ts_ground/ts_ground.yy"},
+                "tiles": {
+                    "SerialiseWidth": 2,
+                    "SerialiseHeight": 2,
+                    "TileSerialiseData": [1, 2147483648, 2147483648, 2],
+                },
+            }
+        ])
+
+        self._make_converter().convert_all()
+        content = self._read_scene("r_old_tiles")
+
+        self.assertIn('metadata/gamemaker_tile_data_format = 0', content)
+        self.assertIn('metadata/gamemaker_tile_decoded_cell_count = 4', content)
+        self.assertIn('metadata/gamemaker_tile_non_empty_cell_count = 2', content)
+        self.assertFalse(any("Could not decode GameMaker tile data" in log for log in self.logs))
+        self.assertIn("\n" + _tile_map_data((0, 0, 1, 0, 0), (1, 1, 2, 0, 0)) + "\n", content)
+
     def test_tile_layer_counts_tiles_in_the_source_sprite_grid_not_out_columns(self):
         self._write_yyp(["r_grid"], extra_resources=[("tilesets", "ts_ground"), ("sprites", "s_tiles")])
         # The sprite is 4 x 3 cells; the compiled texture page is 7 columns wide.

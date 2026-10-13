@@ -1,95 +1,59 @@
-static func _gml_static_ensure(value):
-	var static_struct = _gml_static_lookup(value)
+# The static struct of a function (a constructor, or a function with static
+# variables), found by the function's Callable. It is created empty the first
+# time something asks for it.
+static func _gml_static_ensure(function_key):
+	var static_struct = _gml_static_functions.get(function_key)
 	if static_struct != null:
 		return static_struct
-	static_struct = {}
-	var constructor_name = _gml_static_constructor_name(value)
-	_gml_static_set_parent(value, static_struct, constructor_name)
-	_gml_static_set_parent(static_struct, _gml_static_root, constructor_name)
+	static_struct = _gml_static_new_struct(_gml_static_constructor_name(function_key))
+	_gml_static_functions[function_key] = static_struct
 	return static_struct
 
 
-static func _gml_static_lookup(value):
-	var index = _gml_static_find(value)
-	if index >= 0:
-		return _gml_static_registry[index]["static"]
-	return null
-
-
-# The registry index of a function or struct, or -1. The structs a loop goes
-# through are mostly registered in the order it visits them, so each search
-# starts where the last one found its target.
-static func _gml_static_find(value):
-	var count = _gml_static_registry.size()
-	var index = _gml_static_cursor
-	if index >= count:
-		index = 0
-	for _step in range(count):
-		if is_same(_gml_static_registry[index]["target"], value):
-			_gml_static_cursor = index
-			return index
-		index += 1
-		if index == count:
-			index = 0
-	return -1
-
-
-static func _gml_static_set_parent(value, static_struct, constructor_name = ""):
-	if typeof(static_struct) == TYPE_DICTIONARY:
-		_gml_static_note_struct(static_struct)
-	var index = _gml_static_find(value)
-	if index >= 0:
-		var entry = _gml_static_registry[index]
-		entry["static"] = static_struct
-		if constructor_name != "":
-			entry["constructor_name"] = constructor_name
-		return
-	var entry = {"target": value, "static": static_struct}
+# A static struct holds the static variables of a function and links to the
+# static struct of its parent constructor, the root one for a function without
+# a parent. A struct made by new links to its constructor's static struct the
+# same way, through a member GML code never sees, so the link costs one lookup
+# and goes away with the struct.
+static func _gml_static_new_struct(constructor_name = ""):
+	var static_struct = {GML_STATIC_LINK_KEY: _gml_static_root}
 	if constructor_name != "":
-		entry["constructor_name"] = constructor_name
-	_gml_static_registry.append(entry)
+		static_struct[GML_STATIC_NAME_KEY] = constructor_name
+	return static_struct
 
 
-# A new struct has no registry entry yet, so it is not searched for.
-static func _gml_static_link_new(value, static_struct):
-	_gml_static_cursor = _gml_static_registry.size()
-	_gml_static_registry.append({"target": value, "static": static_struct})
+# The constructor of a struct being built joins the static struct of the
+# constructor it inherits from to its own.
+static func _gml_static_join_parent(instance, parent_function):
+	if typeof(instance) != TYPE_DICTIONARY:
+		return
+	var child_static = instance.get(GML_STATIC_LINK_KEY)
+	if child_static == null:
+		return
+	var parent_static = _gml_static_ensure(parent_function)
+	if not is_same(child_static.get(GML_STATIC_LINK_KEY), parent_static) and not is_same(child_static, parent_static):
+		child_static[GML_STATIC_LINK_KEY] = parent_static
 
 
-static func _gml_static_note_struct(static_struct):
-	for known in _gml_static_structs:
-		if is_same(known, static_struct):
-			return
-	_gml_static_structs.append(static_struct)
-
-
-# The struct of a static chain that holds a variable the struct itself does
-# not have, or null: a dot access looks up the struct's own variables, then
-# the first static struct of its chain with that name (manual: GML Overview >
-# Structs > Static Struct, "How the Dot Operator Looks Up a Variable Name").
-static func _gml_static_chain_owner(struct_value, member_name):
-	var named = false
-	for static_struct in _gml_static_structs:
-		if static_struct.has(member_name):
-			named = true
-			break
-	if not named:
-		return null
-	var current = _gml_static_lookup(struct_value)
+# The struct of a static chain that holds a variable, starting at the first
+# static struct of a struct's chain, or null: a dot access looks up the
+# struct's own variables, then the first static struct of its chain with that
+# name (manual: GML Overview > Structs > Static Struct, "How the Dot Operator
+# Looks Up a Variable Name").
+static func _gml_static_chain_owner(static_struct, member_name):
 	var links = 0
-	while current != null and links < GML_STATIC_CHAIN_LIMIT:
-		if typeof(current) == TYPE_DICTIONARY and current.has(member_name):
-			return current
-		current = _gml_static_lookup(current)
+	while static_struct != null and links < GML_STATIC_CHAIN_LIMIT:
+		if static_struct.has(member_name):
+			return static_struct
+		static_struct = static_struct.get(GML_STATIC_LINK_KEY)
 		links += 1
 	return null
 
 
-static func _gml_static_name(value):
-	var index = _gml_static_find(value)
-	if index >= 0 and _gml_static_registry[index].has("constructor_name"):
-		return _gml_static_registry[index]["constructor_name"]
-	return ""
+static func _gml_static_name(static_struct):
+	if typeof(static_struct) != TYPE_DICTIONARY:
+		return ""
+	return static_struct.get(GML_STATIC_NAME_KEY, "")
 
 
 static func _gml_static_constructor_name(value):
@@ -122,12 +86,6 @@ static func _gml_hash_string(value):
 	return hash
 
 
-static func _gml_static_same(left, right):
-	if _is_gml_reference_value(left) or _is_gml_reference_value(right):
-		return _is_gml_reference_value(left) and _is_gml_reference_value(right) and is_same(left, right)
-	return left == right
-
-
 static func _gml_clone_value(value, depth):
 	if is_handle(value):
 		return value
@@ -139,8 +97,14 @@ static func _gml_clone_value(value, depth):
 		return clone
 	if value_type == TYPE_DICTIONARY:
 		var clone = {}
+		var has_hidden = value.has(GML_STATIC_LINK_KEY)
 		for key in value.keys():
-			clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]
+			if has_hidden and _gml_static_is_hidden_key(key):
+				# The clone shares the original's static chain, as the runner's
+				# clone keeps the struct's prototype.
+				clone[key] = value[key]
+			else:
+				clone[key] = _gml_clone_value(value[key], depth - 1) if depth > 0 else value[key]
 		return clone
 	return value
 

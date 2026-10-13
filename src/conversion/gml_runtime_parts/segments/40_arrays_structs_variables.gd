@@ -523,9 +523,10 @@ static func gml_struct_get(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		if struct_value.has(key):
 			return struct_value[key]
-		if _gml_static_structs.is_empty():
+		var static_struct = struct_value.get(GML_STATIC_LINK_KEY)
+		if static_struct == null:
 			return gml_undefined()
-		var static_owner = _gml_static_chain_owner(struct_value, key)
+		var static_owner = _gml_static_chain_owner(static_struct, key)
 		return gml_undefined() if static_owner == null else static_owner[key]
 	if typeof(struct_value) == TYPE_OBJECT:
 		if (key == "x" or key == "y") and struct_value is Node2D and not (key in struct_value):
@@ -786,10 +787,10 @@ static func gml_variable_global_set(member_name, value):
 static func gml_struct_exists(struct_value, member_name):
 	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.has(key) or (
-			not _gml_static_structs.is_empty()
-			and _gml_static_chain_owner(struct_value, key) != null
-		)
+		if struct_value.has(key):
+			return true
+		var static_struct = struct_value.get(GML_STATIC_LINK_KEY)
+		return static_struct != null and _gml_static_chain_owner(static_struct, key) != null
 	if _gml_is_instance_node(struct_value):
 		return _gml_instance_variable_exists(struct_value, key)
 	if _gml_selects_instances(struct_value):
@@ -839,9 +840,25 @@ static func gml_struct_remove(struct_value, member_name):
 	return gml_unsupported_type_error("GML mutable struct access", struct_value)
 
 
+# The names of a struct's variables: its keys but for the members the runtime
+# keeps in it (see GML_STATIC_LINK_KEY).
+static func _gml_struct_visible_keys(struct_value):
+	var names = struct_value.keys()
+	if struct_value.has(GML_STATIC_LINK_KEY):
+		names.erase(GML_STATIC_LINK_KEY)
+		for hidden_key in GML_STATIC_OTHER_HIDDEN_KEYS:
+			if struct_value.has(hidden_key):
+				names.erase(hidden_key)
+	return names
+
+
+static func _gml_static_is_hidden_key(key):
+	return key == GML_STATIC_LINK_KEY or GML_STATIC_OTHER_HIDDEN_KEYS.has(key)
+
+
 static func gml_struct_get_names(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.keys()
+		return _gml_struct_visible_keys(struct_value)
 	if _gml_is_instance_node(struct_value):
 		return _gml_instance_variable_names(struct_value)
 	if _gml_selects_instances(struct_value):
@@ -859,7 +876,13 @@ static func gml_struct_get_names(struct_value):
 
 static func gml_struct_names_count(struct_value):
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.size()
+		var count = struct_value.size()
+		if struct_value.has(GML_STATIC_LINK_KEY):
+			count -= 1
+			for hidden_key in GML_STATIC_OTHER_HIDDEN_KEYS:
+				if struct_value.has(hidden_key):
+					count -= 1
+		return count
 	if typeof(struct_value) == TYPE_OBJECT or _gml_selects_instances(struct_value):
 		return gml_struct_get_names(struct_value).size()
 	return 0

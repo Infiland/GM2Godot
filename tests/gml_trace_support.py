@@ -56,11 +56,14 @@ def run_gml_trace(
     events: Mapping[tuple[int, int], str],
     *,
     objects: tuple[GameMakerObject, ...] = (),
+    compatibility_scripts: tuple[str, ...] = (),
 ) -> list[str]:
     """Convert and run a project; return what the GML traced, in order.
 
     ``events`` belong to the object ``o_main``, which is the only instance in
-    the first room. ``objects`` are further objects the project defines.
+    the first room. ``objects`` are further objects the project defines, and
+    ``compatibility_scripts`` names the scripts saved as pre-2.3 compatibility
+    scripts (every other script is a 2.3+ script).
     """
     godot_binary = find_smoke_godot_binary()
     if godot_binary is None:
@@ -68,6 +71,7 @@ def run_gml_trace(
     project = GameMakerProject(
         name="GmlTrace",
         scripts={"scr_trace": TRACE_SCRIPT, **scripts},
+        compatibility_scripts=compatibility_scripts,
         objects=(GameMakerObject("o_main", events), *objects),
         rooms=(
             GameMakerRoom(

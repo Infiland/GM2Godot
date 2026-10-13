@@ -159,6 +159,15 @@ static func gml_exception_unhandled_handler(user_handler):
 	return previous
 
 
+# A handler installed from a script's top-level code is a method bound to that
+# script's instance. Left to the static variable it is freed after the script
+# classes at exit, which corrupts the heap; release it with the other GML data.
+static func _gml_unhandled_exception_handler_shutdown():
+	if _gml_shutdown_is_method(_gml_unhandled_exception_handler):
+		_gml_shutdown_detach_methods([_gml_unhandled_exception_handler])
+	_gml_unhandled_exception_handler = null
+
+
 static func _gml_indexed_placeholder_value_index(index_text, value_count):
 	if index_text.is_empty():
 		return -1

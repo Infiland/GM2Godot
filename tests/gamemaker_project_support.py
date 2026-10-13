@@ -179,6 +179,9 @@ class GameMakerProject:
     objects: Sequence[GameMakerObject]
     rooms: Sequence[GameMakerRoom]
     scripts: Mapping[str, str] = field(default_factory=dict[str, str])
+    # Names of the scripts saved with "isCompatibility": true (pre-2.3 scripts,
+    # run only when called); every other script is a 2.3+ script.
+    compatibility_scripts: Sequence[str] = ()
     sprites: Sequence[GameMakerSprite] = ()
     sequences: Sequence[GameMakerSequence] = ()
 
@@ -568,7 +571,7 @@ def write_gamemaker_project(project_dir: Path, project: GameMakerProject) -> Non
             {
                 "$GMScript": "v1",
                 "%Name": script_name,
-                "isCompatibility": False,
+                "isCompatibility": script_name in project.compatibility_scripts,
                 "isDnD": False,
                 "name": script_name,
                 "parent": {"name": "Scripts", "path": "folders/Scripts.yy"},

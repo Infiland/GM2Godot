@@ -4,8 +4,8 @@ import os
 import posixpath
 import re
 from collections.abc import Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
 from src.conversion.asset_output_paths import (
@@ -168,6 +168,29 @@ class _ManifestObjectPlan:
     requested_names: tuple[str, ...]
     available_subfolders: dict[str, str]
     skipped_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _ObjectConversionContext:
+    """What every object of one conversion run shares."""
+
+    subfolders: Mapping[str, str]
+    sprite_scene_paths: Mapping[str, str] | None
+    asset_names: set[str] | None
+    project_script_instance_variables: set[str] | None
+    enum_values: Mapping[str, Mapping[str, int]] | None
+    macro_values: Mapping[str, str] | None
+
+
+@dataclass
+class _ObjectRunState:
+    total: int
+    processed: int = 0
+    cancelled: bool = False
+    first_error: Exception | None = None
+    completed: set[str] = field(default_factory=set[str])
+    skipped: set[str] = field(default_factory=set[str])
+    failed: set[str] = field(default_factory=set[str])
 
 
 def _event_source_filenames(mapping: EventMapping) -> tuple[str, ...]:
@@ -336,6 +359,10 @@ class ObjectConverter(BaseConverter):
         self._project_macro_values_cache: dict[str, str] | None = None
         self._asset_output_paths: dict[str, dict[str, str]] = {}
         self._object_source_paths: dict[str, str] = {}
+        # While a conversion runs: the objects that get no script (skipped,
+        # failed or not part of the project). None outside one, when every
+        # object counts as having a script.
+        self._objects_without_script: set[str] | None = None
         self._project_resource_names_by_path: dict[tuple[str, str], str] | None = None
 
     def _get_valid_object_names(self) -> dict[str, str] | None:
@@ -1519,10 +1546,14 @@ class ObjectConverter(BaseConverter):
             ancestor = self._parse_object_yy(ancestor_name, ancestor_source_path)
             if ancestor is None:
                 break
-            if ancestor["variable_definitions"] or ancestor["variable_overrides"]:
+            # The definitions of an ancestor without a script do not reach the
+            # instance: its Pre-Create method does not exist.
+            if self._object_has_script(ancestor_name) and (
+                ancestor["variable_definitions"] or ancestor["variable_overrides"]
+            ):
                 ancestors_define = True
-            for definition in ancestor["variable_definitions"]:
-                inherited_definitions.setdefault(definition.name, definition)
+                for definition in ancestor["variable_definitions"]:
+                    inherited_definitions.setdefault(definition.name, definition)
             ancestor_name = ancestor["parent_object_name"]
             ancestor_source_path = ancestor["parent_object_source_path"]
         if not (parsed["variable_definitions"] or parsed["variable_overrides"]):
@@ -1566,10 +1597,11 @@ class ObjectConverter(BaseConverter):
             parsed = self._parse_object_yy(object_name, source_path)
             if parsed is None:
                 break
-            for event in parsed["event_list"]:
-                mapping = map_input_event(event) if is_input_event(event) else map_event(event)
-                if mapping is not None:
-                    function_names.add(mapping.godot_func)
+            if self._object_has_script(object_name):
+                for event in parsed["event_list"]:
+                    mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+                    if mapping is not None:
+                        function_names.add(mapping.godot_func)
             object_name = parsed["parent_object_name"]
             source_path = parsed["parent_object_source_path"]
         return function_names
@@ -1589,10 +1621,11 @@ class ObjectConverter(BaseConverter):
             parsed = self._parse_object_yy(object_name, source_path)
             if parsed is None:
                 break
-            for event in parsed["event_list"]:
-                mapping = map_input_event(event) if is_input_event(event) else None
-                if mapping is not None and mapping.godot_func not in function_names:
-                    function_names.append(mapping.godot_func)
+            if self._object_has_script(object_name):
+                for event in parsed["event_list"]:
+                    mapping = map_input_event(event) if is_input_event(event) else None
+                    if mapping is not None and mapping.godot_func not in function_names:
+                        function_names.append(mapping.godot_func)
             object_name = parsed["parent_object_name"]
             source_path = parsed["parent_object_source_path"]
         return tuple(function_names)
@@ -1604,6 +1637,64 @@ class ObjectConverter(BaseConverter):
             if mapping is not None:
                 function_names.add(mapping.godot_func)
         return function_names
+
+    def _object_has_script(self, object_name: str) -> bool:
+        """Whether the object gets a script (every object does outside a conversion run)."""
+        return self._objects_without_script is None or object_name not in self._objects_without_script
+
+    def _script_parent(
+        self,
+        parent_name: str | None,
+        parent_source_path: str | None,
+    ) -> tuple[str | None, str | None, tuple[str, ...]]:
+        """Return the nearest ancestor that has a script, and the ancestors passed over.
+
+        The script of an object that was skipped, failed or is no project
+        object does not exist, so its descendants extend the next ancestor
+        with one (the name and source path are None when none has).
+        """
+        passed_over: list[str] = []
+        seen: set[str] = set()
+        name, source_path = parent_name, parent_source_path
+        while name is not None and name not in seen:
+            seen.add(name)
+            if self._object_has_script(name):
+                return name, source_path, tuple(passed_over)
+            passed_over.append(name)
+            parsed = self._parse_object_yy(name, source_path)
+            if parsed is None:
+                break
+            name = parsed["parent_object_name"]
+            source_path = parsed["parent_object_source_path"]
+        return None, None, tuple(passed_over)
+
+    def _report_unconverted_ancestors(
+        self,
+        object_name: str,
+        object_source_path: str,
+        script_parent_name: str | None,
+        unconverted_ancestors: tuple[str, ...],
+    ) -> None:
+        names = ", ".join(repr(name) for name in unconverted_ancestors)
+        extends = repr(script_parent_name) if script_parent_name is not None else "no object script"
+        message = (
+            f"Warning: GameMaker object {object_name!r} extends {extends} because its ancestor "
+            f"{names} produced no script; the events and Variable Definitions of "
+            f"{names} do not run for {object_name!r}."
+        )
+        if self.diagnostics is not None:
+            self.diagnostics.add(
+                "warning",
+                "GM2GD-OBJECT-PARENT-NOT-CONVERTED",
+                message,
+                source_path=self._diagnostic_source_path(object_source_path),
+                resource=object_name,
+                resource_type="object",
+                workaround=(
+                    f"Fix the conversion problem reported for {names}, then convert again."
+                ),
+            )
+        self._safe_log(message)
 
     def _parent_object_chain(
         self,
@@ -1659,33 +1750,49 @@ class ObjectConverter(BaseConverter):
             parsed = self._parse_object_yy(object_name, source_path)
             if parsed is None:
                 return None
-            names.update(
-                variable_definition_identifiers(
-                    parsed["variable_definitions"],
-                    parsed["variable_overrides"],
-                )
-            )
-            for event in parsed["event_list"]:
-                mapping = map_input_event(event) if is_input_event(event) else map_event(event)
-                if mapping is None or not mapping.gml_filename:
-                    continue
-                event_source_path = self._event_source_path(
-                    parsed["source_path"],
-                    object_name,
-                    mapping,
-                )
-                if event_source_path is None:
-                    if event.get("isDnD") is True:
-                        continue
-                    return None
-                try:
-                    with open(event_source_path, "r", encoding="utf-8") as f:
-                        names.update(_GML_IDENTIFIER_RE.findall(f.read()))
-                except (OSError, UnicodeDecodeError):
-                    return None
+            # An ancestor without a script declares nothing.
+            if self._object_has_script(object_name) and not self._add_object_member_names(
+                names,
+                object_name,
+                parsed,
+            ):
+                return None
             object_name = parsed["parent_object_name"]
             source_path = parsed["parent_object_source_path"]
         return frozenset(names)
+
+    def _add_object_member_names(
+        self,
+        names: set[str],
+        object_name: str,
+        parsed: ParsedObject,
+    ) -> bool:
+        """Add the names one ancestor's script may declare; False if its code is unreadable."""
+        names.update(
+            variable_definition_identifiers(
+                parsed["variable_definitions"],
+                parsed["variable_overrides"],
+            )
+        )
+        for event in parsed["event_list"]:
+            mapping = map_input_event(event) if is_input_event(event) else map_event(event)
+            if mapping is None or not mapping.gml_filename:
+                continue
+            event_source_path = self._event_source_path(
+                parsed["source_path"],
+                object_name,
+                mapping,
+            )
+            if event_source_path is None:
+                if event.get("isDnD") is True:
+                    continue
+                return False
+            try:
+                with open(event_source_path, "r", encoding="utf-8") as f:
+                    names.update(_GML_IDENTIFIER_RE.findall(f.read()))
+            except (OSError, UnicodeDecodeError):
+                return False
+        return True
 
     def _object_inherits_sprite_runtime(
         self,
@@ -1729,8 +1836,20 @@ class ObjectConverter(BaseConverter):
 
         sprite_name = parsed["sprite_name"]
         sprite_source_path = parsed["sprite_source_path"]
-        parent_object_name = parsed["parent_object_name"]
-        parent_object_source_path = parsed["parent_object_source_path"]
+        # The scripts extend the nearest ancestor that has one: a skipped
+        # object leaves none, and its descendants must still load.
+        (
+            parent_object_name,
+            parent_object_source_path,
+            unconverted_ancestors,
+        ) = self._script_parent(parsed["parent_object_name"], parsed["parent_object_source_path"])
+        if unconverted_ancestors:
+            self._report_unconverted_ancestors(
+                object_name,
+                parsed["source_path"],
+                parent_object_name,
+                unconverted_ancestors,
+            )
         event_list = parsed["event_list"]
         solid = bool(parsed.get("solid", False))
         persistent = bool(parsed.get("persistent", False))
@@ -1937,6 +2056,100 @@ class ObjectConverter(BaseConverter):
         if offset_maps:
             write_gml_source_map(gd_path, merge_gml_source_maps(offset_maps))
 
+    def _plan_object_waves(self, object_names: Sequence[str]) -> tuple[list[list[str]], set[str]]:
+        """Group objects by ancestor depth; also return the parents that are no object.
+
+        Every object follows its ancestors, so a wave only needs the results
+        of the waves before it. Objects of one wave convert in parallel.
+        """
+        known = set(object_names)
+        parent_of: dict[str, str | None] = {}
+        unknown_parents: set[str] = set()
+        for name in object_names:
+            try:
+                parsed = self._parse_object_yy(name, self._object_source_paths.get(name))
+            except Exception:
+                # Converting the object reports what is wrong with it.
+                parsed = None
+            parent = parsed["parent_object_name"] if parsed is not None else None
+            if parent is not None and parent not in known:
+                unknown_parents.add(parent)
+                parent = None
+            parent_of[name] = parent
+        waves: dict[int, list[str]] = {}
+        for name in object_names:
+            depth = 0
+            seen = {name}
+            ancestor = parent_of[name]
+            while ancestor is not None and ancestor not in seen:
+                seen.add(ancestor)
+                depth += 1
+                ancestor = parent_of[ancestor]
+            waves.setdefault(depth, []).append(name)
+        return [waves[depth] for depth in sorted(waves)], unknown_parents
+
+    def _run_object_wave(
+        self,
+        executor: ThreadPoolExecutor,
+        names: Sequence[str],
+        context: _ObjectConversionContext,
+        state: _ObjectRunState,
+    ) -> None:
+        futures_map = {
+            executor.submit(
+                self._process_requested_object,
+                name,
+                context.subfolders.get(name, ""),
+                context.sprite_scene_paths,
+                context.asset_names,
+                context.project_script_instance_variables,
+                context.enum_values,
+                context.macro_values,
+                self._object_source_paths.get(name),
+            ): name
+            for name in names
+        }
+        for future in as_completed(futures_map):
+            self._record_object_result(futures_map[future], future, state)
+
+    def _record_object_result(
+        self,
+        object_name: str,
+        future: Future[ObjectProcessResult | None],
+        state: _ObjectRunState,
+    ) -> None:
+        try:
+            result = future.result()
+        except Exception as error:
+            state.failed.add(object_name)
+            if state.first_error is None:
+                state.first_error = error
+            return
+        if result is None:
+            state.cancelled = True
+            return
+
+        state.processed += 1
+        if result["status"] == "completed":
+            state.completed.add(object_name)
+            self._log_converted_object(result, state)
+        elif result["status"] == "skipped":
+            state.skipped.add(object_name)
+        else:
+            state.failed.add(object_name)
+        self._safe_progress(state.processed / state.total * 100)
+
+    def _log_converted_object(self, result: ObjectProcessResult, state: _ObjectRunState) -> None:
+        if self.compact_logging:
+            self._safe_log_progress(result["name"], state.processed, state.total)
+        elif result["has_sprite"]:
+            self._safe_log(get_localized("Console_Convertor_Objects_ConvertedWithSprite").format(
+                object_name=result["name"], sprite_name=result["sprite_name"],
+                event_count=result["event_count"]))
+        else:
+            self._safe_log(get_localized("Console_Convertor_Objects_Converted").format(
+                object_name=result["name"], event_count=result["event_count"]))
+
     def convert_objects(self) -> None:
         os.makedirs(self.godot_objects_path, exist_ok=True)
 
@@ -2019,7 +2232,6 @@ class ObjectConverter(BaseConverter):
         write_gml_runtime(self.godot_project_path)
 
         total = len(object_names)
-        processed = 0
         self._asset_output_paths = build_asset_output_paths(
             self.gm_project_path,
             self.godot_project_path,
@@ -2027,64 +2239,30 @@ class ObjectConverter(BaseConverter):
         )
         sprite_scene_paths = self._get_available_sprite_scene_paths()
         asset_names = self._get_project_asset_names()
-        project_script_instance_variables = self._get_project_script_instance_variables(asset_names)
-        enum_values = self._get_project_enum_values()
-        macro_values = self._get_project_macro_values()
-        cancelled = False
-        completed_objects: set[str] = set()
-        skipped_objects: set[str] = set()
-        failed_objects: set[str] = set()
-        first_error: Exception | None = None
+        context = _ObjectConversionContext(
+            subfolders=object_subfolders,
+            sprite_scene_paths=sprite_scene_paths,
+            asset_names=asset_names,
+            project_script_instance_variables=self._get_project_script_instance_variables(asset_names),
+            enum_values=self._get_project_enum_values(),
+            macro_values=self._get_project_macro_values(),
+        )
+        state = _ObjectRunState(total=total)
 
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures_map = {
-                executor.submit(
-                    self._process_requested_object,
-                    name,
-                    object_subfolders.get(name, ""),
-                    sprite_scene_paths,
-                    asset_names,
-                    project_script_instance_variables,
-                    enum_values,
-                    macro_values,
-                    self._object_source_paths.get(name),
-                ): name
-                for name in object_names
-            }
-            for future in as_completed(futures_map):
-                object_name = futures_map[future]
-                try:
-                    result = future.result()
-                except Exception as error:
-                    failed_objects.add(object_name)
-                    if first_error is None:
-                        first_error = error
-                    continue
-                if result is None:
-                    cancelled = True
-                    continue
+        # Whether an ancestor gets a script decides what a descendant's script
+        # extends, so the objects convert in waves of equal ancestor depth.
+        waves, unknown_parents = self._plan_object_waves(object_names)
+        self._objects_without_script = set(unknown_parents)
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                for wave in waves:
+                    self._run_object_wave(executor, wave, context, state)
+                    self._objects_without_script |= state.skipped | state.failed
+        finally:
+            self._objects_without_script = None
 
-                processed += 1
-
-                if result["status"] == "completed":
-                    completed_objects.add(object_name)
-                    if self.compact_logging:
-                        self._safe_log_progress(result["name"], processed, total)
-                    else:
-                        if result["has_sprite"]:
-                            self._safe_log(get_localized("Console_Convertor_Objects_ConvertedWithSprite").format(
-                                object_name=result["name"], sprite_name=result["sprite_name"],
-                                event_count=result["event_count"]))
-                        else:
-                            self._safe_log(get_localized("Console_Convertor_Objects_Converted").format(
-                                object_name=result["name"], event_count=result["event_count"]))
-                elif result["status"] == "skipped":
-                    skipped_objects.add(object_name)
-                else:
-                    failed_objects.add(object_name)
-
-                self._safe_progress(processed / total * 100)
-
+        completed_objects, skipped_objects, failed_objects = state.completed, state.skipped, state.failed
+        cancelled, first_error = state.cancelled, state.first_error
         for object_name in sorted(completed_objects):
             self._resource_completed(object_name)
         for object_name in sorted(skipped_objects):

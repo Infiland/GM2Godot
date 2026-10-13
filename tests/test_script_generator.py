@@ -114,32 +114,32 @@ class TestScriptGeneratorBasic(unittest.TestCase):
         for member in ("image_index", "image_blend", "image_alpha"):
             self.assertIn(f"\t\t{member} = value\n\t\t_gm_apply_", content)
 
-    def test_collision_change_reports_join_an_object_notification_event(self):
+    def test_window_events_leave_the_notification_to_the_collision_report(self):
+        # Godot calls _notification in every script of an inheritance chain, so
+        # the Close Button event is a plain method the runtime calls: the one
+        # _notification is the root script's collision report.
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            {"_notification": "\tprint(\"closing\")"},
+            {"_on_close_button": "\tprint(\"closing\")"},
             object_runtime=ObjectRuntimeConfig(object_name="o_window"),
         )
 
         self.assertEqual(content.count("func _notification(what):"), 1)
-        self.assertIn(
-            "func _notification(what):\n\tif what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED or what == NOTIFICATION_ENTER_TREE"
-            " or what == NOTIFICATION_EXIT_TREE:\n\t\t_gm_collision_changed()\n"
-            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tprint(\"closing\")",
-            content,
-        )
+        self.assertNotIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertIn("func _on_close_button():\n\tprint(\"closing\")", content)
 
     def test_child_objects_inherit_collision_change_reports(self):
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            {"_notification": "\tprint(\"closing\")"},
+            {"_on_close_button": "\tprint(\"closing\")"},
             object_runtime=ObjectRuntimeConfig(object_name="o_child", parent_object_names=("o_parent",)),
             base_script_path="res://objects/o_parent/o_parent.gd",
         )
 
         self.assertNotIn("_gm_collision_dirty", content)
         self.assertNotIn("func _gm_collision_changed", content)
-        self.assertIn("func _notification(what):\n\tif what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+        self.assertNotIn("_notification", content)
+        self.assertIn("func _on_close_button():\n\tprint(\"closing\")", content)
 
     def test_sprite_runtime_without_object_runtime_reports_nothing(self):
         content = generate_script_content(
@@ -377,30 +377,32 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn("_on_no_more_health()", content)
         self.assertIn("func _on_no_more_health():", content)
 
-    def test_close_button_event(self):
+    def test_close_button_event_is_a_plain_method(self):
+        # The runtime keeps the game open and calls the handler of each
+        # instance (gml_game_window_close_request); the script wires nothing
+        # in _ready or _notification, where a handler would run for every
+        # script of the inheritance chain or only if Create reached it.
         content = generate_script_content([{"eventType": 7, "eventNum": 30}])
-        self.assertIn("func _ready():", content)
-        self.assertIn("get_tree().auto_accept_quit = false", content)
-        self.assertIn("func _notification(what):", content)
-        self.assertIn("if what == NOTIFICATION_WM_CLOSE_REQUEST:", content)
+        self.assertIn("func _on_close_button():", content)
+        self.assertNotIn("func _ready", content)
+        self.assertNotIn("_notification", content)
+        self.assertNotIn("auto_accept_quit", content)
 
-    def test_close_button_event_wraps_code_body(self):
+    def test_close_button_event_keeps_its_code_body(self):
         content = generate_script_content(
             [{"eventType": 7, "eventNum": 30}],
-            code_bodies={"_notification": "\tget_tree().quit()"},
+            code_bodies={"_on_close_button": "\tget_tree().quit()"},
         )
-        self.assertIn(
-            "\tif what == NOTIFICATION_WM_CLOSE_REQUEST:\n\t\tget_tree().quit()",
-            content,
-        )
+        self.assertIn("func _on_close_button():\n\tget_tree().quit()", content)
 
-    def test_close_button_uses_existing_ready_event(self):
-        content = generate_script_content([
-            {"eventType": 0, "eventNum": 0},
-            {"eventType": 7, "eventNum": 30},
-        ])
+    def test_close_button_event_leaves_the_create_event_alone(self):
+        content = generate_script_content(
+            [{"eventType": 0, "eventNum": 0}, {"eventType": 7, "eventNum": 30}],
+            code_bodies={"_ready": "\tscore = 1"},
+        )
         self.assertEqual(content.count("func _ready"), 1)
-        self.assertIn("get_tree().auto_accept_quit = false", content)
+        self.assertIn("func _ready():\n\tscore = 1", content)
+        self.assertNotIn("auto_accept_quit", content)
 
     def test_create_event_code_is_skipped_while_a_room_change_is_pending(self):
         content = generate_script_content(
@@ -412,7 +414,6 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         self.assertIn(
             "func _ready():\n"
             "\t_gm_construct_instance()\n"
-            "\tget_tree().auto_accept_quit = false\n"
             "\tif GMRuntime.gml_event_create_blocked(self):\n"
             "\t\treturn\n"
             "\tscore = 1\n",
@@ -453,12 +454,15 @@ class TestScriptGeneratorEvents(unittest.TestCase):
         ):
             self.assertIn(f"func {function_name}():", content)
 
-    def test_resize_event_connects_viewport_size_changed(self):
+    def test_resize_event_is_a_plain_method(self):
+        # The runtime calls it for each instance when the window is resized,
+        # so no _ready connects the signal (an object that overrides Create or
+        # has none, below an ancestor with the event, would never connect it).
         content = generate_script_content([{"eventType": 8, "eventNum": 65}])
 
-        self.assertIn("func _ready():", content)
-        self.assertIn("get_viewport().size_changed.connect(_on_resize)", content)
         self.assertIn("func _on_resize():", content)
+        self.assertNotIn("func _ready", content)
+        self.assertNotIn("size_changed", content)
 
     def test_unknown_event(self):
         content = generate_script_content([{"eventType": 99, "eventNum": 5}])

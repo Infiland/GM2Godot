@@ -97,6 +97,7 @@ static func gml_instance_register(instance, object_selector = null, parent_selec
 		# The collision events of the instance's object (and its parents)
 		# join the collision table as soon as the object is first seen.
 		_gml_collision_register_instance_events(instance, _gml_collision_entry_object_chain(entry))
+		_gml_window_events_register_instance(instance)
 	return handle
 
 
@@ -203,6 +204,7 @@ const GML_EVENT_OTHER_METHODS = {
 	7: "_on_animation_end",
 	8: "_on_path_ended",
 	9: "_on_no_more_health",
+	30: "_on_close_button",
 	58: "_on_animation_update",
 	59: "_on_animation_event",
 	76: "_on_broadcast_message",

@@ -19,9 +19,7 @@ from src.conversion.object_variables import VARIABLE_DEFINITIONS_FUNCTION
 _CodeBodies: TypeAlias = Mapping[str, str]
 _MapEvent: TypeAlias = Callable[[JsonObject], EventMapping | None]
 _IsInputEvent: TypeAlias = Callable[[JsonObject], bool]
-_GetAdditionalFunctions: TypeAlias = Callable[[set[str]], list[EventMapping]]
 _EmitPrelude: TypeAlias = Callable[[list[str], set[str]], None]
-_WrapBody: TypeAlias = Callable[[EventMapping, str, set[str]], str]
 
 _map_event: _MapEvent = map_event
 _map_input_event: _MapEvent = map_input_event
@@ -525,7 +523,6 @@ def _emit_object_runtime_prelude(
     object_runtime: ObjectRuntimeConfig,
     *,
     declare_members: bool,
-    emit_notification: bool = True,
     sprite_construct_lines: Sequence[str] = (),
 ) -> None:
     # other is the instance itself, except while a collision event runs
@@ -554,7 +551,7 @@ def _emit_object_runtime_prelude(
         "\n\tif not _gm_collision_dirty:"
         "\n\t\t_gm_collision_dirty = true"
         "\n\t\tGMRuntime._gml_collision_instance_changed(self)"
-        + (f"\n\nfunc _notification(what):\n{_COLLISION_NOTIFICATION_BODY}" if emit_notification else "")
+        f"\n\nfunc _notification(what):\n{_COLLISION_NOTIFICATION_BODY}"
         if declare_members
         else ""
     )
@@ -686,12 +683,6 @@ def _wrap_object_runtime_ready_body(body: str, object_runtime: ObjectRuntimeConf
     if should_call_parent_ready:
         wrapped_body += "\n\tsuper._ready()"
     return wrapped_body
-
-
-def _wrap_collision_notification_body(func: EventMapping, body: str, reports_collision_changes: bool) -> str:
-    if reports_collision_changes and func.godot_func == "_notification":
-        return f"{_COLLISION_NOTIFICATION_BODY}\n{body}"
-    return body
 
 
 def _wrap_draw_runtime_body(func: EventMapping, body: str) -> str:
@@ -842,21 +833,6 @@ def generate_script_content(
             unique_functions = _deduplicate_functions(unique_functions + required_functions)
             function_names = {func.godot_func for func in unique_functions}
     script_features = get_script_features()
-
-    for feature in script_features:
-        get_additional_functions = cast(
-            _GetAdditionalFunctions | None,
-            getattr(feature, "get_additional_functions", None),
-        )
-        if get_additional_functions is None:
-            continue
-
-        functions_to_add = get_additional_functions(function_names)
-        if not functions_to_add:
-            continue
-
-        unique_functions = _deduplicate_functions(unique_functions + functions_to_add)
-        function_names = {func.godot_func for func in unique_functions}
     uses_draw_runtime = _uses_draw_runtime(function_names)
 
     # Sort by sort_key, then alphabetically for same key
@@ -888,10 +864,6 @@ def generate_script_content(
             declare_members=not inherited_sprite_runtime,
             track_collision=uses_object_runtime,
         )
-    # The root object script reports transform changes to the collision
-    # runtime; an object's own _notification event function gets the report
-    # added to it.
-    reports_collision_changes = object_runtime is not None and base_script_path is None
     if uses_object_runtime and object_runtime is not None:
         # A child of an object with the sprite runtime starts with its own
         # sprite (or none) even when its code never names a sprite member.
@@ -902,7 +874,6 @@ def generate_script_content(
             lines,
             object_runtime,
             declare_members=base_script_path is None,
-            emit_notification="_notification" not in function_names,
             # Its own object's sprite: _gm_object_sprite_index (virtual) starts
             # sprite_index, and construction shows it.
             sprite_construct_lines=("\t_gm_initialize_sprite_runtime()",) if constructs_sprite else (),
@@ -917,10 +888,6 @@ def generate_script_content(
 
     for func in unique_functions:
         body = _get_function_body(func, effective_code_bodies)
-        for feature in script_features:
-            wrap_body = cast(_WrapBody | None, getattr(feature, "wrap_body", None))
-            if wrap_body is not None:
-                body = wrap_body(func, body, function_names)
         if uses_sprite_runtime and sprite_runtime is not None and func.godot_func == "_ready" and not uses_object_runtime:
             body = _prepend_sprite_runtime_ready_body(body)
         if uses_object_runtime and object_runtime is not None and func.godot_func == "_ready":
@@ -933,7 +900,6 @@ def generate_script_content(
             body = f"{_LAYER_MOVE_EXIT_GUARD}\n\t_gm_unregister_instance()"
         if uses_draw_runtime and func.godot_func in _DRAW_RUNTIME_FUNCTIONS:
             body = _wrap_draw_runtime_body(func, body)
-        body = _wrap_collision_notification_body(func, body, reports_collision_changes)
         lines.append(f"\n\nfunc {func.godot_func}({func.params}):")
         lines.append(f"\n{body}\n")
 

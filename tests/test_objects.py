@@ -1689,6 +1689,87 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn('GMRuntime.gml_instance_register(self, "o_child", ["o_parent"])', content)
         self.assertIn("func _ready():\n\t_gm_construct_instance()\n\tsuper._ready()", content)
 
+    def _write_event_source(self, object_name: str, filename: str, source: str) -> None:
+        with open(os.path.join(self.gm_dir, "objects", object_name, filename), "w", encoding="utf-8") as f:
+            f.write(source)
+
+    def _unconverted_parent_diagnostics(self, diagnostics: DiagnosticCollector) -> dict[str, str]:
+        return {
+            str(diagnostic.resource): diagnostic.message
+            for diagnostic in diagnostics.diagnostics()
+            if diagnostic.code == "GM2GD-OBJECT-PARENT-NOT-CONVERTED"
+        }
+
+    def test_children_of_a_skipped_object_extend_the_nearest_converted_ancestor(self):
+        # o_b has no script (its Step code does not transpile). o_c and o_d
+        # below it must still load: they extend o_a, the nearest object with a
+        # script, and the events of o_b are not theirs to inherit.
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        step: JsonObject = {"eventType": 3, "eventNum": 0}
+        self._setup_object("o_a", event_list=[create])
+        self._setup_object("o_b", event_list=[step], parent_object_name="o_a")
+        self._setup_object("o_c", event_list=[create, step], parent_object_name="o_b")
+        self._setup_object("o_d", event_list=[], parent_object_name="o_c")
+        self._write_event_source("o_a", "Create_0.gml", "hp = 1;\n")
+        self._write_event_source("o_b", "Step_0.gml", "if (hp ==== 1 {\n")
+        self._write_event_source("o_c", "Create_0.gml", "event_inherited();\nmana = 2;\n")
+        self._write_event_source("o_c", "Step_0.gml", "event_inherited();\nmana += 1;\n")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd")))
+        scripts: dict[str, str] = {}
+        for name in ("o_a", "o_c", "o_d"):
+            with open(os.path.join(self.godot_dir, "objects", name, f"{name}.gd"), encoding="utf-8") as f:
+                scripts[name] = f.read()
+        self.assertTrue(scripts["o_c"].startswith('extends "res://objects/o_a/o_a.gd"'))
+        self.assertTrue(scripts["o_d"].startswith('extends "res://objects/o_c/o_c.gd"'))
+        # The instance is still an o_b to GameMaker.
+        self.assertIn('GMRuntime.gml_instance_register(self, "o_c", ["o_b", "o_a"])', scripts["o_c"])
+        # o_a has a Create event to inherit and no Step event.
+        self.assertIn("super._ready()", scripts["o_c"])
+        self.assertNotIn("super._on_step", scripts["o_c"])
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_c"])
+        self.assertIn("extends 'o_a'", self._unconverted_parent_diagnostics(diagnostics)["o_c"])
+
+    def test_children_of_a_skipped_root_object_become_roots(self):
+        create: JsonObject = {"eventType": 0, "eventNum": 0}
+        self._setup_object("o_a", event_list=[create])
+        self._setup_object("o_b", event_list=[create], parent_object_name="o_a")
+        self._setup_object("o_c", event_list=[], parent_object_name="o_b")
+        self._write_event_source("o_a", "Create_0.gml", "hp = ;;\n")
+        self._write_event_source("o_b", "Create_0.gml", "event_inherited();\nmana = 2;\n")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        self.assertFalse(os.path.exists(os.path.join(self.godot_dir, "objects", "o_a", "o_a.gd")))
+        with open(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd"), encoding="utf-8") as f:
+            script = f.read()
+        with open(os.path.join(self.godot_dir, "objects", "o_c", "o_c.gd"), encoding="utf-8") as f:
+            child_script = f.read()
+        # With no ancestor script o_b is the root script: it declares the
+        # members every instance has and what its own code assigns.
+        self.assertTrue(script.startswith("extends Node2D"))
+        self.assertIn("\nvar id = GMRuntime.gml_instance_noone()", script)
+        self.assertIn("\nvar mana", script)
+        self.assertNotIn("super._ready()", script)
+        self.assertTrue(child_script.startswith('extends "res://objects/o_b/o_b.gd"'))
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_b"])
+
+    def test_children_of_a_failed_object_load_too(self):
+        # An object whose .yy cannot be read produces no script either.
+        self._setup_object("o_a", event_list=[])
+        self._setup_object("o_b", event_list=[], parent_object_name="o_a")
+        with open(os.path.join(self.gm_dir, "objects", "o_a", "o_a.yy"), "w", encoding="utf-8") as f:
+            f.write("{ this is not json")
+        diagnostics = DiagnosticCollector()
+        self._make_converter(diagnostics=diagnostics).convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_b", "o_b.gd"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertTrue(script.startswith("extends Node2D"))
+        self.assertEqual(list(self._unconverted_parent_diagnostics(diagnostics)), ["o_b"])
+
     def test_object_without_sprite_or_sprite_code_declares_sprite_members(self):
         # Every GameMaker instance has sprite_index and the image_* variables,
         # and another instance can give it a sprite.
@@ -3185,7 +3266,7 @@ class TestScriptGeneration(unittest.TestCase):
         self.assertIn("func _on_no_more_lives():", content)
 
     def test_script_with_close_button_event(self):
-        """eventType 7, eventNum 30 should generate close request handling."""
+        """eventType 7, eventNum 30 should generate the Close Button handler method."""
         self._setup_object("o_test", event_list=[{"eventType": 7, "eventNum": 30}])
         converter = self._make_converter()
         converter.convert_all()
@@ -3193,9 +3274,9 @@ class TestScriptGeneration(unittest.TestCase):
         gd_path = os.path.join(self.godot_dir, "objects", "o_test", "o_test.gd")
         with open(gd_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        self.assertIn("get_tree().auto_accept_quit = false", content)
-        self.assertIn("func _notification(what):", content)
-        self.assertIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertIn("func _on_close_button():", content)
+        self.assertNotIn("NOTIFICATION_WM_CLOSE_REQUEST", content)
+        self.assertNotIn("auto_accept_quit", content)
 
     def test_script_with_draw_gui_event(self):
         """eventType 8, eventNum 64 should produce func _on_draw_gui()."""

@@ -35,6 +35,7 @@ from .utils import (
     normalize_local_names as _normalize_local_names,
     tokens_to_source as _tokens_to_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
+    wrap_int64 as _wrap_int64,
 )
 
 
@@ -84,7 +85,7 @@ def _evaluate_enum_expression(
         if expr.operator == "+":
             return operand
         if expr.operator == "-":
-            return -operand
+            return _wrap_int64(-operand)
         if expr.operator == "~":
             return ~operand
         return None
@@ -109,47 +110,69 @@ def _parse_enum_int_literal(expr: _NumberLiteral) -> int | None:
     if expr.is_float_like:
         return None
     try:
-        return int(expr.value, 0)
+        # A hex or binary literal of 2^63 or more is the int64 with that bit
+        # pattern, as it is in the generated code.
+        return _wrap_int64(int(expr.value, 0))
     except ValueError:
         return None
 
 
+def _truncated_quotient(left: int, right: int) -> int:
+    quotient = abs(left) // abs(right)
+    return quotient if (left < 0) == (right < 0) else -quotient
+
+
+def _truncated_remainder(left: int, right: int) -> int:
+    remainder = abs(left) % abs(right)
+    return -remainder if left < 0 else remainder
+
+
 def _evaluate_enum_binary(operator: str, left: int, right: int) -> int | None:
+    """Fold a binary operator over enum values as int64 values compute it.
+
+    div and mod truncate toward zero (-5 mod 3 == -2, -7 div 2 == -3), as the
+    runner's integer division and remainder do, and stay exact beyond 2^53.
+    The results wrap around 2^64, and a shift count is taken modulo 64, as the
+    runner's Long does.
+    """
+    result: int
     if operator == "+":
-        return left + right
-    if operator == "-":
-        return left - right
-    if operator == "*":
-        return left * right
-    if operator in ("div", "/"):
+        result = left + right
+    elif operator == "-":
+        result = left - right
+    elif operator == "*":
+        result = left * right
+    elif operator in ("div", "/"):
         if right == 0:
             return None
-        return int(left / right)
-    if operator in ("mod", "%"):
+        result = _truncated_quotient(left, right)
+    elif operator in ("mod", "%"):
         if right == 0:
             return None
-        return left % right
-    if operator == "<<":
-        return left << right
-    if operator == ">>":
-        return left >> right
-    if operator == "&":
-        return left & right
-    if operator == "|":
-        return left | right
-    if operator == "^":
-        return left ^ right
-    return None
+        result = _truncated_remainder(left, right)
+    elif operator == "<<":
+        result = left << (right & 63)
+    elif operator == ">>":
+        result = left >> (right & 63)
+    elif operator == "&":
+        result = left & right
+    elif operator == "|":
+        result = left | right
+    elif operator == "^":
+        result = left ^ right
+    else:
+        return None
+    return _wrap_int64(result)
 
 
 def _evaluate_enum_call(function_name: str, args: Iterable[int]) -> int | None:
     arg_values = list(args)
     if function_name in ("int64", "real") and len(arg_values) == 1:
-        return int(arg_values[0])
+        return _wrap_int64(int(arg_values[0]))
     if function_name == "bool" and len(arg_values) == 1:
         return 1 if arg_values[0] else 0
     if function_name == "abs" and len(arg_values) == 1:
-        return abs(int(arg_values[0]))
+        return _wrap_int64(abs(int(arg_values[0])))
     return None
 
 

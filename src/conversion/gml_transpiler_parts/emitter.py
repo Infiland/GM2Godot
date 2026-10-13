@@ -78,8 +78,10 @@ from .shared_models import (
     ScopeContext as _ScopeContext,
 )
 from .utils import (
+    int64_literal_source as _int64_literal_source,
     normalize_local_names as _normalize_local_names,
     normalize_scope_context as _normalize_scope_context,
+    number_literal_source as _number_literal_source,
     unwrap_grouped_expression as _unwrap_grouped_expression,
 )
 
@@ -289,6 +291,12 @@ def _is_alarm_array_access(
     )
 
 
+def _emit_literal(expr: _Literal | _StringLiteral | _NumberLiteral) -> str:
+    if isinstance(expr, _NumberLiteral):
+        return _number_literal_source(expr.value, expr.is_float_like)
+    return expr.value
+
+
 def _emit_expression(
     expr: _Expression,
     local_names: Iterable[str] | None = None,
@@ -298,9 +306,9 @@ def _emit_expression(
     local_names = _normalize_local_names(local_names)
     scope_context = _normalize_scope_context(scope_context)
     if isinstance(expr, _Literal | _StringLiteral | _NumberLiteral):
-        return expr.value, PRIMARY_PRECEDENCE
+        return _emit_literal(expr), PRIMARY_PRECEDENCE
     if isinstance(expr, _EnumMember):
-        return str(expr.value), PRIMARY_PRECEDENCE
+        return _int64_literal_source(expr.value), PRIMARY_PRECEDENCE
     if isinstance(expr, _TemplateStringLiteral):
         return _emit_template_string(expr, local_names, scope_context)
     if isinstance(expr, _NameOf):

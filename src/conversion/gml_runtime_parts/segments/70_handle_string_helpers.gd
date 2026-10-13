@@ -403,7 +403,7 @@ static func _gml_string_to_int64(value):
 	if text.to_lower().is_valid_hex_number(true):
 		return _gml_hex_string_to_int(text)
 	if text.is_valid_float():
-		return int(text.to_float())
+		return GMLInt64.saturate(text.to_float())
 	return gml_error("GML int64 conversion does not support string " + text)
 
 

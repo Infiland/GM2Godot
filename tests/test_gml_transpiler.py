@@ -189,6 +189,59 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
             "GMRuntime.gml_real(0x2c8e)",
         )
 
+    def test_writes_hex_literals_of_two_to_the_63_or_more_as_signed_int64(self):
+        # GDScript clamps an integer literal beyond the int64 range to
+        # INT64_MAX ("Cannot represent ... as a 64-bit signed integer"). In
+        # GML a hex literal is an int64 with that bit pattern, so
+        # 0xFFFFFFFFFFFFFFFF == -1.
+        smallest = "(-9223372036854775807 - 1)"
+        cases = (
+            ("0x8000000000000000", smallest),
+            ("$8000000000000000", smallest),
+            ("0xFFFFFFFFFFFFFFFF", "(-1)"),
+            ("$FFFFFFFFFFFFFFFF", "(-1)"),
+            ("0xffff_ffff_ffff_ffff", "(-1)"),
+            ("0x8000000000000001", "(-9223372036854775807)"),
+            ("0xCBF29CE484222325", "(-3750763034362895579)"),
+            ("0b" + "1" * 64, "(-1)"),
+            ("0b1" + "0" * 63, smallest),
+            ("0x7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("$7FFFFFFFFFFFFFFF", "0x7FFFFFFFFFFFFFFF"),
+            ("0xFFFFFFFF", "0xFFFFFFFF"),
+            ("0b" + "1" * 63, "0b" + "1" * 63),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
+        self.assertEqual(
+            transpile_gml_expression("x & $FFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_and(position.x, (-1))",
+        )
+        self.assertEqual(
+            transpile_gml_expression("~0xFFFFFFFFFFFFFFFF"),
+            "GMRuntime.gml_bit_not((-1))",
+        )
+        self.assertEqual(
+            transpile_gml_code("var mask = 0x8000000000000000;", indent=""),
+            f"var mask = {smallest}",
+        )
+
+    def test_writes_decimal_integer_literals_beyond_int64_as_reals(self):
+        # GML reads a decimal literal beyond the int64 range as a real; as an
+        # integer literal GDScript would clamp it to INT64_MAX.
+        cases = (
+            ("9223372036854775807", "9223372036854775807"),
+            ("9223372036854775808", "9223372036854775808.0"),
+            ("18446744073709551615", "18446744073709551615.0"),
+            ("9_223_372_036_854_775_808", "9223372036854775808.0"),
+            ("9223372036854775808.5", "9223372036854775808.5"),
+            ("12345", "12345"),
+        )
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.assertEqual(transpile_gml_expression(source), expected)
+
     def test_hash_color_literal_parity_examples(self):
         cases = (
             ("#dd8e2c == $2c8edd", "0x2c8edd == 0x2c8edd"),
@@ -1334,6 +1387,91 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
                 indent="",
             ),
             'var FLAGS = GMRuntime.gml_enum({"A": 16, "B": 32, "C": 0})',
+        )
+
+    def test_folds_enum_div_and_mod_with_gml_integer_semantics(self):
+        # mod and div truncate toward zero (GML gives -5 mod 3 == -2, where
+        # Python's floor modulo gives 1), and the folding is exact beyond
+        # 2^53, where a float quotient is not. Results wrap around 2^64 like
+        # an int64, and a shift count is taken modulo 64 like the runner's Long.
+        source = (
+            "enum FOLD {\n"
+            "    NEG_MOD = -5 mod 3,\n"
+            "    NEG_PERCENT = -5 % 3,\n"
+            "    NEG_DIVISOR_MOD = 5 mod -3,\n"
+            "    BOTH_NEG_MOD = -5 % -3,\n"
+            "    EXACT_MOD = 6 mod 3,\n"
+            "    NEG_DIV = -7 div 2,\n"
+            "    NEG_DIVISOR_DIV = 7 div -2,\n"
+            "    BOTH_NEG_DIV = -7 div -2,\n"
+            "    SLASH = 7 / 2,\n"
+            "    HUGE_DIV = 9007199254740993 div 1,\n"
+            "    PRECISE_DIV = 9223372036854775807 div 3,\n"
+            "    PRECISE_MOD = 18014398509481985 mod 10,\n"
+            "    SMALLEST_DIV = 0x8000000000000000 div -1,\n"
+            "    SHIFTED = 1 << 63,\n"
+            "    SHIFT_WRAPS = 1 << 64,\n"
+            "    SHIFT_RIGHT = -8 >> 1,\n"
+            "    OVERFLOW = 0x7FFFFFFFFFFFFFFF + 1,\n"
+            "    NEGATED = -0x8000000000000000,\n"
+            "    AFTER_LARGEST = 0x7FFFFFFFFFFFFFFE,\n"
+            "    NEXT,\n"
+            "}\n"
+        )
+        expected_values = {
+            "NEG_MOD": -2,
+            "NEG_PERCENT": -2,
+            "NEG_DIVISOR_MOD": 2,
+            "BOTH_NEG_MOD": -2,
+            "EXACT_MOD": 0,
+            "NEG_DIV": -3,
+            "NEG_DIVISOR_DIV": -3,
+            "BOTH_NEG_DIV": 3,
+            "SLASH": 3,
+            "HUGE_DIV": 9007199254740993,
+            "PRECISE_DIV": 3074457345618258602,
+            "PRECISE_MOD": 5,
+            "SMALLEST_DIV": -9223372036854775808,
+            "SHIFTED": -9223372036854775808,
+            "SHIFT_WRAPS": 1,
+            "SHIFT_RIGHT": -4,
+            "OVERFLOW": -9223372036854775808,
+            "NEGATED": -9223372036854775808,
+            "AFTER_LARGEST": 9223372036854775806,
+            "NEXT": 9223372036854775807,
+        }
+        emitted = transpile_gml_code(source, indent="")
+        fields = ", ".join(
+            f'"{name}": ' + ("(-9223372036854775807 - 1)" if value == -9223372036854775808 else str(value))
+            for name, value in expected_values.items()
+        )
+        self.assertEqual(emitted, f"var FOLD = GMRuntime.gml_enum({{{fields}}})")
+
+    def test_rejects_enum_division_by_zero(self):
+        for source in ("enum BAD { A = 5 div 0 }", "enum BAD { A = 5 mod 0 }", "enum BAD { A = 5 % 0 }"):
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(GMLTranspileError, "integer compile-time constants"):
+                    transpile_gml_code(source, indent="")
+
+    def test_wraps_hex_enum_values_of_two_to_the_63_or_more_to_signed_int64(self):
+        self.assertEqual(
+            transpile_gml_code(
+                "enum MASK { ALL = 0xFFFFFFFFFFFFFFFF, TOP = $8000000000000000, LOW = 0xFF }\n"
+                "a = MASK.ALL;\n"
+                "b = MASK.TOP;",
+                indent="",
+            ),
+            'var MASK = GMRuntime.gml_enum({"ALL": -1, "TOP": (-9223372036854775807 - 1), "LOW": 255})\n'
+            "a = -1\n"
+            "b = (-9223372036854775807 - 1)",
+        )
+        self.assertEqual(
+            transpile_gml_code(
+                "result = MASK.TOP;",
+                indent="",
+                enum_values={"MASK": {"TOP": -9223372036854775808}},
+            ),
+            "result = (-9223372036854775807 - 1)",
         )
 
     def test_lowers_project_global_enum_members_to_integer_constants(self):

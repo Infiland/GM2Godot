@@ -59,7 +59,7 @@ static func _to_int64_value(value):
 	if is_string(value):
 		return _gml_string_to_int64(value)
 	if _is_int64_convertible(value):
-		return int(value)
+		return GMLInt64.saturate(value)
 	return gml_unsupported_type_error("GML bitwise conversion", value)
 
 

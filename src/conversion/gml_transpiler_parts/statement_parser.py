@@ -46,6 +46,7 @@ from .utils import (
     indent_lines,
     insert_lines_before_continue,
     insert_until_check_before_continue,
+    int64_literal_source,
     macro_configuration_matches,
     normalize_scope_context,
     scope_context_with_global_names,
@@ -304,7 +305,7 @@ class _StatementParser:
             else:
                 enum_value = next_integer_value
                 next_integer_value += 1
-            value = str(enum_value)
+            value = int64_literal_source(enum_value)
             current_enum_values[member_name] = enum_value
             members.append((member_name, value))
 

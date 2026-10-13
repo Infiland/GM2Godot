@@ -56,6 +56,7 @@ static func gml_int_div(left, right):
 
 
 const GML_INT64_MIN = -9223372036854775807 - 1
+const GML_INT64_MAX = 9223372036854775807
 
 
 # An int64 quotient as the runner's Long.div gives it: the most negative
@@ -226,21 +227,33 @@ static func gml_mul(left, right):
 	return _to_real(left) * _to_real(right)
 
 
+# The runner's yyfmod raises this for any divisor that is zero once it is a
+# real (0, 0.0, -0.0, false, int64(0)) unless both operands are int64.
+const GML_MOD_BY_ZERO_MESSAGE = "unable to mod with zero"
+
+
 static func gml_mod(left, right):
 	var left_type = typeof(left)
 	var right_type = typeof(right)
 	if left_type == TYPE_INT and right_type == TYPE_INT and _gml_int32_pair(left, right):
 		if right == 0:
-			return gml_error("GML int32 modulo by zero")
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
 		return left % right
 	if (left_type == TYPE_FLOAT or left_type == TYPE_INT) and (right_type == TYPE_FLOAT or right_type == TYPE_INT):
+		if right == 0.0:
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
 		return fmod(float(left), float(right))
 	if is_ptr(left) or is_ptr(right):
 		return gml_unsupported_binary_type_error("GML pointer arithmetic", left, right)
 	if _returns_int64_arithmetic_result(left, right):
 		var right_int = _to_int64_value(right)
 		if right_int == 0:
-			return gml_error("GML int64 modulo by zero")
+			# Only two int64 values take the Long.mod path of the runner,
+			# which fails in its division; with any other number the int64
+			# is turned into a real first and yyfmod rejects the zero.
+			if is_int64(left) and is_int64(right):
+				return gml_error("GML int64 modulo by zero")
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
 		# Any int64 modulo -1 is 0, as the runner's Long.mod gives it
 		# (Godot's int % crashes the game on the most negative int64).
 		if right_int == -1:
@@ -249,10 +262,11 @@ static func gml_mod(left, right):
 	if _returns_int32_arithmetic_result(left, right):
 		var right_int = _to_int32_value(right)
 		if right_int == 0:
-			return gml_error("GML int32 modulo by zero")
+			return gml_error(GML_MOD_BY_ZERO_MESSAGE)
 		return _to_int32_value(left) % right_int
 	if not _is_arithmetic_real_operand(left) or not _is_arithmetic_real_operand(right):
 		return gml_unsupported_binary_type_error("GML modulo", left, right)
-	return fmod(_to_real(left), _to_real(right))
-
-
+	var right_real = _to_real(right)
+	if right_real == 0.0:
+		return gml_error(GML_MOD_BY_ZERO_MESSAGE)
+	return fmod(_to_real(left), right_real)

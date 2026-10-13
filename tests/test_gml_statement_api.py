@@ -499,7 +499,7 @@ class GMLStatementAPITests(unittest.TestCase):
     def test_statement_contract_remains_package_internal(self) -> None:
         facade_source = (PARTS_PATH.parent / "gml_transpiler.py").read_text(encoding="utf-8")
         facade_exports = literal_all_exports(facade_source)
-        self.assertEqual(len(facade_exports), 44)
+        self.assertEqual(len(facade_exports), 45)
         self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         package_internal_names = frozenset((*PUBLIC_NAMES, *MODEL_NAMES))
         self.assertTrue(package_internal_names.isdisjoint(facade_exports))

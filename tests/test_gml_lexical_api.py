@@ -254,7 +254,7 @@ class GMLLexicalAPISurfaceTests(unittest.TestCase):
     def test_public_facade_preprocess_identity_and_internal_surface(self) -> None:
         self.assertIs(facade_preprocess_gml_source, preprocess_gml_source)
         facade_exports = literal_all_exports(FACADE_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(len(facade_exports), 44)
+        self.assertEqual(len(facade_exports), 45)
         self.assertTrue(all(not name.startswith("_") for name in facade_exports))
         newly_internal = set(PUBLIC_NAMES) - {"preprocess_gml_source"}
         self.assertTrue(newly_internal.isdisjoint(facade_exports))

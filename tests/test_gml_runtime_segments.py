@@ -68,6 +68,7 @@ EXPECTED_RUNTIME_SEGMENT_ORDER = (
     "72_os_debug_gc.gd",
     "73_platform_services.gd",
     "74_game_step.gd",
+    "75_instance_activation.gd",
     "80_static_hash_clone_error.gd",
 )
 

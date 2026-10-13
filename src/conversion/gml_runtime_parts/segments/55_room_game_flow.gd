@@ -215,12 +215,15 @@ static func _gml_game_restart_end_game(tree):
 			old_scene.get_parent().remove_child(old_scene)
 		old_scene.queue_free()
 		tree.current_scene = null
-	for entry in _gml_instance_live_order.slice(0):
+	# Deactivated instances go too (Run_EndGame empties m_Deactive).
+	for entry in _gml_instance_live_order.slice(0) + _gml_instance_deactivated.values():
 		var node = entry["instance"]
 		gml_instance_unregister(entry["handle"])
 		if node is Node and is_instance_valid(node) and not node.is_queued_for_deletion():
 			node.queue_free()
 	_gml_room_drop_parked_rooms()
+	# The first room's instances make a new step list.
+	_gml_room_reset_step_list()
 	gml_time_source_clear_call_later()
 	gml_audio_stop_all()
 
@@ -320,8 +323,14 @@ static func _gml_room_change_to_entry(entry, restarting):
 	var kept_old_scene = false
 	if old_scene != null:
 		_gml_room_dispatch_lifecycle(old_scene, "_on_room_end")
-		_gml_room_capture_persistent_instances(old_scene)
 		kept_old_scene = _gml_room_scene_is_persistent(old_scene) and _gml_room_current_id >= 0
+		# A room that is not kept deletes its deactivated instances, the
+		# persistent ones too; a kept room keeps them deactivated (runner
+		# StartRoom: only a room that is not persistent runs ClearInstances,
+		# which empties its m_Deactive list).
+		if not kept_old_scene:
+			_gml_instance_discard_deactivated(old_scene)
+		_gml_room_capture_persistent_instances(old_scene)
 		# Clean Up comes after Room End. The instances left in a room that is
 		# not kept leave the game (the persistent ones have just moved out);
 		# a persistent room keeps its instances until it is entered again.
@@ -391,8 +400,9 @@ static func _gml_room_dispatch_lifecycle(root_node, method_name):
 		if not _gml_event_scheduler_instance_valid(node):
 			continue
 		# Game/room start and end are Other events: after a room change
-		# request only persistent instances still receive them.
-		if _gml_event_scheduler_event_blocked(node, true):
+		# request only persistent instances still receive them, and
+		# deactivated instances never do.
+		if _gml_event_scheduler_event_blocked(node, true) or _gml_instance_node_deactivated(node):
 			continue
 		node.call(method_name)
 
@@ -639,7 +649,9 @@ static func _gml_room_capture_persistent_instances(scene):
 	for node in _gml_room_tree_nodes(scene):
 		if node == scene or not _gml_room_node_is_persistent(node):
 			continue
-		if node.get_parent() == null:
+		# Persistent instances only move on from the active list (runner
+		# StartRoom); a deactivated one stays with its room.
+		if node.get_parent() == null or _gml_instance_node_deactivated(node):
 			continue
 		node.set_meta(GML_ROOM_PERSISTENT_LAYER_META, _gml_room_persistent_layer_record(node))
 		node.set_meta("_gm2godot_room_preserving_persistent", true)
@@ -724,15 +736,18 @@ static func _gml_room_node_was_restored_persistent(node):
 # instances leave the instance lists, so no event, with, instance_number or
 # collision meets them, while an id still names its instance as in the
 # runner; its layers keep their ids but do not exist meanwhile; its scene
-# leaves the tree, its room particle systems kept.
+# leaves the tree, its room particle systems kept. Its deactivated instances
+# stay deactivated with it, in their order (the room's own m_Deactive list):
+# instance_activate_* in another room does not reach them.
 static func _gml_room_park_scene(scene):
-	var record = {"scene": scene, "instances": [], "layers": [], "elements": []}
+	var record = {"scene": scene, "instances": [], "deactivated": [], "layers": [], "elements": []}
 	for node in _gml_room_tree_nodes(scene):
 		var entry: Variant = null if node == scene else _gml_instance_entry(node)
 		if entry == null or bool(entry["destroyed"]):
 			continue
 		_gml_room_park_instance(entry)
 		record["instances"].append(entry)
+	record["deactivated"] = _gml_instance_park_deactivated(scene)
 	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
 	for handle in _gml_layer_handles_by_index.values():
 		if gml_handle_is_valid(handle) and _gml_room_scene_holds(scene, handle.reference):
@@ -775,6 +790,9 @@ static func _gml_room_resume_instances(scene, record):
 		_gml_instance_entries[entry["handle"].index] = entry
 		_gml_instance_handles_by_node_id[entry["node_id"]] = entry["handle"]
 		_gml_collision_forget_box_lists(entry)
+		if entry["deactivated"]:
+			# Back in the deactivated list below, not in the live lists.
+			continue
 		_gml_instance_live_order.append(entry)
 		for selector_id in entry["selector_ids"]:
 			_gml_instance_index_add(_gml_instance_live_by_object, selector_id, entry)
@@ -786,6 +804,7 @@ static func _gml_room_resume_instances(scene, record):
 		for entries in index_map.values():
 			entries.sort_custom(_gml_instance_entry_order_less)
 	_gml_builtin_globals["instance_count"] = _gml_instance_live_order.size()
+	_gml_instance_resume_deactivated(record["deactivated"])
 	for node in _gml_room_particle_layer_nodes(scene):
 		var cleanup = _gml_particle_room_layer_exiting.bind(node)
 		if not node.tree_exiting.is_connected(cleanup):
@@ -824,6 +843,7 @@ static func _gml_room_drop_parked_rooms():
 	for record in _gml_room_parked.values():
 		for entry in record["instances"]:
 			gml_handle_invalidate(entry["handle"])
+		_gml_instance_drop_parked_deactivated(record["deactivated"])
 		for handle in record["layers"] + record["elements"]:
 			gml_handle_invalidate(handle)
 		var scene = record["scene"]

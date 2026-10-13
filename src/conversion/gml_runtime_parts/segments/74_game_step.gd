@@ -38,11 +38,17 @@ static var _gml_step_entries = []
 static var _gml_step_infos = []
 static var _gml_step_creation_mark = 0
 static var _gml_step_removal_mark = 0
+# _gml_instance_activation_changes when the list last dropped the instances
+# that were deactivated or activated again.
+static var _gml_step_activation_mark = 0
 # The list positions of the instances whose script has an event method, by
 # method name, for the methods _gml_step_dispatch_method runs. Each is
 # worked out on the method's first dispatch and kept up to date as the list
 # changes.
 static var _gml_step_method_positions = {}
+# Counts the times the list was built afresh; an entry's step_order only
+# counts for the build it was taken in by (its step_list).
+static var _gml_step_list_serial = 0
 static var _gml_step_running = false
 # GMLStepScriptInfo by script, or by class name for nodes without a script.
 static var _gml_step_script_infos = {}
@@ -274,13 +280,15 @@ static func _gml_step_collect_instances():
 	# The instance list of a new step: the last step's instances that still
 	# exist, then the instances created since. Creation order only grows, so
 	# this is every live instance in creation order. Every phase passes over
-	# instances that are gone, so the list only drops them after instances
-	# were unregistered (registering counts up the creation counter and
-	# unregistering shrinks the registry, so their difference grows with
-	# every instance unregistered).
+	# instances that are gone or deactivated, so the list only drops them
+	# after instances were unregistered, deactivated or activated again
+	# (registering counts up the creation counter and unregistering shrinks
+	# the registry, so their difference grows with every instance
+	# unregistered; see _gml_instance_activation_changes for the others).
 	var removal_mark = _gml_instance_creation_counter - _gml_instance_entries.size()
-	if removal_mark != _gml_step_removal_mark:
+	if removal_mark != _gml_step_removal_mark or _gml_instance_activation_changes != _gml_step_activation_mark:
 		_gml_step_removal_mark = removal_mark
+		_gml_step_activation_mark = _gml_instance_activation_changes
 		_gml_step_drop_inactive()
 	_gml_step_join_created_instances()
 	_gml_step_running = true
@@ -288,6 +296,12 @@ static func _gml_step_collect_instances():
 
 
 static func _gml_step_drop_inactive():
+	# Keeps the entries that still take part, in list order, and the method
+	# positions with them. An instance deactivated and activated again since
+	# it joined has a new creation order, at the end of the instance list:
+	# it leaves the list with every entry from its new place on, and they
+	# all join again in creation order.
+	var rejoin_mark = _gml_step_activated_mark()
 	var entries = _gml_step_entries
 	var infos = _gml_step_infos
 	_gml_step_entries = []
@@ -295,14 +309,33 @@ static func _gml_step_drop_inactive():
 	for method_name in _gml_step_method_positions.keys():
 		_gml_step_method_positions[method_name] = []
 	for i in range(entries.size()):
-		if _gml_step_entry_active(entries[i]):
-			_gml_step_append(entries[i], infos[i])
+		var entry = entries[i]
+		var kept = _gml_step_entry_active(entry) and entry["step_order"] == entry["creation_order"]
+		if kept and (rejoin_mark < 0 or entry["creation_order"] < rejoin_mark):
+			_gml_step_append(entry, infos[i])
+		else:
+			entry["step_order"] = -1
+	if rejoin_mark >= 0:
+		_gml_step_creation_mark = min(_gml_step_creation_mark, rejoin_mark)
 	return null
 
 
+static func _gml_step_activated_mark():
+	# The lowest creation order of the listed instances that were activated
+	# again since they joined (their creation order was renumbered), or -1.
+	var mark = -1
+	for entry in _gml_step_entries:
+		if entry["step_order"] == entry["creation_order"] or not _gml_step_entry_active(entry):
+			continue
+		if mark < 0 or entry["creation_order"] < mark:
+			mark = entry["creation_order"]
+	return mark
+
+
 static func _gml_step_clear_list():
-	# The next step takes in every live instance again, in creation order;
-	# the method positions refer to the old list, so they go too.
+	# The next step takes in every live instance again, in creation order,
+	# as a new build of the list (see _gml_step_join_created_instances); the
+	# method positions refer to the old list, so they go too.
 	_gml_step_entries = []
 	_gml_step_infos = []
 	_gml_step_method_positions = {}
@@ -319,6 +352,8 @@ static func _gml_step_add_entry(entry):
 	var inst = entry["instance"]
 	if typeof(inst) != TYPE_OBJECT or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return
+	entry["step_order"] = entry["creation_order"]
+	entry["step_list"] = _gml_step_list_serial
 	_gml_step_append(entry, _gml_step_script_info(inst))
 
 
@@ -332,15 +367,30 @@ static func _gml_step_append(entry, info):
 
 
 static func _gml_step_join_created_instances():
-	# Adds the instances created since the list was last updated, like
-	# GameMaker's active list between phases.
+	# Adds the instances created (or activated again) since the list was
+	# last updated, like GameMaker's active list between phases. The live
+	# list is in creation order, so they are at its end. An empty list is
+	# built afresh: other parts of the runtime empty it and set the creation
+	# mark to 0 between steps to have it take in every live instance again
+	# (a persistent room left or entered again), so the step_order entries
+	# kept from earlier builds, deactivated ones included, no longer count.
 	if _gml_instance_creation_counter == _gml_step_creation_mark:
 		return null
+	if _gml_step_entries.is_empty():
+		_gml_step_list_serial += 1
+		# Whoever emptied the list, positions in it are gone too.
+		_gml_step_method_positions = {}
 	var created = []
-	for entry in _gml_instance_entries.values():
-		if int(entry["creation_order"]) >= _gml_step_creation_mark and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
+	var index = _gml_instance_live_order.size() - 1
+	while index >= 0:
+		var entry = _gml_instance_live_order[index]
+		index -= 1
+		if int(entry["creation_order"]) < _gml_step_creation_mark:
+			break
+		var listed = entry["step_order"] >= 0 and entry["step_list"] == _gml_step_list_serial
+		if not listed and not bool(entry["destroyed"]) and gml_handle_is_valid(entry["handle"]):
 			created.append(entry)
-	created.sort_custom(_gml_instance_entry_order_less)
+	created.reverse()
 	for entry in created:
 		_gml_step_add_entry(entry)
 	_gml_step_creation_mark = _gml_instance_creation_counter
@@ -348,8 +398,9 @@ static func _gml_step_join_created_instances():
 
 
 static func _gml_step_entry_active(entry):
-	# Whether a step list entry still takes part: not destroyed or freed.
-	if bool(entry["destroyed"]):
+	# Whether a step list entry still takes part: not destroyed, deactivated
+	# or freed.
+	if bool(entry["destroyed"]) or entry["deactivated"]:
 		return false
 	var inst = entry["instance"]
 	return is_instance_valid(inst) and not inst.is_queued_for_deletion()
@@ -378,7 +429,7 @@ static func _gml_step_dispatch_method(phase, method_name, frame):
 		if _gml_room_requested_change != null:
 			break
 		var entry = _gml_step_entries[positions[k]]
-		if bool(entry["destroyed"]):
+		if bool(entry["destroyed"]) or entry["deactivated"]:
 			continue
 		var inst = entry["instance"]
 		if not is_instance_valid(inst) or inst.is_queued_for_deletion():
@@ -393,7 +444,12 @@ static func _gml_step_find_method_positions(method_name):
 	var positions = []
 	for i in range(_gml_step_entries.size()):
 		var entry = _gml_step_entries[i]
-		if _gml_step_entry_active(entry) and _gml_step_has_method(_gml_step_infos[i], entry["instance"], method_name):
+		# Deactivated entries count: the dispatch passes over them while
+		# they are deactivated, and one activated again during the step
+		# runs at its place in the list until the next step.
+		if bool(entry["destroyed"]) or not is_instance_valid(entry["instance"]):
+			continue
+		if _gml_step_has_method(_gml_step_infos[i], entry["instance"], method_name):
 			positions.append(i)
 	_gml_step_method_positions[method_name] = positions
 	return positions
@@ -419,7 +475,7 @@ static func _gml_step_apply_motion(frame):
 			continue
 		var entry = _gml_step_entries[i]
 		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		if entry["destroyed"] or entry["deactivated"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if info.motion_members and _gml_step_motion_idle(inst):
 			continue
@@ -473,7 +529,7 @@ static func _gml_step_update_images(frame):
 			continue
 		var entry = _gml_step_entries[i]
 		var inst = entry["instance"]
-		if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+		if entry["destroyed"] or entry["deactivated"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 			continue
 		if info.tracks_previous:
 			# In the space of x and y, which the motion step and solid
@@ -509,7 +565,7 @@ static func _gml_step_wrap_entry(i, frame):
 		return false
 	var entry = _gml_step_entries[i]
 	var inst = entry["instance"]
-	if entry["destroyed"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
+	if entry["destroyed"] or entry["deactivated"] or not is_instance_valid(inst) or inst.is_queued_for_deletion():
 		return false
 	return _gml_step_wrap_image_index(inst, info, frame)
 

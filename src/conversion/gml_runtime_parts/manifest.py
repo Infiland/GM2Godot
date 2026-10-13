@@ -388,6 +388,19 @@ RUNTIME_SEGMENTS: tuple[RuntimeSegmentDefinition, ...] = (
         tests=("tests/test_game_step_godot.py", "tests/test_event_scheduler_godot.py"),
     ),
     _segment(
+        "75_instance_activation.gd",
+        "Instance deactivation and activation: active lists, regions, layers, and node processing.",
+        depends_on=(
+            "00_prelude.gd",
+            "10_handles_and_instances.gd",
+            "11_layers.gd",
+            "45_collision_queries.gd",
+            "50_draw_pipeline.gd",
+            "50_static_types_and_clone.gd",
+        ),
+        tests=("tests/test_instance_deactivation_godot.py",),
+    ),
+    _segment(
         "80_static_hash_clone_error.gd",
         "Late compatibility wrappers for static, hash, clone, and error helpers.",
         depends_on=("00_prelude.gd", "20_methods_and_exceptions.gd", "50_static_types_and_clone.gd", "60_conversion_helpers.gd"),

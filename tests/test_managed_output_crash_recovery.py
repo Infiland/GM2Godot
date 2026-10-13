@@ -112,6 +112,7 @@ def _write_source_fixture(
                     "%Name": script_name,
                     "name": script_name,
                     "resourceType": "GMScript",
+                    "isCompatibility": True,
                     "parent": {
                         "name": "Scripts",
                         "path": "folders/Scripts.yy",

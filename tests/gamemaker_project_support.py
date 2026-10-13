@@ -48,6 +48,7 @@ class GameMakerObject:
     persistent: bool = False
     parent: str | None = None
     sprite: str | None = None
+    visible: bool = True
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,7 @@ def _object_yy(game_object: GameMakerObject) -> dict[str, object]:
         "solid": False,
         "spriteId": _asset_ref("sprites", game_object.sprite),
         "spriteMaskId": None,
-        "visible": True,
+        "visible": game_object.visible,
     }
 
 

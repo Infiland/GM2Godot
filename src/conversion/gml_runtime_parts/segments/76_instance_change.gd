@@ -3,8 +3,8 @@
 # (functions/Function_Instance.js) does it. With perf the instance first runs
 # its Destroy and Clean Up events. It then takes the new object's events,
 # object_index and parents (its place in the objects' instance lists), mask,
-# solid and persistent flags (SetObjectIndex in yyInstance.js) and the
-# object's sprite (UpdateSpriteIndex), and keeps its id, its variables, its
+# solid, visible and persistent flags (SetObjectIndex in yyInstance.js) and
+# the object's sprite (UpdateSpriteIndex), and keeps its id, its variables, its
 # position, depth, image values, motion, alarms and xstart/ystart. With perf
 # the new object's Pre-Create and Create events run last, with the instance
 # as self and other. Changing to an object that does not exist only prints
@@ -40,7 +40,8 @@ const GML_INSTANCE_CHANGE_IMAGE_METAS = {
 
 # Pending changes by node instance id: [node, object asset entry, perf].
 static var _gml_instance_changes = {}
-# [script, sprite name] of each object's scene, or null, by object name.
+# [script, sprite name, visible] of each object's scene, or null, by object
+# name.
 static var _gml_instance_change_objects = {}
 # The instance whose _gm_register_instance runs for a change: its registry
 # entry takes the object and parents that gml_instance_register is given.
@@ -103,6 +104,9 @@ static func _gml_instance_change_apply(key):
 	inst.set_script(info[0])
 	_gml_instance_change_restore(inst, values)
 	_gml_instance_change_identity(inst, entry, object_entry)
+	# The object's visible flag (the root node's visible in its scene).
+	if inst is CanvasItem:
+		inst.visible = info[2]
 	if values.has("_gm_depth") and "_gm_depth" in inst:
 		# The depth stays (SetObjectIndex leaves it).
 		inst.set("_gm_depth", values["_gm_depth"])
@@ -301,7 +305,7 @@ static func _gml_instance_change_show_sprite(inst):
 	_gml_draw_hidden_visuals.erase(instance_id)
 
 
-# The script and sprite of an object's converted scene.
+# The script, sprite and visible flag of an object's converted scene.
 static func _gml_instance_change_object(object_entry):
 	var object_name = str(object_entry["name"])
 	if _gml_instance_change_objects.has(object_name):
@@ -312,11 +316,14 @@ static func _gml_instance_change_object(object_entry):
 	if scene is PackedScene:
 		var state = scene.get_state()
 		var script = null
+		var visible = true
 		for i in range(state.get_node_property_count(0)):
 			if state.get_node_property_name(0, i) == &"script":
 				script = state.get_node_property_value(0, i)
+			elif state.get_node_property_name(0, i) == &"visible":
+				visible = bool(state.get_node_property_value(0, i))
 		if script is Script:
-			info = [script, _gml_instance_change_scene_sprite(state)]
+			info = [script, _gml_instance_change_scene_sprite(state), visible]
 	_gml_instance_change_objects[object_name] = info
 	return info
 

@@ -2,8 +2,8 @@
 
 As instance_change_RELEASE in the HTML5 runner (functions/Function_Instance.js)
 does it: with perf true the instance runs its Destroy and Clean Up events,
-then it takes the new object's events, object_index, parents, mask, solid and
-persistent flags and sprite (SetObjectIndex and UpdateSpriteIndex in
+then it takes the new object's events, object_index, parents, mask, solid,
+visible and persistent flags and sprite (SetObjectIndex and UpdateSpriteIndex in
 yyInstance.js), keeping its id, variables, position, depth, image values and
 xstart/ystart; with perf true the new object's Create event runs last.
 
@@ -250,6 +250,60 @@ _COLLISION_PROJECT = GameMakerProject(
     ),
 )
 
+# An object's visible flag starts each instance and comes with
+# instance_change (SetObjectIndex in yyInstance.js), whether or not perf is
+# true: o_hidden is not visible, and an o_shown instance made invisible
+# becomes visible again when it changes into o_shown.
+_VISIBLE_PROJECT = GameMakerProject(
+    name="InstanceChangeVisible",
+    scripts={"scr_trace": _SCRIPT},
+    objects=(
+        GameMakerObject("o_hidden", {EVENT_CREATE: 'trace("hidden create " + string(visible));\n'}, visible=False),
+        GameMakerObject("o_shown", {}),
+        GameMakerObject("o_plain", {EVENT_CREATE: "instance_change(o_hidden, false);\n"}),
+        GameMakerObject("o_perf", {EVENT_CREATE: "instance_change(o_hidden, true);\n"}),
+        GameMakerObject("o_back", {EVENT_CREATE: "visible = false;\ninstance_change(o_shown, false);\n"}),
+        GameMakerObject(
+            "o_ctrl",
+            {EVENT_STEP: 'with (all) trace(object_get_name(object_index) + " " + string(visible));\nglobal.done = true;\n'},
+        ),
+    ),
+    rooms=(
+        GameMakerRoom(
+            "r_main",
+            layers=(
+                InstanceLayer(
+                    "Instances",
+                    0,
+                    (
+                        RoomInstance("inst_hidden", "o_hidden", 0, 0),
+                        RoomInstance("inst_plain", "o_plain", 0, 0),
+                        RoomInstance("inst_perf", "o_perf", 0, 0),
+                        RoomInstance("inst_back", "o_back", 0, 0),
+                        RoomInstance("inst_ctrl", "o_ctrl", 0, 0),
+                    ),
+                ),
+            ),
+            creation_order=("inst_hidden", "inst_plain", "inst_perf", "inst_back", "inst_ctrl"),
+        ),
+    ),
+)
+
+_VISIBLE_PROBE = """extends Node
+
+const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
+
+var _frames = 0
+
+
+func _process(_delta):
+	_frames += 1
+	if _frames == 8:
+		print("INSTANCE_CHANGE_TRACE " + JSON.stringify(GMRuntime.gml_global_scope().get("trace", [])))
+		print("INSTANCE_CHANGE_NODES []")
+		get_tree().quit(0)
+"""
+
 _COLLISION_PROBE = """extends Node
 
 const GMRuntime = preload("res://gm2godot/gml_runtime.gd")
@@ -333,6 +387,22 @@ class TestInstanceChangeGodot(unittest.TestCase):
         self.assertEqual(trace, ["wall hit true", "brick create true", "brick hit"])
         # The brick has no Draw event, so its sprite shows again.
         self.assertEqual(node, ["o_brick.gd", [["s_brick", True]]])
+
+    def test_instance_change_takes_the_objects_visible_flag(self) -> None:
+        trace, _nodes = self._run(_VISIBLE_PROJECT, _VISIBLE_PROBE)
+
+        self.assertEqual(
+            trace,
+            [
+                "hidden create false",
+                "hidden create false",
+                "o_hidden false",
+                "o_hidden false",
+                "o_hidden false",
+                "o_shown true",
+                "o_ctrl true",
+            ],
+        )
 
 
 if __name__ == "__main__":

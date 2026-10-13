@@ -129,6 +129,7 @@ class ParsedObject(TypedDict):
     event_list: list[JsonObject]
     solid: bool
     persistent: bool
+    visible: bool
 
 
 class ObjectProcessResult(TypedDict):
@@ -1012,6 +1013,7 @@ class ObjectConverter(BaseConverter):
                 event_list=event_list,
                 solid=bool(data.get("solid", False)),
                 persistent=bool(data.get("persistent", False)),
+                visible=bool(data.get("visible", True)),
             )
             # The object's collision mask ("Collision Mask" in the object
             # editor) starts every instance's mask_index.
@@ -1118,11 +1120,15 @@ class ObjectConverter(BaseConverter):
         sprite_name: str | None,
         sprite_scene_path: str | None = None,
         script_res_path: str | None = None,
+        visible: bool = True,
     ) -> str:
         """Build the .tscn content string for an object scene.
 
         If sprite_name is not None, the scene instances the sprite's scene as a child.
         If script_res_path is not None, the scene attaches the script to the root node.
+        An object that is not visible gives every instance (the root node) its
+        visible flag, as SetObjectIndex in the HTML5 runner's yyInstance.js
+        does for each new instance.
         """
         has_sprite = sprite_name is not None
         has_script = script_res_path is not None
@@ -1150,10 +1156,12 @@ class ObjectConverter(BaseConverter):
             script_id = str(next_id)
             parts.append(f'\n[ext_resource type="Script" path="{script_res_path}" id="{script_id}"]\n')
 
+        root = f'\n[node name="{object_name}" type="Node2D"]\n'
+        if not visible:
+            root += 'visible = false\n'
         if has_script:
-            parts.append(f'\n[node name="{object_name}" type="Node2D"]\nscript = ExtResource("{script_id}")\n')
-        else:
-            parts.append(f'\n[node name="{object_name}" type="Node2D"]\n')
+            root += f'script = ExtResource("{script_id}")\n'
+        parts.append(root)
 
         if has_sprite:
             parts.append(f'\n[node name="{sprite_name}" parent="." instance=ExtResource("{sprite_id}")]\n')
@@ -1840,6 +1848,7 @@ class ObjectConverter(BaseConverter):
             sprite_name,
             sprite_scene_path,
             script_res_path,
+            visible=bool(parsed.get("visible", True)),
         )
 
         os.makedirs(object_dir, exist_ok=True)

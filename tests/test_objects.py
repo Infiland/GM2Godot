@@ -37,7 +37,8 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
                             event_list: list[JsonObject] | None = None,
                             parent_object_name: str | None = None,
                             persistent: bool = False,
-                            mask_sprite_name: str | None = None) -> str:
+                            mask_sprite_name: str | None = None,
+                            visible: bool = True) -> str:
     """Build a GameMaker object .yy file string."""
     sprite_id = _sprite_reference(sprite_name)
     sprite_mask_id = _sprite_reference(mask_sprite_name)
@@ -92,10 +93,11 @@ def _make_object_yy_content(name: str, sprite_name: str | None = None,
         '  "solid": false,\n'
         '  "spriteId": {sprite_id},\n'
         '  "spriteMaskId": {sprite_mask_id},\n'
-        '  "visible": true,\n'
+        '  "visible": {visible},\n'
         '}}'
     ).format(
         name=name,
+        visible=str(visible).lower(),
         sprite_id=sprite_id,
         sprite_mask_id=sprite_mask_id,
         parent_path=parent_path,
@@ -320,6 +322,23 @@ class TestObjectConverterBasic(unittest.TestCase):
         self.assertNotIn('instance', content)
         self.assertIn('type="Script"', content)
         self.assertIn('script = ExtResource', content)
+        self.assertNotIn('visible', content)
+
+    def test_invisible_object_scene_root_is_not_visible(self):
+        # Every instance starts with its object's visible flag (SetObjectIndex
+        # in the HTML5 runner's yyInstance.js).
+        obj_dir = os.path.join(self.gm_dir, "objects", "o_hidden")
+        os.makedirs(obj_dir)
+        with open(os.path.join(obj_dir, "o_hidden.yy"), "w") as f:
+            f.write(_make_object_yy_content("o_hidden", sprite_name="s_player", visible=False))
+
+        self._make_converter().convert_all()
+
+        with open(os.path.join(self.godot_dir, "objects", "o_hidden", "o_hidden.tscn"), encoding="utf-8") as f:
+            content = f.read()
+        root = content[content.index('[node name="o_hidden"'):content.index('[node name="s_player"')]
+        self.assertIn("\nvisible = false\n", root)
+        self.assertIn("script = ExtResource", root)
 
 
 class TestObjectConverterEmpty(unittest.TestCase):
@@ -3439,9 +3458,12 @@ class TestObjectTypedAcquisition(unittest.TestCase):
         with patch("src.conversion.objects.decode_gamemaker_json", return_value=GameMakerJsonDocument(self.yy_path, "{}", data)):
             parsed = self.converter._parse_object_yy("o")
         assert parsed is not None
-        self.assertEqual(trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "spriteMaskId"])
+        self.assertEqual(
+            trace, ["spriteId", "parentObjectId", "eventList", "solid", "persistent", "visible", "spriteMaskId"]
+        )
         self.assertTrue(parsed["solid"])
         self.assertFalse(parsed["persistent"])
+        self.assertTrue(parsed["visible"])
 
     def test_live_reference_capture_keeps_explicit_path_authority_before_resolution(self) -> None:
         with patch.object(self.converter, "_resolve_project_source") as resolver:

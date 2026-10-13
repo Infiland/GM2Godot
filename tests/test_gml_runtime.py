@@ -2335,7 +2335,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("if not constructor.is_constructor:", GML_RUNTIME_SCRIPT)
         self.assertIn("var instance = gml_struct({})", GML_RUNTIME_SCRIPT)
         self.assertIn("var constructor_static = gml_static_get(constructor)", GML_RUNTIME_SCRIPT)
-        self.assertIn("gml_static_set(instance, constructor_static)", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_link_new(instance, constructor_static)", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_constructor_invoke(", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(instance)", GML_RUNTIME_SCRIPT)
         self.assertIn("call_args.append(constructor_other)", GML_RUNTIME_SCRIPT)
@@ -3177,6 +3177,23 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func _gml_static_same(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("return left == right", GML_RUNTIME_SCRIPT)
 
+    def test_runtime_statics_are_members_of_the_structs_made_by_new(self):
+        self.assertIn("static func _gml_static_chain_owner(struct_value, member_name):", GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_static_link_new(value, static_struct):", GML_RUNTIME_SCRIPT)
+        self.assertIn("_gml_static_chain_owner(struct_value, key) != null", GML_RUNTIME_SCRIPT)
+        self.assertIn(
+            "static func gml_call_member(target, member_name, args = [], caller_self = null, caller_other = null):",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "if member is GMLMethod and not member.has_bound_self:",
+            GML_RUNTIME_SCRIPT,
+        )
+        self.assertIn(
+            "return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)",
+            GML_RUNTIME_SCRIPT,
+        )
+
     def test_runtime_constructor_identity_uses_static_chain(self):
         self.assertIn("static func gml_is_instanceof(struct_value, constructor):", GML_RUNTIME_SCRIPT)
         self.assertIn("if not is_struct(struct_value):\n\t\treturn false", GML_RUNTIME_SCRIPT)
@@ -3192,7 +3209,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("var constructor_name = _gml_static_name(static_struct)", GML_RUNTIME_SCRIPT)
         self.assertIn("if constructor_name != \"\":\n\t\treturn constructor_name", GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_name(value):", GML_RUNTIME_SCRIPT)
-        self.assertIn('entry.has("constructor_name")', GML_RUNTIME_SCRIPT)
+        self.assertIn('_gml_static_registry[index].has("constructor_name")', GML_RUNTIME_SCRIPT)
         self.assertIn("static func _gml_static_constructor_name(value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return _gml_static_constructor_name(value.function_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("var method_name = str(value.get_method())", GML_RUNTIME_SCRIPT)

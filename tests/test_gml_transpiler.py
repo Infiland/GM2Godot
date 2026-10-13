@@ -2237,7 +2237,7 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         self.assertIn('"Point"', output)
         self.assertIn(
             '["make", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self, func(_gml_method_self = null, "
+            "GMRuntime.gml_undefined(), func(_gml_method_self = null, "
             "_gml_method_other = null): return 1)]",
             output,
         )
@@ -2253,12 +2253,12 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
 
         self.assertIn(
             '["operate", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
             '["invert", func(): return GMRuntime.gml_receiver_method('
-            "_gml_constructor_self,",
+            "GMRuntime.gml_undefined(),",
             output,
         )
         self.assertIn(
@@ -2267,6 +2267,38 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
         )
         self.assertNotIn('gml_call_named("operate"', output)
         self.assertNotIn("Unexpected token", output)
+
+    def test_member_calls_pass_the_target_as_the_receiver_of_unbound_methods(self):
+        self.assertEqual(
+            transpile_gml_expression("point.describe(1, 2)"),
+            'GMRuntime.gml_call_member(point, "describe", [1, 2], self, other)',
+        )
+        self.assertEqual(
+            transpile_gml_expression("make().go()"),
+            "GMRuntime.gml_call_member("
+            'GMRuntime.gml_call_named("make", [], self, other), "go", [], self, other)',
+        )
+        # self.name() calls a method of the running instance itself.
+        self.assertEqual(
+            transpile_gml_expression("self.go()"),
+            "GMRuntime.gml_call_value(self.go, [], self, other)",
+        )
+
+    def test_constructor_static_functions_are_unbound(self):
+        output = transpile_gml_expression(
+            "function Point() constructor { static make = function() { return 1; }; "
+            "static pair = (function() { return 2; }); static count = 0; }"
+        )
+
+        self.assertIn(
+            '["make", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn(
+            '["pair", func(): return GMRuntime.gml_receiver_method(GMRuntime.gml_undefined(), func(',
+            output,
+        )
+        self.assertIn('["count", func(): return 0]', output)
 
     def test_nested_callback_in_constructor_static_switch_keeps_lambda_indentation(self):
         output = transpile_gml_expression(

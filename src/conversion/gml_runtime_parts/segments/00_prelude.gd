@@ -88,6 +88,8 @@ class GMLHandle:
 const GML_RECEIVER_ARGUMENTS_NONE = 0
 const GML_RECEIVER_ARGUMENTS_SELF = 1
 const GML_RECEIVER_ARGUMENTS_SELF_OTHER = 2
+# The most static structs a variable lookup follows (guards a cyclic chain).
+const GML_STATIC_CHAIN_LIMIT = 256
 
 
 class GMLMethod:
@@ -177,6 +179,8 @@ static var _gml_timeline_states_by_instance_id = {}
 static var _gml_timeline_moments_by_asset_id = {}
 static var _gml_static_root = {}
 static var _gml_static_registry = []
+static var _gml_static_cursor = 0
+static var _gml_static_structs = []
 static var _gml_static_named_scopes = {}
 static var _gml_variable_hash_names = {}
 static var _gml_global_scope = {

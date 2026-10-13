@@ -523,7 +523,10 @@ static func gml_struct_get(struct_value, member_name):
 	if typeof(struct_value) == TYPE_DICTIONARY:
 		if struct_value.has(key):
 			return struct_value[key]
-		return gml_undefined()
+		if _gml_static_structs.is_empty():
+			return gml_undefined()
+		var static_owner = _gml_static_chain_owner(struct_value, key)
+		return gml_undefined() if static_owner == null else static_owner[key]
 	if typeof(struct_value) == TYPE_OBJECT:
 		if (key == "x" or key == "y") and struct_value is Node2D and not (key in struct_value):
 			# The node's position (see _gml_object_builtin_field_get).
@@ -671,6 +674,20 @@ static func gml_selector_get(target, member_name, current_self = null, current_o
 	return gml_struct_get(targets[0], member_name)
 
 
+# inst.method(args): a method that is not bound to a struct (a static
+# function, or a script function stored in a variable) runs with the struct it
+# is called through as self and the caller as other.
+static func gml_call_member(target, member_name, args = [], caller_self = null, caller_other = null):
+	var member = gml_selector_get(target, member_name)
+	if member is GMLMethod and not member.has_bound_self:
+		var receiver: Variant = _gml_selector_direct_target(target)
+		if receiver == null:
+			receiver = _gml_instance_object_first(target)
+		if receiver != null:
+			return member.gml_callv(args if typeof(args) == TYPE_ARRAY else [args], receiver, caller_self)
+	return gml_call_value(member, args, caller_self, caller_other)
+
+
 # variable_instance_exists looks at one instance: the first one an object
 # (or all) selects.
 static func gml_selector_exists(target, member_name, current_self = null, current_other = null):
@@ -755,7 +772,10 @@ static func gml_variable_global_set(member_name, value):
 static func gml_struct_exists(struct_value, member_name):
 	var key = _gml_member_key(member_name)
 	if typeof(struct_value) == TYPE_DICTIONARY:
-		return struct_value.has(key)
+		return struct_value.has(key) or (
+			not _gml_static_structs.is_empty()
+			and _gml_static_chain_owner(struct_value, key) != null
+		)
 	if _gml_is_instance_node(struct_value):
 		return _gml_instance_variable_exists(struct_value, key)
 	if _gml_selects_instances(struct_value):

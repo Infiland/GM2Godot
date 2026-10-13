@@ -211,8 +211,9 @@ _ARRAY_ARITY: dict[str, tuple[int, int | None]] = {
     "array_shuffle": (1, 1),
     "array_copy": (5, 5),
     "array_concat": (2, 2),
-    "array_contains": (2, 2),
-    "array_find_index": (2, 2),
+    "array_contains": (2, 4),
+    "array_get_index": (2, 4),
+    "array_find_index": (2, 4),
     "array_foreach": (2, 4),
     "array_filter": (2, 2),
     "array_map": (2, 2),
@@ -1495,7 +1496,7 @@ def _build_function_descriptors() -> dict[str, GMLFunctionDescriptor]:
         lowering_kind: GMLFunctionLoweringKind = "runtime"
         if name == "array_push":
             lowering_kind = "runtime_variadic_1"
-        elif name == "array_foreach":
+        elif name in {"array_foreach", "array_find_index"}:
             lowering_kind = "runtime_array_foreach"
         elif name == "array_sort":
             lowering_kind = "runtime_array_sort"

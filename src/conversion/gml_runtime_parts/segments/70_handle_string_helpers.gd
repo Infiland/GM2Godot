@@ -574,15 +574,26 @@ static func gml_string_trim(value):
 	return s.strip_edges()
 
 
+# string_repeat takes its count as a 32-bit integer, as the runner's
+# yyGetInt32 does (so 2^32 + 1 is 1).
 static func gml_string_repeat(value, count):
-	var s = gml_string(value)
-	var n = int(_to_real(count))
-	if n <= 0:
+	return _gml_repeat_string(gml_string(value), float(_gml_runner_int32(_to_real(count))), "GML string_repeat")
+
+
+# The longest string the runner can build: V8's limit, past which joining
+# strings raises "Invalid string length".
+const GML_STRING_MAX_LENGTH = 536870888
+
+
+# text repeated once for each whole time count goes into it (none for 0, a
+# negative count or NaN), or an error when the result would be longer than
+# the runner's strings can be.
+static func _gml_repeat_string(text, count, api_name):
+	if not (count >= 1.0) or text.is_empty():
 		return ""
-	var result = ""
-	for i in range(n):
-		result += s
-	return result
+	if count * text.length() > GML_STRING_MAX_LENGTH:
+		return gml_error(api_name + ": Invalid string length (" + str(text.length()) + " characters repeated " + gml_string(count) + " times)")
+	return text.repeat(int(count))
 
 
 static func gml_string_digits(value):

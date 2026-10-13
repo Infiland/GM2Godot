@@ -2416,6 +2416,8 @@ class TestGMLExpressionTranspiler(unittest.TestCase):
     def test_rejects_writes_to_read_only_builtin_variables(self):
         for source in (
             "bbox_left = 0",
+            "sprite_width = 16",
+            "sprite_yoffset += 1",
             "image_number += 1",
             "room++",
             "view_current[0] = 1",
@@ -3572,6 +3574,18 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             'GMRuntime.gml_selector_get(platform, "bbox_top"))',
         )
         self.assertEqual(
+            transpile_gml_expression("x + sprite_width - other.sprite_xoffset"),
+            'GMRuntime.gml_sub(GMRuntime.gml_add(position.x, GMRuntime.gml_struct_get(self, "sprite_width")), '
+            'GMRuntime.gml_selector_get(other, "sprite_xoffset"))',
+        )
+        self.assertEqual(
+            transpile_gml_code("with (all) h = sprite_height + sprite_yoffset;", indent=""),
+            "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "h", GMRuntime.gml_add('
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_height"), '
+            'GMRuntime.gml_variable_instance_get(_gml_with_target_0, "sprite_yoffset")))',
+        )
+        self.assertEqual(
             transpile_gml_code("with (all) left = bbox_left;", indent=""),
             "for _gml_with_target_0 in GMRuntime.gml_with_targets(GMRuntime.gml_instance_all(), self, other):\n"
             '\tGMRuntime.gml_variable_instance_set(_gml_with_target_0, "left", '
@@ -4294,12 +4308,41 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             transpile_gml_code("found = array_contains(arr, 42);", indent=""),
             "found = GMRuntime.gml_array_contains(arr, 42)",
         )
-
-    def test_transpiles_array_find_index(self):
         self.assertEqual(
-            transpile_gml_code("idx = array_find_index(arr, 42);", indent=""),
-            "idx = GMRuntime.gml_array_find_index(arr, 42)",
+            transpile_gml_code("found = array_contains(arr, 42, -1, -3);", indent=""),
+            "found = GMRuntime.gml_array_contains(arr, 42, -1, -3)",
         )
+
+    def test_transpiles_array_get_index(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42)",
+        )
+        self.assertEqual(
+            transpile_gml_code("idx = array_get_index(arr, 42, 2, 3);", indent=""),
+            "idx = GMRuntime.gml_array_get_index(arr, 42, 2, 3)",
+        )
+
+    def test_transpiles_array_find_index_with_a_predicate(self):
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, is_big);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, 0, null, self, other)",
+        )
+        self.assertEqual(
+            transpile_gml_code("idx = array_find_index(arr, is_big, -1, -4);", indent=""),
+            "idx = GMRuntime.gml_array_find_index(arr, is_big, -1, -4, self, other)",
+        )
+        inline = transpile_gml_code(
+            "idx = array_find_index(arr, function(_e, _i) { return _e > 1; });",
+            indent="",
+        )
+        self.assertTrue(
+            inline.startswith(
+                "idx = GMRuntime.gml_array_find_index("
+                "arr, GMRuntime.gml_receiver_method(self, "
+            )
+        )
+        self.assertTrue(inline.endswith("), 0, null, self, other)"))
 
     def test_transpiles_array_foreach(self):
         self.assertEqual(

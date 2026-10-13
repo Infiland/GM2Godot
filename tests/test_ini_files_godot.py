@@ -27,6 +27,9 @@ _AUTHORED_INI = (
     "[data]\r\n"
     'json={"a": [1, 2]} ; not a comment\r\n'
     "count=12abc\r\n"
+    "lower=inf\r\n"
+    "big=Infinity\r\n"
+    "small= -Infinity metres\r\n"
 )
 
 _SMOKE = textwrap.dedent(
@@ -70,7 +73,14 @@ _SMOKE = textwrap.dedent(
     \t_expect("keys before the first section", GMRuntime.gml_ini_key_exists("", "ignored"), false)
     \t_expect("JSON value runs to the end of the line", GMRuntime.gml_ini_read_string("data", "json", ""), '{"a": [1, 2]} ; not a comment')
     \t_expect("number at the start of the text", GMRuntime.gml_ini_read_real("data", "count", 0), 12.0)
-    \t_expect("text without a number", GMRuntime.gml_ini_read_real("audio", "name", 3), 0.0)
+    \t# The runner reads reals with JavaScript's parseFloat: NaN without a
+    \t# number, and Infinity only spelled that way.
+    \t_expect("text without a number", is_nan(GMRuntime.gml_ini_read_real("audio", "name", 3)), true)
+    \t_expect("inf is not a number", is_nan(GMRuntime.gml_ini_read_real("data", "lower", 3)), true)
+    \t_expect("Infinity", GMRuntime.gml_ini_read_real("data", "big", 0), INF)
+    \t_expect("-Infinity before text", GMRuntime.gml_ini_read_real("data", "small", 0), -INF)
+    \t_expect("string default with a number", GMRuntime.gml_ini_read_real("data", "missing", "2.5kg"), 2.5)
+    \t_expect("string default without a number", is_nan(GMRuntime.gml_ini_read_real("data", "missing", "none")), true)
     \t_expect("missing real", GMRuntime.gml_ini_read_real("audio", "missing", 7), 7.0)
     \t_expect("missing string with a number default", GMRuntime.gml_ini_read_string("audio", "missing", 5), "5")
     \tvar text = GMRuntime.gml_ini_close()

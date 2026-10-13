@@ -3105,7 +3105,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_variable_instance_names_count(instance_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return gml_selector_names_count(instance_value)", GML_RUNTIME_SCRIPT)
         self.assertIn("if targets.is_empty():\n\t\treturn []", GML_RUNTIME_SCRIPT)
-        self.assertIn("if targets.is_empty():\n\t\treturn -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("if targets.is_empty():\n\t\treturn 0", GML_RUNTIME_SCRIPT)
 
     def test_runtime_global_variable_helpers_use_shared_global_scope(self):
         self.assertIn("static func gml_variable_global_exists(member_name):", GML_RUNTIME_SCRIPT)
@@ -3120,7 +3120,8 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("static func gml_struct_names_count(struct_value):", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.keys()", GML_RUNTIME_SCRIPT)
         self.assertIn("return struct_value.size()", GML_RUNTIME_SCRIPT)
-        self.assertIn("return -1", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_instance_variable_names(struct_value)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return gml_selector_get_names(struct_value)", GML_RUNTIME_SCRIPT)
 
     def test_runtime_struct_foreach_invokes_callback_for_visible_members(self):
         self.assertIn("static func gml_struct_foreach(", GML_RUNTIME_SCRIPT)
@@ -3288,7 +3289,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
         self.assertIn("return _to_int32_value(left) + _to_int32_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) - _to_int32_value(right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) * _to_int32_value(right)", GML_RUNTIME_SCRIPT)
-        self.assertIn("return int(_to_int32_value(left) / right_int)", GML_RUNTIME_SCRIPT)
+        self.assertIn("return int(left / right)", GML_RUNTIME_SCRIPT)
         self.assertIn("return _to_int32_value(left) % right_int", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int32 division by zero")', GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int32 modulo by zero")', GML_RUNTIME_SCRIPT)
@@ -3296,8 +3297,12 @@ class TestGMLRuntimeScript(unittest.TestCase):
     def test_runtime_preserves_int64_division_behavior(self):
         self.assertIn("static func gml_div(left, right):", GML_RUNTIME_SCRIPT)
         self.assertIn("static func gml_int_div(left, right):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return GMLInt64.new(int(_to_int64_value(left) / right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("return GMLInt64.new(_gml_int64_quotient(_to_int64_value(left), right_int))", GML_RUNTIME_SCRIPT)
+        self.assertIn("if right_int == -1 and left_int == GML_INT64_MIN:", GML_RUNTIME_SCRIPT)
         self.assertIn('return gml_error("GML int64 division by zero")', GML_RUNTIME_SCRIPT)
+        self.assertIn("static func _gml_real_int_div(left_value, right_value):", GML_RUNTIME_SCRIPT)
+        self.assertIn("var quotient = _gml_truncate_real(left_value) / divisor", GML_RUNTIME_SCRIPT)
+        self.assertIn("return _gml_whole_real(quotient - fmod(quotient, 1.0))", GML_RUNTIME_SCRIPT)
 
     def test_runtime_checks_int32_range_over_godot_ints(self):
         self.assertIn("static func is_int32(value):", GML_RUNTIME_SCRIPT)
@@ -3339,7 +3344,7 @@ class TestGMLRuntimeScript(unittest.TestCase):
             GML_RUNTIME_SCRIPT,
         )
         self.assertIn("if is_string(right):\n\t\tif is_number(left):", GML_RUNTIME_SCRIPT)
-        self.assertIn("return str(right).repeat(max(0, int(_to_real(left))))", GML_RUNTIME_SCRIPT)
+        self.assertIn('return _gml_repeat_string(str(right), _to_real(left), "GML multiply")', GML_RUNTIME_SCRIPT)
         self.assertIn('return "true" if value else "false"', GML_RUNTIME_SCRIPT)
 
     def test_runtime_type_table_errors_are_centralized(self):

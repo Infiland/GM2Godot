@@ -244,9 +244,12 @@ static func gml_audio_sound_get_pitch(sound):
 	return _to_real(_gml_audio_asset_state_for_entry(sound_entry).get("pitch", 1.0))
 
 
+# Only a sound instance has a loop flag: GameMaker ignores a sound asset
+# index here, and changing the flag leaves a paused voice paused.
 static func gml_audio_sound_loop(sound, loop):
-	for entry in _gml_audio_target_entries(sound):
-		entry["loop"] = bool(loop)
+	var entry = _gml_audio_handle_entry(sound)
+	if entry != null:
+		entry["loop"] = gml_bool(loop)
 		_gml_audio_swap_entry_stream(entry)
 	return null
 
@@ -259,21 +262,21 @@ static func _gml_audio_swap_entry_stream(entry):
 	var wanted = _gml_audio_stream_for_playback(base_stream, entry["loop"])
 	if wanted == player.stream:
 		return
-	var was_playing = bool(player.playing)
-	var position = player.get_playback_position() if was_playing else 0.0
+	# A paused player reports playing as false; setting its stream stops it.
+	var was_paused = bool(player.stream_paused)
+	var was_active = bool(player.playing) or was_paused
+	var position = player.get_playback_position() if was_active else 0.0
 	player.stream = wanted
-	if was_playing:
+	if was_active:
 		player.play(position)
+		if was_paused:
+			player.stream_paused = true
 
 
 static func gml_audio_sound_get_loop(sound):
 	var handle_entry = _gml_audio_handle_entry(sound)
 	if handle_entry != null:
 		return bool(handle_entry.get("loop", false))
-	var entries = _gml_audio_target_entries(sound)
-	for entry in entries:
-		if bool(entry.get("loop", false)):
-			return true
 	return false
 
 

@@ -2709,7 +2709,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
         self.assertEqual(
             transpile_gml_expression("function() { return; }"),
             "GMRuntime.gml_receiver_method(self, func("
-            "_gml_method_self = null, _gml_method_other = null): return)",
+            "_gml_method_self = null, _gml_method_other = null): return GMRuntime.gml_undefined())",
         )
         self.assertEqual(
             transpile_gml_expression("function() { return score + bonus; }"),
@@ -2793,10 +2793,67 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "GMRuntime.gml_receiver_method(self, func("
             "_gml_method_self = null, _gml_method_other = null):\n"
             '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
-            "\t\treturn\n"
+            "\t\treturn GMRuntime.gml_undefined()\n"
             '\treturn GMRuntime.gml_variable_instance_get(_gml_method_self, "score")\n'
             ")",
         )
+
+    def test_function_without_a_return_value_gives_undefined(self):
+        # A GDScript function that ends without a return gives null, which is
+        # not a GML value: GML gives undefined.
+        self.assertEqual(
+            transpile_gml_expression("function() { }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null): return GMRuntime.gml_undefined())",
+        )
+        self.assertEqual(
+            transpile_gml_expression("function() { score += 1; }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            '\tGMRuntime.gml_variable_instance_set(_gml_method_self, "score", '
+            'GMRuntime.gml_add(GMRuntime.gml_variable_instance_get(_gml_method_self, "score"), 1))\n'
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        # A variable whose name starts with return is not a return statement.
+        self.assertEqual(
+            transpile_gml_expression("function(returned) { returned = 1; }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null, returned = null):\n"
+            "\tif returned == null: returned = GMRuntime.gml_undefined()\n"
+            "\treturned = 1\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        self.assertEqual(
+            transpile_gml_expression("function() { if done { return 1; } }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            '\tif GMRuntime.gml_bool(GMRuntime.gml_variable_instance_get(_gml_method_self, "done")):\n'
+            "\t\treturn 1\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+
+    def test_exit_in_a_function_gives_undefined_also_from_nested_blocks(self):
+        # Outside a function an exit is a plain return.
+        self.assertEqual(
+            transpile_gml_expression("function() { with (o_enemy) { exit; } }"),
+            "GMRuntime.gml_receiver_method(self, func("
+            "_gml_method_self = null, _gml_method_other = null):\n"
+            "\tfor _gml_with_target_0 in GMRuntime.gml_with_targets("
+            'GMRuntime.gml_variable_instance_get(_gml_method_self, "o_enemy"), '
+            "_gml_method_self, _gml_method_other):\n"
+            "\t\treturn GMRuntime.gml_undefined()\n"
+            "\treturn GMRuntime.gml_undefined()\n"
+            ")",
+        )
+        function_with_try = transpile_gml_expression("function() { try { exit; } catch (e) { } }")
+        self.assertIn(
+            '_gml_try_control_0["kind"] == "exit":\n\t\treturn GMRuntime.gml_undefined()\n',
+            function_with_try,
+        )
+        self.assertNotIn("\treturn\n", function_with_try)
 
     def test_exit_aborts_later_generated_event_code(self):
         self.assertEqual(
@@ -4452,6 +4509,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\targument0 = 2\n"
+            "\treturn GMRuntime.gml_undefined()\n"
             ")\n"
             "value = 1\n"
             'GMRuntime.gml_call_value(try_to_modify_value, [value], self, other, "try_to_modify_value")\n'
@@ -4470,6 +4528,7 @@ class TestGMLStatementTranspiler(unittest.TestCase):
             "argument0 = null):\n"
             "\tif argument0 == null: argument0 = GMRuntime.gml_undefined()\n"
             "\tGMRuntime.gml_array_push(argument0, [2])\n"
+            "\treturn GMRuntime.gml_undefined()\n"
             ")\n"
             "items = [1]\n"
             'GMRuntime.gml_call_value(try_to_modify_array, [items], self, other, "try_to_modify_array")\n'

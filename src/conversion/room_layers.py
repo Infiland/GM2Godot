@@ -437,9 +437,10 @@ def decode_tile_compressed_data(
     * a positive count n is followed by n literal tile values, each one cell.
 
     The IDE starts a run as soon as two or more equal tiles are adjacent, so a
-    run is never shorter than 2 and runs and literal blocks alternate. The
-    empty tile -2147483648 is an ordinary tile value (a run value or a literal),
-    never a count. A tile value keeps its mirror (bit 28), flip (bit 29) and
+    run is never shorter than 2, two literal blocks are never adjacent and
+    adjacent runs never repeat the same value. The empty tile -2147483648 is an
+    ordinary tile value (a run value or a literal), never a count. A tile value
+    keeps its mirror (bit 28), flip (bit 29) and
     rotate (bit 30) flags, so it can be a large positive number or negative.
     A zero count is an empty literal block, as in expandTiles; the IDE never
     writes one. A count that overruns the layer or a block that runs past the

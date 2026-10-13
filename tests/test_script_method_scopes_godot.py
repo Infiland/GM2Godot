@@ -266,6 +266,54 @@ class TestScriptMethodScopesGodot(unittest.TestCase):
         self.assertNotIn("Parse Error", output)
         self.assertEqual(trace, ["ok:7", "catching:16", "event:1"])
 
+    def test_script_parameter_default_may_be_a_method_with_several_lines(self) -> None:
+        scripts = {
+            "scr_defaults": (
+                "function c13(_cb = function() { switch (1) { case 1: return \"d\"; } return \"z\"; }) {\n"
+                "    return _cb();\n"
+                "}\n"
+                "\n"
+                "function Holder(_first = 1, _cb = function() { var _a = 5; return _a; }) constructor {\n"
+                "    first = _first;\n"
+                "    value = _cb();\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            'trace("default:" + c13());\n'
+            'trace("given:" + c13(function() { return "g"; }));\n'
+            "var _holder = new Holder();\n"
+            'trace("constructor:" + string(_holder.first) + string(_holder.value));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "default:d", "given:g", "constructor:15"])
+
+    def test_constructor_parent_arguments_may_be_methods_with_several_lines(self) -> None:
+        scripts = {
+            "scr_parent": "function Parent(_cb) constructor { cb = _cb; }\n",
+            "scr_child": (
+                "function Child() : Parent(function() { var _a = 4; return _a; }) constructor {\n"
+                "    extra = 1;\n"
+                "}\n"
+            ),
+            "scr_ok": "function ok_value() { return 7; }\n",
+        }
+        create_code = (
+            'trace("ok:" + string(ok_value()));\n'
+            "var _child = new Child();\n"
+            'trace("child:" + string(_child.cb()) + string(_child.extra));\n'
+        )
+
+        trace, output = _run_project(self, scripts, create_code)
+
+        self.assertNotIn("Parse Error", output)
+        self.assertEqual(trace, ["ok:7", "child:41"])
+
     def test_a_script_godot_cannot_load_leaves_the_other_scripts_working(self) -> None:
         scripts = {
             "scr_ok": "function ok_value() { return 7; }\n",

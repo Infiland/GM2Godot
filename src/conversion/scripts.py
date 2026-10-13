@@ -122,6 +122,12 @@ def _script_scope_lines() -> list[str]:
     ]
 
 
+def _indent_function_body_line(text: str) -> str:
+    # Emitted code may span several lines (a method written in place is a
+    # GDScript lambda with its own body); every one of them is indented.
+    return "\n".join(f"\t{line}" if line else "" for line in text.split("\n"))
+
+
 def _script_forward_call(*, declaration: ScriptFunctionDeclaration, scoped_call_method: str) -> str:
     args = [
         "self",
@@ -565,9 +571,13 @@ class ScriptConverter(BaseConverter):
                 extension_functions=extension_functions,
                 extension_function_mappings=extension_function_mappings,
             )
+            # A default that is a multi-line method spans several lines, all
+            # of which belong inside the function body.
             lines.append(
-                f"\tif {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
-                f"{parameter_name} = {default_value}"
+                _indent_function_body_line(
+                    f"if {parameter_name} == null or GMRuntime.is_undefined({parameter_name}): "
+                    f"{parameter_name} = {default_value}"
+                )
             )
         if declaration.parent_constructor is not None:
             outer_scope = ScopeContext(
@@ -594,12 +604,13 @@ class ScriptConverter(BaseConverter):
                 scope_context=outer_scope,
             )
             lines.append(
-                "\t"
-                + emit_constructor_inheritance_line(
-                    parent_expression,
-                    local_names,
-                    constructor_scope,
-                    outer_scope,
+                _indent_function_body_line(
+                    emit_constructor_inheritance_line(
+                        parent_expression,
+                        local_names,
+                        constructor_scope,
+                        outer_scope,
+                    )
                 )
             )
         result = transpile_gml_code_with_source_map(
@@ -619,7 +630,7 @@ class ScriptConverter(BaseConverter):
             source_path=source_path,
             event=f"script:{declaration.name}",
             preserve_source_comments=True,
-            generated_line_offset=generated_line_offset + len(lines),
+            generated_line_offset=generated_line_offset + sum(line.count("\n") + 1 for line in lines),
         )
         lines.append(result.code)
         return (

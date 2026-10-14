@@ -257,7 +257,7 @@ jobs:
 
       - name: Upload required native receipt
         timeout-minutes: 10
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-receipts-dependency-locks-${{ matrix.platform }}
           path: dependency-locks/native-receipts/receipt.json
@@ -607,7 +607,7 @@ jobs:
 
       - name: Upload dependency lock evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-lock-${{ matrix.platform }}-py${{ matrix.python_version }}
           path: ${{ env.ARTIFACT_DIR }}
@@ -1525,7 +1525,7 @@ jobs:
 
       - name: Upload dependency submission responses
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-submission-responses-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/gm2godot-dependency-submission-responses

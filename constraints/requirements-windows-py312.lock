@@ -49,7 +49,7 @@ packaging==26.2
     #   wheel
 pefile==2024.8.26
     # via pyinstaller
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements.txt
 pip-tools==7.6.1
     # via -r requirements-bootstrap.txt

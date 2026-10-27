@@ -51,7 +51,7 @@ packaging==26.2
     #   pyinstaller
     #   pyinstaller-hooks-contrib
     #   wheel
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements.txt
 pip-tools==7.6.1
     # via -r requirements-bootstrap.txt
@@ -100,7 +100,7 @@ pip==26.2.1
     # via
     #   -r requirements-bootstrap.txt
     #   pip-tools
-setuptools==83.0.0
+setuptools==84.1.0
     # via
     #   pip-tools
     #   pyinstaller

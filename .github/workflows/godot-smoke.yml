@@ -53,7 +53,7 @@ jobs:
             pip
           python -m pip --isolated --disable-pip-version-check --no-input install --no-cache-dir --only-binary=:all: \
             --constraint constraints/requirements-linux-py312.lock \
-            Pillow==12.3.0
+            Pillow==13.0.0
           python scripts/verify_dependency_environment.py \
             --constraint constraints/requirements-linux-py312.lock \
             --mode subset \

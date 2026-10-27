@@ -164,7 +164,7 @@ PYRIGHT_VERSION = "1.1.411"
 RUFF_VERSION = "0.15.22"
 COVERAGE_VERSION = "7.15.2"
 PACKAGING_VERSION = "26.2"
-PILLOW_VERSION = "12.3.0"
+PILLOW_VERSION = "13.0.0"
 PIP_HARDENED_INSTALL_FRAGMENT = (
     "-m pip --isolated --disable-pip-version-check --no-input install"
 )
@@ -5647,7 +5647,7 @@ class TestCIWorkflows(unittest.TestCase):
                 "  install \\\n"
                 "  --no-cache-dir --only-binary=:all: \\\n"
                 "  --constraint constraints/requirements-linux-py312.lock \\\n"
-                "  Pillow==12.3.0\n",
+                "  Pillow==13.0.0\n",
                 encoding="utf-8",
             )
 
@@ -5679,7 +5679,7 @@ class TestCIWorkflows(unittest.TestCase):
                     "--only-binary=:all:",
                     "--constraint",
                     LINUX_CONSTRAINT,
-                    "Pillow==12.3.0",
+                    "Pillow==13.0.0",
                 ),
             )
             self.assertEqual(
@@ -5691,7 +5691,7 @@ class TestCIWorkflows(unittest.TestCase):
             prefixed_constraint.write_text(
                 "echo --constraint constraints/fake.txt && "
                 f"python {PIP_HARDENED_INSTALL_FRAGMENT} "
-                "--no-cache-dir --only-binary=:all: Pillow==12.3.0\n",
+                "--no-cache-dir --only-binary=:all: Pillow==13.0.0\n",
                 encoding="utf-8",
             )
             prefixed_commands = _pip_install_commands(prefixed_constraint)
@@ -5706,7 +5706,7 @@ class TestCIWorkflows(unittest.TestCase):
                 f"echo '{PIP_HARDENED_INSTALL_FRAGMENT} "
                 "--no-cache-dir --only-binary=:all:' && "
                 "python -m pip install "
-                f"--constraint {LINUX_CONSTRAINT} Pillow==12.3.0\n",
+                f"--constraint {LINUX_CONSTRAINT} Pillow==13.0.0\n",
                 encoding="utf-8",
             )
             spoofed_commands = _pip_install_commands(spoofed_hardening)
@@ -5733,7 +5733,7 @@ class TestCIWorkflows(unittest.TestCase):
                 f"python {PIP_HARDENED_INSTALL_FRAGMENT} "
                 "--no-cache-dir --only-binary=:all: "
                 "--cache-dir=/tmp/pip-cache --no-binary=:all: "
-                f"--constraint {LINUX_CONSTRAINT} Pillow==12.3.0\n",
+                f"--constraint {LINUX_CONSTRAINT} Pillow==13.0.0\n",
                 encoding="utf-8",
             )
             conflicting_commands = _pip_install_commands(conflicting_policy)
@@ -5752,8 +5752,8 @@ class TestCIWorkflows(unittest.TestCase):
             payload_escapes = (
                 (
                     "no-deps",
-                    "--no-deps Pillow==12.3.0",
-                    ("Pillow==12.3.0",),
+                    "--no-deps Pillow==13.0.0",
+                    ("Pillow==13.0.0",),
                 ),
                 (
                     "second-requirement",

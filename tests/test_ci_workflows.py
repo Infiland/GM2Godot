@@ -816,7 +816,7 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         if step.count(f"          name: {expected_name}\n") != 1:
             errors.append(f"{name} must retain its unique artifact identity")
         for fragment in (
-            "        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1\n",
+            "        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n",
             "          archive: true\n", "          if-no-files-found: error\n",
         ):
             if step.count(fragment) != 1:
@@ -900,7 +900,7 @@ NATIVE_WHEEL_SETUP_ACTION = (
     "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
 )
 NATIVE_WHEEL_UPLOAD_ACTION = (
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+    "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
 )
 NATIVE_WHEEL_DOWNLOAD_ACTION = (
     "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"

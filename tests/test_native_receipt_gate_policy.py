@@ -107,7 +107,7 @@ REQUIRED_PATHS = {
     ),
 }
 R01_PRESERVED_SHA256 = "a67c028d52b41a24e0780d8672947e4f0c6bf49f3c2939ef50f64468e9302d51"
-UPLOAD_ACTION = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1"
+UPLOAD_ACTION = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
 TEST_JOBS = (
     ("test", "linux", "ubuntu-24.04", "x64", 30),
     ("macos-managed-output-transactions", "macos", "macos-26", "arm64", 30),

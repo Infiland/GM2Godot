@@ -8,7 +8,7 @@ altgraph==0.17.5
     # via pyinstaller
 build==1.5.0
     # via pip-tools
-certifi==2026.6.17
+certifi==2026.10.23
     # via requests
 charset-normalizer==3.4.9
     # via requests
@@ -49,7 +49,7 @@ packaging==26.2
     #   wheel
 pefile==2024.8.26
     # via pyinstaller
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements.txt
 pip-tools==7.6.1
     # via -r requirements-bootstrap.txt
@@ -98,7 +98,7 @@ pip==26.2.1
     # via
     #   -r requirements-bootstrap.txt
     #   pip-tools
-setuptools==83.0.0
+setuptools==84.1.0
     # via
     #   pip-tools
     #   pyinstaller

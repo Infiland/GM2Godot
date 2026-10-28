@@ -651,7 +651,7 @@ MAIN_QUALITY_JOB = (
     "          fetch-depth: 1\n"
     "          persist-credentials: false\n"
     "\n"
-    "      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n"
+    "      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n"
     "        with:\n"
     "          python-version: '3.12'\n"
     "\n"
@@ -897,7 +897,7 @@ NATIVE_WHEEL_CHECKOUT_ACTION = (
     "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1"
 )
 NATIVE_WHEEL_SETUP_ACTION = (
-    "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
+    "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0"
 )
 NATIVE_WHEEL_UPLOAD_ACTION = (
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
@@ -4894,7 +4894,7 @@ class TestCIWorkflows(unittest.TestCase):
         self.assertEqual(release_job.count("actions/setup-python@"), 1)
         self.assertIn(
             "      - uses: actions/setup-python@"
-            "5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0\n"
+            "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0\n"
             "        with:\n"
             "          python-version: '3.12'\n",
             release_job,

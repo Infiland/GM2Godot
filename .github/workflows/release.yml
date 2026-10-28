@@ -1137,7 +1137,7 @@ jobs:
           python-version: '3.12'
 
       - name: Download verified Windows artifact archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: GM2Godot-windows
           path: raw-artifacts/GM2Godot-windows
@@ -1145,7 +1145,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download verified Apple Silicon artifact archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: GM2Godot-macos-arm64
           path: raw-artifacts/GM2Godot-macos-arm64
@@ -1153,7 +1153,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download verified Intel artifact archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: GM2Godot-macos-x86_64
           path: raw-artifacts/GM2Godot-macos-x86_64
@@ -1161,7 +1161,7 @@ jobs:
           digest-mismatch: error
 
       - name: Download verified Linux artifact archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: GM2Godot-linux
           path: raw-artifacts/GM2Godot-linux

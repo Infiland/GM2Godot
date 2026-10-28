@@ -841,7 +841,7 @@ def _macos_release_build_policy_errors(content: str) -> tuple[str, ...]:
         errors.append("publication requires main, successful native builds/preflight and an absent tag")
     download_action = (
         "        uses: actions/download-artifact@"
-        "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1\n"
+        "9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2\n"
     )
     if publisher.count(download_action) != 4:
         errors.append("publication must download exactly four named payload archives")
@@ -903,7 +903,7 @@ NATIVE_WHEEL_UPLOAD_ACTION = (
     "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
 )
 NATIVE_WHEEL_DOWNLOAD_ACTION = (
-    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1"
+    "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2"
 )
 
 

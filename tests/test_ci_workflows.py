@@ -5982,7 +5982,8 @@ class TestCIWorkflows(unittest.TestCase):
         )
         pip_block_start = configuration.index('  - package-ecosystem: "pip"')
         pip_block = configuration[pip_block_start:]
-        self.assertIn('    directory: "/"\n', pip_block)
+        self.assertIn('    directories:\n      - "/"\n', pip_block)
+        self.assertIn('      - "/constraints"\n', pip_block)
         self.assertIn("    open-pull-requests-limit: 0\n", pip_block)
         self.assertIn("      pip-bootstrap-security:\n", pip_block)
         self.assertIn("        applies-to: security-updates\n", pip_block)
@@ -5991,6 +5992,30 @@ class TestCIWorkflows(unittest.TestCase):
             r"(?m)^        patterns:\n          - \"pip\"\n          - \"pip-tools\"$",
         )
         self.assertEqual(configuration.count('package-ecosystem: "pip"'), 1)
+
+    def test_retired_dependency_manifests_are_comment_only(self) -> None:
+        constraints_directory = PROJECT_ROOT / "constraints"
+        retired_names = (
+            "requirements-linux-py312.txt",
+            "requirements-macos-py312.txt",
+            "requirements-windows-py312.txt",
+        )
+        self.assertEqual(
+            tuple(sorted(path.name for path in constraints_directory.glob("*.txt"))),
+            retired_names,
+        )
+        for name in retired_names:
+            with self.subTest(manifest=name):
+                path = constraints_directory / name
+                self.assertFalse(path.is_symlink())
+                content = path.read_text(encoding="utf-8")
+                self.assertIn(path.with_suffix(".lock").name, content)
+                for line_number, line in enumerate(content.splitlines(), start=1):
+                    stripped = line.strip()
+                    self.assertTrue(
+                        not stripped or stripped.startswith("#"),
+                        f"{name}:{line_number}: retired manifests must contain only comments or blank lines",
+                    )
 
     def test_dependency_lock_inputs_and_workflow_pins_stay_synchronized(self) -> None:
         runtime_pins = _exact_requirement_pins(PROJECT_ROOT / "requirements.txt")
@@ -6055,7 +6080,6 @@ class TestCIWorkflows(unittest.TestCase):
                 "requirements-windows-x64-py312.wheels.lock",
             ),
         )
-        self.assertFalse(tuple(constraints_directory.glob("*.txt")))
         self.assertFalse(tuple(constraints_directory.glob("*.in")))
 
         for constraint_name in (

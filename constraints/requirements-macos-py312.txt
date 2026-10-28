@@ -1,0 +1,3 @@
+# Retired manifest: use constraints/requirements-macos-py312.lock.
+# Keep this file comment-only so GitHub replaces its obsolete dependency graph.
+# Verified native dependencies are submitted from the .lock file by Dependency Locks.

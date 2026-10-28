@@ -5,7 +5,10 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "pip"
-    directory: "/"
+    directories:
+      - "/"
+      # Reprocess the comment-only retired manifests to clear obsolete graphs.
+      - "/constraints"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 0

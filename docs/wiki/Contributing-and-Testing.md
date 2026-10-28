@@ -42,6 +42,8 @@ On macOS arm64 or x64 (Intel), use CPython 3.12.10 and `constraints/requirements
 
 `requirements-bootstrap.txt` is the sole reviewed source for the exact pip/pip-tools compatibility pair. `requirements.txt` and `requirements-tooling.txt` contain the other reviewed runtime and development roots, while `requirements-lock.in` includes all three sources as the combined compile input. Generated native graphs use `.lock` paths so Dependabot cannot present unverified cross-platform output as an editable manifest. The repository's [native dependency-lock workflow](https://github.com/Infiland/GM2Godot/blob/main/.github/workflows/dependency-locks.yml) resolves that input on the exact Linux, both Mac architectures, and Windows baselines.
 
+The retired `constraints/requirements-{linux,macos,windows}-py312.txt` paths remain as comment-only stubs. GitHub retained their obsolete dependencies after the files were renamed; restoring empty manifests and including `/constraints` in Dependabot's scan directories lets it reprocess those paths without copying native pins. Keep these stubs empty of requirements, includes, and options. Use the `.lock` files for installation and verification; the native workflow continues to submit their complete verified dependency graphs.
+
 Pull requests and pushes use `refresh=locked`, which preference-seeds generation with the committed constraint and requests no upgrades. A manual `workflow_dispatch` run accepts:
 
 | Selection | Behavior |
